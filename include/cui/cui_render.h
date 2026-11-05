@@ -57,6 +57,8 @@ CUI_API cui_renderer_iface cui_gl_iface(cui_gl_renderer *r);
 /* Renders into the currently bound framebuffer. Set clear to false when
  * drawing the UI on top of your own scene. */
 CUI_API void cui_gl_render(cui_gl_renderer *r, const cui_draw_data *dd, bool clear);
+/* Reads the bound framebuffer into a top-down RGBA buffer. */
+CUI_API void cui_gl_read_pixels(cui_gl_renderer *r, int width, int height, void *rgba);
 
 #ifdef __cplusplus
 }

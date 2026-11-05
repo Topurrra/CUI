@@ -1,0 +1,52 @@
+/* Interface between the shared app loop and a windowing backend. */
+#ifndef CUI_PLATFORM_H
+#define CUI_PLATFORM_H
+
+#include "../cui_internal.h"
+#include "cui/cui_app.h"
+#include "cui/cui_render.h"
+
+struct cui_app {
+    cui_ctx *ui;
+    cui_app_desc desc;
+    char title[256];
+    cui_gl_renderer *gl;
+    cui_sw_renderer *sw;
+    uint8_t *sw_pixels;
+    int sw_w, sw_h;
+    bool software;
+    bool running;
+    bool in_frame;
+    bool presented_once;
+    double last_time;
+    double last_present;
+    void (*frame_cb)(cui_ctx *ui, void *user);
+    void *frame_user;
+    bool in_live_resize;
+    void *plat;                /* backend state */
+    char *clipboard;           /* last clipboard string handed to CUI */
+};
+
+/* Implemented by each backend. */
+bool cui__plat_init(cui_app *app);
+void cui__plat_shutdown(cui_app *app);
+bool cui__plat_gl_create(cui_app *app, bool vsync);
+void *cui__plat_gl_proc(const char *name);
+void cui__plat_gl_swap(cui_app *app);
+void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride);
+void cui__plat_wait(cui_app *app, double timeout);   /* < 0 waits for the next event */
+void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w, int *fb_h);
+void cui__plat_set_title(cui_app *app, const char *title);
+void cui__plat_set_size(cui_app *app, int w, int h);
+void cui__plat_show(cui_app *app);
+void *cui__plat_native(cui_app *app);
+const char *cui__plat_name(void);
+double cui__plat_now(void);
+int cui__plat_system_dark(void);                      /* -1 unknown, 0 light, 1 dark */
+
+/* Shared helpers for backends. */
+void cui__app_render(cui_app *app);                   /* end frame (if open), render, present */
+void cui__app_live_frame(cui_app *app);               /* run one frame from inside a resize loop */
+void cui__app_set_clipboard_cache(cui_app *app, const char *utf8);
+
+#endif

@@ -390,7 +390,7 @@ typedef struct cui_card_opts {
     int _;
     const char *id;
     cui_size width, height;
-    float pad, gap;
+    float pad, pad_x, pad_y, gap;
     cui_dir dir;
     cui_align align;
     bool hoverable;            /* lifts slightly on hover and returns clicks */
@@ -734,12 +734,12 @@ CUI_API void cui_virtual_list_begin(cui_ctx *ui, const char *id, int count, floa
 CUI_API void cui_virtual_list_end(cui_ctx *ui);
 
 /* Table */
-typedef struct cui_column {
+typedef struct cui_table_column {
     const char *title;
     cui_size width;            /* default fill */
     cui_text_align align;
     bool sortable;
-} cui_column;
+} cui_table_column;
 
 typedef struct cui_table_sort { int column; bool descending; } cui_table_sort;
 
@@ -751,7 +751,7 @@ typedef struct cui_table_opts {
     bool compact;
     bool selectable;
 } cui_table_opts;
-CUI_API bool cui_table_begin_ex(cui_ctx *ui, const char *id, const cui_column *columns, int column_count, const cui_table_opts *opts);
+CUI_API bool cui_table_begin_ex(cui_ctx *ui, const char *id, const cui_table_column *columns, int column_count, const cui_table_opts *opts);
 /* Begin a row. Returns true when the row is clicked. */
 CUI_API bool cui_table_row(cui_ctx *ui, bool selected);
 /* Next cell; put any components inside, or use cui_table_cell_text. */

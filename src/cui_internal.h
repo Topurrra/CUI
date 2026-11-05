@@ -2,6 +2,13 @@
 #ifndef CUI_INTERNAL_H
 #define CUI_INTERNAL_H
 
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
+
 #ifndef CUI_BUILDING
 #define CUI_BUILDING
 #endif
@@ -168,6 +175,7 @@ typedef struct cui_node {
     cui_id id;
     int parent, first, last, next;
     int abs_first, abs_last;   /* absolutely positioned children */
+    int abs_anchor;            /* absolute: position relative to this node (-1 = parent) */
     int child_count;
     uint32_t flags;
 
@@ -221,6 +229,10 @@ typedef struct cui_node {
     int text_lines;
     cui_text_layout_line *lines;
 } cui_node;
+
+/* self_align value for intrinsic size components: never stretched, otherwise
+ * aligned like their siblings */
+#define CUI__ALIGN_NOSTRETCH 7
 
 /* placement values beyond cui_placement for floating roots */
 enum { CUI__PLACE_FULL = 100, CUI__PLACE_CENTER = 101, CUI__PLACE_POINT = 102 };
@@ -314,6 +326,11 @@ typedef struct cui_toast_item {
     cui_spring y;              /* stacked position */
     float height;
 } cui_toast_item;
+
+/* Scope stacks used while building one frame (kept per context). */
+typedef struct cui__popup_build { cui_id id; bool disabled_pushed; bool menu; int item_index; } cui__popup_build;
+typedef struct cui__modal_build { cui_id id; bool disabled_pushed; } cui__modal_build;
+typedef struct cui__vlist_build { int count; float row_h; int first; } cui__vlist_build;
 
 #define CUI_MAX_TOASTS 16
 #define CUI_ID_STACK 64
@@ -437,6 +454,12 @@ struct cui_ctx {
     int table_depth;
     /* split being built */
     struct cui_split_build *split;
+    /* scope stacks */
+    cui__popup_build pb_stack[16]; int pb_depth;
+    cui__modal_build mb_stack[8]; int mb_depth;
+    cui__vlist_build vl_stack[8]; int vl_depth;
+    bool acc_dis[32]; int acc_depth;
+    int tree_depth;
 };
 
 /* ---- theme ---- */

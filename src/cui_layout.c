@@ -23,6 +23,7 @@ int cui__node_new(cui_ctx *ui, cui_id id) {
     n->parent = cui__current(ui);
     n->first = n->last = n->next = -1;
     n->abs_first = n->abs_last = -1;
+    n->abs_anchor = -1;
     n->opacity = 1;
     n->scale = 1;
     n->line_height = 1.45f;
@@ -227,9 +228,11 @@ static float cui__clamp_size(float v, float lo, float hi) {
 }
 
 static int cui__eff_align(cui_node *parent, cui_node *child) {
+    int pa = parent->align ? parent->align
+           : (parent->dir == CUI_ROW ? CUI_ALIGN_CENTER : (parent->dir == CUI_STACK ? CUI_ALIGN_START : CUI_ALIGN_STRETCH));
+    if (child->self_align == CUI__ALIGN_NOSTRETCH) return pa == CUI_ALIGN_STRETCH ? CUI_ALIGN_START : pa;
     if (child->self_align) return child->self_align;
-    if (parent->align) return parent->align;
-    return parent->dir == CUI_ROW ? CUI_ALIGN_CENTER : (parent->dir == CUI_STACK ? CUI_ALIGN_START : CUI_ALIGN_STRETCH);
+    return pa;
 }
 
 static float cui__text_line_px(cui_node *n) { return n->font_size * n->line_height; }
@@ -575,7 +578,7 @@ static void cui__place(cui_ctx *ui, int i) {
         } else if (n->dir == CUI_STACK) {
             for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
                 cui_node *ch = &ui->nodes[c];
-                int al = ch->self_align ? ch->self_align : (n->align ? n->align : CUI_ALIGN_START);
+                int al = (ch->self_align && ch->self_align != CUI__ALIGN_NOSTRETCH) ? ch->self_align : (n->align ? n->align : CUI_ALIGN_START);
                 float x = ox, y = oy;
                 if (al == CUI_ALIGN_CENTER) x = ox + (iw - ch->rect.w) * 0.5f;
                 else if (al == CUI_ALIGN_END) x = ox + iw - ch->rect.w;
@@ -616,8 +619,13 @@ static void cui__place(cui_ctx *ui, int i) {
     for (int c = n->first; c >= 0; c = ui->nodes[c].next) cui__place(ui, c);
     for (int c = n->abs_first; c >= 0; c = ui->nodes[c].next) {
         cui_node *ab = &ui->nodes[c];
-        ab->rect.x = n->rect.x + ab->fx - n->scroll_x;
-        ab->rect.y = n->rect.y + ab->fy - n->scroll_y;
+        if (ab->abs_anchor >= 0) {
+            ab->rect.x = ui->nodes[ab->abs_anchor].rect.x + ab->fx;
+            ab->rect.y = ui->nodes[ab->abs_anchor].rect.y + ab->fy;
+        } else {
+            ab->rect.x = n->rect.x + ab->fx - n->scroll_x;
+            ab->rect.y = n->rect.y + ab->fy - n->scroll_y;
+        }
         cui__place(ui, c);
     }
 }

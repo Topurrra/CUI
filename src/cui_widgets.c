@@ -113,7 +113,7 @@ void cui_code(cui_ctx *ui, const char *text) {
     b.bg = CUI_C(ui, ACTIVE);
     int i = cui__node_new(ui, 0);
     cui__apply_box(ui, &ui->nodes[i], &b);
-    ui->nodes[i].self_align = CUI_ALIGN_START;
+    ui->nodes[i].self_align = CUI__ALIGN_NOSTRETCH;
     cui__open(ui, i);
     int t = cui__text_node(ui, text, -1, CUI_FONT_MONO, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, FOREGROUND), false);
     ui->nodes[t].line_height = 1.4f;
@@ -124,7 +124,7 @@ void cui_kbd(cui_ctx *ui, const char *keys) {
     /* each space separated key becomes a keycap */
     int row = cui__node_new(ui, 0);
     cui_node *r = &ui->nodes[row];
-    r->dir = CUI_ROW; r->gap = 3; r->self_align = CUI_ALIGN_START;
+    r->dir = CUI_ROW; r->gap = 3; r->self_align = CUI__ALIGN_NOSTRETCH;
     cui__open(ui, row);
     const char *p = keys;
     while (p && *p) {
@@ -160,7 +160,7 @@ static void cui__paint_underline(cui_ctx *ui, cui_node *n, void *data) {
 }
 
 bool cui_link(cui_ctx *ui, const char *text) {
-    cui_id id = cui_make_id(ui, text);
+    cui_id id = cui_make_id(ui, text) ^ 0x11AC0009u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__btn_state *st = cui_state(ui, id, sizeof *st);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.16f);
@@ -169,7 +169,7 @@ bool cui_link(cui_ctx *ui, const char *text) {
                            cui_mix(CUI_C(ui, ACCENT_STRONG), CUI_C(ui, FOREGROUND), ui->accent == CUI_ACCENT_NEUTRAL ? 1.0f : 0.0f), false);
     cui_node *n = &ui->nodes[i];
     n->id = id;
-    n->self_align = CUI_ALIGN_START;
+    n->self_align = CUI__ALIGN_NOSTRETCH;
     n->radius = CUI_CORNERS(4);
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
     {
@@ -303,7 +303,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     }
     if (o->full_width) { n->w = CUI_FILL; n->self_align = CUI_ALIGN_STRETCH; }
     else if (o->width.kind != CUI_SIZE_FIT) n->w = o->width;
-    else n->self_align = CUI_ALIGN_START;
+    else n->self_align = CUI__ALIGN_NOSTRETCH;
     float rad = CUI_MIN(ui->theme.radius_control, h * 0.5f);
     n->radius = CUI_CORNERS(rad);
     cui_color bg = cui_mix(col.bg, col.bg_hover, st->hover);
@@ -334,6 +334,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
         cui__focus_ring(ui, i, st->focus);
     }
     ui->last_id = id;
+    ui->last_node = i;
     if (o->tooltip) {
         if (o->shortcut) cui_tooltip(ui, cui__frame_printf(ui, "%s  \xc2\xb7  %s", o->tooltip, o->shortcut));
         else cui_tooltip(ui, o->tooltip);
@@ -366,7 +367,7 @@ void cui_badge_ex(cui_ctx *ui, const char *text, const cui_badge_opts *o) {
     n->h = CUI_PX(h);
     n->pad[1] = n->pad[3] = o->size == CUI_SIZE_SM ? 7 : 8;
     n->radius = CUI_CORNERS(o->size == CUI_SIZE_SM ? 5 : 6);
-    n->self_align = CUI_ALIGN_START;
+    n->self_align = CUI__ALIGN_NOSTRETCH;
     cui_color fg;
     if (o->solid) {
         n->bg = neutral ? CUI_C(ui, FOREGROUND) : tone;
@@ -476,7 +477,7 @@ void cui_avatar_group(cui_ctx *ui, const char *const *names, int count, int max_
     int row = cui__node_new(ui, 0);
     cui_node *r = &ui->nodes[row];
     r->w = CUI_PX(total_w); r->h = CUI_PX(size);
-    r->self_align = CUI_ALIGN_START;
+    r->self_align = CUI__ALIGN_NOSTRETCH;
     cui__open(ui, row);
     for (int k = 0; k < slots; k++) {
         float x = k * (size - overlap);
@@ -538,7 +539,9 @@ bool cui_card_begin(cui_ctx *ui, const cui_card_opts *o) {
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     float pad = o->pad > 0 ? o->pad : 24;
-    n->pad[0] = n->pad[1] = n->pad[2] = n->pad[3] = pad;
+    float px = o->pad_x > 0 ? o->pad_x : pad, py = o->pad_y > 0 ? o->pad_y : pad;
+    n->pad[0] = n->pad[2] = py;
+    n->pad[1] = n->pad[3] = px;
     n->gap = o->gap > 0 ? o->gap : 12;
     n->dir = (uint8_t)o->dir;
     n->align = (uint8_t)o->align;
@@ -661,7 +664,7 @@ void cui_skeleton(cui_ctx *ui, cui_size width, float height) {
     int i = cui__leaf(ui, 0, width.kind == CUI_SIZE_FIT ? CUI_FILL : width, CUI_PX(height > 0 ? height : 14));
     cui_node *n = &ui->nodes[i];
     n->radius = CUI_CORNERS(CUI_MIN(8.0f, (height > 0 ? height : 14) * 0.5f));
-    if (width.kind != CUI_SIZE_FIT && width.kind != CUI_SIZE_GROW) n->self_align = CUI_ALIGN_START;
+    if (width.kind != CUI_SIZE_FIT && width.kind != CUI_SIZE_GROW) n->self_align = CUI__ALIGN_NOSTRETCH;
     cui__skel_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->time = ui->time;
     p->base = CUI_C(ui, ACTIVE);
@@ -676,7 +679,7 @@ bool cui_alert_ex(cui_ctx *ui, const char *title, const cui_alert_opts *o) {
     cui_alert_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
-    cui_id id = cui_make_id(ui, title);
+    cui_id id = cui_make_id(ui, title) ^ 0xA1E70010u;
     cui__alert_state *st = cui_state(ui, id, sizeof *st);
     if (st->dismissed) return false;
     cui_color tone = o->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : cui__tone_color(ui, o->tone);
@@ -870,7 +873,7 @@ void cui_image_ex(cui_ctx *ui, cui_texture tex, const cui_image_opts *o) {
     int i = cui__leaf(ui, 0, o->width.kind ? o->width : CUI_PX(64), o->height.kind ? o->height : CUI_PX(64));
     cui_node *n = &ui->nodes[i];
     n->radius = CUI_CORNERS(o->radius);
-    n->self_align = CUI_ALIGN_START;
+    n->self_align = CUI__ALIGN_NOSTRETCH;
     cui__img_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->tex = tex;
     p->tint = cui__color_set(o->tint) ? cui_color_of(ui, o->tint) : cui__rgba(255, 255, 255, 255);

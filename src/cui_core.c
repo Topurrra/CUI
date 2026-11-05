@@ -618,6 +618,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
     ui->last_node = -1;
     ui->last_id = 0;
     ui->hover_id_for_tooltip = 0;
+    ui->edit = NULL;
 
     int root = cui__node_new(ui, cui__hash_str("#root", 0));
     cui_node *r = cui__node(ui, root);

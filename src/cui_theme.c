@@ -185,12 +185,24 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
     c[CUI_TOKEN_FOCUS_RING] = cui_mix(c[CUI_TOKEN_ACCENT], c[CUI_TOKEN_BACKGROUND], dark ? 0.35f : 0.45f);
     if (accent == CUI_ACCENT_NEUTRAL) c[CUI_TOKEN_FOCUS_RING] = cui_oklch(series_l, 0.15f, 250, 0.9f);
 
-    static const float offs[6] = { 0, 62, 155, 205, 300, 105 };
-    static const float chroma[6] = { 0.15f, 0.19f, 0.15f, 0.13f, 0.16f, 0.12f };
-    for (int i = 0; i < 6; i++) {
-        float l = series_l + (i == 2 ? 0.1f : 0.0f) * (dark ? 0.5f : 1.0f);
-        c[CUI_TOKEN_SERIES_1 + i] = cui_oklch(l, chroma[i], fmodf(series_h + offs[i] + 360.0f, 360.0f), 1);
+    /* curated series palette; rotated so the first series sits at the accent hue */
+    static const float sh[6] = { 252, 300, 45, 182, 10, 80 };
+    static const float sc[6] = { 0.15f, 0.17f, 0.16f, 0.12f, 0.17f, 0.14f };
+    static const float sl[6] = { 0.00f, -0.02f, 0.08f, 0.05f, 0.02f, 0.17f };
+    int first = 0;
+    if (accent != CUI_ACCENT_NEUTRAL) {
+        float best = 1e9f;
+        for (int i = 0; i < 6; i++) {
+            float d = fabsf(fmodf(sh[i] - series_h + 540.0f, 360.0f) - 180.0f);
+            if (d < best) { best = d; first = i; }
+        }
     }
+    for (int i = 0; i < 6; i++) {
+        int k = (first + i) % 6;
+        float l = series_l + sl[k] * (dark ? 0.4f : 1.0f);
+        c[CUI_TOKEN_SERIES_1 + i] = cui_oklch(l, sc[k], sh[k], 1);
+    }
+    if (accent != CUI_ACCENT_NEUTRAL) c[CUI_TOKEN_SERIES_1] = c[CUI_TOKEN_ACCENT];
 
     t->radius_control = 18;
     t->radius_panel = 22;
