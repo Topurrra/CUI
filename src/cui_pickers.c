@@ -544,6 +544,16 @@ bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *r
 
 typedef struct { float hover; } cui__tp_state;
 
+static void cui__paint_column_fade(cui_ctx *ui, cui_node *n, void *data) {
+    (void)data;
+    cui_rect r = n->rect;
+    cui_color bg = CUI_C(ui, SURFACE_RAISED), clear = bg;
+    clear.a = 0;
+    float f = 34;
+    cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y, r.w, f }, CUI_CORNERS(0), bg, clear);
+    cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y + r.h - f, r.w, f }, CUI_CORNERS(0), clear, bg);
+}
+
 static bool cui__time_column(cui_ctx *ui, const char *sid, int count, int value, int step, int offset, bool twelve, int *out, bool scroll_now) {
     bool changed = false;
     cui_box sb;
@@ -552,6 +562,7 @@ static bool cui__time_column(cui_ctx *ui, const char *sid, int count, int value,
     sb.height = CUI_PX(216);
     sb.gap = 2;
     sb.pad = 4;
+    sb.pad_top = sb.pad_bottom = (216 - 32) * 0.5f;   /* any item can sit in the middle, level with the other columns */
     cui_id scid = cui_make_id(ui, sid);
     cui__scroll_begin_ex(ui, scid, &sb, false);
     int sel_index = -1;
@@ -583,8 +594,7 @@ static bool cui__time_column(cui_ctx *ui, const char *sid, int count, int value,
     cui__scroll_end_ex(ui);
     if (scroll_now && sel_index >= 0) {
         cui_scroll_state *ss = cui_state(ui, scid, sizeof *ss);
-        float y = 4 + sel_index * 34.0f - (216 - 32) * 0.5f;
-        ss->ty = ss->y = CUI_MAX(0.0f, y);
+        ss->ty = ss->y = sel_index * 34.0f;
     }
     return changed;
 }
@@ -623,6 +633,9 @@ bool cui_time_picker_ex(cui_ctx *ui, const char *id_str, int *hour, int *minute,
         bool scroll_now = p && ui->frame - p->opened_frame <= 2;
         int row = cui__node_new(ui, 0);
         ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 4;
+        ui->nodes[row].paint = cui__paint_column_fade;   /* rows fade out at the top and bottom edges */
+        ui->nodes[row].paint_data = NULL;
+        ui->nodes[row].flags |= CUI_NF_PAINT_AFTER;
         cui__open(ui, row);
         int nh = h, nm = m;
         if (o->twelve_hour) {
@@ -636,7 +649,9 @@ bool cui_time_picker_ex(cui_ctx *ui, const char *id_str, int *hour, int *minute,
             int sep2 = cui__leaf(ui, 0, CUI_PX(1), CUI_FILL);
             ui->nodes[sep2].bg = CUI_C(ui, BORDER);
             int ap = cui__node_new(ui, 0);
-            ui->nodes[ap].gap = 2; ui->nodes[ap].pad[0] = ui->nodes[ap].pad[1] = ui->nodes[ap].pad[2] = ui->nodes[ap].pad[3] = 4;
+            ui->nodes[ap].gap = 2; ui->nodes[ap].pad[1] = ui->nodes[ap].pad[3] = 4;
+            ui->nodes[ap].pad[0] = (216 - 32) * 0.5f - (h >= 12 ? 34 : 0);   /* the chosen half sits in the middle row */
+            ui->nodes[ap].h = CUI_PX(216);
             cui__open(ui, ap);
             for (int k = 0; k < 2; k++) {
                 bool sel = (h >= 12) == (k == 1);
