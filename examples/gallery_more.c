@@ -376,17 +376,23 @@ static int cmp_people(const void *a, const void *b) {
 static void page_grid(cui_ctx *ui) {
     static bool init;
     static cui_table_sort last_sort = { -1, false };
-    static const char *first[] = { "Ada", "Alan", "Grace", "Linus", "Margaret", "Katherine", "Hedy", "Dennis", "Barbara", "Edsger", "Frances", "John" };
-    static const char *last[] = { "Lovelace", "Turing", "Hopper", "Torvalds", "Hamilton", "Johnson", "Lamarr", "Ritchie", "Liskov", "Dijkstra", "Allen", "Backus" };
+    static const char *first[] = { "Ada", "Alan", "Grace", "Linus", "Margaret", "Katherine", "Hedy", "Dennis",
+                                    "Barbara", "Edsger", "Frances", "John", "Radia", "Ken", "Sophie", "Niklaus" };
+    static const char *last[] = { "Lovelace", "Turing", "Hopper", "Torvalds", "Hamilton", "Johnson", "Lamarr", "Ritchie",
+                                   "Liskov", "Dijkstra", "Allen", "Backus", "Perlman", "Thompson", "Wilson", "Wirth" };
     static const char *teams[] = { "Engine", "Design", "Platform", "Docs", "Growth" };
     if (!init) {
         for (int k = 0; k < PEOPLE; k++) {
-            snprintf(people[k].name, sizeof people[k].name, "%s %s", first[k % 12], last[(k * 7 + 3) % 12]);
-            snprintf(people[k].email, sizeof people[k].email, "%s.%d@cui.dev", first[k % 12], k);
+            /* a cheap hash, so neighbouring rows do not repeat each other */
+            uint32_t h = (uint32_t)k * 2654435761u;
+            h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+            const char *fn = first[h % 16], *ln = last[(h >> 4) % 16];
+            snprintf(people[k].name, sizeof people[k].name, "%s %s", fn, ln);
+            snprintf(people[k].email, sizeof people[k].email, "%s.%c%u@cui.dev", fn, ln[0], (h >> 8) % 90 + 10);
             for (char *c = people[k].email; *c; c++) if (*c >= 'A' && *c <= 'Z') *c += 32;
-            people[k].team = teams[(k * 3) % 5];
-            people[k].commits = (k * 37) % 900 + 12;
-            people[k].score = (float)((k * 53) % 1000) / 10.0f;
+            people[k].team = teams[(h >> 12) % 5];
+            people[k].commits = (int)((h >> 16) % 1400) + 12;
+            people[k].score = (float)((h >> 3) % 1000) / 10.0f;
             order_ix[k] = k;
         }
         people_sort.column = 3; people_sort.descending = true;
