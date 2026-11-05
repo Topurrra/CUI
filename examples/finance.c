@@ -32,9 +32,7 @@ static void paint_card(cui_ctx *ui, cui_rect r, void *user) {
     cui_draw_shadow(ui, r, rad, 32, -6, (cui_vec2){ 0, 16 }, CUI_RGBA(0x00000080));
     cui_draw_rect_gradient(ui, r, rad, CUI_RGB(0x1f6f5c), CUI_RGB(0x0b2a24));
     cui_push_clip(ui, r);
-    /* a soft glow, kept clear of the rounded corners */
-    cui_draw_shadow(ui, (cui_rect){ r.x + r.w * 0.52f, r.y + r.h * 0.22f, r.w * 0.26f, r.h * 0.36f }, CUI_CORNERS(r.h * 0.18f),
-                    r.h * 0.42f, 0, (cui_vec2){ 0, 0 }, CUI_RGBA(0x5cf2c048));
+    /* printed rings, like the guilloche on a real card; no glow */
     cui_draw_arc(ui, (cui_vec2){ r.x + r.w * 0.92f, r.y + r.h * 1.05f }, r.h * 0.75f, 0, 6.2831853f, 1, CUI_RGBA(0xffffff1c));
     cui_draw_arc(ui, (cui_vec2){ r.x + r.w * 0.92f, r.y + r.h * 1.05f }, r.h * 0.55f, 0, 6.2831853f, 1, CUI_RGBA(0xffffff14));
     cui_pop_clip(ui);
