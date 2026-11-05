@@ -74,7 +74,7 @@ static void topbar(cui_ctx *ui, app_state *s) {
 static void kpi(cui_ctx *ui, const char *label, const char *value, const char *change, bool good) {
     cui_column(ui, .width = CUI_GROW(1), .pad_x = 22, .gap = 6) {
         cui_text(ui, label, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
-        cui_text(ui, value, .font = CUI_FONT_DISPLAY, .size = 26, .tabular = true);
+        cui_number_roll(ui, label, value, .font = CUI_FONT_DISPLAY, .size = 26);   /* the figures roll when the range changes */
         cui_text(ui, change, .size = 12, .color = good ? CUI_COLOR_SUCCESS : CUI_COLOR_DANGER);
     }
 }
@@ -94,13 +94,20 @@ static void content(cui_ctx *ui, app_state *s) {
     }
     /* one strip of figures rather than four look-alike cards; the chart below carries the trend */
     cui_card(ui, .dir = CUI_ROW, .gap = 0, .pad = 0) {
-        kpi(ui, "Revenue", "$64,210", "+12.4% on October", true);
+        static const char *rev[] = { "$15,830", "$64,210", "$702,480" }, *ord[] = { "318", "1,286", "14,903" };
+        static const char *conv[] = { "4.3%", "4.1%", "3.8%" }, *ref[] = { "1.5%", "1.7%", "2.0%" };
+        static const char *since[] = { "on last week", "on October", "on last year" };
+        int k = s->range;
+        char c1[48], c2[48];
+        snprintf(c1, sizeof c1, "%s %s", k == 2 ? "+31.0%" : k ? "+12.4%" : "+3.1%", since[k]);
+        snprintf(c2, sizeof c2, "%s %s", k == 2 ? "+22.6%" : k ? "+7.3%" : "+1.9%", since[k]);
+        kpi(ui, "Revenue", rev[k], c1, true);
         cui_separator(ui);
-        kpi(ui, "Orders", "1,286", "+7.3% on October", true);
+        kpi(ui, "Orders", ord[k], c2, true);
         cui_separator(ui);
-        kpi(ui, "Conversion", "4.1%", "+0.4 pts", true);
+        kpi(ui, "Conversion", conv[k], k == 2 ? "+0.6 pts" : k ? "+0.4 pts" : "+0.2 pts", true);
         cui_separator(ui);
-        kpi(ui, "Refund rate", "1.7%", "-0.6 pts, fewer returns", true);
+        kpi(ui, "Refund rate", ref[k], k == 2 ? "-0.3 pts, fewer returns" : k ? "-0.6 pts, fewer returns" : "-0.2 pts, fewer returns", true);
     }
     cui_row(ui, .gap = 16, .align = CUI_ALIGN_STRETCH) {
         cui_card(ui, .gap = 16, .width = CUI_GROW(2)) {

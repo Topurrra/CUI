@@ -242,7 +242,7 @@ typedef struct { cui__nr_state s; cui_font font; float size; cui_color c; float 
 
 /* splits text into code points, last first */
 static int cui__nr_split(const char *text, char out[CUI__NR_MAX][5]) {
-    char tmp[CUI__NR_MAX][5];
+    char tmp[CUI__NR_MAX][5] = { { 0 } };
     int n = 0, len = (int)strlen(text);
     for (int i = 0; i < len && n < CUI__NR_MAX;) {
         uint32_t cp;
@@ -335,8 +335,9 @@ void cui_number_roll_ex(cui_ctx *ui, const char *id_str, const char *text, const
             /* only the characters that change roll, a beat apart from the left */
             int rank = 0;
             for (int k = slots - 1; k >= 0; k--) {
-                const char *cur = k < st->slots ? (st->t[k].x >= 0.5f ? st->to[k] : st->from[k]) : "";
-                const char *want = k < nn ? nw[k] : "";
+                char cur[5] = "", want[5] = "";   /* copies: a slot may be rewritten from itself */
+                if (k < st->slots) snprintf(cur, sizeof cur, "%s", st->t[k].x >= 0.5f ? st->to[k] : st->from[k]);
+                if (k < nn) snprintf(want, sizeof want, "%s", nw[k]);
                 if (strcmp(cur, want) == 0 && (k >= st->slots || st->t[k].x >= 0.999f)) {
                     memcpy(st->from[k], want, 5); memcpy(st->to[k], want, 5); st->t[k].x = 1; st->t[k].v = 0;
                     continue;
