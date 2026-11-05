@@ -501,6 +501,19 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         if (e->day < 0 || e->day > 6 || e->end <= h0 || e->start >= h1) continue;
         cui_id eid = cui__hash(&k, sizeof k, id ^ 0xE7u);
         cui_interact r = cui__interact(ui, eid, CUI_IF_DRAG | CUI_IF_FOCUSABLE);
+        if (r.focus_visible && !o->read_only) {
+            /* Up and Down move the event 15 minutes, Left and Right a day; Shift changes its end */
+            float dur = e->end - e->start;
+            float dt = cui_key_pressed(ui, CUI_KEY_DOWN) ? 0.25f : cui_key_pressed(ui, CUI_KEY_UP) ? -0.25f : 0;
+            int dday = cui_key_pressed(ui, CUI_KEY_RIGHT) ? 1 : cui_key_pressed(ui, CUI_KEY_LEFT) ? -1 : 0;
+            if (dt != 0) {
+                if (ui->mods & CUI_MOD_SHIFT) e->end = cui__clampf(e->end + dt, e->start + 0.25f, h1);
+                else { e->start = cui__clampf(e->start + dt, h0, h1 - dur); e->end = e->start + dur; }
+                ui->kpressed[CUI_KEY_DOWN] = ui->kpressed[CUI_KEY_UP] = 0;
+            }
+            if (dday) { e->day = CUI_CLAMP(e->day + dday, 0, 6); ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_LEFT] = 0; }
+            if (r.keyboard_activate) clicked = k;
+        }
         cui_rect er = cui__prev_rect(ui, eid);
         if (r.hovered && ui->mpressed[0] && st->drag == 0) {
             st->drag = k + 1; st->moved = false; st->press_x = ui->mx; st->press_y = ui->my;
@@ -772,6 +785,17 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
         cui_gantt_task *t = &tasks[k];
         cui_id tid = cui__hash(&k, sizeof k, id ^ 0x6A7u);
         cui_interact r = cui__interact(ui, tid, CUI_IF_DRAG | CUI_IF_FOCUSABLE);
+        if (r.focus_visible && !o->read_only) {
+            /* arrows move the task a day; with Shift they change its length */
+            int dd = cui_key_pressed(ui, CUI_KEY_RIGHT) ? 1 : cui_key_pressed(ui, CUI_KEY_LEFT) ? -1 : 0;
+            if (dd) {
+                int len = t->end - t->start;
+                if (ui->mods & CUI_MOD_SHIFT) { if (!t->milestone) t->end = CUI_CLAMP(t->end + dd, t->start + 1, days); }
+                else { t->start = CUI_CLAMP(t->start + dd, 0, days - len); t->end = t->start + len; }
+                ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_LEFT] = 0;
+            }
+            if (r.keyboard_activate) clicked = k;
+        }
         cui_rect tr = cui__prev_rect(ui, tid);
         bool near_l = r.hovered && ui->mx < tr.x + 7 && !t->milestone, near_r = r.hovered && ui->mx > tr.x + tr.w - 7 && !t->milestone;
         if (r.hovered && ui->mpressed[0] && st->drag == 0) {

@@ -1527,6 +1527,20 @@ static void test_planning(void) {
     float lx = w.x + 60 + 3.5f * dw, ly = top + (12.5f - 8) * 40;
     drag2(ui, build_plan, &a, lx, ly, lx, ly + 400, 6);
     CHECK(a.ev[1].end == 18 && a.ev[1].start == 17);
+    /* keyboard: Tab to the first event, Down moves it 15 minutes, Shift+Down stretches it, Left moves a day */
+    cui_input_mouse_move(ui, 5, 5);
+    run(ui, build_plan, &a, 1);
+    key(ui, build_plan, &a, CUI_KEY_ESCAPE, 0);
+    key(ui, build_plan, &a, CUI_KEY_TAB, 0);
+    {
+        float s0 = a.ev[0].start, e0 = a.ev[0].end; int d0 = a.ev[0].day;
+        key(ui, build_plan, &a, CUI_KEY_DOWN, 0);
+        CHECK(a.ev[0].start == s0 + 0.25f && a.ev[0].end == e0 + 0.25f);
+        key(ui, build_plan, &a, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+        CHECK(a.ev[0].start == s0 + 0.25f && a.ev[0].end == e0 + 0.5f);
+        key(ui, build_plan, &a, CUI_KEY_LEFT, 0);
+        CHECK(a.ev[0].day == d0 - 1);
+    }
 
     /* gantt */
     a.mode = 2;
@@ -1550,6 +1564,14 @@ static void test_planning(void) {
     /* and the left end in one day */
     drag2(ui, build_plan, &a, x0 + 4 * 30 + 3, y0 + 20, x0 + 5 * 30 + 3, y0 + 20, 6);
     CHECK(a.tasks[0].start == 5 && a.tasks[0].end == 10);
+    /* keyboard: arrows move a day, Shift+arrows change the length */
+    click_at(ui, build_plan, &a, x0 + 7 * 30, y0 + 20);   /* focus the bar, then make the focus visible */
+    key(ui, build_plan, &a, CUI_KEY_TAB, 0);
+    key(ui, build_plan, &a, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    key(ui, build_plan, &a, CUI_KEY_RIGHT, 0);
+    CHECK(a.tasks[0].start == 6 && a.tasks[0].end == 11);
+    key(ui, build_plan, &a, CUI_KEY_LEFT, CUI_MOD_SHIFT);
+    CHECK(a.tasks[0].start == 6 && a.tasks[0].end == 10);
     cui_destroy(ui);
 }
 
