@@ -238,6 +238,7 @@ void cui_set_viewport(cui_ctx *ui, float w, float h, float scale) {
 cui_vec2 cui_viewport_size(cui_ctx *ui) { cui_vec2 v = { ui->vw, ui->vh }; return v; }
 float cui_dpi_scale(cui_ctx *ui) { return ui->scale; }
 double cui_time(cui_ctx *ui) { return ui->time; }
+float cui_delta_time(cui_ctx *ui) { return ui->dt; }
 uint64_t cui_frame_count(cui_ctx *ui) { return ui->frame; }
 void cui_request_redraw(cui_ctx *ui) { ui->animating = true; }
 bool cui_needs_redraw(cui_ctx *ui) { return ui->animating || ui->settle_frames > 0; }

@@ -952,6 +952,82 @@ SCENE(scatter) {
     cui_scatter_chart(ui, "scatter", ss, 2, .height = 300, .x_label = "Nodes", .y_label = "Frame time (ms)", .y_format = "%.2f");
 }
 
+/* ---- motion ---- */
+SCENE(text_effects) {
+    cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
+        cui_loader(ui, .style = CUI_LOADER_DOTS, .size = 22);
+        cui_shimmer_text(ui, "Thinking about your question...", .size = 15);
+    }
+    cui_typewriter(ui, "tw", "CUI draws a full frame in a fraction of a millisecond, so text can stream in as fast as it arrives.", .caret = true, .size = 15);
+    cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+        cui_text(ui, "Interfaces that feel", .font = CUI_FONT_DISPLAY, .size = 26);
+        static const char *words[] = { "native.", "fast.", "calm." };
+        cui_word_rotate(ui, "rot", words, 3, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26);
+    }
+}
+SCENE(loaders) {
+    cui_row(ui, .gap = 44, .align = CUI_ALIGN_CENTER) {
+        for (int k = 0; k < 5; k++) cui_loader(ui, .style = (cui_loader_style)k, .size = 30);
+    }
+}
+static void body_dock(cui_ctx *ui) {
+    cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .height = CUI_FILL, .align = CUI_ALIGN_END) {
+        cui_dock(ui, "dock") {
+            cui_dock_item(ui, CUI_ICON_FOLDER, "Files", .color = CUI_RGB(0x3b82f6), .running = true);
+            cui_dock_item(ui, CUI_ICON_MAIL, "Mail", .color = CUI_RGB(0x0ea5e9), .badge = 3, .running = true);
+            cui_dock_item(ui, CUI_ICON_CALENDAR, "Calendar", .color = CUI_RGB(0xef4444));
+            cui_dock_item(ui, CUI_ICON_MUSIC, "Music", .color = CUI_RGB(0xec4899), .running = true);
+            cui_dock_item(ui, CUI_ICON_SQUARE_TERMINAL, "Terminal", .color = CUI_RGB(0x27272a));
+            cui_dock_item(ui, CUI_ICON_PALETTE, "Design", .color = CUI_RGB(0x8b5cf6));
+            cui_dock_separator(ui);
+            cui_dock_item(ui, CUI_ICON_SETTINGS, "Settings");
+            cui_dock_item(ui, CUI_ICON_TRASH_2, "Trash");
+        }
+    }
+}
+static void scene_dock(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int t = -f - 1;
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "dock"));
+        if (t == 15) cui_input_mouse_move(ui, r.x + r.w * 0.42f, r.y + r.h * 0.5f);
+        return;
+    }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_dock(ui); }
+}
+SCENE(tiles) {
+    static bool wifi = true, bt = false, focus = true, share = false, dark = true;
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
+        cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Home");
+        cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
+        cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm", .color = CUI_RGB(0x6366f1));
+        cui_control_tile(ui, "AirShare", &share, .icon = CUI_ICON_SHARE_2, .detail = "Contacts only");
+    }
+    cui_control_tile(ui, "Dark appearance", &dark, .icon = CUI_ICON_SUN, .wide = true, .width = CUI_PX(300));
+}
+SCENE(player) {
+    static float peaks[96], progress = 0.36f;
+    static int tab = 0;
+    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
+    for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
+    static const cui_tab_bar_item tabs[] = { { CUI_ICON_HOUSE, "Home", 0 }, { CUI_ICON_SEARCH, "Search", 0 }, { CUI_ICON_INBOX, "Inbox", 4 }, { CUI_ICON_USER, "Profile", 0 } };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START) {
+        cui_column(ui, .gap = 16) {
+            cui_now_playing(ui, "np", &np);
+            cui_card(ui, .pad = 14, .gap = 8, .width = CUI_PX(360)) {
+                cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                    cui_icon_button(ui, CUI_ICON_PLAY, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_SECONDARY);
+                    cui_box(ui, .width = CUI_FILL) { cui_waveform(ui, "wave", peaks, 96, &progress, .height = 34); }
+                    cui_text(ui, "0:42", .size = 12, .tabular = true, .color = CUI_COLOR_TEXT_MUTED);
+                }
+            }
+        }
+        cui_column(ui, .gap = 16, .justify = CUI_JUSTIFY_END) {
+            cui_gap(ui, 80);
+            cui_tab_bar(ui, "tabs", tabs, 4, &tab, .width = CUI_PX(340));
+        }
+    }
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -1187,6 +1263,9 @@ int main(int argc, char **argv) {
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
         { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
         { "scatter", scene_scatter, 860, 360, true },
+        { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
+        { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },
+        { "player", scene_player, 820, 300, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

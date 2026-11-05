@@ -169,6 +169,9 @@ enum {
 
 struct cui_node;
 typedef void (*cui__paint_fn)(cui_ctx *ui, struct cui_node *n, void *data);
+/* Per glyph text effect: gets the byte offset in the node's text, the glyph's
+ * pen x and the line's top (points); returns the glyph color and may move it. */
+typedef cui_color (*cui__text_fx_fn)(cui_ctx *ui, void *data, int byte, float x, float line_y, float *dy, cui_color c);
 
 typedef struct cui_node {
     cui_id id;
@@ -207,6 +210,8 @@ typedef struct cui_node {
 
     /* custom paint */
     cui__paint_fn paint;
+    cui__text_fx_fn text_fx;
+    void *text_fx_data;
     void *paint_data;
 
     /* floating */
@@ -487,6 +492,11 @@ struct cui_ctx {
     void *carousel;                /* carousel being built */
     void *card_stack;              /* card stack being built */
     void *kanban;                  /* kanban board being built */
+    void *dock;                    /* dock being built */
+    cui__text_fx_fn text_fx;       /* set while a node with a text effect paints */
+    void *text_fx_data;
+    int text_fx_base;              /* byte offset of the line being drawn */
+    float text_fx_line_y;
 };
 
 /* ---- theme ---- */

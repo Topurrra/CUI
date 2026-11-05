@@ -201,6 +201,7 @@ CUI_API bool cui_needs_redraw(cui_ctx *ui);
 CUI_API float cui_next_wakeup(cui_ctx *ui);
 CUI_API void cui_request_redraw(cui_ctx *ui);
 CUI_API double cui_time(cui_ctx *ui);
+CUI_API float cui_delta_time(cui_ctx *ui);   /* seconds since the last frame */
 CUI_API uint64_t cui_frame_count(cui_ctx *ui);
 
 /* ------------------------------------------------------------------------ */
@@ -1192,6 +1193,66 @@ typedef struct cui_scatter_opts {
 CUI_API int cui_scatter_chart_ex(cui_ctx *ui, const char *id, const cui_scatter_series *series, int count, const cui_scatter_opts *opts);
 
 /* ------------------------------------------------------------------------ */
+/* Motion and text effects                                                  */
+/* ------------------------------------------------------------------------ */
+/* All of these respect reduced motion: they show their final state. */
+
+typedef struct cui_text_fx_opts {
+    int _;
+    cui_font font;
+    float size;
+    cui_color color;
+    cui_size width;
+    bool nowrap;
+    float speed;               /* shimmer: sweeps per second; typewriter: characters per second */
+    float delay;               /* seconds before it starts */
+    bool caret;                /* typewriter: a blinking caret while typing */
+} cui_text_fx_opts;
+/* Text with a highlight sweeping across it, for "Thinking..." states. */
+CUI_API void cui_shimmer_text_ex(cui_ctx *ui, const char *text, const cui_text_fx_opts *opts);
+/* Types the text out. When the text grows (streamed tokens) it carries on
+ * from where it was; other changes start over. Returns true once complete. */
+CUI_API bool cui_typewriter_ex(cui_ctx *ui, const char *id, const char *text, const cui_text_fx_opts *opts);
+/* Words fade and rise into place one after another, when first shown and
+ * again whenever the text changes. */
+CUI_API void cui_text_reveal_ex(cui_ctx *ui, const char *id, const char *text, const cui_text_fx_opts *opts);
+/* One word at a time; the next one rolls up into place and the width follows. */
+CUI_API void cui_word_rotate_ex(cui_ctx *ui, const char *id, const char *const *words, int count, float interval, const cui_text_fx_opts *opts);
+
+typedef enum cui_loader_style { CUI_LOADER_DOTS = 0, CUI_LOADER_BARS, CUI_LOADER_PULSE, CUI_LOADER_ORBIT, CUI_LOADER_GRID } cui_loader_style;
+typedef struct cui_loader_opts { int _; cui_loader_style style; float size; cui_color color; } cui_loader_opts;
+CUI_API void cui_loader_ex(cui_ctx *ui, const cui_loader_opts *opts);
+
+/* Dock: a row of icons that grow as the pointer passes, with labels and a
+ * dot under the running ones. Each item returns true when clicked. */
+typedef struct cui_dock_opts { int _; float size; float magnify; } cui_dock_opts;
+typedef struct cui_dock_item_opts { int _; cui_color color; bool running; int badge; } cui_dock_item_opts;
+CUI_API void cui_dock_begin(cui_ctx *ui, const char *id, const cui_dock_opts *opts);
+CUI_API bool cui_dock_item_ex(cui_ctx *ui, const char *icon, const char *label, const cui_dock_item_opts *opts);
+CUI_API void cui_dock_separator(cui_ctx *ui);
+CUI_API void cui_dock_end(cui_ctx *ui);
+
+/* Bottom tab bar for compact layouts, with a pill that glides to the selection. */
+typedef struct cui_tab_bar_item { const char *icon; const char *label; int badge; } cui_tab_bar_item;
+typedef struct cui_tab_bar_opts { int _; cui_size width; bool labels_on_selected_only; } cui_tab_bar_opts;
+CUI_API bool cui_tab_bar_ex(cui_ctx *ui, const char *id, const cui_tab_bar_item *items, int count, int *selected, const cui_tab_bar_opts *opts);
+
+/* Control tile: a large toggle with an icon, a label and a state line. */
+typedef struct cui_tile_opts { int _; const char *icon; const char *detail; cui_color color; cui_size width; bool wide; } cui_tile_opts;
+CUI_API bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_tile_opts *opts);
+
+/* Waveform: bars from peaks (0..1). With progress, the played part is
+ * colored and clicking or dragging seeks; returns true when it did. */
+typedef struct cui_waveform_opts { int _; cui_size width; float height; float bar; float gap; cui_color color; } cui_waveform_opts;
+CUI_API bool cui_waveform_ex(cui_ctx *ui, const char *id, const float *peaks, int count, float *progress, const cui_waveform_opts *opts);
+
+/* Now playing card: artwork, title, artist, a scrubber and transport buttons. */
+typedef struct cui_now_playing { const char *title, *artist; cui_texture art; cui_color art_color; float position, duration; bool playing; } cui_now_playing;
+typedef struct cui_now_playing_opts { int _; cui_size width; bool compact; } cui_now_playing_opts;
+enum { CUI_PLAYER_TOGGLE = 1, CUI_PLAYER_PREV = 2, CUI_PLAYER_NEXT = 4, CUI_PLAYER_SEEK = 8 };
+CUI_API int cui_now_playing_ex(cui_ctx *ui, const char *id, cui_now_playing *np, const cui_now_playing_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Planning                                                                 */
 /* ------------------------------------------------------------------------ */
 
@@ -1561,6 +1622,17 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_kanban_column_begin(ui, title, count, ...) cui_kanban_column_begin_ex((ui), (title), (count), CUI__OPTS(cui_kanban_column_opts, __VA_ARGS__))
 #define cui_week_calendar(ui, id, week, events, count, ...) cui_week_calendar_ex((ui), (id), (week), (events), (count), CUI__OPTS(cui_week_opts, __VA_ARGS__))
 #define cui_gantt(ui, id, tasks, count, origin, days, ...) cui_gantt_ex((ui), (id), (tasks), (count), (origin), (days), CUI__OPTS(cui_gantt_opts, __VA_ARGS__))
+#define cui_shimmer_text(ui, text, ...)    cui_shimmer_text_ex((ui), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
+#define cui_typewriter(ui, id, text, ...)   cui_typewriter_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
+#define cui_text_reveal(ui, id, text, ...)  cui_text_reveal_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
+#define cui_word_rotate(ui, id, words, n, interval, ...) cui_word_rotate_ex((ui), (id), (words), (n), (interval), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
+#define cui_loader(ui, ...)                 cui_loader_ex((ui), CUI__OPTS(cui_loader_opts, __VA_ARGS__))
+#define cui_dock(ui, id, ...)               CUI__SCOPE(cui_dock_begin((ui), (id), CUI__OPTS(cui_dock_opts, __VA_ARGS__)), cui_dock_end(ui))
+#define cui_dock_item(ui, icon, label, ...) cui_dock_item_ex((ui), (icon), (label), CUI__OPTS(cui_dock_item_opts, __VA_ARGS__))
+#define cui_tab_bar(ui, id, items, n, sel, ...) cui_tab_bar_ex((ui), (id), (items), (n), (sel), CUI__OPTS(cui_tab_bar_opts, __VA_ARGS__))
+#define cui_control_tile(ui, label, on, ...) cui_control_tile_ex((ui), (label), (on), CUI__OPTS(cui_tile_opts, __VA_ARGS__))
+#define cui_waveform(ui, id, peaks, n, progress, ...) cui_waveform_ex((ui), (id), (peaks), (n), (progress), CUI__OPTS(cui_waveform_opts, __VA_ARGS__))
+#define cui_now_playing(ui, id, np, ...)    cui_now_playing_ex((ui), (id), (np), CUI__OPTS(cui_now_playing_opts, __VA_ARGS__))
 #define cui_heatmap(ui, id, v, rows, cols, ...) cui_heatmap_ex((ui), (id), (v), (rows), (cols), CUI__OPTS(cui_heatmap_opts, __VA_ARGS__))
 #define cui_calendar_heatmap(ui, id, start, v, days, ...) cui_calendar_heatmap_ex((ui), (id), (start), (v), (days), CUI__OPTS(cui_calendar_heatmap_opts, __VA_ARGS__))
 #define cui_treemap(ui, id, items, n, ...)  cui_treemap_ex((ui), (id), (items), (n), CUI__OPTS(cui_treemap_opts, __VA_ARGS__))

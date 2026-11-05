@@ -759,7 +759,7 @@ static void page_viz(cui_ctx *ui) {
     section(ui, "Calendar heatmap", "A year of activity, one square a day.");
     cui_card(ui, .pad = 18) {
         cui_date start = cui_date_from_days(cui_date_to_days(cui_date_today()) - 363);
-        cui_calendar_heatmap(ui, "year", start, days, 364, .unit = "contributions");
+        cui_calendar_heatmap(ui, "activity", start, days, 364, .unit = "contributions");
     }
     cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_column(ui, .width = CUI_GROW(1.3f), .gap = 10) {
@@ -836,6 +836,82 @@ static void page_viz(cui_ctx *ui) {
     }
 }
 
+/* ---- motion -------------------------------------------------------------- */
+
+static void page_motion(cui_ctx *ui) {
+    static int replay;
+    static float peaks[96];
+    static float progress = 0.36f;
+    static bool wifi = true, bt = false, focus = true, airdrop = false, dark_tile = true;
+    static int tab = 0;
+    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
+    if (!peaks[0]) for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
+    section(ui, "Text effects", "A shimmer for pending work, a typewriter for streamed text, words that settle into place.");
+    cui_card(ui, .gap = 18, .pad = 20, .width = CUI_FILL) {
+        cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
+            cui_loader(ui, .style = CUI_LOADER_DOTS, .size = 22);
+            cui_shimmer_text(ui, "Thinking about your question...", .size = 15);
+        }
+        cui_push_id_int(ui, replay);
+        cui_typewriter(ui, "tw", "CUI draws a full frame in a fraction of a millisecond, so text can stream in as fast as it arrives.", .caret = true, .size = 15);
+        cui_text_reveal(ui, "rv", "Calm by default. Motion with purpose. Keyboard first. Fast and small.", .size = 20, .font = CUI_FONT_DISPLAY);
+        cui_pop_id(ui);
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+            cui_text(ui, "Interfaces that feel", .font = CUI_FONT_DISPLAY, .size = 26);
+            static const char *words[] = { "native.", "fast.", "calm.", "small." };
+            cui_word_rotate(ui, "rot", words, 4, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26);
+        }
+        if (cui_button(ui, "Replay", .size = CUI_SIZE_SM, .icon = CUI_ICON_ROTATE_CCW, .variant = CUI_BUTTON_OUTLINE)) replay++;
+    }
+    section(ui, "Loaders", "Dots, bars, pulse, orbit and grid.");
+    cui_row(ui, .gap = 36, .align = CUI_ALIGN_CENTER) {
+        for (int k = 0; k < 5; k++) cui_loader(ui, .style = (cui_loader_style)k, .size = 28);
+    }
+    section(ui, "Dock", "Icons grow as the pointer passes.");
+    cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .height = CUI_PX(110), .align = CUI_ALIGN_END) {
+        cui_dock(ui, "dock") {
+            if (cui_dock_item(ui, CUI_ICON_FOLDER, "Files", .color = CUI_RGB(0x3b82f6), .running = true)) cui_toast(ui, "Files");
+            cui_dock_item(ui, CUI_ICON_MAIL, "Mail", .color = CUI_RGB(0x0ea5e9), .badge = 3, .running = true);
+            cui_dock_item(ui, CUI_ICON_CALENDAR, "Calendar", .color = CUI_RGB(0xef4444));
+            cui_dock_item(ui, CUI_ICON_MUSIC, "Music", .color = CUI_RGB(0xec4899), .running = true);
+            cui_dock_item(ui, CUI_ICON_SQUARE_TERMINAL, "Terminal", .color = CUI_RGB(0x27272a));
+            cui_dock_item(ui, CUI_ICON_PALETTE, "Design", .color = CUI_RGB(0x8b5cf6));
+            cui_dock_separator(ui);
+            cui_dock_item(ui, CUI_ICON_SETTINGS, "Settings");
+            cui_dock_item(ui, CUI_ICON_TRASH_2, "Trash");
+        }
+    }
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
+            section(ui, "Control tiles", "Big toggles for quick settings.");
+            cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
+                cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = wifi ? "Home" : "Off");
+                cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
+                cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = focus ? "Until 6 pm" : "Off", .color = CUI_RGB(0x6366f1));
+                cui_control_tile(ui, "AirShare", &airdrop, .icon = CUI_ICON_SHARE_2, .detail = airdrop ? "Everyone" : "Contacts only");
+            }
+            cui_control_tile(ui, "Dark appearance", &dark_tile, .icon = CUI_ICON_SUN, .wide = true, .width = CUI_PX(300));
+        }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
+            section(ui, "Now playing", "Artwork, a scrubber and transport.");
+            int ev = cui_now_playing(ui, "np", &np);
+            if (ev & CUI_PLAYER_NEXT) cui_toast(ui, "Next track");
+            if (np.playing) { np.position += cui_delta_time(ui); if (np.position > np.duration) np.position = 0; }
+            section(ui, "Waveform", "Click or drag to seek.");
+            cui_card(ui, .pad = 14, .gap = 8, .width = CUI_PX(360)) {
+                cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                    cui_icon_button(ui, CUI_ICON_PLAY, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_SECONDARY);
+                    cui_box(ui, .width = CUI_FILL) { cui_waveform(ui, "wave", peaks, 96, &progress, .height = 34); }
+                    cui_text(ui, "0:42", .size = 12, .tabular = true, .color = CUI_COLOR_TEXT_MUTED);
+                }
+            }
+            section(ui, "Tab bar", "For compact layouts.");
+            static const cui_tab_bar_item tabs[] = { { CUI_ICON_HOUSE, "Home", 0 }, { CUI_ICON_SEARCH, "Search", 0 }, { CUI_ICON_INBOX, "Inbox", 4 }, { CUI_ICON_USER, "Profile", 0 } };
+            cui_tab_bar(ui, "tabs", tabs, 4, &tab, .width = CUI_PX(360));
+        }
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -852,9 +928,15 @@ static const more_page pages[] = {
     { "Social and media", CUI_ICON_MESSAGE_SQUARE, page_social },
     { "Planning", CUI_ICON_LIST_CHECKS, page_planning },
     { "More charts", CUI_ICON_CHART_PIE, page_viz },
+    { "Motion", CUI_ICON_SPARKLES, page_motion },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }
 const char *gallery_more_name(int page) { return page >= 0 && page < gallery_more_count() ? pages[page].name : ""; }
 const char *gallery_more_icon(int page) { return page >= 0 && page < gallery_more_count() ? pages[page].icon : NULL; }
-void gallery_more_page(cui_ctx *ui, int page) { if (page >= 0 && page < gallery_more_count()) pages[page].fn(ui); }
+void gallery_more_page(cui_ctx *ui, int page) {
+    if (page < 0 || page >= gallery_more_count()) return;
+    cui_push_id(ui, pages[page].name);   /* ids on different pages never meet */
+    pages[page].fn(ui);
+    cui_pop_id(ui);
+}

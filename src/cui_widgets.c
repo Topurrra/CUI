@@ -325,7 +325,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     float pad = o->size == CUI_SIZE_SM ? 12 : o->size == CUI_SIZE_LG ? 20 : 15;
     if (v == CUI_BUTTON_LINK) pad = 2;
 
-    cui_id swap_id = cui__position_id(ui, 0x1C05A9u);
+    cui_id swap_id = id ^ 0x1C05A9u;   /* per button: positions repeat across unnamed containers */
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW;

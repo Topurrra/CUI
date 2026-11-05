@@ -625,3 +625,77 @@ cui_scatter_chart(ui, "frames", s, 2, .height = 300, .x_label = "Nodes", .y_labe
 ```
 
 Leave `sizes` NULL for a scatter. With sizes, the area of a bubble follows its value. Every mark has a 1.5 point ring in the surface color, so overlapping points stay apart, and the nearest point under the pointer gets guide lines to both axes.
+
+## Motion
+
+Text effects, loaders and the playful pieces. With reduced motion, text effects show their final state at once.
+
+### Text effects
+
+![Text effects](images/components/text-effects.png)
+
+```c
+cui_shimmer_text(ui, "Thinking about your question...");
+bool done = cui_typewriter(ui, "answer", streamed_text, .caret = true);
+cui_text_reveal(ui, "hero", "Calm by default. Motion with purpose.", .font = CUI_FONT_DISPLAY, .size = 20);
+static const char *words[] = { "native.", "fast.", "calm." };
+cui_word_rotate(ui, "rot", words, 3, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26);
+```
+
+The shimmer sweeps a soft highlight across muted text. The typewriter lays out the whole text first and uncovers it, so lines never reflow as it types. When you append to the text (streamed tokens), it carries on from where it was and speeds up when it falls far behind; any other change starts over. The reveal fades and lifts words in one after another whenever the text changes. Rotating words roll up into place, and the width follows the word.
+
+### Loaders
+
+![Loaders](images/components/loaders.png)
+
+```c
+cui_loader(ui, .style = CUI_LOADER_DOTS);    /* also BARS, PULSE, ORBIT, GRID */
+cui_loader(ui, .style = CUI_LOADER_PULSE, .size = 32, .color = CUI_COLOR_ACCENT);
+```
+
+### Dock
+
+![Dock](images/components/dock.png)
+
+```c
+cui_dock(ui, "dock") {
+    if (cui_dock_item(ui, CUI_ICON_FOLDER, "Files", .color = CUI_RGB(0x3b82f6), .running = true)) open_files();
+    cui_dock_item(ui, CUI_ICON_MAIL, "Mail", .color = CUI_RGB(0x0ea5e9), .badge = 3);
+    cui_dock_separator(ui);
+    cui_dock_item(ui, CUI_ICON_TRASH_2, "Trash");
+}
+```
+
+Icons grow as the pointer passes, with the item under it largest and its neighbours following on a cosine falloff. Items show their label as a tooltip, a dot when `running` and a count with `badge`. Tab and Enter work as well.
+
+### Control tiles
+
+![Control tiles](images/components/tiles.png)
+
+```c
+static bool wifi = true;
+cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = wifi ? "Home" : "Off");
+cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .color = CUI_RGB(0x6366f1));
+cui_control_tile(ui, "Dark appearance", &dark, .icon = CUI_ICON_SUN, .wide = true);
+```
+
+Big toggles for quick settings, which fill their grid cell. They switch with a click or with Space and Enter. `detail` replaces the default On and Off line.
+
+### Now playing, waveform and tab bar
+
+![Now playing, waveform and tab bar](images/components/player.png)
+
+```c
+static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", art, { 0 }, 76, 222, true };
+int ev = cui_now_playing(ui, "player", &np);
+if (ev & CUI_PLAYER_NEXT) next_track();
+if (ev & CUI_PLAYER_SEEK) seek(np.position);
+
+static float progress;
+if (cui_waveform(ui, "voice", peaks, 96, &progress, .height = 34)) seek_to(progress);
+
+static int tab;
+cui_tab_bar(ui, "tabs", tabs, 4, &tab);
+```
+
+The player shows artwork (a texture, or `art_color`), a play button that morphs between play and pause, and a scrubber that thickens and shows its knob under the pointer. The time on the right counts down. The waveform resamples its peaks to fit its width; the played part takes the accent color and a ghost shows where a click would seek. The tab bar's pill glides to the selection, and arrow keys move it.

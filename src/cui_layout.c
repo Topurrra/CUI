@@ -735,7 +735,16 @@ static cui_rect cui__xform_rect(cui_ctx *ui, cui_rect r) {
 
 void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);
 
+static void cui__paint_text_lines(cui_ctx *ui, cui_node *n);
 static void cui__paint_text(cui_ctx *ui, cui_node *n) {
+    ui->text_fx = n->text_fx;
+    ui->text_fx_data = n->text_fx_data;
+    cui__paint_text_lines(ui, n);
+    ui->text_fx = NULL;
+    ui->text_fx_base = 0;
+}
+
+static void cui__paint_text_lines(cui_ctx *ui, cui_node *n) {
     float lh = cui__text_line_px(n);
     float fh = cui__font_line_height(ui, n->font, n->font_size);
     float top_pad = (lh - fh) * 0.5f;
@@ -746,6 +755,8 @@ static void cui__paint_text(cui_ctx *ui, cui_node *n) {
             float x = n->rect.x;
             if (n->text_align == CUI_TEXT_CENTER) x += (n->rect.w - L->width) * 0.5f;
             else if (n->text_align == CUI_TEXT_RIGHT) x += n->rect.w - L->width;
+            ui->text_fx_base = L->start;
+            ui->text_fx_line_y = n->rect.y + lh * (float)k;
             cui__draw_text_line(ui, n->font, n->font_size, x, n->rect.y + top_pad + lh * (float)k, n->text_color,
                                 n->text + L->start, L->end - L->start, tab);
         }
@@ -762,6 +773,8 @@ static void cui__paint_text(cui_ctx *ui, cui_node *n) {
                 if (n->text_align == CUI_TEXT_CENTER) x += (n->rect.w - w) * 0.5f;
                 else if (n->text_align == CUI_TEXT_RIGHT) x += n->rect.w - w;
             }
+            ui->text_fx_base = start;
+            ui->text_fx_line_y = n->rect.y + lh * (float)k;
             cui__draw_text_ellipsis(ui, n->font, n->font_size, x, n->rect.y + top_pad + lh * (float)k, n->rect.w,
                                     n->text_color, n->text + start, len, tab);
             start = p + 1;

@@ -1732,6 +1732,107 @@ static void test_viz(void) {
     cui_destroy(ui);
 }
 
+typedef struct {
+    char text[256]; bool done; int clicks, dock_hits; bool tile; int tab; bool tab_changed;
+    float progress; bool seeked; cui_now_playing np; int np_flags;
+    cui_id tile_id, tab_id, wave_id, np_id, dock_id;
+} motion_ctx;
+
+static void build_motion(cui_ctx *ui, void *u) {
+    motion_ctx *a = u;
+    static const cui_tab_bar_item tabs[] = { { CUI_ICON_HOUSE, "Home", 0 }, { CUI_ICON_SEARCH, "Search", 0 }, { CUI_ICON_INBOX, "Inbox", 2 } };
+    static float peaks[40];
+    for (int k = 0; k < 40; k++) peaks[k] = 0.5f;
+    cui_column(ui, .pad = 20, .gap = 12, .width = CUI_FILL) {
+        a->done = cui_typewriter(ui, "tw", a->text, .speed = 60);
+        cui_shimmer_text(ui, "Thinking");
+        cui_text_reveal(ui, "rv", "Words settle into place");
+        static const char *words[] = { "one", "two" };
+        cui_word_rotate(ui, "wr", words, 2, 1.0f);
+        cui_loader(ui, .style = CUI_LOADER_GRID);
+        cui_row(ui, .gap = 10) {
+            if (cui_control_tile(ui, "Wi-Fi", &a->tile, .width = CUI_PX(140))) a->clicks++;
+            a->tile_id = cui_last_id(ui);
+        }
+        if (cui_tab_bar(ui, "tabs", tabs, 3, &a->tab, .width = CUI_PX(300))) a->tab_changed = true;
+        a->tab_id = cui_last_id(ui);
+        cui_box(ui, .width = CUI_PX(400)) { if (cui_waveform(ui, "wave", peaks, 40, &a->progress)) a->seeked = true; a->wave_id = cui_last_id(ui); }
+        a->np_flags |= cui_now_playing(ui, "np", &a->np);
+        a->np_id = cui_last_id(ui);
+        cui_dock(ui, "dock") {
+            if (cui_dock_item(ui, CUI_ICON_FOLDER, "Files")) a->dock_hits++;
+            if (cui_dock_item(ui, CUI_ICON_MAIL, "Mail", .badge = 2)) a->dock_hits += 10;
+        }
+        a->dock_id = cui_last_id(ui);
+    }
+}
+
+static void test_motion(void) {
+    printf("motion: typewriter streams and restarts, tiles, tab bar, waveform seek, player, dock\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 1000, 1);
+    cui_set_reduced_motion(ui, false);
+    motion_ctx a;
+    memset(&a, 0, sizeof a);
+    strcpy(a.text, "Hello there");   /* 11 characters at 60 a second */
+    a.np = (cui_now_playing){ "Song", "Artist", 0, { 0 }, 30, 200, false };
+    run(ui, build_motion, &a, 2);
+    CHECK(!a.done);
+    run(ui, build_motion, &a, 30);
+    CHECK(a.done);
+    /* streamed: more text carries on without starting over */
+    strcat(a.text, ", and more");
+    run(ui, build_motion, &a, 1);
+    CHECK(!a.done);
+    run(ui, build_motion, &a, 30);
+    CHECK(a.done);
+    /* a different text starts over */
+    strcpy(a.text, "Something else entirely");
+    run(ui, build_motion, &a, 1);
+    CHECK(!a.done);
+    cui_set_reduced_motion(ui, true);
+    run(ui, build_motion, &a, 1);
+    CHECK(a.done);   /* still motion shows everything at once */
+    cui_set_reduced_motion(ui, false);
+    /* tile toggles on click and on Space */
+    cui_rect tr = rect_of(ui, a.tile_id);
+    CHECK(tr.w == 140);
+    click_at(ui, build_motion, &a, tr.x + 20, tr.y + 20);
+    CHECK(a.tile && a.clicks == 1);
+    key(ui, build_motion, &a, CUI_KEY_TAB, 0);
+    key(ui, build_motion, &a, CUI_KEY_TAB, CUI_MOD_SHIFT);   /* back to the tile, with a visible focus */
+    key(ui, build_motion, &a, CUI_KEY_SPACE, 0);
+    CHECK(!a.tile && a.clicks == 2);
+    /* tab bar: click the third item, then the arrow key goes back */
+    cui_rect br = rect_of(ui, a.tab_id);
+    click_at(ui, build_motion, &a, br.x + br.w * 5 / 6, br.y + br.h / 2);
+    CHECK(a.tab == 2 && a.tab_changed);
+    key(ui, build_motion, &a, CUI_KEY_LEFT, 0);
+    CHECK(a.tab == 1);
+    /* waveform: drag seeks */
+    cui_rect wr = rect_of(ui, a.wave_id);
+    drag(ui, build_motion, &a, wr.x + 10, wr.y + wr.h / 2, wr.x + wr.w * 0.75f, 5);
+    CHECK(a.seeked && a.progress > 0.72f && a.progress < 0.78f);
+    /* player: the play button toggles, the scrubber seeks */
+    cui_rect nr = rect_of(ui, a.np_id);
+    bool found_toggle = false;
+    for (float x = nr.x + nr.w - 120; x < nr.x + nr.w && !found_toggle; x += 6) {
+        a.np_flags = 0;
+        click_at(ui, build_motion, &a, x, nr.y + 16 + 32);
+        if (a.np_flags & CUI_PLAYER_TOGGLE) found_toggle = true;
+    }
+    CHECK(found_toggle && a.np.playing);
+    a.np_flags = 0;
+    drag(ui, build_motion, &a, nr.x + nr.w * 0.5f, nr.y + nr.h - 16 - 7, nr.x + nr.w * 0.5f + 40, 4);
+    CHECK((a.np_flags & CUI_PLAYER_SEEK) && a.np.position > 30);
+    /* dock: clicking an item */
+    cui_rect dr = rect_of(ui, a.dock_id);
+    click_at(ui, build_motion, &a, dr.x + 8 + 23, dr.y + dr.h - 12 - 23);
+    run(ui, build_motion, &a, 20);
+    CHECK(a.dock_hits == 1);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -1755,6 +1856,7 @@ int main(void) {
     test_planning();
     test_media();
     test_viz();
+    test_motion();
     test_text_capacity();
     test_dialog();
     test_menu();

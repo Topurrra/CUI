@@ -583,11 +583,18 @@ static void cui__draw_run(cui_ctx *ui, cui_font font, float size, float x, float
             gy = roundf((y + size) * s);
         }
         if (gs_px < 1) continue;
+        cui_color gc = color;
+        if (ui->text_fx) {
+            float dy = 0;
+            gc = ui->text_fx(ui, ui->text_fx_data, ui->text_fx_base + it.start, x + it.gx, ui->text_fx_line_y, &dy, color);
+            if (gc.a == 0) continue;
+            gy += roundf(dy * s);
+        }
         cui_glyph *g = cui__glyph_get(ui, it.gfont, it.gi, gs_px, subpx);
         if (!g || !g->w) continue;
         float qx0 = fl + g->x0, qy0 = gy + g->y0;
         cui__draw_glyph_quad(ui, qx0, qy0, qx0 + g->w, qy0 + g->h,
-                             g->ax * inv_w, g->ay * inv_h, (g->ax + g->w) * inv_w, (g->ay + g->h) * inv_h, color);
+                             g->ax * inv_w, g->ay * inv_h, (g->ax + g->w) * inv_w, (g->ay + g->h) * inv_h, gc);
     }
 }
 
@@ -619,7 +626,10 @@ void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, fl
     }
     while (cut > 0 && text[cut - 1] == ' ') { cut--; cut_w = cui__text_width(ui, font, size, text, cut, tabular); }
     cui__draw_run(ui, font, size, x, y, color, text, cut, tabular, 1e30f);
+    cui__text_fx_fn fx = ui->text_fx;
+    ui->text_fx = NULL;   /* the ellipsis is not part of the text */
     cui__draw_run(ui, font, size, x + cut_w, y, color, ell, 3, false, 1e30f);
+    ui->text_fx = fx;
 }
 
 void cui_draw_text(cui_ctx *ui, cui_font font, float size, cui_vec2 pos, cui_color color, const char *text, int len) {
