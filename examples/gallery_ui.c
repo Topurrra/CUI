@@ -405,7 +405,7 @@ static void page_overlays(cui_ctx *ui, gallery *g) {
             }
         }
         cui_card(ui, .muted = true, .id = "ctx-area", .pad = 28, .align = CUI_ALIGN_CENTER, .hoverable = true) {
-            cui_icon(ui, CUI_ICON_MOVE, 18, CUI_COLOR_TEXT_MUTED);
+            cui_icon(ui, CUI_ICON_ELLIPSIS, 18, CUI_COLOR_TEXT_MUTED);
             cui_text(ui, "Right click this area", .color = CUI_COLOR_TEXT_SECONDARY, .align = CUI_TEXT_CENTER);
         }
         cui_context_menu(ui, "ctx") {
@@ -419,10 +419,10 @@ static void page_overlays(cui_ctx *ui, gallery *g) {
     section(ui, "Toasts", "They stack, expand on hover and pause while you read.");
     cui_card(ui) {
         cui_row(ui, .gap = 8) {
-            if (cui_button(ui, "Success")) cui_toast(ui, "Changes saved", .description = "Your profile is up to date.", .tone = CUI_TONE_SUCCESS);
-            if (cui_button(ui, "Error")) cui_toast(ui, "Upload failed", .description = "The file is larger than 25 MB.", .tone = CUI_TONE_DANGER);
-            if (cui_button(ui, "With action")) cui_toast(ui, "Message archived", .action = "Undo");
-            if (cui_button(ui, "Info")) cui_toast(ui, "Update available", .description = "Version 1.1 is ready to install.", .tone = CUI_TONE_INFO);
+            if (cui_button(ui, "Save profile")) cui_toast(ui, "Changes saved", .description = "Your profile is up to date.", .tone = CUI_TONE_SUCCESS);
+            if (cui_button(ui, "Upload a 30 MB file")) cui_toast(ui, "Upload failed", .description = "The file is larger than 25 MB.", .tone = CUI_TONE_DANGER);
+            if (cui_button(ui, "Archive a message")) cui_toast(ui, "Message archived", .action = "Undo");
+            if (cui_button(ui, "Check for updates")) cui_toast(ui, "Update available", .description = "Version 1.1 is ready to install.", .tone = CUI_TONE_INFO);
         }
     }
     section(ui, "Tooltips", NULL);
