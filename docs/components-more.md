@@ -281,7 +281,7 @@ Attaches to the previous component. It opens after the pointer rests there for `
 ```c
 if (cui_button(ui, "Delete branch")) cui_popover_open(ui, "confirm-delete");
 if (cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "This cannot be undone.",
-                        .confirm_label = "Delete", .danger = true))
+                        .confirm_label = "Delete branch", .danger = true))
     delete_branch();
 ```
 

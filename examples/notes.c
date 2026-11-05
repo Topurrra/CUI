@@ -161,7 +161,7 @@ static void frame(cui_ctx *ui, void *user) {
     cui_dialog(ui, "Delete this note?", &a->confirm_delete, .description = "The note will be removed permanently.", .width = 380) {
         cui_dialog_footer(ui) {
             if (cui_button(ui, "Cancel")) a->confirm_delete = false;
-            if (cui_button(ui, "Delete", .variant = CUI_BUTTON_DANGER)) {
+            if (cui_button(ui, "Delete note", .variant = CUI_BUTTON_DANGER)) {
                 delete_selected(a);
                 a->confirm_delete = false;
                 cui_toast(ui, "Note deleted");

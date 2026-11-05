@@ -281,7 +281,7 @@ static void page_disclosure(cui_ctx *ui) {
     cui_row(ui, .gap = 12) {
         if (cui_button(ui, "Delete branch", .icon = CUI_ICON_TRASH_2)) cui_popover_open(ui, "confirm-delete");
         if (cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "The branch and its 12 commits are removed from the remote.",
-                                .confirm_label = "Delete", .danger = true)) deleted++;
+                                .confirm_label = "Delete branch", .danger = true)) deleted++;
         if (deleted) cui_muted(ui, "Branch deleted");
     }
 

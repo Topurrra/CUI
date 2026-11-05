@@ -135,7 +135,7 @@ static void account(cui_ctx *ui, settings *s) {
         cui_input(ui, "confirm", s->confirm_text, sizeof s->confirm_text, .placeholder = "DELETE", .autofocus = true);
         cui_dialog_footer(ui) {
             if (cui_button(ui, "Cancel")) s->confirm_delete = false;
-            if (cui_button(ui, "Delete forever", .variant = CUI_BUTTON_DANGER, .disabled = strcmp(s->confirm_text, "DELETE") != 0)) {
+            if (cui_button(ui, "Delete account", .variant = CUI_BUTTON_DANGER, .disabled = strcmp(s->confirm_text, "DELETE") != 0)) {
                 s->confirm_delete = false;
                 cui_toast(ui, "Account scheduled for deletion", .description = "You have 14 days to change your mind.", .tone = CUI_TONE_DANGER);
             }

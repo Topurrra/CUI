@@ -161,7 +161,7 @@ static void scene_dialog(cui_ctx *ui, int f) {
         cui_skeleton(ui, CUI_PCT(80), 14); cui_skeleton(ui, CUI_PCT(60), 14); cui_skeleton(ui, CUI_PCT(70), 14);
     }
     cui_dialog(ui, "Delete project?", &open_true, .description = "This removes the project for everyone. You cannot undo this.", .width = 380) {
-        cui_dialog_footer(ui) { cui_button(ui, "Cancel"); cui_button(ui, "Delete", .variant = CUI_BUTTON_DANGER); }
+        cui_dialog_footer(ui) { cui_button(ui, "Cancel"); cui_button(ui, "Delete project", .variant = CUI_BUTTON_DANGER); }
     }
 }
 static void scene_toast(cui_ctx *ui, int f) {
@@ -590,7 +590,7 @@ static void scene_hover_card(cui_ctx *ui, int f) {
 static void body_confirm_pop(cui_ctx *ui) {
     if (cui_button(ui, "Delete branch", .icon = CUI_ICON_TRASH_2)) cui_popover_open(ui, "confirm-delete");
     cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "The branch and its 12 commits are removed from the remote.",
-                        .confirm_label = "Delete", .danger = true);
+                        .confirm_label = "Delete branch", .danger = true);
 }
 static void scene_confirm_pop(cui_ctx *ui, int f) {
     if (f < 0) { click_id(ui, cui_make_id(ui, "Delete branch"), -f - 1, 10); if (-f - 1 == 16) cui_input_mouse_move(ui, 400, 300); return; }
