@@ -783,7 +783,11 @@ bool cui_alert_ex(cui_ctx *ui, const char *title, const cui_alert_opts *o) {
     cui__open(ui, col);
     int t = cui__text_node(ui, title, cui__display_len(title), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), true);
     ui->nodes[t].line_height = 1.4f;
-    if (o->description) cui__text_node(ui, o->description, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, TEXT_SECONDARY), true);
+    if (o->description) {
+        /* on a tinted surface, the body text leans toward the same hue instead of a neutral gray */
+        cui_color body = o->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : cui_mix(CUI_C(ui, TEXT_SECONDARY), tone, dark ? 0.18f : 0.22f);
+        cui__text_node(ui, o->description, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), body, true);
+    }
     cui__close(ui);
     bool keep = true;
     if (o->dismissible) {

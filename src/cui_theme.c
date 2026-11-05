@@ -111,10 +111,10 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         c[CUI_TOKEN_SURFACE_MUTED] = cui__gray(0.978f);
         c[CUI_TOKEN_FOREGROUND] = cui__gray(0.15f);
         c[CUI_TOKEN_TEXT_SECONDARY] = cui__gray(0.46f);
-        c[CUI_TOKEN_TEXT_MUTED] = cui__gray(0.59f);
+        c[CUI_TOKEN_TEXT_MUTED] = cui__gray(0.565f);
         c[CUI_TOKEN_BORDER] = cui__gray(0.915f);
         c[CUI_TOKEN_BORDER_SUBTLE] = cui__gray(0.955f);
-        c[CUI_TOKEN_BORDER_STRONG] = cui__gray(0.84f);
+        c[CUI_TOKEN_BORDER_STRONG] = cui__gray(0.665f);
         c[CUI_TOKEN_CONTROL_ON] = cui__gray(0.23f);
         c[CUI_TOKEN_CONTROL_GLYPH] = cui__gray(1.0f);
         c[CUI_TOKEN_CONTROL_TRACK] = cui__gray(0.895f);
@@ -139,7 +139,7 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         c[CUI_TOKEN_TEXT_MUTED] = cui__gray(0.64f);
         c[CUI_TOKEN_BORDER] = cui__gray(0.29f);
         c[CUI_TOKEN_BORDER_SUBTLE] = cui__gray(0.25f);
-        c[CUI_TOKEN_BORDER_STRONG] = cui__gray(0.40f);
+        c[CUI_TOKEN_BORDER_STRONG] = cui__gray(0.515f);
         c[CUI_TOKEN_CONTROL_ON] = cui__gray(0.93f);
         c[CUI_TOKEN_CONTROL_GLYPH] = cui__gray(0.19f);
         c[CUI_TOKEN_CONTROL_TRACK] = cui__gray(0.33f);

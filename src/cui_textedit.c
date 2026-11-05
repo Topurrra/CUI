@@ -681,6 +681,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         cui_button_opts bo;
         memset(&bo, 0, sizeof bo);
         bo.size = CUI_SIZE_SM;
+        bo.color = CUI_COLOR_TEXT_MUTED;   /* quiet like the field's leading icon */
         bo.tooltip = e->show_password ? "Hide password" : "Show password";
         cui_push_id_int(ui, (int)id);
         if (cui_icon_button_ex(ui, e->show_password ? CUI_ICON_EYE_OFF : CUI_ICON_EYE, &bo)) e->show_password = !e->show_password;

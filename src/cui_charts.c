@@ -398,7 +398,8 @@ static void cui__paint_donut(cui_ctx *ui, cui_node *n, void *data) {
     float a = -CUI_PI * 0.5f;
     float sweep_total = 2 * CUI_PI * cui__clampf(p->intro, 0, 1);
     float gap = 2.2f / radius;
-    cui_draw_arc(ui, c, radius, 0, 2 * CUI_PI, thick, cui_alpha(CUI_C(ui, CONTROL_TRACK), 0.5f));
+    /* the track only shows where the intro has not reached yet, so the gaps between segments are the card itself */
+    if (sweep_total < 2 * CUI_PI - 0.001f) cui_draw_arc(ui, c, radius, a + sweep_total, a + 2 * CUI_PI, thick, cui_alpha(CUI_C(ui, CONTROL_TRACK), 0.5f));
     for (int k = 0; k < p->count; k++) {
         float sw = p->values[k] / total * sweep_total;
         if (sw <= 0) continue;

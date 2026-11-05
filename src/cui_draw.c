@@ -257,7 +257,8 @@ static void cui__polyline_px(cui_ctx *ui, const cui_vec2 *pts, int n, float thic
     }
     if (!closed) nrm[n - 1] = nrm[n - 2];
     uint32_t base;
-    cui_vertex *v = cui__reserve(ui, n * 4, segs * 18, &base);
+    int caps = closed ? 0 : 2;   /* open lines get a soft fringe across each end too, so cut ends do not stair-step */
+    cui_vertex *v = cui__reserve(ui, n * 4 + caps * 4, segs * 18 + caps * 18, &base);
     for (int i = 0; i < n; i++) {
         cui_vec2 na = (i == 0 && !closed) ? nrm[0] : nrm[(i - 1 + n) % n];
         cui_vec2 nb = nrm[i];
@@ -271,13 +272,30 @@ static void cui__polyline_px(cui_ctx *ui, const cui_vec2 *pts, int n, float thic
         cui__solid_vertex(&v[i * 4 + 2], pts[i].x - mx * p, pts[i].y - my * p, col);
         cui__solid_vertex(&v[i * 4 + 3], pts[i].x - mx * o, pts[i].y - my * o, trans);
     }
-    uint32_t *ix = cui__idx(ui, segs * 18);
+    uint32_t *ix = cui__idx(ui, segs * 18 + caps * 18);
     for (int i = 0; i < segs; i++) {
         uint32_t a = base + (uint32_t)i * 4, b = base + (uint32_t)((i + 1) % n) * 4;
         uint32_t q[18] = { a + 0, b + 0, b + 1, a + 0, b + 1, a + 1,
                            a + 1, b + 1, b + 2, a + 1, b + 2, a + 2,
                            a + 2, b + 2, b + 3, a + 2, b + 3, a + 3 };
         memcpy(ix + i * 18, q, sizeof q);
+    }
+    if (caps) {
+        for (int e = 0; e < 2; e++) {
+            int end = e == 0 ? 0 : n - 1;
+            /* the outward tangent at this end */
+            cui_vec2 tn = e == 0 ? (cui_vec2){ -nrm[0].y, nrm[0].x } : (cui_vec2){ nrm[n - 2].y, -nrm[n - 2].x };
+            cui_vec2 t = { -tn.x * aa, -tn.y * aa };
+            uint32_t a = base + (uint32_t)end * 4, c = base + (uint32_t)(n * 4 + e * 4);
+            for (int k = 0; k < 4; k++) {
+                cui_vertex *src = &v[end * 4 + k];
+                cui__solid_vertex(&v[n * 4 + e * 4 + k], src->x + t.x, src->y + t.y, trans);
+            }
+            uint32_t q[18] = { a + 0, c + 0, c + 1, a + 0, c + 1, a + 1,
+                               a + 1, c + 1, c + 2, a + 1, c + 2, a + 2,
+                               a + 2, c + 2, c + 3, a + 2, c + 3, a + 3 };
+            memcpy(ix + segs * 18 + e * 18, q, sizeof q);
+        }
     }
 }
 

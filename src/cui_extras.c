@@ -492,7 +492,7 @@ int cui_password_strength(cui_ctx *ui, const char *pw) {
     if (score > 4) score = 4;
     if (len == 0) score = 0;
     static const char *names[5] = { "Too short", "Weak", "Fair", "Good", "Strong" };
-    cui_color colors[5] = { CUI_C(ui, TEXT_MUTED), CUI_C(ui, DANGER), CUI_C(ui, WARNING), ui->theme.tone_teal, CUI_C(ui, SUCCESS) };
+    cui_color colors[5] = { CUI_C(ui, TEXT_MUTED), CUI_C(ui, DANGER), CUI_C(ui, WARNING), CUI_C(ui, SUCCESS), CUI_C(ui, SUCCESS) };   /* status colors only; the bar count tells Good from Strong */
     cui_id id = cui_make_id(ui, "#strength");
     id = cui__hash(&ui->node_count, sizeof ui->node_count, id);
     int row = cui__node_new(ui, 0);
