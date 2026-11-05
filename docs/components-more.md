@@ -6,7 +6,7 @@ The second half of the library: richer actions and inputs, pickers, disclosure, 
 
 ### Split button
 
-![Split button](images/components/split-button.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/split-button-dark.png"><img src="images/components/split-button.png" alt="Split button"></picture>
 
 ```c
 static const char *more[] = { "Save as draft", "Save and publish", "Schedule..." };
@@ -22,7 +22,7 @@ Returns 0 for the main action, 1 + i for menu item i, -1 otherwise. Options: `va
 
 ### Toggle group
 
-![Toggle group](images/components/toggle-group.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toggle-group-dark.png"><img src="images/components/toggle-group.png" alt="Toggle group"></picture>
 
 ```c
 static bool format[4];          /* bold, italic, underline, code */
@@ -43,7 +43,7 @@ The first click morphs the button into a red "Click to confirm" with a countdown
 
 ### Status button
 
-![Morphing buttons](images/components/morph-buttons.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/morph-buttons-dark.png"><img src="images/components/morph-buttons.png" alt="Morphing buttons"></picture>
 
 ```c
 static cui_status status;
@@ -83,7 +83,7 @@ Light and dark are applied for you. For "system" (mode 2), read the OS setting (
 
 ### User menu
 
-![User menu](images/components/user-menu.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/user-menu-dark.png"><img src="images/components/user-menu.png" alt="User menu"></picture>
 
 ```c
 cui_user_menu(ui, "Ada Lovelace", .detail = "ada@analytical.engine", .status = "online") {
@@ -110,7 +110,7 @@ Drag a row sideways, or swipe with two fingers on a trackpad. Past half the reve
 
 ### Inline edit
 
-![Inline edit](images/components/inline-edit.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/inline-edit-dark.png"><img src="images/components/inline-edit.png" alt="Inline edit"></picture>
 
 ```c
 static char title[128] = "Q3 roadmap";
@@ -121,7 +121,7 @@ Looks like text, with a pencil on hover. Click (or Enter when focused) to edit i
 
 ### Scrub field
 
-![Scrub fields](images/components/scrub.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/scrub-dark.png"><img src="images/components/scrub.png" alt="Scrub fields"></picture>
 
 ```c
 static float opacity = 80;
@@ -151,7 +151,7 @@ cui_input(ui, "weight", weight, sizeof weight, .suffix = "kg");
 
 ### Shortcut recorder
 
-![Shortcut recorder](images/components/shortcut-recorder.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/shortcut-recorder-dark.png"><img src="images/components/shortcut-recorder.png" alt="Shortcut recorder"></picture>
 
 ```c
 static cui_key_combo palette_key = { CUI_MOD_PRIMARY, CUI_KEY_K };
@@ -165,7 +165,7 @@ Click and press a combination. While recording, the field shows the modifiers yo
 
 ### Multi-select
 
-![Multi-select](images/components/multi-select.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/multi-select-dark.png"><img src="images/components/multi-select.png" alt="Multi-select"></picture>
 
 ```c
 static bool chosen[6];
@@ -177,7 +177,7 @@ The field shows chips (with remove buttons) for up to `max_chips` items and "+N"
 
 ### Date range picker
 
-![Date range picker](images/components/date-range.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/date-range-dark.png"><img src="images/components/date-range.png" alt="Date range picker"></picture>
 
 ```c
 static cui_date_range trip;
@@ -189,7 +189,7 @@ Click a start and an end (in either order); while you choose the end, the band f
 
 ### Time picker
 
-![Time picker](images/components/time-picker.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/time-picker-dark.png"><img src="images/components/time-picker.png" alt="Time picker"></picture>
 
 ```c
 static int hour = 9, minute = 30;
@@ -201,7 +201,7 @@ Hour and minute columns (and AM / PM) that open scrolled to the current value. `
 
 ### Wheel picker and time dial
 
-![Wheels and dial](images/components/wheels.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/wheels-dark.png"><img src="images/components/wheels.png" alt="Wheels and dial"></picture>
 
 ```c
 cui_wheel_picker(ui, "month", month_names, 12, &month, .width = CUI_PX(128), .loop = true);
@@ -214,7 +214,7 @@ The time dial sets hours on two rings (1 to 12 outside, 13 to 00 inside), then s
 
 ### Ruler and histogram sliders
 
-![Ruler and histogram](images/components/ruler-histogram.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/ruler-histogram-dark.png"><img src="images/components/ruler-histogram.png" alt="Ruler and histogram"></picture>
 
 ```c
 cui_ruler_slider(ui, "Height", &height, 120, 220, .unit = "cm");
@@ -225,7 +225,7 @@ The ruler is a tape that slides under a fixed marker; throw it and it glides, th
 
 ## Capture
 
-![Dropzone, signature and avatar upload](images/components/capture.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/capture-dark.png"><img src="images/components/capture.png" alt="Dropzone, signature and avatar upload"></picture>
 
 ### Dropzone
 
@@ -262,7 +262,7 @@ Stroke width follows speed, so signatures look inked rather than drawn with a fi
 
 ### Hover card
 
-![Hover card](images/components/hover-card.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hover-card-dark.png"><img src="images/components/hover-card.png" alt="Hover card"></picture>
 
 ```c
 cui_link(ui, "@grace");
@@ -276,7 +276,7 @@ Attaches to the previous component. It opens after the pointer rests there for `
 
 ### Confirm popover
 
-![Confirm popover](images/components/confirm-popover.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/confirm-popover-dark.png"><img src="images/components/confirm-popover.png" alt="Confirm popover"></picture>
 
 ```c
 if (cui_button(ui, "Delete branch")) cui_popover_open(ui, "confirm-delete");
@@ -289,7 +289,7 @@ A small question anchored to the button that opened it. Focus moves to the confi
 
 ### Expandable text and card
 
-![Expandable text and cards](images/components/expandables.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/expandables-dark.png"><img src="images/components/expandables.png" alt="Expandable text and cards"></picture>
 
 ```c
 cui_expandable_text(ui, "about", long_text, .lines = 3);
@@ -304,7 +304,7 @@ Expandable text clamps to `lines` with a fade (into `fade_to`, the background by
 
 ### Table of contents
 
-![Table of contents](images/components/toc.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toc-dark.png"><img src="images/components/toc.png" alt="Table of contents"></picture>
 
 ```c
 static const cui_toc_item toc[] = { { "Install", "install", 0 }, { "With CMake", "cmake", 1 } };
@@ -323,7 +323,7 @@ The rail fills as you read, and a marker glides to the section in view. Clicking
 
 ### Banner and countdown
 
-![Banner and countdown](images/components/banner-countdown.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/banner-countdown-dark.png"><img src="images/components/banner-countdown.png" alt="Banner and countdown"></picture>
 
 ```c
 static bool show_update = true;
@@ -336,7 +336,7 @@ The banner spans its container, tinted with its `tone` (the accent by default), 
 
 ### Onboarding checklist
 
-![Onboarding checklist](images/components/checklist.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/checklist-dark.png"><img src="images/components/checklist.png" alt="Onboarding checklist"></picture>
 
 ```c
 static cui_check_step steps[] = {
@@ -351,7 +351,7 @@ A card with a progress ring and steps; the first unfinished step opens to show i
 
 ### Undo toast
 
-![Undo toast](images/components/undo-toast.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/undo-toast-dark.png"><img src="images/components/undo-toast.png" alt="Undo toast"></picture>
 
 ```c
 cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true);
@@ -363,7 +363,7 @@ cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true);
 
 ### Data grid and filter bar
 
-![Data grid and filter bar](images/components/data-grid.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/data-grid-dark.png"><img src="images/components/data-grid.png" alt="Data grid and filter bar"></picture>
 
 ```c
 static const cui_grid_column cols[] = {
@@ -394,7 +394,7 @@ The filter bar keeps one bit mask per field in `selected`; each active field sho
 
 ### Code block
 
-![Code block](images/components/code-block.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-block-dark.png"><img src="images/components/code-block.png" alt="Code block"></picture>
 
 ```c
 cui_code_block(ui, "counter", source, .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
@@ -404,7 +404,7 @@ Highlighting for C, C++, JavaScript, TypeScript, Python, Rust, Go, JSON and shel
 
 ### JSON viewer
 
-![JSON viewer](images/components/json-view.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/json-view-dark.png"><img src="images/components/json-view.png" alt="JSON viewer"></picture>
 
 ```c
 if (!cui_json_view(ui, "response", body, .expand_depth = 1)) { /* not valid JSON: the view shows where it broke */ }
@@ -416,7 +416,7 @@ A collapsible tree with typed colors. Collapsed objects and arrays show their si
 
 ### Chat
 
-![Chat](images/components/chat.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/chat-dark.png"><img src="images/components/chat.png" alt="Chat"></picture>
 
 ```c
 cui_chat_divider(ui, "Today");
@@ -430,7 +430,7 @@ Grouped messages stack tightly with the avatar on the last bubble and tighter in
 
 ### Comments
 
-![Comments](images/components/comments.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/comments-dark.png"><img src="images/components/comments.png" alt="Comments"></picture>
 
 ```c
 static int likes = 12; static bool liked = true;
@@ -443,7 +443,7 @@ cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .dep
 
 ### Presence, counter and ticker
 
-![Presence, counter and ticker](images/components/presence-ticker.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/presence-ticker-dark.png"><img src="images/components/presence-ticker.png" alt="Presence, counter and ticker"></picture>
 
 ```c
 cui_presence(ui, "here", users, 7, 5, 30);                     /* show 5, then "+2" */
@@ -457,7 +457,7 @@ Presence avatars overlap with colored rings and spread out under the pointer; id
 
 ### Carousel
 
-![Carousel](images/components/carousel.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/carousel-dark.png"><img src="images/components/carousel.png" alt="Carousel"></picture>
 
 ```c
 static int slide = 0;
@@ -470,7 +470,7 @@ Drag or flick between slides, scroll sideways, use the arrow buttons, the dots o
 
 ### Image compare and card stack
 
-![Image compare and card stack](images/components/compare-stack.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/compare-stack-dark.png"><img src="images/components/compare-stack.png" alt="Image compare and card stack"></picture>
 
 ```c
 static float split = 0.5f;
@@ -487,7 +487,7 @@ Drag the divider, or focus it and use the arrow keys. The top card of the stack 
 
 ### Kanban board
 
-![Kanban board](images/components/kanban.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/kanban-dark.png"><img src="images/components/kanban.png" alt="Kanban board"></picture>
 
 ```c
 cui_kanban_begin(ui, "board");
@@ -511,7 +511,7 @@ Cards lift and follow the pointer when dragged; the column under the pointer lig
 
 ### Week calendar
 
-![Week calendar](images/components/week-calendar.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/week-calendar-dark.png"><img src="images/components/week-calendar.png" alt="Week calendar"></picture>
 
 ```c
 static cui_cal_event events[] = {
@@ -525,7 +525,7 @@ Drag an event to move it (it snaps to 15 minutes and keeps its length) or pull i
 
 ### Gantt chart
 
-![Gantt chart](images/components/gantt.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gantt-dark.png"><img src="images/components/gantt.png" alt="Gantt chart"></picture>
 
 ```c
 static cui_gantt_task tasks[] = {
@@ -545,7 +545,7 @@ These follow the same rules as the [core charts](components.md#charts): a toolti
 
 ### Heatmap
 
-![Heatmap](images/components/heatmap.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/heatmap-dark.png"><img src="images/components/heatmap.png" alt="Heatmap"></picture>
 
 ```c
 float traffic[7 * 24];   /* values[row * cols + col] */
@@ -556,7 +556,7 @@ One hue, light to dark (dim to bright in dark mode), with a scale below. Column 
 
 ### Calendar heatmap
 
-![Calendar heatmap](images/components/calendar-heatmap.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/calendar-heatmap-dark.png"><img src="images/components/calendar-heatmap.png" alt="Calendar heatmap"></picture>
 
 ```c
 cui_calendar_heatmap(ui, "year", start, per_day, 364, .unit = "contributions");
@@ -566,7 +566,7 @@ One square a day in five levels, weeks as columns starting on Monday, month labe
 
 ### Treemap and radar
 
-![Treemap and radar](images/components/treemap-radar.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/treemap-radar-dark.png"><img src="images/components/treemap-radar.png" alt="Treemap and radar"></picture>
 
 ```c
 static const cui_viz_item mods[] = { { "Layout", 412 }, { "Text", 318 }, { "Draw", 260 } /* ... */ };
@@ -580,7 +580,7 @@ The treemap uses a squarified layout, so rectangles stay close to square; labels
 
 ### Funnel, split bar and waffle
 
-![Funnel, split bar and waffle](images/components/funnel-split.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/funnel-split-dark.png"><img src="images/components/funnel-split.png" alt="Funnel, split bar and waffle"></picture>
 
 ```c
 static const cui_viz_item stages[] = { { "Visited", 12840 }, { "Signed up", 4210 }, { "Activated", 2380 }, { "Subscribed", 860 } };
@@ -593,7 +593,7 @@ The funnel shows each stage's share of the first and, under it, the conversion f
 
 ### Sankey
 
-![Sankey](images/components/sankey.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/sankey-dark.png"><img src="images/components/sankey.png" alt="Sankey"></picture>
 
 ```c
 static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
@@ -605,7 +605,7 @@ Columns follow the links from the sources, and nodes with no way out line up on 
 
 ### Bar list and activity rings
 
-![Bar list and activity rings](images/components/bar-list-rings.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/bar-list-rings-dark.png"><img src="images/components/bar-list-rings.png" alt="Bar list and activity rings"></picture>
 
 ```c
 cui_bar_list(ui, "pages", pages, 5);   /* ranked by value; set keep_order to keep yours */
@@ -617,7 +617,7 @@ Bar list rows are keyed by their label: when the values change, the bars grow or
 
 ### Scatter and bubble
 
-![Scatter](images/components/scatter.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/scatter-dark.png"><img src="images/components/scatter.png" alt="Scatter"></picture>
 
 ```c
 cui_scatter_series s[] = { { "Software", points_a, sizes_a, 40 }, { "OpenGL", points_b, sizes_b, 40 } };
@@ -632,7 +632,7 @@ Text effects, loaders and the playful pieces. With reduced motion, text effects 
 
 ### Text effects
 
-![Text effects](images/components/text-effects.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/text-effects-dark.png"><img src="images/components/text-effects.png" alt="Text effects"></picture>
 
 ```c
 cui_shimmer_text(ui, "Thinking about your question...");
@@ -661,7 +661,7 @@ Gradient text blends from one color to the other across its width; with `animate
 
 ### Loaders
 
-![Loaders](images/components/loaders.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/loaders-dark.png"><img src="images/components/loaders.png" alt="Loaders"></picture>
 
 ```c
 cui_loader(ui, .style = CUI_LOADER_DOTS);    /* also BARS, PULSE, ORBIT, GRID */
@@ -670,7 +670,7 @@ cui_loader(ui, .style = CUI_LOADER_PULSE, .size = 32, .color = CUI_COLOR_ACCENT)
 
 ### Dock
 
-![Dock](images/components/dock.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dock-dark.png"><img src="images/components/dock.png" alt="Dock"></picture>
 
 ```c
 cui_dock(ui, "dock") {
@@ -685,7 +685,7 @@ Icons grow as the pointer passes, with the item under it largest and its neighbo
 
 ### Control tiles
 
-![Control tiles](images/components/tiles.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tiles-dark.png"><img src="images/components/tiles.png" alt="Control tiles"></picture>
 
 ```c
 static bool wifi = true;
@@ -698,7 +698,7 @@ Big toggles for quick settings, which fill their grid cell. They switch with a c
 
 ### Now playing, waveform and tab bar
 
-![Now playing, waveform and tab bar](images/components/player.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/player-dark.png"><img src="images/components/player.png" alt="Now playing, waveform and tab bar"></picture>
 
 ```c
 static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", art, { 0 }, 76, 222, true };
@@ -721,7 +721,7 @@ The pieces of an assistant: thinking, tools, plans, sources and the composer. Se
 
 ### Reasoning and tool calls
 
-![Reasoning and tool calls](images/components/reasoning-tools.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/reasoning-tools-dark.png"><img src="images/components/reasoning-tools.png" alt="Reasoning and tool calls"></picture>
 
 ```c
 cui_reasoning(ui, "think", .thinking = streaming, .seconds = elapsed) {
@@ -736,7 +736,7 @@ While `thinking`, the reasoning header shimmers and counts up; when it ends, the
 
 ### Agent plan and status
 
-![Agent plan and status](images/components/agent-plan.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/agent-plan-dark.png"><img src="images/components/agent-plan.png" alt="Agent plan and status"></picture>
 
 ```c
 cui_plan_step steps[] = {
@@ -752,7 +752,7 @@ The rail fills up to the step in progress, the running step shimmers, and the he
 
 ### Sources and citations
 
-![Sources and citations](images/components/sources.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/sources-dark.png"><img src="images/components/sources.png" alt="Sources and citations"></picture>
 
 ```c
 static const cui_source sources[] = { { "Text rendering hates you", "https://docs.example.org/text", "Shaping, hinting and..." } /* ... */ };
@@ -764,9 +764,9 @@ Citations show the source's domain and open a card with the title and snippet wh
 
 ### Composer and model picker
 
-![Composer](images/components/composer.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/composer-dark.png"><img src="images/components/composer.png" alt="Composer"></picture>
 
-![Model picker](images/components/model-picker.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/model-picker-dark.png"><img src="images/components/model-picker.png" alt="Model picker"></picture>
 
 ```c
 static char draft[4096];
@@ -783,7 +783,7 @@ The text area grows with its content up to `max_lines`, then scrolls. Enter send
 
 ### Suggestions, response actions and the context meter
 
-![Suggestions, actions and context](images/components/suggestions.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/suggestions-dark.png"><img src="images/components/suggestions.png" alt="Suggestions, actions and context"></picture>
 
 ```c
 int pick = cui_prompt_suggestions(ui, "start", suggestions, 4);           /* .columns = 1 for a sidebar */
@@ -796,7 +796,7 @@ The response actions copy (the icon turns into a check), regenerate, vote and sh
 
 ### Voice orb
 
-![Voice orb](images/components/voice-orb.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-orb-dark.png"><img src="images/components/voice-orb.png" alt="Voice orb"></picture>
 
 ```c
 if (cui_voice_orb(ui, "voice", listening ? CUI_VOICE_LISTENING : CUI_VOICE_IDLE, mic_level)) toggle_listening();

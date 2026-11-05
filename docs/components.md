@@ -1,6 +1,6 @@
 # Components
 
-Every component, what it is for, how to use it and what it does with the keyboard. Screenshots are rendered by `tests/component_shots.c`, so they always match the code.
+Every component, what it is for, how to use it and what it does with the keyboard. Screenshots are rendered by `tests/component_shots.c`, so they always match the code, and they follow your light or dark theme.
 
 Looking for split buttons, data grids, kanban boards, more charts, motion effects or AI interface pieces? They are in [More components](components-more.md).
 
@@ -68,7 +68,7 @@ Hierarchy comes from size and color, not weight: CUI uses regular and medium onl
 
 ## Button
 
-![Buttons](images/components/buttons.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/buttons-dark.png"><img src="images/components/buttons.png" alt="Buttons"></picture>
 
 ```c
 if (cui_button(ui, "Save", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_CHECK)) save();
@@ -100,7 +100,7 @@ When a button's icon changes (copy to check, play to pause), the old icon shrink
 
 ## Segmented control
 
-![Segmented control](images/components/segmented.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/segmented-dark.png"><img src="images/components/segmented.png" alt="Segmented control"></picture>
 
 ```c
 static int view = 0;
@@ -113,7 +113,7 @@ For switching between two to five views of the same content. The highlight glide
 
 ## Checkbox, switch and radio
 
-![Toggles](images/components/toggles.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toggles-dark.png"><img src="images/components/toggles.png" alt="Toggles"></picture>
 
 ```c
 cui_checkbox(ui, "Email notifications", &email, .description = "Product news, monthly.");
@@ -127,7 +127,7 @@ Each returns true when it changes the value. The whole row, label included, is c
 
 ## Slider
 
-![Sliders](images/components/slider.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/slider-dark.png"><img src="images/components/slider.png" alt="Sliders"></picture>
 
 ```c
 cui_slider(ui, "Volume", &volume, 0, 100, .show_value = true);
@@ -148,7 +148,7 @@ cui_rating(ui, "stars", &stars, 5);         /* click the current value again to 
 
 ## Text field
 
-![Text fields](images/components/inputs.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/inputs-dark.png"><img src="images/components/inputs.png" alt="Text fields"></picture>
 
 ```c
 static char email[128];
@@ -187,7 +187,7 @@ Word wraps, scrolls with the wheel, Up and Down move between visual lines. Enter
 
 ## Select and combobox
 
-![Select](images/components/select.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/select-dark.png"><img src="images/components/select.png" alt="Select"></picture>
 
 ```c
 static int country = 2;
@@ -200,7 +200,7 @@ cui_select(ui, "lang", languages, n, &lang, .searchable = true, .placeholder = "
 
 ## Date picker and calendar
 
-![Calendar](images/components/calendar.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/calendar-dark.png"><img src="images/components/calendar.png" alt="Calendar"></picture>
 
 ```c
 static cui_date due = { 2026, 11, 14 };
@@ -234,7 +234,7 @@ A swatch that opens a saturation and brightness square, a hue bar and preset swa
 
 ## Tabs
 
-![Tabs](images/components/tabs.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tabs-dark.png"><img src="images/components/tabs.png" alt="Tabs"></picture>
 
 ```c
 static int tab = 0;
@@ -248,7 +248,7 @@ The underline slides to the active tab. Keyboard: Left and Right.
 
 ## Sidebar navigation
 
-![Sidebar](images/components/sidebar.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/sidebar-dark.png"><img src="images/components/sidebar.png" alt="Sidebar"></picture>
 
 ```c
 cui_nav_section(ui, "Workspace");
@@ -270,7 +270,7 @@ cui_stepper(ui, steps, 4, current);
 
 ## Dropdown and context menu
 
-![Menu](images/components/menu-dark.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/menu-dark.png"><img src="images/components/menu.png" alt="Menu"></picture>
 
 ```c
 cui_menu(ui, "Options", .icon = CUI_ICON_SETTINGS) {
@@ -314,7 +314,7 @@ Appears after a short delay, then instantly while you move between tooltips.
 
 ## Dialog
 
-![Dialog](images/components/dialog.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dialog-dark.png"><img src="images/components/dialog.png" alt="Dialog"></picture>
 
 ```c
 cui_dialog(ui, "Edit profile", &open, .description = "Changes are visible to your team.") {
@@ -338,7 +338,7 @@ A panel that slides in from an edge. Content scrolls.
 
 ## Toast
 
-![Toasts](images/components/toast.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toast-dark.png"><img src="images/components/toast.png" alt="Toasts"></picture>
 
 ```c
 cui_toast(ui, "Changes saved", .tone = CUI_TONE_SUCCESS);
@@ -351,7 +351,7 @@ Toasts stack in the bottom right corner. Older toasts tuck behind the newest one
 
 ## Command palette
 
-![Command palette](images/components/command-palette-dark.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/command-palette-dark.png"><img src="images/components/command-palette.png" alt="Command palette"></picture>
 
 ```c
 static const cui_command commands[] = {
@@ -366,7 +366,7 @@ Fuzzy search with ranking, grouped results, Up/Down to move, Enter to run, Esc t
 
 ## Alert
 
-![Alerts](images/components/alerts.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/alerts-dark.png"><img src="images/components/alerts.png" alt="Alerts"></picture>
 
 ```c
 cui_alert(ui, "Payment received", .description = "Paid on November 5.", .tone = CUI_TONE_SUCCESS);
@@ -390,7 +390,7 @@ cui_gauge(ui, "CPU", 0.42f, 130);
 
 ## Badge, avatar and keycap
 
-![Badges and avatars](images/components/badges.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/badges-dark.png"><img src="images/components/badges.png" alt="Badges and avatars"></picture>
 
 ```c
 cui_badge(ui, "Active", .tone = CUI_TONE_SUCCESS, .dot = true);
@@ -405,7 +405,7 @@ Avatars without an image show initials on a color picked from the name, so the s
 
 ## Card and metric
 
-![Cards](images/components/cards.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/cards-dark.png"><img src="images/components/cards.png" alt="Cards"></picture>
 
 ```c
 cui_card(ui, .gap = 12) { ... }
@@ -417,7 +417,7 @@ Cards rest on a hairline border with no shadow. Card options: `pad` (24), `pad_x
 
 ## Empty state
 
-![Empty state](images/components/empty-state.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/empty-state-dark.png"><img src="images/components/empty-state.png" alt="Empty state"></picture>
 
 ```c
 if (cui_empty_state(ui, "No projects yet", .icon = CUI_ICON_FOLDER_OPEN,
@@ -427,7 +427,7 @@ if (cui_empty_state(ui, "No projects yet", .icon = CUI_ICON_FOLDER_OPEN,
 
 ## Table
 
-![Table](images/components/table.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/table-dark.png"><img src="images/components/table.png" alt="Table"></picture>
 
 ```c
 cui_table_column cols[] = {
@@ -484,9 +484,9 @@ The content animates its height on a smooth spring and the chevron rotates.
 
 ## Charts
 
-![Line chart](images/components/line-chart-dark.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/line-chart-dark.png"><img src="images/components/line-chart.png" alt="Line chart"></picture>
 
-![Bar and donut](images/components/bar-donut.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/bar-donut-dark.png"><img src="images/components/bar-donut.png" alt="Bar and donut"></picture>
 
 ```c
 cui_series s[] = { { "Revenue", revenue, 12 }, { "Costs", costs, 12 } };
@@ -513,7 +513,7 @@ PNG and JPEG are decoded out of the box. Configure with `-DCUI_IMAGE_ALL_FORMATS
 
 ## Radio cards
 
-![Radio cards](images/components/radio-cards.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/radio-cards-dark.png"><img src="images/components/radio-cards.png" alt="Radio cards"></picture>
 
 ```c
 static const cui_choice plans[] = {
@@ -528,7 +528,7 @@ Bigger targets for choices that need a sentence of explanation. Keyboard: arrows
 
 ## Tag input
 
-![Tag input, code input and password strength](images/components/tag-otp.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tag-otp-dark.png"><img src="images/components/tag-otp.png" alt="Tag input, code input and password strength"></picture>
 
 ```c
 static char tags[256] = "design, c99";
@@ -555,7 +555,7 @@ int score = cui_password_strength(ui, pw);   /* 0 too short .. 4 strong */
 
 ## Button group, copy and hold to confirm
 
-![Button group, copy and hold](images/components/button-extras.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/button-extras-dark.png"><img src="images/components/button-extras.png" alt="Button group, copy and hold"></picture>
 
 ```c
 cui_button_group(ui) {
@@ -570,7 +570,7 @@ The hold button fills while pressed (or while Space is held with keyboard focus)
 
 ## Timeline and progress ring
 
-![Timeline and progress ring](images/components/timeline.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/timeline-dark.png"><img src="images/components/timeline.png" alt="Timeline and progress ring"></picture>
 
 ```c
 cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description = "Release 1.0.3 is live.",

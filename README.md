@@ -281,7 +281,7 @@ Every component is documented with a screenshot, usage, options and keyboard beh
 | **Motion** | shimmer text, typewriter, word reveal, rotating words, gradient text, spotlight cards with a border beam, loaders, dock, tab bar, control tiles, waveform, now playing |
 | **AI** | reasoning, tool calls, agent plan and status, sources and citations, context meter, response actions, prompt suggestions, model picker, chat composer, voice orb |
 
-All of them are in [docs/components-more.md](docs/components-more.md), with screenshots in light and dark.
+All of them are in [docs/components-more.md](docs/components-more.md), with screenshots that follow your light or dark theme.
 
 ## Light, dark and eight accents
 
