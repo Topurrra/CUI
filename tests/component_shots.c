@@ -1600,6 +1600,51 @@ static void scene_hero_charts(cui_ctx *ui, int f) {
     stage(ui, &look_violet, hero_charts_body);
 }
 
+static void hero_social_body(cui_ctx *ui) {
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START) {
+        window_begin(ui, "Messages", 520);
+        cui_column(ui, .width = CUI_FILL, .pad = 20, .gap = 0) {
+            cui_chat_divider(ui, "Today");
+            cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
+            cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+            cui_chat_message(ui, "It did! Keyboard selection too.", .mine = true);
+            cui_chat_message(ui, "Shift and Ctrl clicks work like a spreadsheet.", .mine = true, .grouped = true, .last_in_group = true, .status = "Read", .time = "9:43");
+            cui_typing_indicator(ui, "Grace");
+        }
+        window_end(ui);
+        cui_column(ui, .width = CUI_PX(420), .gap = 18) {
+            cui_box(ui, .width = CUI_FILL) { body_comments(ui); }
+            static const cui_presence_user who[] = {
+                { "Ada Lovelace", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Grace Hopper", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
+                { "Alan Turing", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Linus Torvalds", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
+                { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
+            };
+            cui_card(ui, .pad = 18, .gap = 10, .width = CUI_FILL) {
+                cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+                    cui_column(ui, .gap = 2, .width = CUI_FILL) {
+                        cui_text(ui, "Revenue today", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                        cui_counter(ui, "rev", 48210, .format = "$%.0f", .size = 32, .group_thousands = true, .font = CUI_FONT_DISPLAY);
+                    }
+                    cui_presence(ui, "here", who, 6, 4, 30);
+                }
+            }
+        }
+    }
+}
+static void scene_hero_social(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    stage(ui, &look_teal, hero_social_body);
+}
+static void hero_data_body(cui_ctx *ui) {
+    window_begin(ui, "People", 860);
+    cui_column(ui, .width = CUI_FILL, .pad = 18, .gap = 14) { body_data_grid(ui); }
+    window_end(ui);
+}
+static void scene_hero_data(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    stage(ui, &look_amber, hero_data_body);
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -1648,6 +1693,8 @@ int main(int argc, char **argv) {
         { "hero-palette", scene_hero_palette, 900, 520, true, false, CUI_ACCENT_AMBER },
         { "hero-plan", scene_hero_plan, 1100, 520, true, false, CUI_ACCENT_GREEN },
         { "hero-charts", scene_hero_charts, 1000, 700, true, false, CUI_ACCENT_VIOLET },
+        { "hero-social", scene_hero_social, 1080, 620, true, false, CUI_ACCENT_GREEN },
+        { "hero-data", scene_hero_data, 1000, 560, true, false, CUI_ACCENT_AMBER },
         { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
         { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },

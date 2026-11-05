@@ -107,6 +107,14 @@ Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software
 <td align="center"><sub><b>Charts</b>: calendar heatmap, sankey, radar, and a live plan</sub></td>
 </tr>
 <tr>
+<td><img src="docs/images/showcase/hero-social-dark.png" alt="Chat bubbles, threaded comments, a rolling counter and presence avatars"></td>
+<td><img src="docs/images/showcase/hero-data.png" alt="A data grid with a filter bar, selected rows, badges and progress cells"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Conversation</b>: grouped bubbles, threads, a rolling counter, presence</sub></td>
+<td align="center"><sub><b>Data grid</b>: virtualized rows, filters, sorting, spreadsheet style selection</sub></td>
+</tr>
+<tr>
 <td colspan="2"><img src="docs/images/showcase/hero-plan-dark.png" alt="A gantt chart with dependencies, progress and a today line"></td>
 </tr>
 <tr>
