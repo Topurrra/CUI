@@ -1376,6 +1376,236 @@ static void test_stress(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+
+static void drag2(cui_ctx *ui, build_fn fn, void *u, float x0, float y0, float x1, float y1, int steps) {
+    cui_input_mouse_move(ui, x0, y0);
+    run(ui, fn, u, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, fn, u, 1);
+    for (int i = 1; i <= steps; i++) { cui_input_mouse_move(ui, x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps); run(ui, fn, u, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, fn, u, 1);
+}
+
+typedef struct {
+    int cols[3][6], len[3];
+    cui_id card_ids[10];
+    bool moved, added, clicked;
+    cui_kanban_move mv;
+    cui_cal_event ev[2];
+    int ev_clicked;
+    cui_id week_id;
+    cui_gantt_task tasks[2];
+    int task_clicked;
+    cui_id gantt_id;
+    int mode;   /* 0 kanban, 1 week, 2 gantt */
+} plan_ctx;
+
+static void build_plan(cui_ctx *ui, void *u) {
+    plan_ctx *a = u;
+    cui_column(ui, .pad = 16, .gap = 16, .width = CUI_FILL) {
+        if (a->mode == 0) {
+            cui_kanban_begin(ui, "kb");
+            for (int c = 0; c < 3; c++) {
+                if (cui_kanban_column_begin(ui, "Col", a->len[c], .width = 220)) a->added = true;
+                for (int k = 0; k < a->len[c]; k++) {
+                    int id = a->cols[c][k];
+                    if (cui_kanban_card_begin(ui, id)) a->clicked = true;
+                    a->card_ids[id] = cui_last_id(ui);
+                    cui_text(ui, "A card with a title");
+                    cui_kanban_card_end(ui);
+                }
+                cui_kanban_column_end(ui);
+            }
+            if (cui_kanban_end(ui, &a->mv)) a->moved = true;
+        } else if (a->mode == 1) {
+            cui_date wk = { 2026, 3, 2 };
+            int r = cui_week_calendar(ui, "wk", wk, a->ev, 2, .start_hour = 8, .end_hour = 18, .hour_height = 40, .height = CUI_PX(500));
+            if (r >= 0) a->ev_clicked = r;
+            a->week_id = cui_last_id(ui);
+        } else {
+            cui_date org = { 2026, 3, 2 };
+            int r = cui_gantt(ui, "gt", a->tasks, 2, org, 30, .day_width = 30, .row_height = 40);
+            if (r >= 0) a->task_clicked = r;
+            a->gantt_id = cui_last_id(ui);
+        }
+    }
+}
+
+static void kb_move(plan_ctx *a) {
+    cui_kanban_move *m = &a->mv;
+    int at = -1;
+    for (int k = 0; k < a->len[m->from_column]; k++) if (a->cols[m->from_column][k] == m->card) at = k;
+    for (int k = at; k < a->len[m->from_column] - 1; k++) a->cols[m->from_column][k] = a->cols[m->from_column][k + 1];
+    a->len[m->from_column]--;
+    for (int k = a->len[m->to_column]; k > m->to_index; k--) a->cols[m->to_column][k] = a->cols[m->to_column][k - 1];
+    a->cols[m->to_column][m->to_index] = m->card;
+    a->len[m->to_column]++;
+}
+
+static void test_planning(void) {
+    printf("planning: kanban drag between and within columns, week calendar move and resize, gantt reschedule\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 800, 1);
+    plan_ctx a;
+    memset(&a, 0, sizeof a);
+    a.cols[0][0] = 1; a.cols[0][1] = 2; a.cols[0][2] = 3; a.len[0] = 3;
+    a.cols[1][0] = 4; a.len[1] = 1;
+    run(ui, build_plan, &a, 3);
+    cui_rect c1 = rect_of(ui, a.card_ids[1]), c4 = rect_of(ui, a.card_ids[4]);
+    CHECK(c1.w > 150 && c4.x > c1.x + c1.w);
+    /* card 1 goes below card 4 */
+    drag2(ui, build_plan, &a, c1.x + 40, c1.y + 20, c4.x + 60, c4.y + c4.h + 20, 8);
+    CHECK(a.moved && a.mv.card == 1 && a.mv.from_column == 0 && a.mv.to_column == 1 && a.mv.to_index == 1);
+    CHECK(!a.clicked);
+    kb_move(&a);
+    a.moved = false;
+    run(ui, build_plan, &a, 2);
+    /* card 3 goes above card 2 in the same column */
+    cui_rect c2 = rect_of(ui, a.card_ids[2]), c3 = rect_of(ui, a.card_ids[3]);
+    CHECK(c3.y > c2.y);
+    drag2(ui, build_plan, &a, c3.x + 40, c3.y + 20, c2.x + 40, c2.y + 6, 8);
+    CHECK(a.moved && a.mv.card == 3 && a.mv.to_column == 0 && a.mv.to_index == 0);
+    kb_move(&a);
+    CHECK(a.cols[0][0] == 3 && a.cols[0][1] == 2 && a.cols[1][1] == 1);
+    /* the empty third column accepts a drop */
+    a.moved = false;
+    run(ui, build_plan, &a, 2);
+    cui_rect c2b = rect_of(ui, a.card_ids[2]);
+    drag2(ui, build_plan, &a, c2b.x + 40, c2b.y + 20, c4.x + 260, c4.y + 30, 8);
+    CHECK(a.moved && a.mv.card == 2 && a.mv.to_column == 2 && a.mv.to_index == 0);
+    /* a plain click on a card is a click, not a move */
+    a.moved = false;
+    run(ui, build_plan, &a, 2);
+    cui_rect c4b = rect_of(ui, a.card_ids[4]);
+    click_at(ui, build_plan, &a, c4b.x + 30, c4b.y + 20);
+    CHECK(a.clicked && !a.moved);
+
+    /* week calendar */
+    a.mode = 1;
+    a.ev[0] = (cui_cal_event){ "Review", NULL, 1, 10, 11, CUI_TONE_INFO };
+    a.ev[1] = (cui_cal_event){ "Lunch", NULL, 3, 12, 13, CUI_TONE_SUCCESS };
+    a.ev_clicked = -1;
+    run(ui, build_plan, &a, 3);
+    cui_rect w = rect_of(ui, a.week_id);
+    float dw = (w.w - 60) / 7, top = w.y + 57;
+    CHECK(w.h > 500 && dw > 80);
+    float ex = w.x + 60 + 1.5f * dw, ey = top + (10.5f - 8) * 40;
+    click_at(ui, build_plan, &a, ex, ey);
+    CHECK(a.ev_clicked == 0);
+    a.ev_clicked = -1;
+    drag2(ui, build_plan, &a, ex, ey, ex + dw, ey + 40, 6);
+    CHECK(a.ev[0].day == 2 && a.ev[0].start == 11 && a.ev[0].end == 12);
+    CHECK(a.ev_clicked == -1);
+    run(ui, build_plan, &a, 2);
+    /* the bottom edge resizes by half an hour */
+    float bx = w.x + 60 + 2.5f * dw, by = top + (12 - 8) * 40 - 4;
+    drag2(ui, build_plan, &a, bx, by, bx, by + 20, 4);
+    CHECK(a.ev[0].start == 11 && a.ev[0].end == 12.5f);
+    /* events cannot be dragged past the last hour */
+    run(ui, build_plan, &a, 2);
+    float lx = w.x + 60 + 3.5f * dw, ly = top + (12.5f - 8) * 40;
+    drag2(ui, build_plan, &a, lx, ly, lx, ly + 400, 6);
+    CHECK(a.ev[1].end == 18 && a.ev[1].start == 17);
+
+    /* gantt */
+    a.mode = 2;
+    a.tasks[0] = (cui_gantt_task){ "Build", "Ada", 2, 6, 0.5f, CUI_TONE_INFO, -1, false };
+    a.tasks[1] = (cui_gantt_task){ "Ship", NULL, 10, 10, 0, CUI_TONE_SUCCESS, 0, true };
+    a.task_clicked = -1;
+    run(ui, build_plan, &a, 3);
+    cui_rect g = rect_of(ui, a.gantt_id);
+    float x0 = g.x + 231, y0 = g.y + 53;
+    CHECK(g.h > 120);
+    click_at(ui, build_plan, &a, x0 + 4 * 30, y0 + 20);
+    CHECK(a.task_clicked == 0);
+    a.task_clicked = -1;
+    drag2(ui, build_plan, &a, x0 + 4 * 30, y0 + 20, x0 + 6 * 30, y0 + 20, 6);
+    CHECK(a.tasks[0].start == 4 && a.tasks[0].end == 8 && a.task_clicked == -1);
+    run(ui, build_plan, &a, 2);
+    /* pull the right end out two days */
+    drag2(ui, build_plan, &a, x0 + 8 * 30 - 4, y0 + 20, x0 + 10 * 30 - 4, y0 + 20, 6);
+    CHECK(a.tasks[0].start == 4 && a.tasks[0].end == 10);
+    run(ui, build_plan, &a, 2);
+    /* and the left end in one day */
+    drag2(ui, build_plan, &a, x0 + 4 * 30 + 3, y0 + 20, x0 + 5 * 30 + 3, y0 + 20, 6);
+    CHECK(a.tasks[0].start == 5 && a.tasks[0].end == 10);
+    cui_destroy(ui);
+}
+
+typedef struct {
+    int likes; bool liked; int flags;
+    int slide; float split; int thrown;
+    cui_id car_id, cmp_id, stack_id;
+    cui_texture img;
+} media_ctx;
+
+static void build_media(cui_ctx *ui, void *u) {
+    media_ctx *a = u;
+    cui_column(ui, .pad = 16, .gap = 16, .width = CUI_FILL) {
+        a->flags |= cui_comment(ui, "c", "Ada Lovelace", "Looks good to me.", .likes = &a->likes, .liked = &a->liked);
+        cui_chat_message(ui, "Hello", .author = "Grace");
+        cui_chat_message(ui, "Hi!", .mine = true, .status = "Read");
+        cui_carousel(ui, "car", 3, &a->slide, .height = 120) {
+            for (int k = 0; k < 3; k++) cui_carousel_slide(ui) { cui_text(ui, "Slide"); }
+        }
+        a->car_id = cui_last_id(ui);
+        cui_image_compare(ui, "cmp", a->img, a->img, &a->split, .width = CUI_PX(400), .height = 120);
+        a->cmp_id = cui_last_id(ui);
+        cui_card_stack_begin(ui, "stk", 3, &(cui_card_stack_opts){ .width = CUI_PX(240), .height = 120 });
+        for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) { cui_text(ui, "Card"); }
+        int d = cui_card_stack_end(ui);
+        if (d) a->thrown = d;
+        a->stack_id = cui_last_id(ui);
+    }
+}
+
+static void test_media(void) {
+    printf("social and media: comment likes, carousel drag and keys, compare slider, card stack throw\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 1000, 1);
+    media_ctx a;
+    memset(&a, 0, sizeof a);
+    a.likes = 4; a.split = 0.5f;
+    static unsigned char px[16 * 16 * 4];
+    a.img = cui_image_create(ui, 16, 16, px);
+    run(ui, build_media, &a, 3);
+    /* Tab reaches the like button first; Enter toggles it */
+    key(ui, build_media, &a, CUI_KEY_TAB, 0);
+    key(ui, build_media, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.liked && a.likes == 5 && (a.flags & CUI_COMMENT_LIKE));
+    key(ui, build_media, &a, CUI_KEY_ENTER, 0);
+    CHECK(!a.liked && a.likes == 4);
+    /* carousel: drag left past half a slide */
+    cui_rect cr = rect_of(ui, a.car_id);
+    CHECK(cr.w > 600 && cr.h >= 120);
+    drag2(ui, build_media, &a, cr.x + cr.w * 0.7f, cr.y + 50, cr.x + cr.w * 0.1f, cr.y + 50, 8);
+    run(ui, build_media, &a, 20);
+    CHECK(a.slide == 1);
+    key(ui, build_media, &a, CUI_KEY_RIGHT, 0);
+    CHECK(a.slide == 2);
+    key(ui, build_media, &a, CUI_KEY_RIGHT, 0);
+    CHECK(a.slide == 2);   /* stops at the end without loop */
+    /* compare: drag the divider to three quarters */
+    cui_rect pr = rect_of(ui, a.cmp_id);
+    CHECK(pr.w > 390 && pr.w < 410);
+    drag2(ui, build_media, &a, pr.x + pr.w * 0.5f, pr.y + 60, pr.x + pr.w * 0.75f, pr.y + 60, 6);
+    CHECK(a.split > 0.72f && a.split < 0.78f);
+    /* card stack: a long drag right throws the top card */
+    cui_rect sr = rect_of(ui, a.stack_id);
+    CHECK(sr.w > 230 && sr.w < 250);
+    drag2(ui, build_media, &a, sr.x + 120, sr.y + 50, sr.x + 320, sr.y + 50, 10);
+    run(ui, build_media, &a, 60);
+    CHECK(a.thrown == 1);
+    /* a short drag springs back */
+    a.thrown = 0;
+    drag2(ui, build_media, &a, sr.x + 120, sr.y + 50, sr.x + 140, sr.y + 50, 10);
+    run(ui, build_media, &a, 60);
+    CHECK(a.thrown == 0);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -1396,6 +1626,8 @@ int main(void) {
     test_disclosure();
     test_checklist();
     test_data_grid();
+    test_planning();
+    test_media();
     test_text_capacity();
     test_dialog();
     test_menu();

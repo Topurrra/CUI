@@ -484,6 +484,9 @@ struct cui_ctx {
     bool slider_no_header;     /* next range slider skips its label row */      /* this field selects all of its text when it next has focus */
     struct cui_swipe_build *swipe;
     struct cui_grid_build *grid;   /* data grid being built (grids do not nest) */
+    void *carousel;                /* carousel being built */
+    void *card_stack;              /* card stack being built */
+    void *kanban;                  /* kanban board being built */
 };
 
 /* ---- theme ---- */

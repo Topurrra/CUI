@@ -346,7 +346,10 @@ static void cui__state_gc(cui_ctx *ui) {
 
 static cui_id cui__seed(cui_ctx *ui) { return ui->id_depth ? ui->id_stack[ui->id_depth - 1] : 0x9E3779B9u; }
 
-cui_id cui_make_id(cui_ctx *ui, const char *str) { return cui__hash_str(str, cui__seed(ui)); }
+cui_id cui_make_id(cui_ctx *ui, const char *str) {
+    const char *keep = str ? strstr(str, "###") : NULL;   /* "Label###id": the id ignores the visible part */
+    return cui__hash_str(keep ? keep : str, cui__seed(ui));
+}
 
 void cui_push_id(cui_ctx *ui, const char *str) {
     cui_id id = cui_make_id(ui, str);

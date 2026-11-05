@@ -646,6 +646,227 @@ static void scene_undo(cui_ctx *ui, int f) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_undo(ui); }
 }
 
+/* ---- data, code, conversation, media and planning ---- */
+SCENE(data_grid) {
+    static const char *const teams[] = { "Engine", "Design", "Platform", "Docs" };
+    static const cui_filter_field fields[] = { { "Team", CUI_ICON_USERS, teams, 4 }, { "Status", CUI_ICON_CIRCLE_DOT, teams, 0 } };
+    static uint32_t filt[2] = { 1u | 4u, 0 };
+    static char search[32];
+    cui_filter_bar(ui, "filters", fields, 2, filt, search, sizeof search);
+    static const cui_grid_column cols[] = { { "Name", 210, CUI_TEXT_LEFT, true }, { "Team", 120, CUI_TEXT_LEFT, true },
+                                            { "Commits", 100, CUI_TEXT_RIGHT, true }, { "Score", 150, CUI_TEXT_RIGHT, true } };
+    static const char *names[] = { "Grace Hopper", "Ada Lovelace", "Linus Torvalds", "Margaret Hamilton", "Dennis Ritchie", "Barbara Liskov" };
+    static const char *tm[] = { "Engine", "Design", "Platform", "Engine", "Platform", "Docs" };
+    static const int commits[] = { 884, 812, 640, 597, 431, 309 };
+    static const float score[] = { 97.2f, 93.5f, 88.1f, 84.0f, 71.9f, 66.4f };
+    static bool sel[6] = { false, true, true, false, false, false };
+    static cui_table_sort sort = { 2, true };
+    int f0, l0;
+    if (cui_data_grid_begin(ui, "people", cols, 4, 6, &f0, &l0, .height = CUI_PX(282), .selected = sel, .sort = &sort)) {
+        for (int r = f0; r < l0; r++) {
+            char b1[16], b2[16];
+            cui_data_grid_row(ui, r);
+            cui_data_grid_cell(ui);
+            cui_avatar(ui, names[r], .size = 24);
+            cui_text(ui, names[r], .size = 13.5f);
+            cui_data_grid_cell(ui);
+            cui_badge(ui, tm[r], .dot = true, .tone = (cui_tone)(1 + (tm[r][0] % 7)));
+            snprintf(b1, sizeof b1, "%d", commits[r]);
+            cui_data_grid_cell_text(ui, b1);
+            cui_data_grid_cell(ui);
+            cui_progress(ui, score[r] / 100, .width = CUI_PX(70), .height = 5);
+            snprintf(b2, sizeof b2, "%.1f", (double)score[r]);
+            cui_text(ui, b2, .tabular = true, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+        cui_data_grid_end(ui);
+    }
+}
+SCENE(code_block) {
+    cui_code_block(ui, "c",
+        "#include <cui/cui.h>\n"
+        "\n"
+        "/* A counter with a button */\n"
+        "static int clicks = 0;\n"
+        "\n"
+        "void frame(cui_ctx *ui) {\n"
+        "    if (cui_button(ui, \"Click me\", .variant = CUI_BUTTON_PRIMARY)) clicks++;\n"
+        "    cui_textf(ui, \"Clicked %d times\", clicks);\n"
+        "}\n",
+        .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
+}
+SCENE(json_view) {
+    cui_json_view(ui, "json",
+        "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
+        " \"platforms\": [\"windows\", \"macos\", \"linux\"],\n"
+        " \"renderer\": {\"backend\": \"opengl\", \"fallback\": \"software\", \"vsync\": true, \"msaa\": null},\n"
+        " \"authors\": [{\"name\": \"Ada\", \"commits\": 412}, {\"name\": \"Grace\", \"commits\": 388}]}",
+        .expand_depth = 1);
+}
+SCENE(chat) {
+    cui_card(ui, .gap = 0, .pad = 16, .width = CUI_FILL) {
+        cui_chat_divider(ui, "Today");
+        cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
+        cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+        cui_chat_message(ui, "It did! Keyboard selection too.", .mine = true);
+        cui_chat_message(ui, "Shift and Ctrl clicks work like a spreadsheet.", .mine = true, .grouped = true, .last_in_group = true, .status = "Read", .time = "9:43");
+        cui_typing_indicator(ui, "Grace");
+    }
+}
+SCENE(comments) {
+    static int likes[3] = { 12, 3, 0 };
+    static bool liked[3] = { true, false, false };
+    cui_card(ui, .gap = 4, .pad = 14, .width = CUI_FILL) {
+        cui_comment(ui, "c1", "Katherine Johnson", "The trajectory numbers check out. I would still run the sim once more before launch.", .time = "2h", .likes = &likes[0], .liked = &liked[0], .badge = "Author");
+        cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .depth = 1, .likes = &likes[1], .liked = &liked[1]);
+        cui_comment(ui, "c3", "Ada Lovelace", "Scheduled it for 3 pm.", .time = "40m", .depth = 1, .likes = &likes[2], .liked = &liked[2], .edited = true);
+    }
+}
+SCENE(presence_ticker) {
+    static const cui_presence_user who[] = {
+        { "Ada Lovelace", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Grace Hopper", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
+        { "Alan Turing", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Linus Torvalds", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
+        { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
+        { "Barbara Liskov", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
+    };
+    static const cui_ticker_item tick[] = {
+        { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f }, { "Latency", "182 ms", -8.4f },
+        { "Builds", "1,204", 12.0f }, { "Uptime", "99.98%", 0 },
+    };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER) {
+        cui_presence(ui, "here", who, 7, 5, 30);
+        cui_counter(ui, "rev", 48210, .format = "$%.0f", .size = 34, .group_thousands = true);
+    }
+    cui_ticker(ui, "tick", tick, 6);
+}
+SCENE(carousel) {
+    static int slide = 1;
+    static const char *titles[] = { "Calm by default", "Motion with purpose", "Keyboard first" };
+    static const char *descs[] = { "One accent, hairline borders, layered shadows only where things float.",
+                                   "Springs for presses, highlights that glide, overlays that open from their trigger.",
+                                   "Tab, arrows, Enter and Esc work everywhere, with a ring only for the keyboard." };
+    static const unsigned tops[] = { 0x3b1d5e, 0x0f3d3e, 0x1d2a5e };
+    cui_carousel(ui, "tour", 3, &slide, .height = 200) {
+        for (int k = 0; k < 3; k++) cui_carousel_slide(ui) {
+            cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(tops[k]), .radius = 16, .pad = 28, .gap = 8, .justify = CUI_JUSTIFY_END) {
+                cui_text(ui, titles[k], .font = CUI_FONT_DISPLAY, .size = 24, .color = CUI_RGB(0xffffff));
+                cui_text(ui, descs[k], .color = CUI_RGBA(0xffffffc0));
+            }
+        }
+    }
+}
+static void shot_scene(unsigned char *px, int w, int h, bool color) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float fx = (float)x / w, fy = (float)y / h;
+            float r = 0.98f - fy * 0.45f, g = 0.62f - fy * 0.3f + fx * 0.1f, b = 0.38f + fy * 0.4f;
+            float m1 = 0.55f + 0.1f * sinf(fx * 7.0f) + 0.04f * sinf(fx * 23.0f);
+            float m2 = 0.7f + 0.06f * sinf(fx * 5.0f + 2.1f);
+            float dx = fx - 0.7f, dy = fy - 0.32f;
+            if (dx * dx + dy * dy < 0.006f) { r = 1; g = 0.92f; b = 0.7f; }
+            if (fy > m1) { r = 0.32f - fy * 0.1f; g = 0.24f; b = 0.42f; }
+            if (fy > m2) { r = 0.14f; g = 0.12f; b = 0.24f + (1 - fy) * 0.2f; }
+            if (!color) { float l = r * 0.3f + g * 0.59f + b * 0.11f; r = g = b = l * 0.85f + 0.05f; }
+            unsigned char *p = px + (y * w + x) * 4;
+            p[0] = (unsigned char)(fminf(1, fmaxf(0, r)) * 255); p[1] = (unsigned char)(fminf(1, fmaxf(0, g)) * 255);
+            p[2] = (unsigned char)(fminf(1, fmaxf(0, b)) * 255); p[3] = 255;
+        }
+}
+SCENE(compare_stack) {
+    static cui_ctx *owner;
+    static cui_texture before, after;
+    static float split = 0.42f;
+    if (owner != ui) {
+        static unsigned char a[480 * 300 * 4], b[480 * 300 * 4];
+        shot_scene(a, 480, 300, false);
+        shot_scene(b, 480, 300, true);
+        before = cui_image_create(ui, 480, 300, a);
+        after = cui_image_create(ui, 480, 300, b);
+        owner = ui;
+    }
+    cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) { cui_image_compare(ui, "cmp", before, after, &split, .height = 230); }
+        static const char *names[] = { "Kyoto", "Lisbon", "Reykjavik" };
+        static const unsigned cols[] = { 0x7c3aed, 0x0ea5e9, 0x10b981 };
+        cui_card_stack_begin(ui, "deck", 3, &(cui_card_stack_opts){ .width = CUI_PX(240), .height = 200 });
+        for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) {
+            cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[k]), .radius = 20, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
+                cui_text(ui, names[k], .font = CUI_FONT_DISPLAY, .size = 22, .color = CUI_RGB(0xffffff));
+                cui_text(ui, "Swipe right to save", .size = 13, .color = CUI_RGBA(0xffffffb0));
+            }
+        }
+        cui_card_stack_end(ui);
+    }
+}
+static cui_id kb_ids[3][3];
+static void body_kanban(cui_ctx *ui);
+static void scene_kanban(cui_ctx *ui, int f) {
+    if (f < 0) {   /* lift the first backlog card and carry it into "In progress" */
+        int t = -f - 1;
+        cui_rect a = cui_get_rect(ui, kb_ids[0][0]), b = cui_get_rect(ui, kb_ids[1][1]);
+        float x0 = a.x + 90, y0 = a.y + 30, x1 = b.x + 110, y1 = b.y - 10;
+        if (t == 20) cui_input_mouse_move(ui, x0, y0);
+        if (t == 21) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (t >= 22 && t <= 40) { float k = (t - 22) / 18.0f; cui_input_mouse_move(ui, x0 + (x1 - x0) * k, y0 + (y1 - y0) * k); }
+        return;
+    }
+    frame_wrap(ui, body_kanban);
+}
+static void body_kanban(cui_ctx *ui) {
+    static const char *col_names[3] = { "Backlog", "In progress", "Done" };
+    static const unsigned dots[3] = { 0x94a3b8, 0x3b82f6, 0x22c55e };
+    static const char *titles[3][3] = { { "Audit the color tokens for contrast", "Virtualize the activity feed", "Dark mode screenshots" },
+                                        { "Keyboard nav in the date range picker", "IME composition on Windows", NULL },
+                                        { "Spring presets", NULL, NULL } };
+    static const char *tags[3][3] = { { "Design", "Perf", "Docs" }, { "A11y", "Platform", NULL }, { "Motion", NULL, NULL } };
+    static const cui_tone tones[3][3] = { { CUI_TONE_VIOLET, CUI_TONE_TEAL, CUI_TONE_ROSE }, { CUI_TONE_INFO, CUI_TONE_WARNING }, { CUI_TONE_VIOLET } };
+    static const char *who[3][3] = { { "Ada Lovelace", "Grace Hopper", "Hedy Lamarr" }, { "Alan Turing", "Dennis Ritchie" }, { "Barbara Liskov" } };
+    static const int lens[3] = { 3, 2, 1 };
+    cui_kanban_begin(ui, "board");
+    for (int c = 0; c < 3; c++) {
+        cui_kanban_column_begin(ui, col_names[c], lens[c], .dot = CUI_RGB(dots[c]), .limit = c == 1 ? 3 : 0, .width = 270);
+        for (int k = 0; k < lens[c]; k++) {
+            cui_kanban_card_begin(ui, c * 10 + k);
+            kb_ids[c][k] = cui_last_id(ui);
+            cui_badge(ui, tags[c][k], .tone = tones[c][k], .size = CUI_SIZE_SM);
+            cui_text(ui, titles[c][k], .font = CUI_FONT_MEDIUM, .size = 13.5f, .line_height = 1.35f);
+            if (c == 1) cui_progress(ui, k ? 0.3f : 0.6f, .height = 4);
+            cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                cui_avatar(ui, who[c][k], .size = 22);
+                cui_spacer(ui);
+                cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 13, CUI_COLOR_TEXT_MUTED);
+                cui_text(ui, k == 1 ? "2" : "3", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+            }
+            cui_kanban_card_end(ui);
+        }
+        cui_kanban_column_end(ui);
+    }
+    cui_kanban_end(ui, NULL);
+}
+SCENE(week_calendar) {
+    static cui_cal_event events[] = {
+        { "Standup", "Zoom", 0, 9.5f, 9.75f, CUI_TONE_INFO }, { "Design review", "Room 2", 0, 11, 12.5f, CUI_TONE_VIOLET },
+        { "Lunch with Ada", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
+        { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Grace", NULL, 2, 10.5f, 11.5f, CUI_TONE_ROSE },
+        { "Focus time", "No meetings", 2, 13.5f, 16, CUI_TONE_TEAL }, { "Standup", "Zoom", 3, 9.5f, 9.75f, CUI_TONE_INFO },
+        { "Customer call", "Acme", 3, 14, 15, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 15, 16.5f, CUI_TONE_VIOLET },
+        { "Gym", NULL, 5, 10, 11.5f, CUI_TONE_SUCCESS },
+    };
+    cui_date wk = { 2026, 11, 2 };
+    cui_week_calendar(ui, "week", wk, events, 11, .start_hour = 8, .end_hour = 17, .hour_height = 44, .height = CUI_PX(400));
+}
+SCENE(gantt) {
+    static cui_gantt_task tasks[] = {
+        { "Research", "Ada Lovelace", 0, 5, 1, CUI_TONE_VIOLET, -1, false },
+        { "Wireframes", "Hedy Lamarr", 4, 10, 1, CUI_TONE_ROSE, 0, false },
+        { "Design system", "Barbara Liskov", 8, 16, 0.7f, CUI_TONE_VIOLET, 1, false },
+        { "Core engine", "Grace Hopper", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
+        { "Beta", NULL, 21, 21, 0, CUI_TONE_WARNING, 3, true },
+        { "Launch", "Alan Turing", 22, 27, 0, CUI_TONE_SUCCESS, 4, false },
+    };
+    cui_date org = { 2026, 10, 26 };
+    cui_gantt(ui, "plan", tasks, 6, org, 28, .day_width = 26, .today = 10);
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -871,6 +1092,12 @@ int main(int argc, char **argv) {
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
+        { "data-grid", scene_data_grid, 760, 390, true }, { "code-block", scene_code_block, 720, 300, true },
+        { "json-view", scene_json_view, 560, 330, true }, { "chat", scene_chat, 560, 440, true },
+        { "comments", scene_comments, 600, 370, true }, { "presence-ticker", scene_presence_ticker, 640, 170, true },
+        { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },
+        { "kanban", scene_kanban, 920, 480, true }, { "week-calendar", scene_week_calendar, 960, 520, true },
+        { "gantt", scene_gantt, 1000, 360, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

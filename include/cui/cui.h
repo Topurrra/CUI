@@ -35,6 +35,8 @@
  *   - Units are logical points. CUI scales everything for high DPI screens.
  *   - Strings are UTF-8. "Label##key" shows "Label" but uses the whole
  *     string as the identity, so two buttons can share a visible label.
+ *     "Label###key" uses only "###key", so the label can change (a count,
+ *     a translation) while the widget keeps its state and focus.
  *
  * MIT License. See LICENSE.
  */
@@ -1046,6 +1048,117 @@ typedef struct cui_json_opts { int _; int expand_depth; float max_height; } cui_
 CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, const cui_json_opts *opts);
 
 /* ------------------------------------------------------------------------ */
+/* Conversation                                                             */
+/* ------------------------------------------------------------------------ */
+
+/* Chat message bubble. Consecutive messages from one person set grouped so
+ * they stack tightly and show the avatar once. */
+typedef struct cui_chat_opts {
+    int _;
+    bool mine;                 /* right aligned, accent bubble */
+    const char *author;        /* name above the first bubble of a group */
+    const char *time;
+    const char *status;        /* under your own last message, e.g. "Read" */
+    bool grouped;              /* continues the previous message */
+    bool last_in_group;        /* shows the avatar (others) and status (mine) */
+    cui_texture avatar;
+} cui_chat_opts;
+CUI_API void cui_chat_message_ex(cui_ctx *ui, const char *text, const cui_chat_opts *opts);
+CUI_API void cui_chat_divider(cui_ctx *ui, const char *label);       /* "Today" */
+CUI_API void cui_typing_indicator(cui_ctx *ui, const char *name);    /* bouncing dots */
+
+/* Comment with replies. depth indents replies under a connector line.
+ * Returns CUI_COMMENT_LIKE or CUI_COMMENT_REPLY flags for what was clicked;
+ * *liked and *likes are updated for you. */
+enum { CUI_COMMENT_LIKE = 1, CUI_COMMENT_REPLY = 2 };
+typedef struct cui_comment_opts { int _; const char *time; int depth; int *likes; bool *liked; bool edited; const char *badge; } cui_comment_opts;
+CUI_API int cui_comment_ex(cui_ctx *ui, const char *id, const char *author, const char *text, const cui_comment_opts *opts);
+
+/* Presence: who is here now. Overlapping avatars with a colored ring each,
+ * that spread out on hover and name themselves. */
+typedef struct cui_presence_user { const char *name; cui_color color; cui_texture avatar; bool idle; } cui_presence_user;
+CUI_API void cui_presence(cui_ctx *ui, const char *id, const cui_presence_user *users, int count, int max_visible, float size);
+
+/* ------------------------------------------------------------------------ */
+/* Media                                                                    */
+/* ------------------------------------------------------------------------ */
+
+/* Carousel: slides that you swipe, drag, scroll or page with the arrows
+ * and dots. Build every slide between begin and end:
+ *     cui_carousel(ui, "tour", 4, &index, .height = 220) {
+ *         for (int k = 0; k < 4; k++) cui_carousel_slide(ui) { ... }
+ *     }
+ */
+typedef struct cui_carousel_opts { int _; float height; float auto_advance; float gap; bool no_arrows, no_dots, loop; } cui_carousel_opts;
+CUI_API bool cui_carousel_begin(cui_ctx *ui, const char *id, int count, int *index, const cui_carousel_opts *opts);
+CUI_API void cui_carousel_slide_begin(cui_ctx *ui);
+CUI_API void cui_carousel_slide_end(cui_ctx *ui);
+CUI_API void cui_carousel_end(cui_ctx *ui);
+
+/* Before and after: drag the divider to compare two images. *pos is 0..1. */
+typedef struct cui_compare_opts { int _; cui_size width; float height; const char *before_label, *after_label; } cui_compare_opts;
+CUI_API bool cui_image_compare_ex(cui_ctx *ui, const char *id, cui_texture before, cui_texture after, float *pos, const cui_compare_opts *opts);
+
+/* Card stack: a deck where the top card can be flicked away left or right.
+ * Build `count` cards; card 0 is the top. end returns -1 or 1 on the frame
+ * the top card leaves (to the left or right), else 0. */
+typedef struct cui_card_stack_opts { int _; cui_size width; float height; int visible; } cui_card_stack_opts;
+CUI_API void cui_card_stack_begin(cui_ctx *ui, const char *id, int count, const cui_card_stack_opts *opts);
+CUI_API void cui_card_stack_item_begin(cui_ctx *ui, int depth);
+CUI_API void cui_card_stack_item_end(cui_ctx *ui);
+CUI_API int cui_card_stack_end(cui_ctx *ui);
+
+/* Odometer: a number whose digits roll to their new values. */
+typedef struct cui_counter_opts { int _; const char *format; float size; cui_font font; cui_color color; bool group_thousands; } cui_counter_opts;
+CUI_API void cui_counter_ex(cui_ctx *ui, const char *id, double value, const cui_counter_opts *opts);
+
+/* Ticker: items that scroll by continuously, pausing on hover. */
+typedef struct cui_ticker_item { const char *label; const char *value; float delta; } cui_ticker_item;
+typedef struct cui_ticker_opts { int _; float speed; float height; } cui_ticker_opts;
+CUI_API void cui_ticker_ex(cui_ctx *ui, const char *id, const cui_ticker_item *items, int count, const cui_ticker_opts *opts);
+
+/* ------------------------------------------------------------------------ */
+/* Planning                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/* Kanban board: columns of cards you drag between columns and within them.
+ * The board reports drops; you move the card in your data:
+ *
+ *     cui_kanban_begin(ui, "board");
+ *     for (int c = 0; c < ncols; c++) {
+ *         cui_kanban_column_begin(ui, cols[c].title, cols[c].count, .dot = CUI_COLOR_SERIES(c));
+ *         for (each card k in column c) {
+ *             cui_kanban_card_begin(ui, card_id);   ... content ...   cui_kanban_card_end(ui);
+ *         }
+ *         cui_kanban_column_end(ui);
+ *     }
+ *     cui_kanban_move m;
+ *     if (cui_kanban_end(ui, &m)) move_card(m.card, m.to_column, m.to_index);
+ */
+typedef struct cui_kanban_move { int card; int from_column, to_column, to_index; } cui_kanban_move;
+typedef struct cui_kanban_column_opts { int _; cui_color dot; int limit; float width; } cui_kanban_column_opts;
+CUI_API void cui_kanban_begin(cui_ctx *ui, const char *id);
+CUI_API bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, const cui_kanban_column_opts *opts);   /* true: "+" clicked */
+CUI_API bool cui_kanban_card_begin(cui_ctx *ui, int card_id);   /* true when clicked */
+CUI_API void cui_kanban_card_end(cui_ctx *ui);
+CUI_API void cui_kanban_column_end(cui_ctx *ui);
+CUI_API bool cui_kanban_end(cui_ctx *ui, cui_kanban_move *move);
+
+/* Week calendar: seven day columns on an hour grid. Drag an event to move
+ * it (15 minute steps), drag its bottom edge to resize it. Returns the
+ * index of a clicked event, or -1. */
+typedef struct cui_cal_event { const char *title; const char *detail; int day; float start, end; cui_tone tone; } cui_cal_event;
+typedef struct cui_week_opts { int _; float start_hour, end_hour, hour_height; cui_size height; bool read_only; } cui_week_opts;
+CUI_API int cui_week_calendar_ex(cui_ctx *ui, const char *id, cui_date week_start, cui_cal_event *events, int count, const cui_week_opts *opts);
+
+/* Gantt chart: a task list beside a timeline of bars. Drag a bar to move
+ * it, its ends to resize it. Dependencies are drawn as elbow arrows.
+ * Returns the index of a clicked task, or -1. */
+typedef struct cui_gantt_task { const char *name; const char *owner; int start, end; float progress; cui_tone tone; int depends_on; bool milestone; } cui_gantt_task;
+typedef struct cui_gantt_opts { int _; float day_width, row_height; cui_size height; int today; bool read_only; } cui_gantt_opts;
+CUI_API int cui_gantt_ex(cui_ctx *ui, const char *id, cui_gantt_task *tasks, int count, cui_date origin, int days, const cui_gantt_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Disclosure                                                               */
 /* ------------------------------------------------------------------------ */
 
@@ -1371,6 +1484,17 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
 #define cui_reorder_item(ui, pos)           CUI__SCOPE(cui_reorder_item_begin((ui), (pos)), cui_reorder_item_end(ui))
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
+#define cui_kanban_column_begin(ui, title, count, ...) cui_kanban_column_begin_ex((ui), (title), (count), CUI__OPTS(cui_kanban_column_opts, __VA_ARGS__))
+#define cui_week_calendar(ui, id, week, events, count, ...) cui_week_calendar_ex((ui), (id), (week), (events), (count), CUI__OPTS(cui_week_opts, __VA_ARGS__))
+#define cui_gantt(ui, id, tasks, count, origin, days, ...) cui_gantt_ex((ui), (id), (tasks), (count), (origin), (days), CUI__OPTS(cui_gantt_opts, __VA_ARGS__))
+#define cui_chat_message(ui, text, ...)     cui_chat_message_ex((ui), (text), CUI__OPTS(cui_chat_opts, __VA_ARGS__))
+#define cui_comment(ui, id, author, text, ...) cui_comment_ex((ui), (id), (author), (text), CUI__OPTS(cui_comment_opts, __VA_ARGS__))
+#define cui_carousel(ui, id, count, index, ...) CUI__SCOPE(cui_carousel_begin((ui), (id), (count), (index), CUI__OPTS(cui_carousel_opts, __VA_ARGS__)), cui_carousel_end(ui))
+#define cui_carousel_slide(ui)              CUI__SCOPE(cui_carousel_slide_begin(ui), cui_carousel_slide_end(ui))
+#define cui_image_compare(ui, id, before, after, pos, ...) cui_image_compare_ex((ui), (id), (before), (after), (pos), CUI__OPTS(cui_compare_opts, __VA_ARGS__))
+#define cui_card_stack_item(ui, depth)      CUI__SCOPE(cui_card_stack_item_begin((ui), (depth)), cui_card_stack_item_end(ui))
+#define cui_counter(ui, id, value, ...)     cui_counter_ex((ui), (id), (value), CUI__OPTS(cui_counter_opts, __VA_ARGS__))
+#define cui_ticker(ui, id, items, count, ...) cui_ticker_ex((ui), (id), (items), (count), CUI__OPTS(cui_ticker_opts, __VA_ARGS__))
 #define cui_data_grid_begin(ui, id, cols, ncols, rows, first, last, ...) cui_data_grid_begin_ex((ui), (id), (cols), (ncols), (rows), (first), (last), CUI__OPTS(cui_grid_opts, __VA_ARGS__))
 #define cui_code_block(ui, id, code, ...)   cui_code_block_ex((ui), (id), (code), CUI__OPTS(cui_code_opts, __VA_ARGS__))
 #define cui_json_view(ui, id, json, ...)    cui_json_view_ex((ui), (id), (json), CUI__OPTS(cui_json_opts, __VA_ARGS__))

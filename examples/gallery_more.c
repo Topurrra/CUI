@@ -1,6 +1,7 @@
 /* Extended gallery pages. Each page keeps its own state in statics. */
 #include "gallery_more.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -505,6 +506,225 @@ static void page_code(cui_ctx *ui) {
     cui_json_view(ui, "broken", "{\"ok\": true, \"oops\": [1, 2,}");
 }
 
+
+/* ---- conversation and media ------------------------------------------------- */
+
+static void make_scene(unsigned char *px, int w, int h, bool color) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float fx = (float)x / w, fy = (float)y / h;
+            float r = 0.98f - fy * 0.35f, g = 0.62f - fy * 0.1f, b = 0.45f + fy * 0.4f;   /* dusk sky */
+            float sun = (fx - 0.68f) * (fx - 0.68f) * 2.4f + (fy - 0.42f) * (fy - 0.42f) * 6.0f;
+            if (sun < 0.012f) { r = 1.0f; g = 0.86f; b = 0.55f; }
+            float m1 = 0.55f + 0.12f * sinf(fx * 7.0f + 0.6f) + 0.05f * sinf(fx * 23.0f);
+            float m2 = 0.68f + 0.07f * sinf(fx * 5.0f + 2.1f) + 0.03f * sinf(fx * 31.0f);
+            if (fy > m1) { r = 0.32f - fy * 0.1f; g = 0.24f; b = 0.42f; }
+            if (fy > m2) { r = 0.14f; g = 0.12f; b = 0.24f + (1 - fy) * 0.2f; }
+            if (!color) { float l = r * 0.3f + g * 0.59f + b * 0.11f; l = l * 0.85f + 0.05f; r = g = b = l; }
+            unsigned char *p = px + (y * w + x) * 4;
+            p[0] = (unsigned char)(fminf(1, fmaxf(0, r)) * 255); p[1] = (unsigned char)(fminf(1, fmaxf(0, g)) * 255);
+            p[2] = (unsigned char)(fminf(1, fmaxf(0, b)) * 255); p[3] = 255;
+        }
+}
+
+static void page_social(cui_ctx *ui) {
+    static int likes[3] = { 12, 3, 0 };
+    static bool liked[3] = { true, false, false };
+    static int slide = 1;
+    static cui_texture before, after;
+    static float split = 0.45f;
+    static int deck = 0;
+    static double revenue = 48210;
+    static const cui_presence_user who[] = {
+        { "Ada Lovelace", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Grace Hopper", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
+        { "Alan Turing", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Linus Torvalds", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
+        { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
+        { "Barbara Liskov", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
+    };
+    static cui_ctx *owner;
+    if (owner != ui) { before = after = 0; owner = ui; }   /* textures belong to one context */
+    if (!before) {
+        static unsigned char a[640 * 400 * 4], b[640 * 400 * 4];
+        make_scene(a, 640, 400, false);
+        make_scene(b, 640, 400, true);
+        before = cui_image_create(ui, 640, 400, a);
+        after = cui_image_create(ui, 640, 400, b);
+    }
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
+            section(ui, "Chat", "Grouped bubbles, read receipts and a typing indicator.");
+            cui_card(ui, .gap = 0, .pad = 16) {
+                cui_chat_divider(ui, "Today");
+                cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
+                cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+                cui_chat_message(ui, "It did! Keyboard selection too.", .mine = true);
+                cui_chat_message(ui, "Shift and Ctrl clicks work like a spreadsheet.", .mine = true, .grouped = true, .last_in_group = true, .status = "Read", .time = "9:43");
+                cui_typing_indicator(ui, "Grace");
+            }
+        }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
+            section(ui, "Comments", "Threads with replies, likes and badges.");
+            cui_card(ui, .gap = 4, .pad = 14) {
+                cui_comment(ui, "c1", "Katherine Johnson", "The trajectory numbers check out. I would still run the sim once more before launch.", .time = "2h", .likes = &likes[0], .liked = &liked[0], .badge = "Author");
+                cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .depth = 1, .likes = &likes[1], .liked = &liked[1]);
+                cui_comment(ui, "c3", "Ada Lovelace", "Scheduled it for 3 pm.", .time = "40m", .depth = 1, .likes = &likes[2], .liked = &liked[2], .edited = true);
+            }
+        }
+    }
+    section(ui, "Presence", "Who is here now. Hover to spread them out.");
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_CENTER) {
+        cui_presence(ui, "here", who, 7, 5, 30);
+        cui_counter(ui, "rev", revenue, .format = "$%.0f", .size = 34, .group_thousands = true);
+        if (cui_button(ui, "Add a sale", .size = CUI_SIZE_SM, .icon = CUI_ICON_PLUS)) revenue += 1287;
+    }
+
+    section(ui, "Ticker", "A continuous strip of figures. It pauses under the pointer.");
+    static const cui_ticker_item tick[] = {
+        { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f }, { "Latency", "182 ms", -8.4f },
+        { "Builds", "1,204", 12.0f }, { "Uptime", "99.98%", 0 },
+    };
+    cui_ticker(ui, "tick", tick, 6);
+
+    section(ui, "Carousel", "Drag, flick, scroll sideways or use the arrows and dots.");
+    cui_carousel(ui, "tour", 4, &slide, .height = 200, .auto_advance = 6) {
+        static const char *titles[] = { "Calm by default", "Motion with purpose", "Keyboard first", "Fast and small" };
+        static const char *descs[] = { "One accent, hairline borders, layered shadows only where things float.",
+                                       "Springs for presses, highlights that glide, overlays that open from their trigger.",
+                                       "Tab, arrows, Enter and Esc work everywhere, with a ring only for the keyboard.",
+                                       "A full frame in a quarter of a millisecond, and about 230 KB for a whole app." };
+        static const unsigned tops[] = { 0x3b1d5e, 0x0f3d3e, 0x1d2a5e, 0x5e2a1d };
+        for (int k = 0; k < 4; k++) cui_carousel_slide(ui) {
+            cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(tops[k]), .radius = 16, .pad = 28, .gap = 8, .justify = CUI_JUSTIFY_END) {
+                cui_text(ui, titles[k], .font = CUI_FONT_DISPLAY, .size = 24, .color = CUI_RGB(0xffffff));
+                cui_text(ui, descs[k], .color = CUI_RGBA(0xffffffc0));
+            }
+        }
+    }
+
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
+            section(ui, "Before and after", "Drag the divider.");
+            cui_image_compare(ui, "cmp", before, after, &split, .height = 230);
+        }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 10, .align = CUI_ALIGN_CENTER) {
+            section(ui, "Card stack", "Flick the top card away, left or right.");
+            static const char *names[] = { "Kyoto", "Lisbon", "Reykjavik", "Oaxaca", "Hanoi" };
+            static const unsigned cols[] = { 0x7c3aed, 0x0ea5e9, 0x10b981, 0xf59e0b, 0xef4444 };
+            cui_card_stack_begin(ui, "deck", 3, &(cui_card_stack_opts){ .width = CUI_PX(260), .height = 200 });
+            for (int k = 0; k < 3; k++) {
+                int idx = (deck + k) % 5;
+                cui_card_stack_item(ui, k) {
+                    cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[idx]), .radius = 20, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
+                        cui_text(ui, names[idx], .font = CUI_FONT_DISPLAY, .size = 22, .color = CUI_RGB(0xffffff));
+                        cui_text(ui, "Swipe right to save", .size = 13, .color = CUI_RGBA(0xffffffb0));
+                    }
+                }
+            }
+            int dir = cui_card_stack_end(ui);
+            if (dir) { deck = (deck + 1) % 5; cui_toast(ui, dir > 0 ? "Saved" : "Skipped"); }
+        }
+    }
+}
+
+/* ---- planning ------------------------------------------------------------ */
+
+typedef struct { int id; const char *title, *tag, *who; cui_tone tone; int comments, files; float progress; } kb_card;
+
+static kb_card kb_cards[] = {
+    { 1, "Audit the color tokens for contrast", "Design", "Ada Lovelace", CUI_TONE_VIOLET, 3, 0, 0 },
+    { 2, "Virtualize the activity feed", "Perf", "Grace Hopper", CUI_TONE_TEAL, 1, 2, 0 },
+    { 3, "Dark mode screenshots for docs", "Docs", "Hedy Lamarr", CUI_TONE_ROSE, 0, 4, 0 },
+    { 4, "Keyboard nav in the date range picker", "A11y", "Alan Turing", CUI_TONE_INFO, 5, 0, 0.6f },
+    { 5, "IME composition on Windows", "Platform", "Dennis Ritchie", CUI_TONE_WARNING, 2, 1, 0.3f },
+    { 6, "Spring presets", "Motion", "Barbara Liskov", CUI_TONE_VIOLET, 4, 0, 1 },
+    { 7, "Glyph atlas eviction", "Perf", "Linus Torvalds", CUI_TONE_TEAL, 0, 0, 1 },
+    { 8, "Retina screenshots", "Docs", "Hedy Lamarr", CUI_TONE_ROSE, 1, 3, 1 },
+};
+static int kb_cols[4][8] = { { 1, 2, 3 }, { 4, 5 }, { 6 }, { 7, 8 } };
+static int kb_len[4] = { 3, 2, 1, 2 };
+
+static kb_card *kb_find(int id) {
+    for (size_t k = 0; k < sizeof kb_cards / sizeof kb_cards[0]; k++) if (kb_cards[k].id == id) return &kb_cards[k];
+    return NULL;
+}
+
+static void kb_apply(const cui_kanban_move *m) {
+    int *from = kb_cols[m->from_column], *to = kb_cols[m->to_column];
+    int at = -1;
+    for (int k = 0; k < kb_len[m->from_column]; k++) if (from[k] == m->card) at = k;
+    if (at < 0 || (m->to_column != m->from_column && kb_len[m->to_column] >= 8)) return;
+    for (int k = at; k < kb_len[m->from_column] - 1; k++) from[k] = from[k + 1];
+    kb_len[m->from_column]--;
+    int idx = m->to_index < 0 ? 0 : m->to_index > kb_len[m->to_column] ? kb_len[m->to_column] : m->to_index;
+    for (int k = kb_len[m->to_column]; k > idx; k--) to[k] = to[k - 1];
+    to[idx] = m->card;
+    kb_len[m->to_column]++;
+}
+
+static void page_planning(cui_ctx *ui) {
+    static const char *col_names[4] = { "Backlog", "In progress", "Review", "Done" };
+    static const unsigned col_dots[4] = { 0x94a3b8, 0x3b82f6, 0xf59e0b, 0x22c55e };
+    section(ui, "Kanban", "Drag cards within and between columns. Columns can carry a work-in-progress limit.");
+    cui_kanban_begin(ui, "board");
+    for (int c = 0; c < 4; c++) {
+        if (cui_kanban_column_begin(ui, col_names[c], kb_len[c], .dot = CUI_RGB(col_dots[c]), .limit = c == 1 ? 3 : 0, .width = 264))
+            cui_toast(ui, "New card", .description = col_names[c]);
+        for (int k = 0; k < kb_len[c]; k++) {
+            kb_card *cd = kb_find(kb_cols[c][k]);
+            if (!cd) continue;
+            if (cui_kanban_card_begin(ui, cd->id)) cui_toast(ui, cd->title);
+            cui_badge(ui, cd->tag, .tone = cd->tone, .size = CUI_SIZE_SM);
+            cui_text(ui, cd->title, .font = CUI_FONT_MEDIUM, .size = 13.5f, .line_height = 1.35f);
+            if (cd->progress > 0 && cd->progress < 1) cui_progress(ui, cd->progress, .height = 4);
+            cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                cui_avatar(ui, cd->who, .size = 22);
+                cui_spacer(ui);
+                static const char *nums[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+                if (cd->files) { cui_icon(ui, CUI_ICON_PAPERCLIP, 13, CUI_COLOR_TEXT_MUTED); cui_text(ui, nums[cd->files % 10], .size = 12, .color = CUI_COLOR_TEXT_MUTED); }
+                if (cd->comments) { cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 13, CUI_COLOR_TEXT_MUTED); cui_text(ui, nums[cd->comments % 10], .size = 12, .color = CUI_COLOR_TEXT_MUTED); }
+                if (cd->progress >= 1) cui_icon(ui, CUI_ICON_CIRCLE_CHECK, 14, CUI_COLOR_SUCCESS);
+            }
+            cui_kanban_card_end(ui);
+        }
+        cui_kanban_column_end(ui);
+    }
+    cui_kanban_move mv;
+    if (cui_kanban_end(ui, &mv)) kb_apply(&mv);
+
+    section(ui, "Week calendar", "Drag events to move them in 15 minute steps, or pull the bottom edge to resize.");
+    static cui_cal_event events[] = {
+        { "Standup", "Zoom", 0, 9.5f, 9.75f, CUI_TONE_INFO }, { "Design review", "Room 2", 0, 11, 12.5f, CUI_TONE_VIOLET },
+        { "Lunch with Ada", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
+        { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Grace", NULL, 2, 10.5f, 11, CUI_TONE_ROSE },
+        { "Focus time", "No meetings", 2, 14, 17, CUI_TONE_TEAL }, { "Standup", "Zoom", 3, 9.5f, 9.75f, CUI_TONE_INFO },
+        { "Customer call", "Acme", 3, 15, 16, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 16, 17.5f, CUI_TONE_VIOLET },
+        { "Gym", NULL, 5, 10, 11.5f, CUI_TONE_SUCCESS },
+    };
+    cui_date today = cui_date_today();
+    int td = cui_date_to_days(today);
+    int monday = td - ((td + 3) % 7 + 7) % 7;
+    int ev = cui_week_calendar(ui, "week", cui_date_from_days(monday), events, (int)(sizeof events / sizeof events[0]), .start_hour = 8, .end_hour = 19, .height = CUI_PX(420));
+    if (ev >= 0) cui_toast(ui, events[ev].title, .description = events[ev].detail);
+
+    section(ui, "Gantt", "Drag bars to reschedule, pull either end to change the length. Arrows follow dependencies.");
+    static cui_gantt_task tasks[] = {
+        { "Research", "Ada Lovelace", 0, 5, 1, CUI_TONE_VIOLET, -1, false },
+        { "Wireframes", "Hedy Lamarr", 4, 10, 1, CUI_TONE_ROSE, 0, false },
+        { "Design system", "Barbara Liskov", 8, 17, 0.7f, CUI_TONE_VIOLET, 1, false },
+        { "Core engine", "Grace Hopper", 6, 20, 0.55f, CUI_TONE_INFO, 0, false },
+        { "Platform backends", "Dennis Ritchie", 14, 26, 0.2f, CUI_TONE_TEAL, 3, false },
+        { "Beta", NULL, 27, 27, 0, CUI_TONE_WARNING, 4, true },
+        { "Docs and launch", "Alan Turing", 28, 36, 0, CUI_TONE_SUCCESS, 5, false },
+    };
+    cui_date origin = cui_date_from_days(monday - 7);
+    int tk = cui_gantt(ui, "plan", tasks, (int)(sizeof tasks / sizeof tasks[0]), origin, 42, .today = 7 + (td - monday));
+    if (tk >= 0) {
+        static char dur[32];
+        snprintf(dur, sizeof dur, "%d days", tasks[tk].end - tasks[tk].start);
+        cui_toast(ui, tasks[tk].name, .description = tasks[tk].milestone ? "Milestone" : dur);
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -518,6 +738,8 @@ static const more_page pages[] = {
     { "Reader", CUI_ICON_FILE_TEXT, page_reader },
     { "Data grid", CUI_ICON_GRID_3X3, page_grid },
     { "Code", CUI_ICON_CODE, page_code },
+    { "Social and media", CUI_ICON_MESSAGE_SQUARE, page_social },
+    { "Planning", CUI_ICON_LIST_CHECKS, page_planning },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

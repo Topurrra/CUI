@@ -358,3 +358,183 @@ cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true);
 ```
 
 `show_timer` adds a draining line along the bottom of the toast, so people can see how long Undo stays (6 seconds by default; hovering the stack pauses it).
+
+## Data
+
+### Data grid and filter bar
+
+![Data grid and filter bar](images/components/data-grid.png)
+
+```c
+static const cui_grid_column cols[] = {
+    { "Name", 210, CUI_TEXT_LEFT, true }, { "Team", 120, CUI_TEXT_LEFT, true }, { "Commits", 100, CUI_TEXT_RIGHT, true },
+};
+static bool selected[2000];
+static cui_table_sort sort = { 2, true };
+int first, last;
+cui_filter_bar(ui, "filters", fields, 2, filter_masks, search, sizeof search);
+if (cui_data_grid_begin(ui, "people", cols, 3, 2000, &first, &last, .height = CUI_PX(420), .selected = selected, .sort = &sort)) {
+    for (int r = first; r < last; r++) {
+        cui_data_grid_row(ui, r);
+        cui_data_grid_cell(ui);
+        cui_avatar(ui, people[r].name, .size = 24);
+        cui_data_grid_edit(ui, people[r].name, sizeof people[r].name);   /* double click to rename */
+        cui_data_grid_cell_text(ui, people[r].team);
+        cui_data_grid_cell_text(ui, people[r].commits_text);
+    }
+    cui_data_grid_end(ui);
+}
+```
+
+Only the rows in view are built, so the row count barely matters. Headers are sticky; drag a header edge to resize a column; click a sortable header to set `sort` (you reorder your data). With `selected`, a checkbox column appears and rows select like a spreadsheet: click, Shift+click for a range, Ctrl+click to toggle, Ctrl+A for all, arrows to move the cursor, Esc to clear. Editable cells start on double click or Enter and commit on Enter or clicking away.
+
+The filter bar keeps one bit mask per field in `selected`; each active field shows as a chip that opens its value list, "Filter" adds one and "Clear all" resets them. `cui_tree_cell` draws a disclosure chevron and indentation inside any table or grid cell for tree tables.
+
+## Code
+
+### Code block
+
+![Code block](images/components/code-block.png)
+
+```c
+cui_code_block(ui, "counter", source, .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
+```
+
+Highlighting for C, C++, JavaScript, TypeScript, Python, Rust, Go, JSON and shell, in colors that follow the theme. Long lines scroll sideways, `max_height` makes the block scroll vertically, and the copy button morphs into a check after copying.
+
+### JSON viewer
+
+![JSON viewer](images/components/json-view.png)
+
+```c
+if (!cui_json_view(ui, "response", body, .expand_depth = 1)) { /* not valid JSON: the view shows where it broke */ }
+```
+
+A collapsible tree with typed colors. Collapsed objects and arrays show their size; click a chevron to fold or unfold.
+
+## Conversation
+
+### Chat
+
+![Chat](images/components/chat.png)
+
+```c
+cui_chat_divider(ui, "Today");
+cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
+cui_chat_message(ui, "Virtualized and sortable.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+cui_chat_message(ui, "It did!", .mine = true, .status = "Read", .time = "9:43");
+cui_typing_indicator(ui, "Grace");
+```
+
+Grouped messages stack tightly with the avatar on the last bubble and tighter inner corners. Your own messages sit on the right in the primary color. The typing dots bounce in sequence.
+
+### Comments
+
+![Comments](images/components/comments.png)
+
+```c
+static int likes = 12; static bool liked = true;
+int act = cui_comment(ui, "c1", "Katherine Johnson", text, .time = "2h", .likes = &likes, .liked = &liked, .badge = "Author");
+if (act & CUI_COMMENT_REPLY) open_reply_box();
+cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .depth = 1);
+```
+
+`depth` indents replies under a thread line. The like button toggles `liked` and keeps `likes` in step.
+
+### Presence, counter and ticker
+
+![Presence, counter and ticker](images/components/presence-ticker.png)
+
+```c
+cui_presence(ui, "here", users, 7, 5, 30);                     /* show 5, then "+2" */
+cui_counter(ui, "revenue", revenue, .format = "$%.0f", .size = 34, .group_thousands = true);
+cui_ticker(ui, "kpis", items, 6);
+```
+
+Presence avatars overlap with colored rings and spread out under the pointer; idle people are dimmed. The counter rolls each digit like an odometer when the value changes. The ticker scrolls continuously, fades at the edges and pauses under the pointer.
+
+## Media
+
+### Carousel
+
+![Carousel](images/components/carousel.png)
+
+```c
+static int slide = 0;
+cui_carousel(ui, "tour", 4, &slide, .height = 200, .auto_advance = 6) {
+    for (int k = 0; k < 4; k++) cui_carousel_slide(ui) { draw_slide(ui, k); }
+}
+```
+
+Drag or flick between slides, scroll sideways, use the arrow buttons, the dots or the arrow keys. The track settles on a spring. `auto_advance` moves on every few seconds, except while hovered; `loop` wraps around.
+
+### Image compare and card stack
+
+![Image compare and card stack](images/components/compare-stack.png)
+
+```c
+static float split = 0.5f;
+cui_image_compare(ui, "cmp", before, after, &split, .height = 230);
+
+cui_card_stack_begin(ui, "deck", 3, &(cui_card_stack_opts){ .width = CUI_PX(240), .height = 200 });
+for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) { draw_card(ui, deck[k]); }
+int dir = cui_card_stack_end(ui);   /* -1 or 1 when the top card was thrown left or right */
+```
+
+Drag the divider, or focus it and use the arrow keys. The top card of the stack follows the pointer; past a third of its width, or with a fast flick, it flies off and the cards behind move up.
+
+## Planning
+
+### Kanban board
+
+![Kanban board](images/components/kanban.png)
+
+```c
+cui_kanban_begin(ui, "board");
+for (int c = 0; c < column_count; c++) {
+    if (cui_kanban_column_begin(ui, columns[c].name, columns[c].count, .dot = columns[c].color, .limit = columns[c].wip))
+        add_card(c);                                     /* the "+" in the header */
+    for (int k = 0; k < columns[c].count; k++) {
+        card *cd = &columns[c].cards[k];
+        if (cui_kanban_card_begin(ui, cd->id)) open_card(cd);
+        cui_badge(ui, cd->tag, .tone = cd->tone, .size = CUI_SIZE_SM);
+        cui_text(ui, cd->title, .font = CUI_FONT_MEDIUM);
+        cui_kanban_card_end(ui);
+    }
+    cui_kanban_column_end(ui);
+}
+cui_kanban_move m;
+if (cui_kanban_end(ui, &m)) move_card(m.card, m.from_column, m.to_column, m.to_index);
+```
+
+Cards lift and follow the pointer when dragged; the column under the pointer lights up and a line marks where the card will land. A plain click is a click, not a move. `to_index` is the position in the target column with the dragged card left out, so removing it first and then inserting at `to_index` is always right. The count turns red when a column goes over its `limit`. Wide boards scroll sideways.
+
+### Week calendar
+
+![Week calendar](images/components/week-calendar.png)
+
+```c
+static cui_cal_event events[] = {
+    { "Design review", "Room 2", 0, 11, 12.5f, CUI_TONE_VIOLET },   /* Monday 11:00 to 12:30 */
+    { "Focus time", NULL, 2, 13.5f, 16, CUI_TONE_TEAL },
+};
+int clicked = cui_week_calendar(ui, "week", monday, events, 2, .start_hour = 8, .end_hour = 18, .height = CUI_PX(460));
+```
+
+Drag an event to move it (it snaps to 15 minutes and keeps its length) or pull its bottom edge to resize it; the calendar writes the new times into your array. Overlapping events share the day side by side. Today is circled and a line marks the current time. `read_only` turns editing off but keeps clicks.
+
+### Gantt chart
+
+![Gantt chart](images/components/gantt.png)
+
+```c
+static cui_gantt_task tasks[] = {
+    /* name, owner, start day, end day, progress, tone, depends on, milestone */
+    { "Research", "Ada Lovelace", 0, 5, 1.0f, CUI_TONE_VIOLET, -1, false },
+    { "Core engine", "Grace Hopper", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
+    { "Beta", NULL, 21, 21, 0, CUI_TONE_WARNING, 1, true },
+};
+int clicked = cui_gantt(ui, "plan", tasks, 3, start_date, 28, .today = 10);
+```
+
+A task list on the left and a timeline that scrolls sideways, with months, day numbers and shaded weekends. Drag a bar to reschedule it, or drag either end to change its length. The darker part of a bar is its progress. Dependencies draw as elbow arrows and milestones as diamonds.
