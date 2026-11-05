@@ -1301,9 +1301,16 @@ static void cui__paint_rings(cui_ctx *ui, cui_node *n, void *data) {
             cui_draw_circle(ui, (cui_vec2){ c.x + cosf(a0) * rad, c.y + sinf(a0) * rad }, p->th * 0.5f, col);
         } else {
             cui_draw_arc(ui, c, rad, 0, 2 * CUI_PI, p->th, col);
-            /* the tip overlaps the start: a soft shadow tells them apart */
-            float sa = a1 - 0.18f;
-            cui_draw_circle(ui, (cui_vec2){ c.x + cosf(sa) * rad, c.y + sinf(sa) * rad }, p->th * 0.56f, cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 90 : 45));
+            /* the tip overlaps the start: a soft shadow cast ahead of the cap tells them apart */
+            float sa = a1 + p->th * 0.25f / rad;
+            float sr = p->th * 0.5f;
+            cui_vec2 sc = { c.x + cosf(sa) * rad, c.y + sinf(sa) * rad };
+            cui_push_clip(ui, (cui_rect){ c.x - rad - p->th, c.y - rad - p->th, (rad + p->th) * 2, (rad + p->th) * 2 });
+            cui_draw_shadow(ui, (cui_rect){ sc.x - sr, sc.y - sr, sr * 2, sr * 2 }, CUI_CORNERS(sr), p->th * 0.3f, 0, (cui_vec2){ 0, 0 },
+                            cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 150 : 70));
+            cui_pop_clip(ui);
+            /* the last stretch of the arc sits on top of the shadow */
+            cui_draw_arc(ui, c, rad, a1 - 0.6f, a1, p->th, col);
         }
         cui_vec2 tip = { c.x + cosf(a1) * rad, c.y + sinf(a1) * rad };
         cui_draw_circle(ui, tip, p->th * 0.5f, col);
