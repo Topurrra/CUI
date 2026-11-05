@@ -223,10 +223,23 @@ static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const c
     float hw = a->hw, hh = a->hh, rtl = a->r_tl, rtr = a->r_tr, rbr = a->r_br, rbl = a->r_bl, bw = a->border;
     float bcr = a->border_color.r / 255.0f, bcg = a->border_color.g / 255.0f, bcb = a->border_color.b / 255.0f, bca = a->border_color.a / 255.0f;
     bool flat_color = memcmp(&a->color, &b->color, 4) == 0 && memcmp(&a->color, &c->color, 4) == 0;
+    const cui_vertex *tv[3] = { a, b, c };
     for (int y = y0; y < y1; y++) {
         float py = (float)y + 0.5f;
         uint8_t *row = job->pixels + (size_t)y * (size_t)job->stride;
-        for (int x = x0; x < x1; x++) {
+        /* horizontal span of the triangle on this row */
+        float sx0 = 1e30f, sx1 = -1e30f;
+        for (int e = 0; e < 3; e++) {
+            const cui_vertex *p0 = tv[e], *p1 = tv[(e + 1) % 3];
+            float ya = p0->y, yb = p1->y;
+            if ((py < ya && py < yb) || (py > ya && py > yb)) continue;
+            float xi = (yb == ya) ? p0->x : p0->x + (p1->x - p0->x) * (py - ya) / (yb - ya);
+            if (yb == ya) { sx0 = CUI_MIN(sx0, CUI_MIN(p0->x, p1->x)); sx1 = CUI_MAX(sx1, CUI_MAX(p0->x, p1->x)); continue; }
+            sx0 = CUI_MIN(sx0, xi); sx1 = CUI_MAX(sx1, xi);
+        }
+        if (sx1 < sx0) continue;
+        int rx0 = CUI_MAX(x0, (int)floorf(sx0) - 1), rx1 = CUI_MIN(x1, (int)ceilf(sx1) + 1);
+        for (int x = rx0; x < rx1; x++) {
             float px = (float)x + 0.5f;
             float w0 = ((b->x - px) * (c->y - py) - (b->y - py) * (c->x - px)) * inv;
             float w1 = ((c->x - px) * (a->y - py) - (c->y - py) * (a->x - px)) * inv;

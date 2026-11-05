@@ -1,4 +1,7 @@
-/* Measures CPU time per frame (build + layout + paint) for gallery pages,
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+/* Measures wall time per frame (build + layout + paint) for gallery pages,
  * and software rasterization time. */
 #include <cui/cui.h>
 #include <cui/cui_render.h>
@@ -10,7 +13,7 @@
 #include <windows.h>
 static double now(void) { LARGE_INTEGER f, c; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&c); return (double)c.QuadPart / f.QuadPart; }
 #else
-static double now(void) { return (double)clock() / CLOCKS_PER_SEC; }
+static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + (double)t.tv_nsec * 1e-9; }
 #endif
 
 int main(void) {

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "icon_list.h"
 
 typedef void (*scene_fn)(cui_ctx *ui, int frame);
 
@@ -315,6 +316,21 @@ static void scene_palette(cui_ctx *ui, int f) {
     cui_command_palette(ui, &open, cmds, 4);
 }
 
+static void scene_icons(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    int n = (int)(sizeof icon_list / sizeof icon_list[0]);
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 24) {
+        cui_box(ui, .dir = CUI_GRID, .columns = 6, .gap = 4) {
+            for (int i = 0; i < n; i++) {
+                cui_row(ui, .gap = 10, .pad = 8, .radius = 10) {
+                    cui_icon(ui, icon_list[i].icon, 18, CUI_COLOR_FOREGROUND);
+                    cui_text(ui, icon_list[i].name, .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
+                }
+            }
+        }
+    }
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -350,6 +366,7 @@ int main(int argc, char **argv) {
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 300, true },
         { "bar-donut", scene_bar_chart, 760, 290, true }, { "command-palette", scene_palette, 680, 460, true },
+        { "icons", scene_icons, 1040, 1080, false },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
