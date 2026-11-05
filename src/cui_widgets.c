@@ -662,7 +662,8 @@ void cui_progress_ex(cui_ctx *ui, float value, const cui_progress_opts *o) {
     }
     float h = o->height > 0 ? o->height : 6;
     int i = cui__leaf(ui, 0, col ? CUI_FILL : (o->width.kind ? o->width : CUI_FILL), CUI_PX(h));
-    ui->nodes[i].self_align = CUI_ALIGN_STRETCH;
+    /* full width bars stretch; a bar with its own width centers in a row like its siblings */
+    ui->nodes[i].self_align = (!col && o->width.kind) ? CUI__ALIGN_NOSTRETCH : CUI_ALIGN_STRETCH;
     cui__progress_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->value = shown;
     p->indeterminate = o->indeterminate;

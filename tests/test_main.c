@@ -889,6 +889,121 @@ static void test_checklist(void) {
     cui_destroy(ui);
 }
 
+/* data grid ------------------------------------------------------------------ */
+
+typedef struct { bool sel[500]; cui_table_sort sort; char names[500][16]; int committed; int cursor; bool open; uint32_t filt[2]; char q[32]; int json_ok, json_bad; cui_id grid_id, tree_id, fb_id; } dgrid_ctx;
+static void build_dgrid(cui_ctx *ui, void *u) {
+    dgrid_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 12, .width = CUI_FILL, .height = CUI_FILL) {
+        static const char *const o1[] = { "Red", "Green", "Blue" };
+        static const cui_filter_field fields[] = { { "Color", NULL, o1, 3 }, { "Size", NULL, o1, 3 } };
+        cui_filter_bar(ui, "fb", fields, 2, a->filt, a->q, sizeof a->q);
+        a->fb_id = cui_last_id(ui);
+        static const cui_grid_column cols[] = { { "Name", 200, CUI_TEXT_LEFT, true }, { "Value", 120, CUI_TEXT_RIGHT, true } };
+        int f, l;
+        if (cui_data_grid_begin(ui, "grid", cols, 2, 500, &f, &l, .height = CUI_PX(300), .selected = a->sel, .sort = &a->sort, .cursor = &a->cursor)) {
+            for (int r = f; r < l; r++) {
+                cui_data_grid_row(ui, r);
+                if (cui_data_grid_cell_edit(ui, a->names[r], sizeof a->names[r])) a->committed++;
+                char v[16];
+                snprintf(v, sizeof v, "%d", r * 3);
+                cui_data_grid_cell_text(ui, v);
+            }
+            cui_data_grid_end(ui);
+        }
+        a->grid_id = cui_make_id(ui, "grid");
+        cui_tree_cell(ui, "folder", 0, true, &a->open, NULL);
+        a->tree_id = cui_make_id(ui, "folder") ^ 0x7CE1u;
+        a->json_ok = cui_json_view(ui, "j1", "{\"a\": [1, 2, {\"b\": null}], \"c\": \"x\\\"y\", \"d\": -1.5e3, \"e\": true}");
+        a->json_bad = cui_json_view(ui, "j2", "{\"a\": [1, 2,}");
+        cui_code_block(ui, "code", "int main(void) {\n    return 0; /* done */\n}\n", .lang = "c", .line_numbers = true);
+    }
+}
+
+static void test_data_grid(void) {
+    printf("data grid: virtual rows, selection, sort, keyboard, editing; filter bar, tree cell, json\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 1100, 1);
+    dgrid_ctx a;
+    memset(&a, 0, sizeof a);
+    a.cursor = -1;
+    for (int k = 0; k < 500; k++) snprintf(a.names[k], sizeof a.names[k], "row %d", k);
+    run(ui, build_dgrid, &a, 3);
+    CHECK(a.json_ok == 1 && a.json_bad == 0);
+    cui_rect g = rect_of(ui, a.grid_id);
+    CHECK(g.h > 290 && g.h < 310);
+    /* only the visible rows are built: far fewer nodes than 500 rows would need */
+    /* click row 1 (header 40, rows 40) */
+    float row_y = g.y + 40 + 40 * 1 + 20;
+    click_at(ui, build_dgrid, &a, g.x + 120, row_y);
+    CHECK(a.sel[1] && !a.sel[0] && a.cursor == 1);
+    /* shift click row 4 selects 1..4 */
+    cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_SHIFT);
+    cui_input_mouse_move(ui, g.x + 120, g.y + 40 + 40 * 4 + 20);
+    run(ui, build_dgrid, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_dgrid, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_dgrid, &a, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    int n = 0;
+    for (int k = 0; k < 500; k++) n += a.sel[k];
+    CHECK(n == 4 && a.sel[1] && a.sel[4]);
+    /* keyboard: Down moves the cursor, Escape clears, Ctrl+A selects all */
+    key(ui, build_dgrid, &a, CUI_KEY_DOWN, 0);
+    CHECK(a.cursor == 5);
+    key(ui, build_dgrid, &a, CUI_KEY_ESCAPE, 0);
+    n = 0;
+    for (int k = 0; k < 500; k++) n += a.sel[k];
+    CHECK(n == 0);
+    key(ui, build_dgrid, &a, CUI_KEY_A, CUI_MOD_PRIMARY);
+    n = 0;
+    for (int k = 0; k < 500; k++) n += a.sel[k];
+    CHECK(n == 500);
+    key(ui, build_dgrid, &a, CUI_KEY_END, 0);
+    run(ui, build_dgrid, &a, 40);
+    CHECK(a.cursor == 499);
+    key(ui, build_dgrid, &a, CUI_KEY_HOME, 0);
+    run(ui, build_dgrid, &a, 40);
+    /* sort: clicking the Value header sorts by it */
+    click_at(ui, build_dgrid, &a, g.x + 44 + 200 + 60, g.y + 20);
+    CHECK(a.sort.column == 1 && !a.sort.descending);
+    click_at(ui, build_dgrid, &a, g.x + 44 + 200 + 60, g.y + 20);
+    CHECK(a.sort.descending);
+    /* editing: Enter on the cursor row edits, typing replaces, Enter commits */
+    click_at(ui, build_dgrid, &a, g.x + 300, g.y + 40 + 20);   /* back to the grid, row 0 */
+    key(ui, build_dgrid, &a, CUI_KEY_ENTER, 0);
+    run(ui, build_dgrid, &a, 1);
+    type(ui, build_dgrid, &a, "first");
+    key(ui, build_dgrid, &a, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(a.names[0], "first") == 0 && a.committed == 1);
+    /* a double click on a cell edits it too */
+    cui_input_mouse_move(ui, g.x + 120, g.y + 40 + 40 * 2 + 20);
+    run(ui, build_dgrid, &a, 1);
+    for (int c = 0; c < 2; c++) {
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        run(ui, build_dgrid, &a, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        run(ui, build_dgrid, &a, 1);
+    }
+    run(ui, build_dgrid, &a, 1);
+    type(ui, build_dgrid, &a, "second");
+    CHECK(cui_wants_keyboard(ui) && strcmp(a.names[2], "second") == 0);   /* the double click opened an editor */
+    key(ui, build_dgrid, &a, CUI_KEY_ESCAPE, 0);   /* Esc reverts */
+    CHECK(strcmp(a.names[2], "row 2") == 0);
+    /* column resize: drag the Name header's right edge */
+    float edge = g.x + 44 + 200;
+    drag(ui, build_dgrid, &a, edge, g.y + 20, edge + 60, 6);
+    run(ui, build_dgrid, &a, 2);
+    click_at(ui, build_dgrid, &a, g.x + 44 + 260 + 60, g.y + 20);   /* Value header moved right by 60 */
+    CHECK(!a.sort.descending);
+    /* tree cell */
+    cui_vec2 tc = center(rect_of(ui, a.tree_id));
+    click_at(ui, build_dgrid, &a, tc.x, tc.y);
+    CHECK(a.open);
+    cui_destroy(ui);
+}
+
 static void test_text_capacity(void) {
     printf("text input: respects buffer capacity\n");
     cui_ctx *ui = new_ctx();
@@ -1280,6 +1395,7 @@ int main(void) {
     test_pickers();
     test_disclosure();
     test_checklist();
+    test_data_grid();
     test_text_capacity();
     test_dialog();
     test_menu();

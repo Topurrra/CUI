@@ -2,6 +2,7 @@
 #include "gallery_more.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void section(cui_ctx *ui, const char *title, const char *desc) {
@@ -349,6 +350,161 @@ static void page_reader(cui_ctx *ui) {
     }
 }
 
+
+/* ---- data grid and code ---------------------------------------------------- */
+
+typedef struct { char name[48]; char email[64]; const char *team; int commits; float score; } person;
+#define PEOPLE 2000
+static person people[PEOPLE];
+static int order_ix[PEOPLE];
+static bool people_sel[PEOPLE];
+static cui_table_sort people_sort;
+
+static int cmp_people(const void *a, const void *b) {
+    const person *x = &people[*(const int *)a], *y = &people[*(const int *)b];
+    int r = 0;
+    switch (people_sort.column) {
+    case 0: r = strcmp(x->name, y->name); break;
+    case 2: r = strcmp(x->team, y->team); break;
+    case 3: r = x->commits - y->commits; break;
+    default: r = x->score < y->score ? -1 : x->score > y->score; break;
+    }
+    return people_sort.descending ? -r : r;
+}
+
+static void page_grid(cui_ctx *ui) {
+    static bool init;
+    static cui_table_sort last_sort = { -1, false };
+    static const char *first[] = { "Ada", "Alan", "Grace", "Linus", "Margaret", "Katherine", "Hedy", "Dennis", "Barbara", "Edsger", "Frances", "John" };
+    static const char *last[] = { "Lovelace", "Turing", "Hopper", "Torvalds", "Hamilton", "Johnson", "Lamarr", "Ritchie", "Liskov", "Dijkstra", "Allen", "Backus" };
+    static const char *teams[] = { "Engine", "Design", "Platform", "Docs", "Growth" };
+    if (!init) {
+        for (int k = 0; k < PEOPLE; k++) {
+            snprintf(people[k].name, sizeof people[k].name, "%s %s", first[k % 12], last[(k * 7 + 3) % 12]);
+            snprintf(people[k].email, sizeof people[k].email, "%s.%d@cui.dev", first[k % 12], k);
+            for (char *c = people[k].email; *c; c++) if (*c >= 'A' && *c <= 'Z') *c += 32;
+            people[k].team = teams[(k * 3) % 5];
+            people[k].commits = (k * 37) % 900 + 12;
+            people[k].score = (float)((k * 53) % 1000) / 10.0f;
+            order_ix[k] = k;
+        }
+        people_sort.column = 3; people_sort.descending = true;
+        init = true;
+    }
+    if (people_sort.column != last_sort.column || people_sort.descending != last_sort.descending) {
+        qsort(order_ix, PEOPLE, sizeof(int), cmp_people);
+        last_sort = people_sort;
+    }
+    static const char *const team_opts[] = { "Engine", "Design", "Platform", "Docs", "Growth" };
+    static const char *const status_opts[] = { "Active", "Away", "Invited" };
+    static const char *const role_opts[] = { "Owner", "Admin", "Member" };
+    static const cui_filter_field fields[] = {
+        { "Team", CUI_ICON_USERS, team_opts, 5 },
+        { "Status", CUI_ICON_CIRCLE_DOT, status_opts, 3 },
+        { "Role", CUI_ICON_KEY_ROUND, role_opts, 3 },
+    };
+    static uint32_t filters[3] = { 1u << 0 | 1u << 2, 0, 0 };
+    static char search[64];
+    section(ui, "Filter bar", "Chips for active filters, values in a list, and a search.");
+    cui_filter_bar(ui, "filters", fields, 3, filters, search, sizeof search);
+
+    section(ui, "Data grid", "2,000 rows, virtualized. Sort, resize columns, select with Shift and Ctrl, edit names with a double click.");
+    static const cui_grid_column cols[] = {
+        { "Name", 200, CUI_TEXT_LEFT, true }, { "Email", 196, CUI_TEXT_LEFT, false }, { "Team", 110, CUI_TEXT_LEFT, true },
+        { "Commits", 96, CUI_TEXT_RIGHT, true }, { "Score", 130, CUI_TEXT_RIGHT, true },
+    };
+    int n_sel = 0;
+    for (int k = 0; k < PEOPLE; k++) n_sel += people_sel[k];
+    int f0, l0;
+    if (cui_data_grid_begin(ui, "people", cols, 5, PEOPLE, &f0, &l0, .height = CUI_PX(420), .selected = people_sel, .sort = &people_sort)) {
+        for (int r = f0; r < l0; r++) {
+            person *p = &people[order_ix[r]];
+            cui_data_grid_row(ui, r);
+            cui_data_grid_cell(ui);
+            cui_avatar(ui, p->name, .size = 24);
+            cui_data_grid_edit(ui, p->name, sizeof p->name);
+            cui_data_grid_cell_text(ui, p->email);
+            cui_data_grid_cell(ui);
+            cui_badge(ui, p->team, .dot = true, .tone = (cui_tone)(1 + (p->team[0] % 7)));
+            {
+                char buf[16];
+                snprintf(buf, sizeof buf, "%d", p->commits);
+                cui_data_grid_cell_text(ui, buf);
+            }
+            cui_data_grid_cell(ui);
+            cui_progress(ui, p->score / 100, .width = CUI_PX(70), .height = 5);
+            {
+                char buf[16];
+                snprintf(buf, sizeof buf, "%.1f", (double)p->score);
+                cui_text(ui, buf, .tabular = true, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+            }
+        }
+        cui_data_grid_end(ui);
+    }
+    cui_muted(ui, n_sel ? "Rows selected. Press Esc to clear." : "Click a row, Shift+click to select a range, Ctrl+A for all.");
+
+    section(ui, "Tree table", "Tree cells inside a table: disclosure, indentation, totals.");
+    {
+        static bool open_src = true, open_ui = false;
+        cui_table_column tc[] = { { "Name", CUI_FILL, CUI_TEXT_LEFT, false }, { "Files", CUI_PX(80), CUI_TEXT_RIGHT, false }, { "Size", CUI_PX(100), CUI_TEXT_RIGHT, false } };
+        cui_table(ui, "tree", tc, 3) {
+            cui_table_row(ui, false);
+            cui_table_cell(ui); cui_tree_cell(ui, "src", 0, true, &open_src, CUI_ICON_FOLDER);
+            cui_table_cell_text(ui, "42"); cui_table_cell_text(ui, "1.2 MB");
+            if (open_src) {
+                cui_table_row(ui, false);
+                cui_table_cell(ui); cui_tree_cell(ui, "ui", 1, true, &open_ui, CUI_ICON_FOLDER);
+                cui_table_cell_text(ui, "18"); cui_table_cell_text(ui, "640 KB");
+                if (open_ui) {
+                    cui_table_row(ui, false);
+                    cui_table_cell(ui); cui_tree_cell(ui, "button.c", 2, false, NULL, CUI_ICON_FILE);
+                    cui_table_cell_text(ui, "1"); cui_table_cell_text(ui, "24 KB");
+                }
+                cui_table_row(ui, false);
+                cui_table_cell(ui); cui_tree_cell(ui, "main.c", 1, false, NULL, CUI_ICON_FILE);
+                cui_table_cell_text(ui, "1"); cui_table_cell_text(ui, "8 KB");
+            }
+            cui_table_row(ui, false);
+            cui_table_cell(ui); cui_tree_cell(ui, "README.md", 0, false, NULL, CUI_ICON_FILE_TEXT);
+            cui_table_cell_text(ui, "1"); cui_table_cell_text(ui, "12 KB");
+        }
+    }
+}
+
+static void page_code(cui_ctx *ui) {
+    section(ui, "Code block", "Highlighting for C, C++, JavaScript, TypeScript, Python, Rust, Go, JSON and shell.");
+    cui_code_block(ui, "c-sample",
+        "#include <cui/cui.h>\n"
+        "\n"
+        "/* A counter with a button */\n"
+        "static int clicks = 0;\n"
+        "\n"
+        "void frame(cui_ctx *ui) {\n"
+        "    if (cui_button(ui, \"Click me\", .variant = CUI_BUTTON_PRIMARY)) clicks++;\n"
+        "    cui_textf(ui, \"Clicked %d times\", clicks);\n"
+        "    float ratio = clicks / 10.0f;   // grows with each click\n"
+        "}\n",
+        .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
+    cui_row(ui, .gap = 16, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) {
+            cui_code_block(ui, "py", "def fib(n: int) -> int:\n    # the slow way, on purpose\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\n\nprint([fib(k) for k in range(10)])\n",
+                           .lang = "python", .title = "fib.py");
+        }
+        cui_box(ui, .width = CUI_GROW(1)) {
+            cui_code_block(ui, "sh", "git clone https://github.com/yappologistic/CUI.git\ncmake -S CUI -B build\ncmake --build build\n./build/examples/gallery  # run it\n",
+                           .lang = "shell");
+        }
+    }
+    section(ui, "JSON viewer", "Collapsible, with counts. Click a brace to fold it.");
+    cui_json_view(ui, "json",
+        "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
+        " \"platforms\": [\"windows\", \"macos\", \"linux\"],\n"
+        " \"renderer\": {\"backend\": \"opengl\", \"fallback\": \"software\", \"vsync\": true, \"msaa\": null},\n"
+        " \"authors\": [{\"name\": \"Ada\", \"commits\": 412}, {\"name\": \"Grace\", \"commits\": 388}]}",
+        .expand_depth = 2);
+    cui_json_view(ui, "broken", "{\"ok\": true, \"oops\": [1, 2,}");
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -360,6 +516,8 @@ static const more_page pages[] = {
     { "Capture", CUI_ICON_UPLOAD, page_capture },
     { "Disclosure", CUI_ICON_LAYERS, page_disclosure },
     { "Reader", CUI_ICON_FILE_TEXT, page_reader },
+    { "Data grid", CUI_ICON_GRID_3X3, page_grid },
+    { "Code", CUI_ICON_CODE, page_code },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

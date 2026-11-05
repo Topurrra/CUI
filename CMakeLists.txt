@@ -42,6 +42,8 @@ set(CUI_CORE_SOURCES
     src/cui_actions.c
     src/cui_pickers.c
     src/cui_disclosure.c
+    src/cui_grid.c
+    src/cui_code.c
     src/cui_image.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)

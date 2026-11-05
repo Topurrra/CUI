@@ -965,6 +965,87 @@ CUI_API void cui_swipe_item_begin(cui_ctx *ui, const char *id, const cui_swipe_a
 CUI_API int cui_swipe_item_end(cui_ctx *ui);
 
 /* ------------------------------------------------------------------------ */
+/* Data grid                                                                */
+/* ------------------------------------------------------------------------ */
+
+/* A virtualized table for large data: sticky header, resizable and sortable
+ * columns, checkbox selection (click, Ctrl+click, Shift+click, Ctrl+A),
+ * keyboard navigation and editable cells. Build only the rows in
+ * [first, last):
+ *
+ *     int first, last;
+ *     if (cui_data_grid_begin(ui, "people", cols, 4, count, &first, &last, .selected = sel)) {
+ *         for (int r = first; r < last; r++) {
+ *             cui_data_grid_row(ui, r);
+ *             cui_data_grid_cell_text(ui, people[r].name);
+ *             ...
+ *         }
+ *         cui_data_grid_end(ui);
+ *     }
+ */
+typedef struct cui_grid_column {
+    const char *title;
+    float width;               /* initial width in points, default 150 */
+    cui_text_align align;
+    bool sortable;
+    bool fixed;                /* not resizable */
+} cui_grid_column;
+typedef struct cui_grid_opts {
+    int _;
+    cui_size width, height;    /* default fill */
+    float row_height;          /* default 40 */
+    bool *selected;            /* one bool per row; adds a checkbox column */
+    cui_table_sort *sort;
+    bool striped;
+    int *cursor;               /* the keyboard row, optional */
+} cui_grid_opts;
+CUI_API bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id, const cui_grid_column *columns, int column_count, int row_count,
+                                    int *first, int *last, const cui_grid_opts *opts);
+CUI_API bool cui_data_grid_row(cui_ctx *ui, int row);   /* true when the row was clicked */
+CUI_API void cui_data_grid_cell(cui_ctx *ui);           /* next cell; put components inside */
+CUI_API void cui_data_grid_cell_text(cui_ctx *ui, const char *text);
+/* Editable text cell: double click (or Enter on the cursor row) to edit,
+ * Enter or clicking away commits, Esc reverts. True when committed. */
+CUI_API bool cui_data_grid_cell_edit(cui_ctx *ui, char *buf, size_t cap);
+/* The same editable text, inside the current cell (after an avatar, say). */
+CUI_API bool cui_data_grid_edit(cui_ctx *ui, char *buf, size_t cap);
+CUI_API void cui_data_grid_end(cui_ctx *ui);
+
+/* Tree cell: indentation, a disclosure chevron and a label, for tree tables
+ * (use it in a table or grid cell). Returns true when *open toggled. */
+CUI_API bool cui_tree_cell(cui_ctx *ui, const char *label, int depth, bool has_children, bool *open, const char *icon);
+
+/* Filter bar: a search field, a chip per active filter (click it to pick
+ * values) and "+ Filter" to add one. selected[i] is a bit mask of the
+ * chosen options of fields[i]. Returns true when anything changed. */
+typedef struct cui_filter_field { const char *name; const char *icon; const char *const *options; int option_count; } cui_filter_field;
+CUI_API bool cui_filter_bar(cui_ctx *ui, const char *id, const cui_filter_field *fields, int count, uint32_t *selected,
+                            char *search, size_t search_cap);
+
+/* ------------------------------------------------------------------------ */
+/* Code                                                                     */
+/* ------------------------------------------------------------------------ */
+
+/* Code block with syntax highlighting (lang: "c", "cpp", "js", "ts",
+ * "python", "rust", "go", "json", "shell"), line numbers, a title bar and a
+ * copy button. Long lines scroll sideways. */
+typedef struct cui_code_opts {
+    int _;
+    const char *lang;
+    const char *title;         /* e.g. a file name */
+    bool line_numbers;
+    int highlight_from, highlight_to;   /* 1 based line range to emphasize */
+    float max_height;          /* scrolls beyond this, default none */
+    float size;                /* font size, default 13 */
+} cui_code_opts;
+CUI_API void cui_code_block_ex(cui_ctx *ui, const char *id, const char *code, const cui_code_opts *opts);
+
+/* JSON viewer: a collapsible tree with typed colors and item counts.
+ * Returns false when the text is not valid JSON (and shows the error). */
+typedef struct cui_json_opts { int _; int expand_depth; float max_height; } cui_json_opts;
+CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, const cui_json_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Disclosure                                                               */
 /* ------------------------------------------------------------------------ */
 
@@ -1290,6 +1371,9 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
 #define cui_reorder_item(ui, pos)           CUI__SCOPE(cui_reorder_item_begin((ui), (pos)), cui_reorder_item_end(ui))
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
+#define cui_data_grid_begin(ui, id, cols, ncols, rows, first, last, ...) cui_data_grid_begin_ex((ui), (id), (cols), (ncols), (rows), (first), (last), CUI__OPTS(cui_grid_opts, __VA_ARGS__))
+#define cui_code_block(ui, id, code, ...)   cui_code_block_ex((ui), (id), (code), CUI__OPTS(cui_code_opts, __VA_ARGS__))
+#define cui_json_view(ui, id, json, ...)    cui_json_view_ex((ui), (id), (json), CUI__OPTS(cui_json_opts, __VA_ARGS__))
 #define cui_hover_card(ui, id, ...)         CUI__SCOPE_IF(cui_hover_card_begin((ui), (id), CUI__OPTS(cui_hover_card_opts, __VA_ARGS__)), cui_hover_card_end(ui))
 #define cui_confirm_popover(ui, id, ...)    cui_confirm_popover_ex((ui), (id), CUI__OPTS(cui_confirm_popover_opts, __VA_ARGS__))
 #define cui_expandable_text(ui, id, text, ...) cui_expandable_text_ex((ui), (id), (text), CUI__OPTS(cui_expandable_text_opts, __VA_ARGS__))
