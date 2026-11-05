@@ -5,7 +5,7 @@
 ### Modern native UI components for C
 
 Polished components, spring motion and full keyboard support.<br>
-Windows, macOS and Linux from one C99 codebase. No dependencies. About 230 KB.
+Windows, macOS and Linux from one C99 codebase. No dependencies. About 240 KB.
 
 <p>
 <img src="https://img.shields.io/badge/C99-pure-3b82f6?style=flat-square" alt="C99">
@@ -69,7 +69,7 @@ Your UI is plain C that runs every frame. Behind it sits a flexbox style engine:
 <td valign="top">
 
 **Fast, small, frugal**<br>
-A full screen builds, lays out and paints in **0.1 to 0.25 ms**. A complete app is about **230 KB**. Idle apps sleep and use no CPU.
+A full screen builds, lays out and paints in **0.1 to 0.25 ms**. A complete app is about **240 KB**. Idle apps sleep and use no CPU.
 
 </td>
 <td valign="top">
@@ -305,9 +305,9 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 
 | | |
 |---|---|
-| Whole library: every component, both renderers, X11 backend, fonts and icons | about 570 KB |
-| `hello` on Linux, stripped, whole executable | about 230 KB |
-| `assistant` (the AI app above), whole executable | about 320 KB |
+| Whole library: every component, both renderers, X11 backend, fonts and icons | about 590 KB |
+| `hello` on Linux, stripped, whole executable | about 240 KB |
+| `assistant` (the AI app above), whole executable | about 330 KB |
 | Embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons), compressed | 95 KB |
 
 The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off. Details in [Integration](docs/integration.md#binary-size).

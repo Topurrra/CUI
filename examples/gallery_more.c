@@ -598,7 +598,7 @@ static void page_social(cui_ctx *ui) {
         static const char *descs[] = { "One accent, hairline borders, layered shadows only where things float.",
                                        "Springs for presses, highlights that glide, overlays that open from their trigger.",
                                        "Tab, arrows, Enter and Esc work everywhere, with a ring only for the keyboard.",
-                                       "A full frame in a quarter of a millisecond, and about 230 KB for a whole app." };
+                                       "A full frame in a quarter of a millisecond, and about 240 KB for a whole app." };
         static const unsigned tops[] = { 0x3b1d5e, 0x0f3d3e, 0x1d2a5e, 0x5e2a1d };
         for (int k = 0; k < 4; k++) cui_carousel_slide(ui) {
             cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(tops[k]), .radius = 16, .pad = 28, .gap = 8, .justify = CUI_JUSTIFY_END) {
