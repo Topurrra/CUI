@@ -23,6 +23,7 @@ if(CMAKE_CXX_COMPILER)
     enable_language(CXX)
     add_executable(cui_cpp_compat cpp_compat.cpp)
     target_link_libraries(cui_cpp_compat PRIVATE cui::cui)
+    set_target_properties(cui_cpp_compat PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
     add_test(NAME cui_cpp_compat COMMAND cui_cpp_compat)
 endif()
 

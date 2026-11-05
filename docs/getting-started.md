@@ -140,7 +140,7 @@ Every component that has options takes them as named arguments after the require
 cui_button(ui, "Export", .icon = CUI_ICON_DOWNLOAD, .size = CUI_SIZE_SM, .tooltip = "Export as CSV");
 ```
 
-Under the hood this is a C99 compound literal: `cui_button(ui, label, ...)` expands to `cui_button_ex(ui, label, &(cui_button_opts){ ... })`. From C++ (or if you want to build options at runtime) call the `_ex` function with a filled struct.
+Under the hood this is a C99 compound literal: `cui_button(ui, label, ...)` expands to `cui_button_ex(ui, label, &(cui_button_opts){ ... })`. From C++ (C++11 or later; the headers are `extern "C"`), or if you want to build options at runtime, call the `_ex` function with a filled struct. C++20 designated initializers make that nearly as short.
 
 ## 5. Containers
 
