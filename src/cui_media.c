@@ -357,7 +357,9 @@ void cui_card_stack_item_begin(cui_ctx *ui, int depth) {
     cn->w = CUI_FILL; cn->h = CUI_PX(b->h);
     cn->radius = CUI_CORNERS(ui->theme.radius_panel + 4);
     cn->bg = CUI_C(ui, SURFACE_RAISED);
-    cn->border = 1; cn->border_color = CUI_C(ui, BORDER);
+    /* a translucent hairline, so it reads on the surface and on whatever fills the card */
+    cn->border = 1;
+    cn->border_color = ui->mode == CUI_THEME_DARK ? cui__rgba(255, 255, 255, 26) : cui__rgba(0, 0, 0, 22);
     cn->elevation = top ? CUI_ELEVATION_FLOATING : CUI_ELEVATION_RESTING;
     cn->elevation_alpha = top ? 0.6f + 0.4f * cui__clampf(fabsf(st->x.x) / 120, 0, 1) : 1;
     cn->flags |= CUI_NF_CLIP;

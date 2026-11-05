@@ -481,7 +481,7 @@ for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) { draw_card(ui, deck[k]);
 int dir = cui_card_stack_end(ui);   /* -1 or 1 when the top card was thrown left or right */
 ```
 
-Drag the divider, or focus it and use the arrow keys. The top card of the stack follows the pointer; past a third of its width, or with a fast flick, it flies off and the cards behind move up.
+Drag the divider, or focus it and use the arrow keys. The top card of the stack follows the pointer; past a third of its width, or with a fast flick, it flies off and the cards behind move up. Cards clip their content to a rectangle, so content that fills a card gives itself a radius of 25 (the card's 26, less its 1px border) and its corners line up.
 
 ## Planning
 

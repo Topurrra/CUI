@@ -772,16 +772,16 @@ static void shot_scene(unsigned char *px, int w, int h, bool color) {
         }
 }
 SCENE(compare_stack) {
-    static cui_ctx *owner;
     static cui_texture before, after;
     static float split = 0.42f;
-    if (owner != ui) {
+    bool *made = cui_state(ui, cui_make_id(ui, "cmp-textures"), sizeof *made);
+    if (!*made) {
+        *made = true;
         static unsigned char a[480 * 300 * 4], b[480 * 300 * 4];
         shot_scene(a, 480, 300, false);
         shot_scene(b, 480, 300, true);
         before = cui_image_create(ui, 480, 300, a);
         after = cui_image_create(ui, 480, 300, b);
-        owner = ui;
     }
     cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
         cui_box(ui, .width = CUI_GROW(1)) { cui_image_compare(ui, "cmp", before, after, &split, .height = 230); }
@@ -789,7 +789,7 @@ SCENE(compare_stack) {
         static const unsigned cols[] = { 0x7c3aed, 0x0ea5e9, 0x10b981 };
         cui_card_stack_begin(ui, "deck", 3, &(cui_card_stack_opts){ .width = CUI_PX(240), .height = 200 });
         for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) {
-            cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[k]), .radius = 20, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
+            cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[k]), .radius = 25, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
                 cui_text(ui, names[k], .font = CUI_FONT_DISPLAY, .size = 22, .color = CUI_RGB(0xffffff));
                 cui_text(ui, "Swipe right to save", .size = 13, .color = CUI_RGBA(0xffffffb0));
             }

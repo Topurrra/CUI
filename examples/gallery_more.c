@@ -541,9 +541,10 @@ static void page_social(cui_ctx *ui) {
         { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
         { "Barbara Liskov", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
     };
-    static cui_ctx *owner;
-    if (owner != ui) { before = after = 0; owner = ui; }   /* textures belong to one context */
-    if (!before) {
+    /* textures belong to one context: a flag in its state store says whether this one has them */
+    bool *made = cui_state(ui, cui_make_id(ui, "cmp-textures"), sizeof *made);
+    if (!*made) {
+        *made = true;
         static unsigned char a[640 * 400 * 4], b[640 * 400 * 4];
         make_scene(a, 640, 400, false);
         make_scene(b, 640, 400, true);
@@ -614,7 +615,7 @@ static void page_social(cui_ctx *ui) {
             for (int k = 0; k < 3; k++) {
                 int idx = (deck + k) % 5;
                 cui_card_stack_item(ui, k) {
-                    cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[idx]), .radius = 20, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
+                    cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[idx]), .radius = 25, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
                         cui_text(ui, names[idx], .font = CUI_FONT_DISPLAY, .size = 22, .color = CUI_RGB(0xffffff));
                         cui_text(ui, "Swipe right to save", .size = 13, .color = CUI_RGBA(0xffffffb0));
                     }
