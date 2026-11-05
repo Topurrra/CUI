@@ -178,8 +178,8 @@ bool cui_expandable_card_begin(cui_ctx *ui, const char *title, bool *open, const
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked) *open = !*open;
     if (!st->init) { st->t.x = *open ? 1.0f : 0.0f; st->init = true; }
-    cui__spring(ui, &st->t, *open ? 1.0f : 0.0f, 0.34f, 0.0f);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__spring(ui, &st->t, *open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     float t = cui__clampf(st->t.x, 0, 1);
     int wrap = cui__node_new(ui, 0);
     cui_node *wn = &ui->nodes[wrap];
@@ -320,7 +320,7 @@ int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int c
     for (int k = 0; k < count; k++) {
         cui_id iid = cui__hash(&k, sizeof k, tid);
         cui_interact r = cui__interact(ui, iid, CUI_IF_FOCUSABLE);
-        cui__tween(ui, &st->hover[k], r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, &st->hover[k], r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         if (r.clicked) clicked = k;
         bool on = k == active;
         int it = cui__node_new(ui, iid);
@@ -391,7 +391,7 @@ bool cui_banner_ex(cui_ctx *ui, const char *text, bool *open, const cui_banner_o
     cui_id id = cui_make_id(ui, text) ^ 0xBA22u;
     cui__banner_state *st = cui_state(ui, id, sizeof *st);
     if (!st->init) { st->t.x = shown ? 1.0f : 0.0f; st->init = true; }
-    cui__spring(ui, &st->t, shown ? 1.0f : 0.0f, 0.3f, 0.0f);
+    cui__spring(ui, &st->t, shown ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
     float t = cui__clampf(st->t.x, 0, 1);
     if (t <= 0.002f && !shown) return false;
     cui_id inner_id = id ^ 0x1u;
@@ -420,7 +420,7 @@ bool cui_banner_ex(cui_ctx *ui, const char *text, bool *open, const cui_banner_o
     cui__open(ui, row);
     cui_spacer(ui);
     cui_color fg = cui_mix(CUI_C(ui, FOREGROUND), tc, ui->mode == CUI_THEME_DARK ? 0.25f : 0.35f);
-    if (o->icon) cui__icon_node(ui, o->icon, 15, tc);
+    if (o->icon) cui__icon_node(ui, o->icon, 16, tc);
     int tt = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, false);
     ui->nodes[tt].line_height = 1.35f;
     bool action = false;
@@ -579,11 +579,11 @@ int cui_checklist_ex(cui_ctx *ui, const char *id_str, cui_check_step *steps, int
         cui__step_state *st = cui_state(ui, sid, sizeof *st);
         bool expanded = k == current;
         if (!st->init) { st->open.x = expanded ? 1.0f : 0.0f; st->done = s->done ? 1.0f : 0.0f; st->init = true; }
-        cui__spring(ui, &st->open, expanded ? 1.0f : 0.0f, 0.36f, 0.0f);
-        cui__tween(ui, &st->done, s->done ? 1.0f : 0.0f, 0.2f);
+        cui__spring(ui, &st->open, expanded ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+        cui__tween(ui, &st->done, s->done ? 1.0f : 0.0f, CUI__T_STATE);
         cui_id circle_id = sid ^ 0xC1u;
         cui_interact cr = cui__interact(ui, circle_id, CUI_IF_FOCUSABLE);
-        cui__tween(ui, &st->hover, cr.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, &st->hover, cr.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         if (cr.clicked) s->done = !s->done;
         float ot = cui__clampf(st->open.x, 0, 1);
         int row = cui__node_new(ui, sid);

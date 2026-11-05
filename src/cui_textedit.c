@@ -564,8 +564,8 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     if (er.submitted) flags |= CUI_SUBMITTED;
     if (er.gained) flags |= CUI_FOCUSED;
     if (er.blurred) flags |= CUI_BLURRED;
-    cui__tween(ui, &e->hover, rf.hovered ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &e->focus, (ui->focus == id) ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &e->hover, rf.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &e->focus, (ui->focus == id) ? 1.0f : 0.0f, CUI__T_FOCUS);
     (void)was_focused;
 
     int len = (int)strlen(buf);
@@ -594,13 +594,13 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     if (style == CUI__FIELD_BOXED) {
         float rad = CUI_MIN(ui->theme.radius_control, h * 0.5f);
         bn->radius = CUI_CORNERS(rad);
-        bn->pad[1] = bn->pad[3] = 12;
+        bn->pad[1] = bn->pad[3] = CUI__FIELD_PAD;
         if (multiline) { bn->pad[0] = bn->pad[2] = 8; }
-        if (o->icon || search_icon) bn->pad[3] = 10;
+        if (o->icon || search_icon) bn->pad[3] = CUI__FIELD_PAD_ICON;
         bn->bg = disabled ? CUI_C(ui, SURFACE_MUTED) : CUI_C(ui, SURFACE);
         bn->border = 1;
-        cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), e->hover * 0.45f);
-        cui_color focus_c = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : CUI_C(ui, ACCENT);
+        cui_color border = cui__control_edge(ui, e->hover);
+        cui_color focus_c = cui__edge_on(ui);
         border = cui_mix(border, focus_c, e->focus);
         if (has_error) border = CUI_C(ui, DANGER);
         bn->border_color = border;
@@ -608,7 +608,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
             bn->elevation = CUI_ELEVATION_NONE;
         }
     }
-    bn->opacity = disabled ? 0.6f : 1.0f;
+    bn->opacity = disabled ? CUI__DISABLED : 1.0f;
     cui__mark_interactive(ui, box, CUI_IF_FOCUSABLE);
     cui__open(ui, box);
     const char *icon = o->icon ? o->icon : search_icon;

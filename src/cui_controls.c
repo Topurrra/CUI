@@ -32,7 +32,7 @@ static void cui__paint_toggle(cui_ctx *ui, cui_node *n, void *data) {
     }
     if (p->kind == 0) {
         cui_corners rad = CUI_CORNERS(5);
-        cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), p->hover * 0.6f);
+        cui_color border = cui__control_edge(ui, p->hover);
         cui_color bg = cui_mix(CUI_C(ui, SURFACE), on, t);
         cui_draw_rect_border(ui, r, rad, bg, cui_mix(border, on, t), 1);
         cui__draw_sheen(ui, r, rad, 0.55f * t);
@@ -67,7 +67,7 @@ static void cui__paint_toggle(cui_ctx *ui, cui_node *n, void *data) {
         cui__draw_focus_ring(ui, r, CUI_CORNERS(h * 0.5f), p->focus);
     } else {
         float rr = r.w * 0.5f;
-        cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), p->hover * 0.6f);
+        cui_color border = cui__control_edge(ui, p->hover);
         cui_draw_rect_border(ui, r, CUI_CORNERS(rr), cui_mix(CUI_C(ui, SURFACE), on, t), cui_mix(border, on, t), 1);
         cui__draw_sheen(ui, r, CUI_CORNERS(rr), 0.55f * t);
         float dot = 7.0f * CUI_MAX(0.0f, p->t);   /* the dot pops a touch past its size, then settles */
@@ -91,8 +91,8 @@ static cui_interact cui__toggle_row(cui_ctx *ui, cui_id id, int kind, bool check
     float target = checked ? 1.0f : 0.0f;
     if (!st->init) { st->on.x = target; st->init = true; }
     if (r.clicked) target = 1.0f - target;
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (kind == 1) cui__spring(ui, &st->on, target, CUI_SPRING_SMOOTH);
     else if (r.keyboard_activate) cui__spring(ui, &st->on, target, 0.2f, 0.0f);   /* keys toggle plainly */
     else cui__spring(ui, &st->on, target, 0.26f, target > 0.5f ? 0.22f : 0.0f);   /* checking overshoots a little; clearing does not */
@@ -105,7 +105,7 @@ static cui_interact cui__toggle_row(cui_ctx *ui, cui_id id, int kind, bool check
     rn->gap = kind == 1 ? 12 : 10;
     rn->align = has_desc ? CUI_ALIGN_START : CUI_ALIGN_CENTER;
     rn->self_align = CUI__ALIGN_NOSTRETCH;
-    rn->opacity = disabled ? 0.45f : 1.0f;
+    rn->opacity = disabled ? CUI__DISABLED : 1.0f;
     cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__open(ui, row);
@@ -302,16 +302,16 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     if (!st->dragging) cui__spring(ui, &st->over, 0, 0.5f, 0.35f);
     if (jumped || !st->dragging) cui__spring(ui, &st->thumb, t, 0.3f, 0.0f);
     else { st->thumb.x = t; st->thumb.v = 0; }
-    cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &st->active, r.active ? 1.0f : 0.0f, 0.12f);
-    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->active, r.active ? 1.0f : 0.0f, CUI__T_STATE);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (r.hovered || r.active) cui__set_cursor(ui, CUI_CURSOR_HAND);
 
     int col = cui__node_new(ui, id);
     cui_node *cn = &ui->nodes[col];
     cn->gap = 6;
     cn->w = o->width.kind ? o->width : CUI_FILL;
-    cn->opacity = disabled ? 0.45f : 1.0f;
+    cn->opacity = disabled ? CUI__DISABLED : 1.0f;
     cui__open(ui, col);
     const char *fmt = o->format ? o->format : "%.0f";
     if ((label && cui__display_len(label)) || o->show_value)
@@ -350,7 +350,7 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
     *hi = min + tb * (max - min);
     cui__spring(ui, &st->a, ta, 0.22f, 0);
     cui__spring(ui, &st->b, tb, 0.22f, 0);
-    cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, CUI__T_HOVER);
     int col = cui__node_new(ui, id);
     ui->nodes[col].gap = 6;
     ui->nodes[col].w = CUI_FILL;
@@ -454,11 +454,11 @@ bool cui_chip_ex(cui_ctx *ui, const char *label, bool *selected, const cui_chip_
     bool changed = false;
     if (r.clicked && selected) { *selected = !*selected; changed = true; }
     bool sel = selected && *selected;
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &st->sel, sel ? 1.0f : 0.0f, 0.16f);
-    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->sel, sel ? 1.0f : 0.0f, CUI__T_STATE);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
-    cui__spring(ui, &st->press, r.pressed ? 0.96f : 1.0f, CUI_SPRING_SNAPPY);
+    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 6;
@@ -470,7 +470,7 @@ bool cui_chip_ex(cui_ctx *ui, const char *label, bool *selected, const cui_chip_
     n->border = 1;
     n->border_color = cui_mix(cui__quiet_edge(ui, st->hover), cui_mix(CUI_C(ui, ACCENT), CUI_C(ui, BACKGROUND), 0.45f), st->sel);
     n->scale = st->press.x;
-    n->opacity = disabled ? 0.45f : 1;
+    n->opacity = disabled ? CUI__DISABLED : 1.0f;
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__open(ui, i);
@@ -594,7 +594,7 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
     }
     for (int k = 0; k < count; k++) {
         bool sel = k == *index;
-        cui__tween(ui, &st->hover[k], ir[k].hovered ? 1.0f : 0.0f, 0.15f);
+        cui__tween(ui, &st->hover[k], ir[k].hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         int it = cui__node_new(ui, item_ids[k]);
         cui_node *in = &ui->nodes[it];
         in->dir = CUI_ROW; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER; in->gap = 6;
@@ -616,7 +616,7 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         }
         cui__open(ui, it);
         cui_color fg = sel ? CUI_C(ui, FOREGROUND) : cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), st->hover[k] * 0.7f);
-        if (icons && icons[k]) cui__icon_node(ui, icons[k], 15, fg);
+        if (icons && icons[k]) cui__icon_node(ui, icons[k], 16, fg);
         if (items[k] && cui__display_len(items[k]) > 0) cui__label_text(ui, items[k], CUI_FONT_MEDIUM, cui__fs(ui, size == CUI_SIZE_SM ? ui->theme.text_sm : ui->theme.text_body), fg);
         cui__close(ui);
         if (ir[k].focus_visible) {
@@ -691,10 +691,10 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
     cui_id id = cui_make_id(ui, label) ^ 0x4A570005u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__nav_state *st = cui_state(ui, id, sizeof *st);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
-    cui__spring(ui, &st->press, r.pressed ? 0.98f : 1.0f, CUI_SPRING_SNAPPY);
+    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
     bool first = g->frame != ui->frame;
     if (first) {
         g->frame = ui->frame;
@@ -719,7 +719,7 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
     n->pad[1] = 10; n->pad[3] = 10;
     n->w = CUI_FILL;
     n->self_align = CUI_ALIGN_STRETCH;
-    n->radius = CUI_CORNERS(10);
+    n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
     if (!o->selected) n->bg = cui_alpha(CUI_C(ui, HOVER), st->hover);
     n->scale = st->press.x;
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
@@ -798,7 +798,7 @@ int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
             cui_id id = cui_make_id(ui, items[k]);
             cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
             float *hv = cui_state(ui, id, sizeof(float));
-            cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.15f);
+            cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
             int t = cui__text_node(ui, items[k], cui__display_len(items[k]), CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body),
                                    cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), *hv), false);
             ui->nodes[t].id = id;
@@ -816,13 +816,13 @@ int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
 static bool cui__page_button(cui_ctx *ui, cui_id id, const char *text, bool selected) {
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->w = CUI_PX(32); n->h = CUI_PX(32);
     n->min_w = 32;
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->justify = CUI_JUSTIFY_CENTER;
-    n->radius = CUI_CORNERS(16);
+    n->radius = CUI_CORNERS(CUI__R_CONTROL(ui, 32));
     n->bg = selected ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), *hv);
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);

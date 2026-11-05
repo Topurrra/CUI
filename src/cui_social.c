@@ -4,7 +4,7 @@
 #define cui__fs cui__fsz
 
 static cui_color cui__accent_bg(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_ON) : CUI_C(ui, ACCENT); }
-static cui_color cui__accent_or_fg_any(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : CUI_C(ui, ACCENT); }
+static cui_color cui__accent_or_fg_any(cui_ctx *ui) { return cui__edge_on(ui); }
 static cui_color cui__accent_text(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_GLYPH) : CUI_C(ui, ACCENT_FOREGROUND); }
 
 /* ------------------------------------------------------------------------ */

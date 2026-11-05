@@ -44,7 +44,7 @@ bool cui_accordion_begin(cui_ctx *ui, const char *title, bool *open) {
     if (r.clicked) *open = !*open;
     if (!st->init) { st->t.x = *open ? 1.0f : 0.0f; st->init = true; }
     cui__spring(ui, &st->t, *open ? 1.0f : 0.0f, CUI_SPRING_SMOOTH);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     float t = cui__clampf(st->t.x, 0, 1);
     bool first = ui->nodes[cui__current(ui)].child_count == 0;
     int wrap = cui__node_new(ui, 0);
@@ -60,7 +60,7 @@ bool cui_accordion_begin(cui_ctx *ui, const char *title, bool *open) {
     hn->dir = CUI_ROW; hn->align = CUI_ALIGN_CENTER; hn->gap = 12;
     hn->pad[0] = hn->pad[2] = 14;
     hn->w = CUI_FILL;
-    hn->radius = CUI_CORNERS(8);
+    hn->radius = CUI_CORNERS(CUI__R_ITEM(ui));
     cui__mark_interactive(ui, head, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__open(ui, head);
@@ -134,15 +134,15 @@ bool cui_tree_begin(cui_ctx *ui, const char *label, bool *open, const cui_tree_o
     }
     ui->tree_clicked = r.clicked;
     if (!st->init) { st->t.x = is_open ? 1.0f : 0.0f; st->init = true; }
-    cui__spring(ui, &st->t, is_open ? 1.0f : 0.0f, 0.26f, 0.0f);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
+    cui__spring(ui, &st->t, is_open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int row = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[row];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 6;
     n->h = CUI_PX(30);
     n->pad[3] = 6 + 16.0f * (float)ui->tree_depth; n->pad[1] = 8;
     n->w = CUI_FILL; n->self_align = CUI_ALIGN_STRETCH;
-    n->radius = CUI_CORNERS(8);
+    n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
     n->bg = o->selected ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), st->hover);
     cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
@@ -150,7 +150,7 @@ bool cui_tree_begin(cui_ctx *ui, const char *label, bool *open, const cui_tree_o
     if (o->leaf) cui_gap(ui, 14);
     else cui__chevron_node(ui, -CUI_PI * 0.5f + st->t.x * CUI_PI * 0.5f, 14, CUI_C(ui, TEXT_MUTED));
     const char *icon = o->icon ? o->icon : (o->leaf ? CUI_ICON_FILE : (is_open ? CUI_ICON_FOLDER_OPEN : CUI_ICON_FOLDER));
-    cui__icon_node(ui, icon, 15, o->selected ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
+    cui__icon_node(ui, icon, 16, o->selected ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
     int t = cui__text_node(ui, label, cui__display_len(label), o->selected ? CUI_FONT_MEDIUM : CUI_FONT_BODY,
                            cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
     ui->nodes[t].line_height = 1.3f;
@@ -195,14 +195,14 @@ bool cui_list_item_ex(cui_ctx *ui, const char *title, const cui_list_item_opts *
     cui_id id = cui_make_id(ui, title) ^ 0x115E0008u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int row = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[row];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 12;
     n->pad[0] = n->pad[2] = o->subtitle ? 10 : 8; n->pad[1] = n->pad[3] = 12;
     n->min_h = o->subtitle ? 52 : 38;
     n->w = CUI_FILL; n->self_align = CUI_ALIGN_STRETCH;
-    n->radius = CUI_CORNERS(12);
+    n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
     n->bg = o->selected ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), *hv);
     cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
@@ -212,7 +212,7 @@ bool cui_list_item_ex(cui_ctx *ui, const char *title, const cui_list_item_opts *
         memset(&ao, 0, sizeof ao);
         ao.size = o->subtitle ? 34 : 26;
         cui_avatar_ex(ui, o->avatar, &ao);
-    } else if (o->icon) cui__icon_node(ui, o->icon, 17, CUI_C(ui, TEXT_SECONDARY));
+    } else if (o->icon) cui__icon_node(ui, o->icon, 16, CUI_C(ui, TEXT_SECONDARY));
     int col = cui__node_new(ui, 0);
     ui->nodes[col].gap = 1; ui->nodes[col].w = CUI_FILL;
     cui__open(ui, col);
@@ -377,7 +377,7 @@ bool cui_table_begin_ex(cui_ctx *ui, const char *id_str, const cui_table_column 
         ui->nodes[tx].line_height = 1.3f;
         if (c->sortable && o->sort) {
             const char *ic = sorted ? (o->sort->descending ? CUI_ICON_ARROW_DOWN : CUI_ICON_ARROW_UP) : CUI_ICON_CHEVRONS_UP_DOWN;
-            cui__icon_node(ui, ic, 13, sorted ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED));
+            cui__icon_node(ui, ic, 12, sorted ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED));
         }
         cui__close(ui);
     }
@@ -406,7 +406,7 @@ bool cui_table_row(cui_ctx *ui, bool selected) {
     cui_id rid = cui__hash(&ri, sizeof ri, t->id ^ 0x20Bu);
     cui_interact r = cui__interact(ui, rid, t->selectable ? CUI_IF_FOCUSABLE : 0);
     float *hv = cui_state(ui, rid, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.1f);
+    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
     int row = cui__node_new(ui, rid);
     cui_node *n = &ui->nodes[row];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER;

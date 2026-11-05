@@ -118,7 +118,7 @@ bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, 
     if (b->col_is_target) { b->target_col = c; b->target_index = 0; b->hole_y = cr.y + CUI__KB_HEAD; b->hole_x = cr.x + 8; }
     cui__kb_col_state *cs = cui_state(ui, cid, sizeof *cs);
     if (cs->gen != st->gen) { cs->grow = 0; cs->gen = st->gen; }   /* the dropped card fills the room now */
-    cui__tween(ui, &cs->hl, b->col_is_target ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &cs->hl, b->col_is_target ? 1.0f : 0.0f, CUI__T_STATE);
     int col = cui__node_new(ui, cid);
     cui_node *cn = &ui->nodes[col];
     cn->w = CUI_PX(o->width > 0 ? o->width : 280);
@@ -219,7 +219,7 @@ bool cui_kanban_card_begin(cui_ctx *ui, int card_id) {
     cui__spring(ui, &cs->y, shift, CUI_SPRING_SMOOTH);
     cui__spring(ui, &cs->sx, 0, CUI_SPRING_SMOOTH);
     cui__spring(ui, &cs->sy, 0, CUI_SPRING_SMOOTH);
-    cui__tween(ui, &cs->hover, (r.hovered && st->drag_card < 0) ? 1.0f : 0.0f, 0.14f);
+    cui__tween(ui, &cs->hover, (r.hovered && st->drag_card < 0) ? 1.0f : 0.0f, CUI__T_HOVER);
     bool settling = card_id == st->settle_card && (fabsf(cs->sx.x) > 0.5f || fabsf(cs->sy.x) > 0.5f);
     int n = cui__node_new(ui, kid);
     cui_node *cn = &ui->nodes[n];
@@ -549,7 +549,7 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         bool active = st->drag == k + 1 && st->moved;
         int en = cui__absolute(ui, eid, x, y, lane_w - 2, CUI_MAX(18.0f, h));
         cui_node *nd = &ui->nodes[en];
-        nd->radius = CUI_CORNERS(8);
+        nd->radius = CUI_CORNERS(CUI__R_SMALL);
         nd->bg = cui_mix(CUI_C(ui, SURFACE), tone, ui->mode == CUI_THEME_DARK ? (r.hovered ? 0.3f : 0.24f) : (r.hovered ? 0.2f : 0.14f));
         nd->pad[0] = 5; nd->pad[1] = 6; nd->pad[3] = 12; nd->pad[2] = 4;
         nd->gap = 1;
@@ -854,7 +854,7 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
         if (t->milestone) { w = bh + 4; x = t->start * dw - w * 0.5f; }
         int bnode = cui__absolute(ui, tid, x, k * rh + 8, w, bh);
         cui_node *nd = &ui->nodes[bnode];
-        nd->radius = CUI_CORNERS(7);
+        nd->radius = CUI_CORNERS(CUI__R_SMALL);
         nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->pad[3] = 10; nd->pad[1] = 8;
         nd->flags |= CUI_NF_CLIP;
         if (st->drag == k + 1 && st->moved) { nd->elevation = CUI_ELEVATION_RAISED; nd->elevation_alpha = 1; nd->flags |= CUI_NF_ON_TOP; }

@@ -69,8 +69,8 @@ bool cui_reasoning_begin(cui_ctx *ui, const char *id_str, const cui_reasoning_op
     st->was_thinking = o->thinking;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked) { st->open = !st->open; st->user_set = true; }
-    cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, 0.34f, 0.0f);
-    cui__tween(ui, &st->f.hover, r.hovered ? 1.0f : 0.0f, 0.12f);
+    cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+    cui__tween(ui, &st->f.hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int wrap = cui__node_new(ui, 0);
     ui->nodes[wrap].w = CUI_FILL; ui->nodes[wrap].gap = 0;
     cui__open(ui, wrap);
@@ -78,7 +78,7 @@ bool cui_reasoning_begin(cui_ctx *ui, const char *id_str, const cui_reasoning_op
     cui_node *hn = &ui->nodes[head];
     hn->dir = CUI_ROW; hn->align = CUI_ALIGN_CENTER; hn->gap = 8;
     hn->pad[0] = hn->pad[2] = 4; hn->pad[1] = 8;
-    hn->radius = CUI_CORNERS(8);
+    hn->radius = CUI_CORNERS(CUI__R_ITEM(ui));
     hn->self_align = CUI__ALIGN_NOSTRETCH;
     cui__mark_interactive(ui, head, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
@@ -207,8 +207,8 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
     cui_interact r = cui__interact(ui, id, expandable ? CUI_IF_FOCUSABLE : 0);
     if (r.clicked && expandable) st->open = !st->open;
     if (!st->f.init) { st->f.t.x = st->open ? 1.0f : 0.0f; st->f.init = true; }
-    cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, 0.32f, 0.0f);
-    cui__tween(ui, &st->f.hover, r.hovered && expandable ? 1.0f : 0.0f, 0.12f);
+    cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+    cui__tween(ui, &st->f.hover, r.hovered && expandable ? 1.0f : 0.0f, CUI__T_HOVER);
     int wrap = cui__node_new(ui, 0);
     cui_node *wn = &ui->nodes[wrap];
     wn->w = CUI_FILL;
@@ -230,7 +230,7 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
     in->w = CUI_PX(16); in->h = CUI_PX(24);   /* a bare icon: no tile behind it */
     in->dir = CUI_STACK; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER;
     cui__open(ui, ib);
-    cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_TERMINAL, 13, CUI_C(ui, TEXT_SECONDARY));
+    cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_TERMINAL, 14, CUI_C(ui, TEXT_SECONDARY));
     cui__close(ui);
     int nt = cui__text_node(ui, name, -1, CUI_FONT_MONO, cui__fs(ui, ui->theme.text_sm - 0.5f), CUI_C(ui, FOREGROUND), false);
     ui->nodes[nt].line_height = 1.3f;
@@ -321,7 +321,7 @@ int cui_agent_plan_ex(cui_ctx *ui, const char *id_str, const cui_plan_step *step
         cui_interact r = cui__interact(ui, sid, 0);
         if (r.clicked) clicked = k;
         float *hv = cui_state(ui, sid, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         cui_rect pr = cui__prev_rect(ui, sid);
         float cy = pr.y + 9 + 10;
         if (k == 0) first_y = cy;
@@ -464,12 +464,12 @@ int cui_source_list(cui_ctx *ui, const char *id_str, const cui_source *sources, 
         cui_interact r = cui__interact(ui, cid, CUI_IF_FOCUSABLE);
         if (r.clicked) clicked = k;
         float *hv = cui_state(ui, cid, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         int c = cui__node_new(ui, cid);
         cui_node *cn = &ui->nodes[c];
         cn->w = CUI_PX(196); cn->gap = 6;
         cn->pad[0] = cn->pad[2] = 10; cn->pad[1] = cn->pad[3] = 12;
-        cn->radius = CUI_CORNERS(14);
+        cn->radius = CUI_CORNERS(ui->theme.radius_panel);
         cn->bg = cui_mix(ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.04f) : CUI_C(ui, SURFACE_MUTED), CUI_C(ui, FOREGROUND), 0.04f * *hv);
         cn->border = 1; cn->border_color = cui_mix(CUI_C(ui, BORDER_SUBTLE), CUI_C(ui, BORDER), *hv);
         cui__mark_interactive(ui, c, CUI_IF_FOCUSABLE);
@@ -511,7 +511,7 @@ bool cui_citation(cui_ctx *ui, int number, const cui_source *s) {
     cui_id id = cui_make_id(ui, key);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int n = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[n];
     nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->gap = 4;
@@ -692,15 +692,15 @@ int cui_prompt_suggestions_ex(cui_ctx *ui, const char *id_str, const cui_prompt_
         cui_interact r = cui__interact(ui, cid, CUI_IF_FOCUSABLE);
         if (r.clicked) clicked = k;
         float *st = cui_state(ui, cid, sizeof(float) * 3);
-        cui__tween(ui, &st[0], r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, &st[0], r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         cui_spring *press = (cui_spring *)&st[1];
         if (press->x <= 0) press->x = 1;
-        cui__spring(ui, press, r.pressed ? 0.98f : 1.0f, CUI_SPRING_SNAPPY);
+        cui__spring(ui, press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
         int c = cui__node_new(ui, cid);
         cui_node *cn = &ui->nodes[c];
         cn->dir = CUI_ROW; cn->gap = 12; cn->align = CUI_ALIGN_START;
         cn->pad[0] = cn->pad[2] = 12; cn->pad[1] = cn->pad[3] = 14;
-        cn->radius = CUI_CORNERS(16);
+        cn->radius = CUI_CORNERS(ui->theme.radius_panel);
         cn->bg = cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), (ui->mode == CUI_THEME_DARK ? 0.04f : 0.0f) + 0.03f * st[0]);
         cn->border = 1; cn->border_color = cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), st[0]);
         cn->scale = press->x;
@@ -756,7 +756,7 @@ static bool cui__model_item(cui_ctx *ui, const cui_model *m, bool checked) {
     if (r.hovered && nav && (ui->mx != ui->pmx || ui->my != ui->pmy || !nav->keyboard)) { nav->highlight = index; nav->keyboard = false; }
     bool hl = nav && nav->highlight == index;
     float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, hl ? 1.0f : 0.0f, 0.1f);
+    cui__tween(ui, hv, hl ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
     int n = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[n];
     nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->gap = 10;
@@ -788,7 +788,7 @@ static bool cui__model_item(cui_ctx *ui, const cui_model *m, bool checked) {
         ui->nodes[dt].line_height = 1.4f;
     }
     cui__close(ui);
-    if (checked) cui__icon_node(ui, CUI_ICON_CHECK, 15, CUI_C(ui, FOREGROUND));
+    if (checked) cui__icon_node(ui, CUI_ICON_CHECK, 16, CUI_C(ui, FOREGROUND));
     cui__close(ui);
     bool chosen = r.clicked || (hl && cui_key_pressed(ui, CUI_KEY_ENTER));
     if (chosen) { cui__close_all_popups(ui); ui->kpressed[CUI_KEY_ENTER] = 0; }
@@ -809,12 +809,12 @@ bool cui_model_picker_ex(cui_ctx *ui, const char *id_str, const cui_model *model
     bool key = ui->focus == id && ui->focus_visible && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE));
     if (r.clicked && !(open && key) && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
     float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, (r.hovered || open) ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, hv, (r.hovered || open) ? 1.0f : 0.0f, CUI__T_HOVER);
     int b = cui__node_new(ui, id);
     cui_node *bn = &ui->nodes[b];
     bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 6;
     bn->h = CUI_PX(30); bn->pad[1] = 8; bn->pad[3] = 10;
-    bn->radius = CUI_CORNERS(15);
+    bn->radius = CUI_CORNERS(CUI__R_CONTROL(ui, 30));
     bn->bg = o->ghost ? cui_alpha(CUI_C(ui, HOVER), *hv * 1.4f) : cui_mix(CUI_C(ui, SURFACE_MUTED), CUI_C(ui, FOREGROUND), 0.04f * *hv);
     if (!o->ghost) { bn->border = 1; bn->border_color = CUI_C(ui, BORDER); }
     bn->self_align = CUI__ALIGN_NOSTRETCH;
@@ -864,12 +864,12 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
         ui->kpressed[CUI_KEY_ENTER] = 0;
         if (!empty && !o->busy) result |= CUI_COMPOSER_SEND;
     }
-    cui__tween(ui, &st->focus, ui->focus == fid ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->focus, ui->focus == fid ? 1.0f : 0.0f, CUI__T_FOCUS);
     int box = cui__node_new(ui, id);
     cui_node *bn = &ui->nodes[box];
     bn->w = o->width.kind ? o->width : CUI_FILL; bn->gap = 4;
     bn->pad[0] = 10; bn->pad[1] = bn->pad[3] = 10; bn->pad[2] = 10;
-    bn->radius = CUI_CORNERS(24);
+    bn->radius = CUI_CORNERS(ui->theme.radius_surface);
     bn->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.04f) : CUI_C(ui, SURFACE);
     bn->border = 1;
     bn->border_color = cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), st->focus);
@@ -887,15 +887,15 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
             cui_node *cn = &ui->nodes[chip];
             cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 6;
             cn->pad[0] = cn->pad[2] = 4; cn->pad[3] = 6; cn->pad[1] = 4;
-            cn->radius = CUI_CORNERS(10);
+            cn->radius = CUI_CORNERS(CUI__R_ITEM(ui));
             cn->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.08f) : CUI_C(ui, SURFACE_MUTED);
             cn->border = 1; cn->border_color = CUI_C(ui, BORDER_SUBTLE);
             cui__open(ui, chip);
             int ib = cui__node_new(ui, 0);
-            ui->nodes[ib].w = CUI_PX(24); ui->nodes[ib].h = CUI_PX(24); ui->nodes[ib].radius = CUI_CORNERS(7);
+            ui->nodes[ib].w = CUI_PX(24); ui->nodes[ib].h = CUI_PX(24); ui->nodes[ib].radius = CUI_CORNERS(CUI__R_SMALL);
             ui->nodes[ib].bg = CUI_C(ui, SURFACE); ui->nodes[ib].dir = CUI_STACK; ui->nodes[ib].align = CUI_ALIGN_CENTER; ui->nodes[ib].justify = CUI_JUSTIFY_CENTER;
             cui__open(ui, ib);
-            cui__icon_node(ui, CUI_ICON_FILE_TEXT, 13, CUI_C(ui, TEXT_SECONDARY));
+            cui__icon_node(ui, CUI_ICON_FILE_TEXT, 14, CUI_C(ui, TEXT_SECONDARY));
             cui__close(ui);
             int t = cui__text_node(ui, o->attachments[k], -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs + 0.5f), CUI_C(ui, FOREGROUND), false);
             ui->nodes[t].line_height = 1.3f; ui->nodes[t].max_w = 160;
@@ -935,7 +935,7 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     memset(&bo, 0, sizeof bo);
     bo.variant = CUI_BUTTON_OUTLINE; bo.size = CUI_SIZE_SM; bo.tooltip = "Attach files";
     if (cui_icon_button_ex(ui, CUI_ICON_PLUS, &bo)) result |= CUI_COMPOSER_ATTACH;
-    ui->nodes[ui->last_node].radius = CUI_CORNERS(15);
+    ui->nodes[ui->last_node].radius = CUI_CORNERS(ui->theme.radius_surface - 10);   /* concentric with the composer (pad 10) */
     if (o->models && o->model_count > 0) {
         cui_model_picker_opts mo;
         memset(&mo, 0, sizeof mo);
@@ -952,7 +952,7 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     cui__spring(ui, &st->send, sr.pressed ? 0.88f : 1.0f, CUI_SPRING_SNAPPY);
     int sb = cui__node_new(ui, sid);
     cui_node *sn = &ui->nodes[sb];
-    sn->w = CUI_PX(32); sn->h = CUI_PX(32); sn->radius = CUI_CORNERS(16);
+    sn->w = CUI_PX(32); sn->h = CUI_PX(32); sn->radius = CUI_CORNERS(ui->theme.radius_surface - 10);
     sn->dir = CUI_STACK; sn->align = CUI_ALIGN_CENTER; sn->justify = CUI_JUSTIFY_CENTER;
     cui_color on_bg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
     cui_color on_fg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, BACKGROUND) : CUI_C(ui, ACCENT_FOREGROUND);
@@ -1047,9 +1047,9 @@ bool cui_voice_orb_ex(cui_ctx *ui, const char *id_str, cui_voice_state state, fl
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__orb_state *st = cui_state(ui, id, sizeof *st);
     if (!st->init) { st->state_t[state & 3] = 1; st->scale.x = 1; st->init = true; }
-    for (int k = 0; k < 4; k++) cui__tween(ui, &st->state_t[k], k == (int)state ? 1.0f : 0.0f, 0.3f);
+    for (int k = 0; k < 4; k++) cui__tween(ui, &st->state_t[k], k == (int)state ? 1.0f : 0.0f, CUI__T_STATE);
     cui__spring(ui, &st->level, cui__clampf(level, 0, 1), 0.18f, 0.0f);
-    cui__spring(ui, &st->scale, r.pressed ? 0.94f : 1.0f, CUI_SPRING_SNAPPY);
+    cui__spring(ui, &st->scale, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
     float size = o->size > 0 ? o->size : 160;
     int n = cui__leaf(ui, id, CUI_PX(size), CUI_PX(size));
     cui_node *nd = &ui->nodes[n];

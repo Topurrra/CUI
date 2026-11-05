@@ -52,8 +52,8 @@ static void cui__paint_grid_check(cui_ctx *ui, cui_node *n, void *data) {
 
 static void cui__grid_checkbox(cui_ctx *ui, cui_id id, bool on, bool mixed) {
     float *t = cui_state(ui, id, sizeof(float) * 2);
-    cui__tween(ui, &t[0], on ? 1.0f : 0.0f, 0.12f);
-    cui__tween(ui, &t[1], mixed ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &t[0], on ? 1.0f : 0.0f, CUI__T_STATE);
+    cui__tween(ui, &t[1], mixed ? 1.0f : 0.0f, CUI__T_STATE);
     int c = cui__leaf(ui, id, CUI_PX(16), CUI_PX(16));
     cui__gcheck_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->t = t[0]; p->mixed = t[1];
@@ -196,7 +196,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         cui_id hid = cui__hash(&k, sizeof k, b->id ^ 0x4E1u);
         cui_interact hr = cui__interact(ui, hid, c->sortable ? CUI_IF_FOCUSABLE : 0);
         float *hv = cui_state(ui, hid, sizeof(float));
-        cui__tween(ui, hv, (hr.hovered && c->sortable) ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, hv, (hr.hovered && c->sortable) ? 1.0f : 0.0f, CUI__T_HOVER);
         if (hr.clicked && c->sortable && o->sort) {
             if (o->sort->column == k) o->sort->descending = !o->sort->descending;
             else { o->sort->column = k; o->sort->descending = false; }
@@ -217,7 +217,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         ui->nodes[t].line_height = 1.3f;
         if (c->sortable) {
             const char *icon = sorted ? (o->sort->descending ? CUI_ICON_ARROW_DOWN : CUI_ICON_ARROW_UP) : CUI_ICON_CHEVRONS_UP_DOWN;
-            cui__icon_node(ui, icon, 13, sorted ? CUI_C(ui, FOREGROUND) : cui_alpha(CUI_C(ui, TEXT_MUTED), 0.4f + 0.6f * *hv));
+            cui__icon_node(ui, icon, 12, sorted ? CUI_C(ui, FOREGROUND) : cui_alpha(CUI_C(ui, TEXT_MUTED), 0.4f + 0.6f * *hv));
         }
         /* resize handle on the right edge */
         if (!c->fixed) {
@@ -293,7 +293,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
         if (b->o.cursor) *b->o.cursor = row;
     }
     float *hv = cui_state(ui, rid, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.1f);
+    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
     int n = cui__node_new(ui, rid);
     cui_node *rn = &ui->nodes[n];
     rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER;
@@ -460,7 +460,7 @@ bool cui_tree_cell(cui_ctx *ui, const char *label, int depth, bool has_children,
     cui__open(ui, row);
     if (has_children) {
         cui_interact r = cui__interact(ui, id, 0);
-        cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         if (r.clicked && open) { *open = !*open; toggled = true; }
         int b = cui__node_new(ui, id);
         cui_node *bn = &ui->nodes[b];
@@ -475,7 +475,7 @@ bool cui_tree_cell(cui_ctx *ui, const char *label, int depth, bool has_children,
     } else {
         cui_gap(ui, 20);
     }
-    if (icon) cui__icon_node(ui, icon, 15, CUI_C(ui, TEXT_SECONDARY));
+    if (icon) cui__icon_node(ui, icon, 16, CUI_C(ui, TEXT_SECONDARY));
     int t = cui__text_node(ui, label, cui__display_len(label), has_children ? CUI_FONT_MEDIUM : CUI_FONT_BODY,
                            cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
     ui->nodes[t].line_height = 1.3f;
@@ -521,19 +521,19 @@ bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fie
         cui_interact r = cui__interact(ui, cid, CUI_IF_FOCUSABLE);
         if (r.clicked && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
         float *hv = cui_state(ui, cid, sizeof(float));
-        cui__tween(ui, hv, (r.hovered || (p && p->open)) ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, hv, (r.hovered || (p && p->open)) ? 1.0f : 0.0f, CUI__T_HOVER);
         int chip = cui__node_new(ui, cid);
         cui_node *cn = &ui->nodes[chip];
         cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 6;
         cn->h = CUI_PX(30); cn->pad[3] = 10; cn->pad[1] = 4;
-        cn->radius = CUI_CORNERS(8);
+        cn->radius = CUI_CORNERS(CUI__R_CONTROL(ui, 30));
         cn->bg = cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.04f + 0.04f * *hv);
         cn->border = 1; cn->border_color = CUI_C(ui, BORDER_STRONG);
         cn->self_align = CUI__ALIGN_NOSTRETCH;
         cui__mark_interactive(ui, chip, CUI_IF_FOCUSABLE);
         if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
         cui__open(ui, chip);
-        if (f->icon) cui__icon_node(ui, f->icon, 13, CUI_C(ui, TEXT_SECONDARY));
+        if (f->icon) cui__icon_node(ui, f->icon, 14, CUI_C(ui, TEXT_SECONDARY));
         int nt = cui__text_node(ui, f->name, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_SECONDARY), false);
         ui->nodes[nt].line_height = 1.2f;
         int n = cui__popcount(selected[k]);
@@ -561,7 +561,7 @@ bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fie
                 bool on = (selected[k] & (1u << o)) != 0;
                 if (orr.clicked) { selected[k] ^= 1u << o; changed = true; on = !on; }
                 float *oh = cui_state(ui, oid, sizeof(float));
-                cui__tween(ui, oh, orr.hovered ? 1.0f : 0.0f, 0.1f);
+                cui__tween(ui, oh, orr.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
                 int it = cui__node_new(ui, oid);
                 cui_node *in = &ui->nodes[it];
                 in->dir = CUI_ROW; in->align = CUI_ALIGN_CENTER; in->gap = 10;

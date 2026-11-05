@@ -289,9 +289,9 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
             uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)(ln - 1) * 6);
             float alpha_top = (p->count > 1 ? 0.16f : 0.2f) * (ui->mode == CUI_THEME_DARK ? 1.2f : 1.0f);
             for (int i = 0; i < ln; i++) {
-                float rel = (base_y - line[i].y) / plot.h;
-                v[i * 2].x = line[i].x; v[i * 2].y = line[i].y; v[i * 2].c = cui_alpha(c, alpha_top * (0.35f + 0.65f * cui__clampf(rel * 1.4f, 0, 1)));
-                v[i * 2 + 1].x = line[i].x; v[i * 2 + 1].y = base_y; v[i * 2 + 1].c = cui_alpha(c, 0);
+                /* a flat tint: the area is a quantity, not a glow fading into the page */
+                v[i * 2].x = line[i].x; v[i * 2].y = line[i].y; v[i * 2].c = cui_alpha(c, alpha_top * 0.6f);
+                v[i * 2 + 1].x = line[i].x; v[i * 2 + 1].y = base_y; v[i * 2 + 1].c = cui_alpha(c, alpha_top * 0.6f);
             }
             for (int i = 0; i < ln - 1; i++) {
                 uint32_t a = (uint32_t)i * 2;
@@ -495,7 +495,7 @@ void cui_donut_chart_ex(cui_ctx *ui, const char *id_str, const float *values, co
         }
     }
     cui__spring(ui, &st->intro, 1.0f, 1.0f, 0.0f);
-    cui__tween(ui, &st->hover_t, hover >= 0 ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover_t, hover >= 0 ? 1.0f : 0.0f, CUI__T_HOVER);
     if (hover >= 0) st->hover = hover;
     float size = o->height > 0 ? o->height : 180;
     int row = cui__node_new(ui, id);
@@ -562,18 +562,7 @@ static void cui__paint_spark(cui_ctx *ui, cui_node *n, void *data) {
         pts[i].x = r.x + 2 + (r.w - 4) * (float)i / (float)(p->count - 1);
         pts[i].y = r.y + 3 + (r.h - 6) * (1 - (p->values[i] - lo) / (hi - lo));
     }
-    cui_cvert *v = cui__frame_alloc(ui, sizeof(cui_cvert) * (size_t)p->count * 2);
-    uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)(p->count - 1) * 6);
-    for (int i = 0; i < p->count; i++) {
-        v[i * 2].x = pts[i].x; v[i * 2].y = pts[i].y; v[i * 2].c = cui_alpha(p->color, 0.16f);
-        v[i * 2 + 1].x = pts[i].x; v[i * 2 + 1].y = r.y + r.h; v[i * 2 + 1].c = cui_alpha(p->color, 0);
-    }
-    for (int i = 0; i < p->count - 1; i++) {
-        uint32_t a = (uint32_t)i * 2;
-        uint32_t q[6] = { a, a + 2, a + 3, a, a + 3, a + 1 };
-        memcpy(idx + i * 6, q, sizeof q);
-    }
-    cui__draw_triangles(ui, v, p->count * 2, idx, (p->count - 1) * 6);
+    /* a line and where it ends: no fill under it, the shape is the information */
     cui_draw_polyline(ui, pts, p->count, 1.75f, p->color, false);
     cui_draw_circle(ui, pts[p->count - 1], 3, p->color);
 }

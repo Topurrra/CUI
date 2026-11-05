@@ -151,7 +151,7 @@ static void sidebar(cui_ctx *ui, app_state *s) {
         cui_row(ui, .gap = 10, .pad_x = 6, .pad_top = 4, .pad_bottom = 12, .align = CUI_ALIGN_CENTER) {
             cui_box(ui, .width = CUI_PX(26), .height = CUI_PX(26), .radius = 8, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
-                cui_icon(ui, CUI_ICON_TARGET, 15, CUI_COLOR_ACCENT_FOREGROUND);
+                cui_icon(ui, CUI_ICON_TARGET, 16, CUI_COLOR_ACCENT_FOREGROUND);
             }
             cui_text(ui, "Orbit", .font = CUI_FONT_MEDIUM, .size = 15, .width = CUI_FILL, .nowrap = true);
             cui_icon_button(ui, CUI_ICON_SQUARE_PEN, .size = CUI_SIZE_SM, .tooltip = "New issue");

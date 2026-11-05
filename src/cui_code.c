@@ -404,7 +404,7 @@ static void cui__json_rows(cui_ctx *ui, cui_id id, cui__jparse *p, cui__json_sta
     cui_interact r = cui__interact(ui, rid, 0);
     if (r.clicked && container && node < 4096) { st->collapsed[node >> 3] ^= (uint8_t)(1 << (node & 7)); collapsed = !collapsed; }
     float *hv = cui_state(ui, rid, sizeof(float));
-    cui__tween(ui, hv, (r.hovered && container) ? 1.0f : 0.0f, 0.1f);
+    cui__tween(ui, hv, (r.hovered && container) ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
     float fs = cui__fs(ui, 13);
     int row = cui__node_new(ui, rid);
     cui_node *rn = &ui->nodes[row];
@@ -503,7 +503,7 @@ bool cui_json_view_ex(cui_ctx *ui, const char *id_str, const char *json, const c
         ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 8; ui->nodes[row].align = CUI_ALIGN_CENTER;
         ui->nodes[row].pad[0] = ui->nodes[row].pad[2] = 6; ui->nodes[row].pad[3] = 6;
         cui__open(ui, row);
-        cui__icon_node(ui, CUI_ICON_CIRCLE_ALERT, 15, CUI_C(ui, DANGER));
+        cui__icon_node(ui, CUI_ICON_CIRCLE_ALERT, 16, CUI_C(ui, DANGER));
         int t = cui__text_node(ui, cui__frame_printf(ui, "Invalid JSON: %s (line %d, column %d)", p.err ? p.err : "error", line, colno), -1,
                                CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, DANGER), true);
         ui->nodes[t].line_height = 1.4f;

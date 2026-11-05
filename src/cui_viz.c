@@ -97,7 +97,7 @@ static cui__viz_state *cui__viz_state_get(cui_ctx *ui, cui_id id) {
 static void cui__viz_hover(cui_ctx *ui, cui__viz_state *st, int hover) {
     st->hover = hover;
     if (hover >= 0) st->shown = hover;
-    cui__tween(ui, &st->hover_t, hover >= 0 ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover_t, hover >= 0 ? 1.0f : 0.0f, CUI__T_HOVER);
 }
 
 static int cui__viz_node(cui_ctx *ui, cui_id id, cui_size w, cui_size h, cui__paint_fn paint, void *data, bool hovered) {
@@ -1274,7 +1274,7 @@ int cui_bar_list_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *items_i
         if (!is->init) { is->y.x = ty; is->w.x = 0; is->init = true; }
         cui__spring(ui, &is->y, ty, CUI_SPRING_SMOOTH);
         cui__spring(ui, &is->w, tw, 0.6f, 0.0f);
-        cui__tween(ui, &is->hover, rank == hover_rank ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, &is->hover, rank == hover_rank ? 1.0f : 0.0f, CUI__T_HOVER);
         if (rank >= shown && fabsf(is->y.x - ty) < 0.5f) continue;   /* gone */
         cui__bl_row *row = &p->rows[p->n++];
         row->label = lb;

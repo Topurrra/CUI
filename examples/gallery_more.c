@@ -268,7 +268,7 @@ static void page_disclosure(cui_ctx *ui) {
                     cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
                     cui_text(ui, "Engineer on the rendering team. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                     cui_row(ui, .gap = 6, .pad_top = 4) {
-                        cui_icon(ui, CUI_ICON_CALENDAR, 13, CUI_COLOR_TEXT_MUTED);
+                        cui_icon(ui, CUI_ICON_CALENDAR, 12, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
                     }
                 }
@@ -689,8 +689,8 @@ static void page_planning(cui_ctx *ui) {
                 cui_avatar(ui, cd->who, .size = 22);
                 cui_spacer(ui);
                 static const char *nums[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
-                if (cd->files) { cui_icon(ui, CUI_ICON_PAPERCLIP, 13, CUI_COLOR_TEXT_MUTED); cui_text(ui, nums[cd->files % 10], .size = 12, .color = CUI_COLOR_TEXT_MUTED); }
-                if (cd->comments) { cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 13, CUI_COLOR_TEXT_MUTED); cui_text(ui, nums[cd->comments % 10], .size = 12, .color = CUI_COLOR_TEXT_MUTED); }
+                if (cd->files) { cui_icon(ui, CUI_ICON_PAPERCLIP, 12, CUI_COLOR_TEXT_MUTED); cui_text(ui, nums[cd->files % 10], .size = 12, .color = CUI_COLOR_TEXT_MUTED); }
+                if (cd->comments) { cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 12, CUI_COLOR_TEXT_MUTED); cui_text(ui, nums[cd->comments % 10], .size = 12, .color = CUI_COLOR_TEXT_MUTED); }
                 if (cd->progress >= 1) cui_icon(ui, CUI_ICON_CIRCLE_CHECK, 14, CUI_COLOR_SUCCESS);
             }
             cui_kanban_card_end(ui);

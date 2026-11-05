@@ -469,7 +469,7 @@ void cui_spotlight_begin(cui_ctx *ui, const char *id_str, const cui_spotlight_op
     cui_rect pr = cui__prev_rect(ui, id);
     bool inside = pr.w > 0 && ui->mouse_inside && ui->mx >= pr.x && ui->mx < pr.x + pr.w && ui->my >= pr.y && ui->my < pr.y + pr.h;
     cui__spot_state *st = cui_state(ui, id, sizeof *st);
-    cui__tween(ui, &st->hover, inside ? 1.0f : 0.0f, 0.2f);
+    cui__tween(ui, &st->hover, inside ? 1.0f : 0.0f, CUI__T_HOVER);
     if (inside || !st->init) { st->mx = ui->mx; st->my = ui->my; st->init = true; }
     int n = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[n];
@@ -666,7 +666,7 @@ bool cui_dock_item_ex(cui_ctx *ui, const char *icon, const char *label, const cu
     if (st->s.x <= 0) st->s.x = 1;
     cui__spring(ui, &st->s, target, 0.28f, 0.0f);
     cui__spring(ui, &st->press, r.pressed ? 0.9f : 1.0f, CUI_SPRING_SNAPPY);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     float sz = b->size * st->s.x;
     int n = cui__leaf(ui, iid, CUI_PX(sz), CUI_PX(sz));
     cui_node *nd = &ui->nodes[n];
@@ -730,7 +730,7 @@ bool cui_tab_bar_ex(cui_ctx *ui, const char *id_str, const cui_tab_bar_item *ite
     nd->dir = CUI_ROW; nd->pad[0] = nd->pad[1] = nd->pad[2] = nd->pad[3] = 6; nd->gap = 4;
     nd->w = o->width.kind ? o->width : CUI_FILL;
     nd->h = CUI_PX(64);
-    nd->radius = CUI_CORNERS(32);
+    nd->radius = CUI_CORNERS(ui->theme.radius_surface);
     nd->bg = CUI_C(ui, SURFACE_RAISED);
     nd->border = 1; nd->border_color = ui->mode == CUI_THEME_DARK ? CUI_C(ui, BORDER) : cui__rgba(0, 0, 0, 18);
     nd->elevation = CUI_ELEVATION_RAISED; nd->elevation_alpha = 1;
@@ -751,13 +751,13 @@ bool cui_tab_bar_ex(cui_ctx *ui, const char *id_str, const cui_tab_bar_item *ite
         }
         bool on = k == sel;
         float *hv = cui_state(ui, iid, sizeof(float) * 2);
-        cui__tween(ui, &hv[0], on ? 1.0f : 0.0f, 0.18f);
-        cui__tween(ui, &hv[1], r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, &hv[0], on ? 1.0f : 0.0f, CUI__T_HOVER);
+        cui__tween(ui, &hv[1], r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         int it = cui__node_new(ui, iid);
         cui_node *in = &ui->nodes[it];
         in->w = CUI_GROW(1); in->h = CUI_FILL;
         in->dir = CUI_COLUMN; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER; in->gap = 3;
-        in->radius = CUI_CORNERS(26);
+        in->radius = CUI_CORNERS(ui->theme.radius_surface - 6);
         cui__mark_interactive(ui, it, CUI_IF_FOCUSABLE);
         if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
         cui__open(ui, it);
@@ -820,9 +820,9 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     bool v = on && *on;
     cui__tile_state *st = cui_state(ui, id, sizeof *st);
     if (!st->init) { st->on = v ? 1.0f : 0.0f; st->press.x = 1; st->init = true; }
-    cui__tween(ui, &st->on, v ? 1.0f : 0.0f, 0.18f);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
-    cui__spring(ui, &st->press, r.pressed ? 0.96f : 1.0f, CUI_SPRING_SNAPPY);
+    cui__tween(ui, &st->on, v ? 1.0f : 0.0f, CUI__T_STATE);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
     bool dark = ui->mode == CUI_THEME_DARK;
     cui_color off_bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.08f + 0.04f * st->hover) : cui_mix(CUI_C(ui, SURFACE_MUTED), CUI_C(ui, FOREGROUND), 0.035f * st->hover);
     cui_color on_bg = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_ON) : CUI_C(ui, ACCENT));
@@ -837,7 +837,7 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     nd->pad[0] = nd->pad[1] = nd->pad[2] = nd->pad[3] = 14;
     nd->w = o->width.kind ? o->width : CUI_FILL;
     nd->min_h = o->wide ? 64 : 112;
-    nd->radius = CUI_CORNERS(22);
+    nd->radius = CUI_CORNERS(ui->theme.radius_surface);
     nd->bg = lamp ? cui_mix(off_bg, cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.15f + 0.03f * st->hover), st->on) : cui_mix(off_bg, on_bg, st->on);
     /* off tiles in light mode keep a hairline so they do not melt into a white page */
     nd->border = 1;
@@ -981,8 +981,7 @@ typedef struct { bool dragging; float hover; float drag_pos; cui_spring press; }
 static void cui__paint_art_color(cui_ctx *ui, cui_node *n, void *data) {
     cui_color c = *(cui_color *)data;
     cui_rect r = n->rect;
-    cui_draw_rect_gradient(ui, r, n->radius, cui_mix(c, cui__rgba(255, 255, 255, 255), 0.22f), cui_mix(c, cui__rgba(0, 0, 0, 255), 0.28f));
-    cui__draw_sheen(ui, r, n->radius, 0.6f);
+    cui_draw_rect(ui, r, n->radius, c);   /* a flat placeholder, not a glossy tile */
     cui_draw_icon(ui, CUI_ICON_MUSIC, r, r.w * 0.4f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.85f));
 }
 
@@ -1007,7 +1006,7 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
         if (ui->mdown[0] && srr.w > 0) { st->drag_pos = cui__clampf((ui->mx - srr.x) / srr.w, 0, 1) * np->duration; ui->active = sid; }
         else { st->dragging = false; np->position = st->drag_pos; result |= CUI_PLAYER_SEEK; }
     }
-    cui__tween(ui, &st->hover, (sr.hovered || st->dragging) ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, (sr.hovered || st->dragging) ? 1.0f : 0.0f, CUI__T_HOVER);
     if (sr.hovered || st->dragging) cui__set_cursor(ui, CUI_CURSOR_HAND);
     float pos = st->dragging ? st->drag_pos : np->position;
     float frac = np->duration > 0 ? cui__clampf(pos / np->duration, 0, 1) : 0;

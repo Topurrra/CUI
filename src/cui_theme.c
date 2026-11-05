@@ -188,7 +188,7 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
     c[CUI_TOKEN_DANGER] = dark ? cui_oklch(0.70f, 0.16f, 24, 1) : cui_oklch(0.55f, 0.19f, 27, 1);
     c[CUI_TOKEN_INFO] = t->tone_sky;
     c[CUI_TOKEN_HOVER] = cui_alpha(c[CUI_TOKEN_FOREGROUND], 0.05f);
-    c[CUI_TOKEN_ACTIVE] = cui_alpha(c[CUI_TOKEN_FOREGROUND], 0.085f);
+    c[CUI_TOKEN_ACTIVE] = cui_alpha(c[CUI_TOKEN_FOREGROUND], 0.075f);
 
     const cui__accent_def *a = &cui__accents[accent];
     float series_l = dark ? 0.73f : 0.58f;

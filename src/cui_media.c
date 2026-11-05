@@ -53,7 +53,7 @@ bool cui_carousel_begin(cui_ctx *ui, const char *id_str, int count, int *index, 
     b->slide_w = sw;
     float stride = sw + gap;
     cui_interact r = cui__interact(ui, b->vid, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int target = *index;
     if (r.hovered && ui->mpressed[0]) { st->dragging = true; st->press_x = ui->mx; st->start = st->pos.x; st->vel = 0; st->last_x = ui->mx; st->last_t = ui->time; }
     if (st->dragging) {
@@ -245,7 +245,7 @@ bool cui_image_compare_ex(cui_ctx *ui, const char *id_str, cui_texture before, c
         if (cui_key_pressed(ui, CUI_KEY_LEFT)) *pos = cui__clampf(*pos - 0.05f, 0, 1);
         if (cui_key_pressed(ui, CUI_KEY_RIGHT)) *pos = cui__clampf(*pos + 0.05f, 0, 1);
     }
-    cui__tween(ui, hv, (r.hovered || r.active) ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, hv, (r.hovered || r.active) ? 1.0f : 0.0f, CUI__T_HOVER);
     int n = cui__leaf(ui, id, o->width.kind ? o->width : CUI_FILL, CUI_PX(o->height > 0 ? o->height : 280));
     cui_node *nd = &ui->nodes[n];
     nd->radius = CUI_CORNERS(ui->theme.radius_panel);
@@ -541,7 +541,7 @@ static void cui__ticker_set(cui_ctx *ui, cui_id set_id, const cui_ticker_item *i
         }
         if (it->delta != 0) {
             cui_color c = (it->lower_is_better ? it->delta < 0 : it->delta > 0) ? CUI_C(ui, SUCCESS) : CUI_C(ui, DANGER);
-            cui__icon_node(ui, it->delta > 0 ? CUI_ICON_TRENDING_UP : CUI_ICON_TRENDING_DOWN, 13, c);
+            cui__icon_node(ui, it->delta > 0 ? CUI_ICON_TRENDING_UP : CUI_ICON_TRENDING_DOWN, 12, c);
             int dt = cui__text_node(ui, cui__frame_printf(ui, "%+.1f%%", (double)it->delta), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), c, false);
             ui->nodes[dt].line_height = 1.3f;
             ui->nodes[dt].flags |= CUI_NF_TABULAR;

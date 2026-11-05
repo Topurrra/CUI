@@ -26,12 +26,12 @@ static int cui__picker_field(cui_ctx *ui, cui_id id, cui_interact r, float hover
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
     n->min_h = h;
     n->w = in_label ? CUI_FILL : (width.kind ? width : CUI_PX(240));
-    n->pad[1] = 12; n->pad[3] = 12; n->pad[0] = n->pad[2] = 3;
+    n->pad[1] = CUI__FIELD_PAD_ICON; n->pad[3] = CUI__FIELD_PAD; n->pad[0] = n->pad[2] = 3;
     n->radius = CUI_CORNERS(CUI_MIN(ui->theme.radius_control, h * 0.5f));
     n->bg = CUI_C(ui, SURFACE);
     n->border = 1;
-    cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), hover * 0.45f);
-    n->border_color = cui_mix(border, ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : CUI_C(ui, ACCENT), open ? 1.0f : 0.0f);
+    cui_color border = cui__control_edge(ui, hover);
+    n->border_color = cui_mix(border, cui__edge_on(ui), open ? 1.0f : 0.0f);
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     return i;
@@ -60,8 +60,8 @@ static bool cui__check_item(cui_ctx *ui, const char *label, const char *icon, bo
     if (r.hovered && nav && (ui->mx != ui->pmx || ui->my != ui->pmy || !nav->keyboard)) { nav->highlight = index; nav->keyboard = false; }
     bool hl = nav && nav->highlight == index;
     float *st = cui_state(ui, id, sizeof(float) * 2);
-    cui__tween(ui, &st[0], hl ? 1.0f : 0.0f, 0.1f);
-    cui__tween(ui, &st[1], checked ? 1.0f : 0.0f, 0.14f);
+    cui__tween(ui, &st[0], hl ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    cui__tween(ui, &st[1], checked ? 1.0f : 0.0f, CUI__T_STATE);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 10;
@@ -117,7 +117,7 @@ bool cui_multi_select_ex(cui_ctx *ui, const char *id_str, const char *const *ite
     if (r.clicked && p && !(open && r.keyboard_activate)) { cui__popup_set(ui, pid, !open); p->at_mouse = false; st->query[0] = 0; }
     if (p && !p->open && r.focus_visible && cui_key_pressed(ui, CUI_KEY_DOWN)) cui__popup_set(ui, pid, true);
     open = p && p->open;
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     bool changed = false;
     int col = cui__label_wrap_begin(ui, o->label, o->width);
     int field = cui__picker_field(ui, id, r, st->hover, open, o->width.kind ? o->width : CUI_PX(300), col >= 0);
@@ -166,7 +166,7 @@ bool cui_multi_select_ex(cui_ctx *ui, const char *id_str, const char *const *ite
         ui->nodes[chips].pad[3] = 2;
     }
     cui__close(ui);
-    cui__icon_node(ui, CUI_ICON_CHEVRONS_UP_DOWN, 15, CUI_C(ui, TEXT_MUTED));
+    cui__icon_node(ui, CUI_ICON_CHEVRONS_UP_DOWN, 16, CUI_C(ui, TEXT_MUTED));
     cui__close(ui);
     cui__focus_ring(ui, field, r.focus_visible ? 1.0f : 0.0f);
     if (col >= 0) cui__close(ui);
@@ -357,7 +357,7 @@ static void cui__range_month(cui_ctx *ui, cui_id cal_id, cui__rcal_state *st, in
         cui_interact r = cui__interact(ui, did, CUI_IF_FOCUSABLE);
         if (r.hovered) *new_hover = days;
         float *hv = cui_state(ui, did, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.12f);
+        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         bool in = have_s && days >= lo && days <= hi && (have_e && hi > lo);
         bool is_end = have_s && (days == s || (have_e && days == e));
         int wdk = cui__dow(days);
@@ -463,7 +463,7 @@ bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *r
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
     bool open = p && p->open;
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int col = cui__label_wrap_begin(ui, o->label, o->width);
     int field = cui__picker_field(ui, id, r, st->hover, open, o->width.kind ? o->width : CUI_PX(280), col >= 0);
     ui->nodes[field].h = CUI_PX(cui__control_height(ui, CUI_SIZE_MD));
@@ -574,12 +574,12 @@ static bool cui__time_column(cui_ctx *ui, const char *sid, int count, int value,
         cui_id iid = cui__hash(&k, sizeof k, scid);
         cui_interact r = cui__interact(ui, iid, 0);
         float *hv = cui_state(ui, iid, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, 0.1f);
+        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
         int it = cui__node_new(ui, iid);
         cui_node *n = &ui->nodes[it];
         n->h = CUI_PX(32); n->w = CUI_FILL;
         n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->justify = CUI_JUSTIFY_CENTER;
-        n->radius = CUI_CORNERS(8);
+        n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
         n->bg = sel ? CUI_C(ui, CONTROL_ON) : cui_alpha(CUI_C(ui, HOVER), *hv * 1.3f);
         cui__mark_interactive(ui, it, 0);
         if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
@@ -612,7 +612,7 @@ bool cui_time_picker_ex(cui_ctx *ui, const char *id_str, int *hour, int *minute,
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
     bool open = p && p->open;
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int h = CUI_CLAMP(*hour, 0, 23), m = CUI_CLAMP(*minute, 0, 59);
     int col = cui__label_wrap_begin(ui, o->label, o->width);
     int field = cui__picker_field(ui, id, r, st->hover, open, o->width.kind ? o->width : CUI_PX(150), col >= 0);
@@ -664,7 +664,7 @@ bool cui_time_picker_ex(cui_ctx *ui, const char *id_str, int *hour, int *minute,
                 cui_node *n = &ui->nodes[it];
                 n->h = CUI_PX(32); n->w = CUI_PX(50);
                 n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->justify = CUI_JUSTIFY_CENTER;
-                n->radius = CUI_CORNERS(8);
+                n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
                 n->bg = sel ? CUI_C(ui, CONTROL_ON) : (ar.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0));
                 cui__mark_interactive(ui, it, 0);
                 cui__open(ui, it);
@@ -819,7 +819,7 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
     if (!st->dragging) cui__spring(ui, &st->pos, target, 0.34f, 0.05f);
     int node = cui__leaf(ui, id, o->width.kind ? o->width : CUI_PX(84), CUI_PX(rows * row_h));
     cui_node *n = &ui->nodes[node];
-    n->radius = CUI_CORNERS(12);
+    n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
     n->self_align = CUI__ALIGN_NOSTRETCH;
     cui__mark_interactive(ui, node, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     if (r.hovered) cui__set_cursor(ui, st->dragging ? CUI_CURSOR_RESIZE_NS : CUI_CURSOR_HAND);
@@ -1077,7 +1077,7 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
         if (!st->dragging) target = *value;
     }
     if (!st->dragging) cui__spring(ui, &st->shown, target, 0.4f, 0.0f);
-    cui__tween(ui, &st->hover, (r.hovered || st->dragging) ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, (r.hovered || st->dragging) ? 1.0f : 0.0f, CUI__T_HOVER);
     int col = cui__node_new(ui, id);
     ui->nodes[col].gap = 6;
     ui->nodes[col].w = o->width.kind ? o->width : CUI_FILL;
@@ -1104,7 +1104,7 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
     if (r.hovered || st->dragging) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
     cui__ruler_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->value = st->shown.x; p->min = min; p->max = max; p->step = step; p->spacing = spacing; p->major = major; p->format = fmt;
-    p->tick = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), st->hover * 0.5f);
+    p->tick = cui__control_edge(ui, st->hover);
     p->major_c = CUI_C(ui, TEXT_SECONDARY);
     p->label = CUI_C(ui, TEXT_MUTED);
     p->marker = cui__accent_or_fg(ui);
@@ -1462,8 +1462,8 @@ int cui_dropzone_ex(cui_ctx *ui, const char *id_str, const cui_dropzone_opts *o)
     int got = cui__claim_drop(ui, pr, o->accept, &rejected);
     if (got || rejected) { st->done_at = ui->time; st->done_count = got; st->rejected = rejected; }
     bool over = ui->drag_hover && cui__rect_contains(pr, ui->drag_x, ui->drag_y);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &st->drag, over ? 1.0f : 0.0f, 0.14f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->drag, over ? 1.0f : 0.0f, CUI__T_STATE);
     cui__spring(ui, &st->lift, over ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
     bool recent = st->done_at > 0 && ui->time - st->done_at < 2.2;
     if (recent) cui__wakeup_after(ui, (float)(2.2 - (ui->time - st->done_at)) + 0.01f);
@@ -1479,7 +1479,7 @@ int cui_dropzone_ex(cui_ctx *ui, const char *id_str, const cui_dropzone_opts *o)
     bn->radius = CUI_CORNERS(ui->theme.radius_control);
     bn->bg = cui_mix(cui_alpha(CUI_C(ui, HOVER), st->hover * 0.7f), cui_mix(CUI_C(ui, SURFACE), accent, ui->mode == CUI_THEME_DARK ? 0.12f : 0.06f), st->drag);
     cui__dash_paint *dp = cui__frame_alloc(ui, sizeof *dp);
-    cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), st->hover * 0.6f);
+    cui_color border = cui__control_edge(ui, st->hover);
     dp->c = cui_mix(border, accent, st->drag);
     dp->t = st->drag;
     bn->paint = cui__paint_dropzone;
@@ -1560,8 +1560,8 @@ int cui_avatar_upload(cui_ctx *ui, const char *id_str, const char *name, cui_tex
     }
     if (r.clicked) result = -1;
     bool over = ui->drag_hover && cui__rect_contains(pr, ui->drag_x, ui->drag_y);
-    cui__tween(ui, &st->hover, (r.hovered || over) ? 1.0f : 0.0f, 0.15f);
-    cui__tween(ui, &st->drag, over ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, (r.hovered || over) ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->drag, over ? 1.0f : 0.0f, CUI__T_STATE);
     if (st->pop.x == 0) st->pop.x = 1;
     cui__spring(ui, &st->pop, 1.0f, 0.4f, 0.3f);
     int wrap = cui__node_new(ui, id);

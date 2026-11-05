@@ -215,7 +215,7 @@ SCENE(badges) {
 SCENE(cards) {
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16, .width = CUI_PX(640)) {
         static const float s1[] = { 3, 5, 4, 7, 6, 9, 11 };
-        cui_metric(ui, "Weekly installs", "3,912", .delta = 8.1f, .spark = s1, .spark_count = 7, .icon = CUI_ICON_DOWNLOAD);
+        cui_metric(ui, "Weekly installs", "3,912", .delta = 8.1f, .delta_label = "+8.1% vs last week", .spark = s1, .spark_count = 7, .icon = CUI_ICON_DOWNLOAD);
         cui_card(ui, .gap = 12) {
             cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
                 cui_column(ui, .gap = 2, .width = CUI_FILL) {
@@ -584,7 +584,7 @@ static void body_hover_card(cui_ctx *ui) {
                     cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
                     cui_text(ui, "Engineer on the rendering team.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                     cui_row(ui, .gap = 6, .pad_top = 4) {
-                        cui_icon(ui, CUI_ICON_CLOCK, 13, CUI_COLOR_TEXT_MUTED);
+                        cui_icon(ui, CUI_ICON_CLOCK, 12, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
                     }
                 }
@@ -863,7 +863,7 @@ static void body_kanban(cui_ctx *ui) {
             cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
                 cui_avatar(ui, who[c][k], .size = 22);
                 cui_spacer(ui);
-                cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 13, CUI_COLOR_TEXT_MUTED);
+                cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 12, CUI_COLOR_TEXT_MUTED);
                 cui_text(ui, k == 1 ? "2" : "3", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
             }
             cui_kanban_card_end(ui);
@@ -1216,7 +1216,7 @@ static void mosaic_metrics(cui_ctx *ui) {
     static const float s1[] = { 268, 255, 262, 249, 251, 240, 236, 229, 231, 222 };
     static const float s2[] = { 3, 4, 3, 5, 4, 6, 5, 6, 7, 7 };
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 20, .width = CUI_FILL) {
-        cui_metric(ui, "Median build", "3m 42s", .delta = -17.6f, .delta_label = "-17.6%", .lower_is_better = true, .spark = s1, .spark_count = 10, .icon = CUI_ICON_CLOCK);
+        cui_metric(ui, "Median build, 30 days", "3m 42s", .delta = -17.6f, .delta_label = "-17.6%", .lower_is_better = true, .spark = s1, .spark_count = 10, .icon = CUI_ICON_CLOCK);
         cui_metric(ui, "Flaky tests", "7", .delta = 2, .delta_label = "+2 this week", .lower_is_better = true, .spark = s2, .spark_count = 10, .icon = CUI_ICON_TRIANGLE_ALERT);
     }
 }
@@ -1367,7 +1367,7 @@ static void pro_board(cui_ctx *ui) {
         cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
             cui_avatar(ui, who[k], .size = 22);
             cui_spacer(ui);
-            cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 13, CUI_COLOR_TEXT_MUTED);
+            cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 12, CUI_COLOR_TEXT_MUTED);
             cui_text(ui, k ? "2" : "5", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
         }
         cui_kanban_card_end(ui);
@@ -1682,7 +1682,7 @@ static void renderer_card(cui_ctx *ui, const char *id, const char *name, const c
         cui_text(ui, blurb, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
         cui_separator(ui);
         for (int k = 0; k < nf; k++) cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
-            cui_icon(ui, CUI_ICON_CHECK, 15, CUI_COLOR_TEXT_SECONDARY);
+            cui_icon(ui, CUI_ICON_CHECK, 16, CUI_COLOR_TEXT_SECONDARY);
             cui_text(ui, facts[k], .size = 13.5f);
         }
         cui_spacer(ui);

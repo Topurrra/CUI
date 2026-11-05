@@ -133,7 +133,7 @@ static void page_overview(cui_ctx *ui, gallery *g) {
     cui_box(ui, .dir = CUI_GRID, .columns = 3, .gap = 16) {
         static const float s2[] = { 9, 7, 8, 6, 5, 6, 4, 4, 3 };
         cui_metric(ui, "Components", "150", .icon = CUI_ICON_BOX);
-        cui_metric(ui, "Frame time", "0.4 ms", .delta = -18.0f, .delta_label = "-18%", .lower_is_better = true, .spark = s2, .spark_count = 9, .icon = CUI_ICON_ZAP);
+        cui_metric(ui, "Frame time", "0.4 ms", .delta = -18.0f, .delta_label = "-18% vs v0.9", .lower_is_better = true, .spark = s2, .spark_count = 9, .icon = CUI_ICON_ZAP);
         cui_metric(ui, "Dependencies", "0", .icon = CUI_ICON_PACKAGE);
     }
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
@@ -638,7 +638,7 @@ static void page_data(cui_ctx *ui, gallery *g) {
                 snprintf(buf, sizeof buf, "Invoice 2026-%05d", 10000 - i);
                 snprintf(amount, sizeof amount, "$%u.%02u", 40 + (h >> 8) % 2400, (h >> 4) % 100);
                 cui_row(ui, .height = CUI_PX(36), .pad_x = 12, .gap = 12) {
-                    cui_icon(ui, CUI_ICON_FILE_TEXT, 15, CUI_COLOR_TEXT_MUTED);
+                    cui_icon(ui, CUI_ICON_FILE_TEXT, 16, CUI_COLOR_TEXT_MUTED);
                     cui_text(ui, buf, .nowrap = true, .width = CUI_FILL, .tabular = true);
                     cui_text(ui, amount, .size = 13, .tabular = true, .nowrap = true);
                     cui_text(ui, (h >> 20) % 5 == 0 ? "Due" : "Paid", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true, .width = CUI_PX(32));

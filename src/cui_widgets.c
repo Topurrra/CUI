@@ -148,7 +148,7 @@ void cui_kbd(cui_ctx *ui, const char *keys) {
             c->min_w = 20; c->pad[1] = c->pad[3] = 5; c->h = CUI_PX(20);
             c->radius = CUI_CORNERS(5);
             c->bg = CUI_C(ui, SURFACE);
-            c->border = 1; c->border_color = CUI_C(ui, BORDER_STRONG);
+            c->border = 1; c->border_color = cui__quiet_edge(ui, 0.35f);
             c->align = CUI_ALIGN_CENTER; c->justify = CUI_JUSTIFY_CENTER; c->dir = CUI_ROW;
             cui__open(ui, cap);
             int t = cui__text_node(ui, p, (int)(e - p), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), CUI_C(ui, TEXT_SECONDARY), false);
@@ -174,8 +174,8 @@ bool cui_link(cui_ctx *ui, const char *text) {
     cui_id id = cui_make_id(ui, text) ^ 0x11AC0009u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__btn_state *st = cui_state(ui, id, sizeof *st);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
-    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     int i = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body),
                            cui_mix(CUI_C(ui, ACCENT_STRONG), CUI_C(ui, FOREGROUND), ui->accent == CUI_ACCENT_NEUTRAL ? 1.0f : 0.0f), false);
     cui_node *n = &ui->nodes[i];
@@ -213,6 +213,14 @@ cui_color cui__quiet_edge(cui_ctx *ui, float hover) {
     return cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), 0.35f + 0.65f * cui__clampf(hover, 0, 1));
 }
 
+cui_color cui__control_edge(cui_ctx *ui, float hover) {
+    return cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), 0.5f * cui__clampf(hover, 0, 1));
+}
+
+cui_color cui__edge_on(cui_ctx *ui) {
+    return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : CUI_C(ui, ACCENT);
+}
+
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected) {
     cui__btn_colors c;
     cui_color clear = cui__rgba(0, 0, 0, 0);
@@ -224,7 +232,7 @@ cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selec
         if (ui->accent == CUI_ACCENT_NEUTRAL) a = CUI_C(ui, CONTROL_ON);
         c.bg = a;
         c.bg_hover = cui_mix(a, CUI_C(ui, BACKGROUND), 0.14f);
-        c.bg_press = cui_mix(a, CUI_C(ui, BACKGROUND), 0.2f);
+        c.bg_press = cui_mix(a, CUI_C(ui, BACKGROUND), 0.06f);   /* pushed in: back toward rest, never lighter than hover */
         c.fg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_GLYPH) : CUI_C(ui, ACCENT_FOREGROUND);
         break;
     }
@@ -232,7 +240,7 @@ cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selec
         cui_color d = CUI_C(ui, DANGER);
         c.bg = d;
         c.bg_hover = cui_mix(d, CUI_C(ui, BACKGROUND), 0.12f);
-        c.bg_press = cui_mix(d, CUI_C(ui, BACKGROUND), 0.2f);
+        c.bg_press = cui_mix(d, CUI_C(ui, BACKGROUND), 0.05f);
         c.fg = ui->mode == CUI_THEME_DARK ? cui__rgba(26, 10, 12, 255) : cui__rgba(255, 255, 255, 255);
         break;
     }
@@ -335,9 +343,9 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     if (v == CUI_BUTTON_DEFAULT) v = (icon_only || ui->button_group_depth > 0) ? CUI_BUTTON_GHOST : CUI_BUTTON_SECONDARY;
     cui__btn_colors col = cui__button_colors(ui, v, o->selected);
     if (o->color.r | o->color.g | o->color.b | o->color.a) col.fg = cui_color_of(ui, o->color);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
-    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
-    cui__spring(ui, &st->press, r.pressed ? 0.97f : 1.0f, CUI_SPRING_SNAPPY);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
 
     float h = cui__control_height(ui, o->size);
     float fs = o->size == CUI_SIZE_SM ? ui->theme.text_sm : o->size == CUI_SIZE_LG ? ui->theme.text_lg - 1 : ui->theme.text_body;
@@ -367,7 +375,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     n->bg = bg;
     if (col.border.a) { n->border = 1; n->border_color = cui_mix(col.border, col.border_hover, st->hover); }
     n->scale = st->press.x;
-    n->opacity = disabled ? 0.45f : 1.0f;
+    n->opacity = disabled ? CUI__DISABLED : 1.0f;
     if (disabled) {
         /* flat while disabled */
     } else if (v == CUI_BUTTON_PRIMARY || v == CUI_BUTTON_DANGER) {
@@ -439,10 +447,9 @@ void cui_badge_ex(cui_ctx *ui, const char *text, const cui_badge_opts *o) {
         n->bg = neutral ? CUI_C(ui, FOREGROUND) : tone;
         fg = neutral ? CUI_C(ui, BACKGROUND) : (ui->mode == CUI_THEME_DARK ? cui__rgba(20, 20, 22, 255) : cui__rgba(255, 255, 255, 255));
     } else {
+        /* a tint, no edge: a badge is a label, not a control */
         cui_color surf = CUI_C(ui, SURFACE);
-        n->bg = neutral ? CUI_C(ui, ACTIVE) : cui_mix(surf, tone, ui->mode == CUI_THEME_DARK ? 0.14f : 0.10f);
-        n->border = 1;
-        n->border_color = neutral ? CUI_C(ui, BORDER) : cui_mix(CUI_C(ui, BORDER), tone, ui->mode == CUI_THEME_DARK ? 0.22f : 0.18f);   /* every badge has the same edge */
+        n->bg = neutral ? CUI_C(ui, ACTIVE) : cui_mix(surf, tone, ui->mode == CUI_THEME_DARK ? 0.18f : 0.12f);
         fg = neutral ? CUI_C(ui, TEXT_SECONDARY) : cui__legible(cui_mix(CUI_C(ui, FOREGROUND), tone, ui->mode == CUI_THEME_DARK ? 0.80f : 0.88f), n->bg, 4.5f);
     }
     cui__open(ui, i);
@@ -602,7 +609,7 @@ bool cui_card_begin(cui_ctx *ui, const cui_card_opts *o) {
         if (!id) id = cui__hash_str("card", (cui_id)ui->node_count * 2654435761u);
         r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
         st = cui_state(ui, id, sizeof *st);
-        cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.2f);
+        cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         cui__spring(ui, &st->lift, r.hovered ? -2.0f : 0.0f, CUI_SPRING_SMOOTH);
         hover = st->hover;
         clicked = r.clicked;
@@ -777,7 +784,7 @@ bool cui_alert_ex(cui_ctx *ui, const char *title, const cui_alert_opts *o) {
     int ib = cui__node_new(ui, 0);
     ui->nodes[ib].pad[0] = 1;
     cui__open(ui, ib);
-    cui__icon_node(ui, icon, 17, tone);
+    cui__icon_node(ui, icon, 16, tone);
     cui__close(ui);
     int col = cui__node_new(ui, 0);
     ui->nodes[col].gap = 3;
@@ -1185,7 +1192,7 @@ void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_sp
         *ratio = pos / total;
     }
     if (r.hovered || r.active) cui__set_cursor(ui, o->vertical ? CUI_CURSOR_RESIZE_NS : CUI_CURSOR_RESIZE_EW);
-    cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, 0.15f);
+    cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, CUI__T_HOVER);
     b->hover = st->hover;
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];

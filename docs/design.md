@@ -46,9 +46,21 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 
 - Motion explains cause and effect: what opened, what changed, where it came from.
 - Anything that reports state lands without overshoot (switch thumbs, progress, panel heights). Small feedback has a little life (presses, gliding highlights).
-- Presses scale to about 0.97, except for triggers that anchor a menu: those answer with color.
-- Frequent feedback is nearly instant, rare moments may take longer. Hover color settles in about 120 ms, presses in about 150 ms, a popover opens in about 250 ms and closes in about 150 ms, a dialog takes up to 400 ms.
-- Things already on screen move; new things fade and travel a few points at most (a popover rises 6 pt from 96% scale).
+- Presses scale to 0.97 (0.98 for rows and cards, which are wide), except for triggers that anchor a menu: those answer with color. Nothing grows on hover.
+- Frequent feedback is nearly instant, rare moments may take longer. One duration per job, in every component:
+
+| Job | Time |
+|---|---|
+| A row following the pointer or the keys | 100 ms |
+| Hover color, edges, icon color | 140 ms |
+| A focus ring appearing | 140 ms |
+| A check, selection or switch reporting its new state | 180 ms |
+| A disclosure, tree or accordion opening | 320 ms spring, no overshoot |
+| A popover, menu, tooltip or hover card appearing | 280 ms spring from 96% scale, rising 6 pt |
+| A dialog appearing | 340 ms spring |
+| Any floating layer leaving | 160 ms |
+
+- Disabled is one opacity everywhere (45%).
 - Exits are faster than entrances. Everything is interruptible because everything is a spring.
 - Every animation has a reduced motion path that keeps the final state and the feedback.
 
@@ -99,6 +111,14 @@ A lot of interface work now comes out of the same few templates, and people have
 - Button labels are a verb and an object: "Create project", not "Submit".
 - Example content is specific and plausible. Real-looking names that are not famous people, prices and numbers that are not round templates, products with an actual job. Placeholder pioneers (Ada Lovelace, Grace Hopper) and template dashboards ("Revenue $15,231 +20.1%") are as generic as "John Doe".
 
+**Charts and numbers**
+
+- No gradient fading out under a line. A sparkline is a line and the point where it ends; an area chart is a flat tint, because the area is a quantity.
+- A change always names its baseline, in the delta itself ("+2 this week") or in the title it sits under ("Median build, 30 days"). A bare "+12.5%" says nothing.
+- Its color says good or bad, not up or down: fewer flaky tests is green.
+
 **Coherence**
 
 - One value per axis, used everywhere: one radius scale, one light direction, one accent, one icon set, one spacing scale, one set of motion curves. A mix of personalities on one screen reads as assembled rather than designed.
+- Every rule above is a decision, not only a ban. Avoiding the tells and putting nothing in their place produces its own generic look; CUI's positive choices are the token tables in this document.
+- Icons come in even sizes that match the text beside them: 12 with small text, 14 in small controls, 16 in rows and default controls, 18 in large ones. Odd sizes sit off the pixel grid and their strokes blur.

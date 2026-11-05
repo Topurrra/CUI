@@ -84,6 +84,27 @@ float cui__tween(cui_ctx *ui, float *x, float target, float duration);   /* expo
 #define CUI_SPRING_SNAPPY 0.26f, 0.12f
 #define CUI_SPRING_MORPH  0.42f, 0.16f
 
+/* Motion and state tokens. One value per job, so every component answers in
+ * the same time and the same way. Tween durations are the time to settle. */
+#define CUI__T_HIGHLIGHT 0.10f   /* list and menu rows that follow the pointer or the keys */
+#define CUI__T_HOVER     0.14f   /* hover color, edges, icon color */
+#define CUI__T_FOCUS     0.14f   /* focus rings and focused edges */
+#define CUI__T_STATE     0.18f   /* checked, selected, on: fills that report a state */
+#define CUI__SPRING_EXPAND 0.32f, 0.0f   /* disclosures, trees, accordions open and close */
+#define CUI__SPRING_ENTER  0.28f, 0.0f   /* popovers, menus, tooltips, hover cards */
+#define CUI__SPRING_DIALOG 0.34f, 0.0f   /* dialogs */
+#define CUI__SPRING_EXIT   0.16f, 0.0f   /* every floating layer leaves faster than it came */
+#define CUI__ENTER_SCALE 0.96f   /* floating layers grow from here */
+#define CUI__PRESS       0.97f   /* buttons, chips, tiles */
+#define CUI__PRESS_WIDE  0.98f   /* rows and cards: wide targets travel further at the same scale */
+#define CUI__DISABLED    0.45f   /* opacity of anything disabled */
+/* Radius steps derived from the theme, so a custom scale carries everywhere */
+#define CUI__R_ITEM(ui)    CUI_MAX(6.0f, (ui)->theme.radius_panel - 6.0f)   /* rows inside a panel */
+#define CUI__R_CONTROL(ui, h) CUI_MIN((ui)->theme.radius_control, (h) * 0.5f)
+#define CUI__FIELD_PAD 12.0f      /* fields: text side */
+#define CUI__FIELD_PAD_ICON 10.0f /* fields: the side with an icon */
+#define CUI__R_SMALL 6.0f   /* marks inside rows: attachment chips, bars, events */
+
 /* ---- fonts ---- */
 typedef struct cui_glyph {
     uint32_t key_cp;
@@ -532,6 +553,8 @@ cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selec
  * groups). Fields, checkboxes and radios keep BORDER_STRONG (3:1): their edge
  * is the only thing that marks them. */
 cui_color cui__quiet_edge(cui_ctx *ui, float hover);
+cui_color cui__control_edge(cui_ctx *ui, float hover);   /* the 3:1 edge of fields, checks, radios, dropzones */
+cui_color cui__edge_on(cui_ctx *ui);                     /* the edge of a focused or open field */
 void cui__focus_ring(cui_ctx *ui, int node, float alpha);
 void cui__icon_swap(cui_ctx *ui, cui_id state_id, const char *icon, float size, cui_color c);
 cui_id cui__position_id(cui_ctx *ui, uint32_t salt);
