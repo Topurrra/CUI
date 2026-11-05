@@ -269,6 +269,8 @@ void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const 
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
     if (o->max_height > 0 && content_h > o->max_height) sb.height = CUI_PX(o->max_height);
+    cui_scroll_state *ss = cui_state(ui, id ^ 0x5C0Du, sizeof *ss);
+    ss->fade = cui__backdrop(ui);   /* long lines fade out at the edge */
     cui__scroll_begin_ex(ui, id ^ 0x5C0Du, &sb, true);
     if (!(o->max_height > 0 && content_h > o->max_height)) { ui->nodes[cui__current(ui)].h = CUI_FIT; ui->nodes[cui__current(ui)].min_h = 0; }
     int canvas = cui__leaf(ui, 0, CUI_FILL, CUI_PX(content_h));

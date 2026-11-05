@@ -176,7 +176,7 @@ static void page_pickers(cui_ctx *ui) {
         cui_date_range_picker(ui, "range", &range, .width = CUI_PX(300));
         cui_date_range_picker(ui, "stay", &stay, .width = CUI_PX(300), .no_presets = true);
     }
-    cui_card(ui, .pad = 16) { cui_range_calendar(ui, "inline-range", &stay, 2); }
+    cui_row(ui) { cui_card(ui, .pad = 16) { cui_range_calendar(ui, "inline-range", &stay, 2); } }   /* as wide as its months */
 
     section(ui, "Time", "A field with hour and minute columns, 24 hour or 12 hour.");
     cui_row(ui, .gap = 12) {
