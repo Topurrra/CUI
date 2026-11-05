@@ -1691,6 +1691,44 @@ static void scene_hero_effects(cui_ctx *ui, int f) {
     stage(ui, &look_violet, hero_effects_body);
 }
 
+static void mosaic_body(cui_ctx *ui) {
+    cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_START) {
+        cui_column(ui, .width = CUI_GROW(1), .gap = 20) { mosaic_signup(ui); mosaic_notifications(ui); mosaic_storage(ui); }
+        cui_column(ui, .width = CUI_GROW(1.25f), .gap = 20) { mosaic_metrics(ui); mosaic_calendar(ui); mosaic_chart(ui); }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 20) { mosaic_team(ui); mosaic_share(ui); mosaic_progress(ui); mosaic_topics(ui); }
+    }
+}
+static void scene_stage_mosaic(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_violet, mosaic_body); }
+static void mosaic_pro_body(cui_ctx *ui) {
+    cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_START) {
+        cui_column(ui, .width = CUI_GROW(1.15f), .gap = 20) { pro_assistant(ui); pro_board(ui); }
+        cui_column(ui, .width = CUI_GROW(1.2f), .gap = 20) { pro_activity(ui); pro_flow(ui); pro_player(ui); }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 20) { pro_plan(ui); pro_tiles(ui); pro_radar(ui); }
+    }
+}
+static void scene_stage_mosaic_pro(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_rose, mosaic_pro_body); }
+/* one small panel of controls, rendered once per accent and put side by side */
+static void accent_body(cui_ctx *ui) {
+    static bool on = true, chk = true;
+    static float v = 64;
+    static int seg = 1;
+    cui_card(ui, .pad = 18, .gap = 14, .width = CUI_PX(250)) {
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+            cui_button(ui, "Upgrade", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_SPARKLES);
+            cui_badge(ui, "New", .tone = CUI_TONE_ACCENT);
+        }
+        static const char *items[] = { "Day", "Week", "Month" };
+        cui_segmented(ui, "seg", items, 3, &seg, .size = CUI_SIZE_SM);
+        cui_row(ui, .gap = 16, .align = CUI_ALIGN_CENTER) { cui_switch(ui, "Sync", &on); cui_checkbox(ui, "Notify", &chk); }
+        cui_slider(ui, "##vol", &v, 0, 100);
+        cui_progress(ui, 0.68f, .height = 6);
+    }
+}
+static void scene_accent(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 20, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) { accent_body(ui); }
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -1742,6 +1780,12 @@ int main(int argc, char **argv) {
         { "hero-social", scene_hero_social, 1080, 620, true, false, CUI_ACCENT_GREEN },
         { "hero-data", scene_hero_data, 1000, 560, true, false, CUI_ACCENT_AMBER },
         { "hero-effects", scene_hero_effects, 1000, 700, true, false, CUI_ACCENT_VIOLET },
+        { "stage-mosaic", scene_stage_mosaic, 1440, 980, true, true, CUI_ACCENT_BLUE },
+        { "stage-mosaic-pro", scene_stage_mosaic_pro, 1440, 980, true, true, CUI_ACCENT_VIOLET },
+        { "accent-neutral", scene_accent, 290, 252, true, false, CUI_ACCENT_NEUTRAL }, { "accent-violet", scene_accent, 290, 252, true, false, CUI_ACCENT_VIOLET },
+        { "accent-blue", scene_accent, 290, 252, true, false, CUI_ACCENT_BLUE }, { "accent-green", scene_accent, 290, 252, true, false, CUI_ACCENT_GREEN },
+        { "accent-amber", scene_accent, 290, 252, true, false, CUI_ACCENT_AMBER }, { "accent-orange", scene_accent, 290, 252, true, false, CUI_ACCENT_ORANGE },
+        { "accent-coral", scene_accent, 290, 252, true, false, CUI_ACCENT_CORAL }, { "accent-rose", scene_accent, 290, 252, true, false, CUI_ACCENT_ROSE },
         { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
         { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },

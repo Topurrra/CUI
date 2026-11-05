@@ -825,7 +825,6 @@ static void cui__paint_art_color(cui_ctx *ui, cui_node *n, void *data) {
     cui_color c = *(cui_color *)data;
     cui_rect r = n->rect;
     cui_draw_rect_gradient(ui, r, n->radius, cui_mix(c, cui__rgba(255, 255, 255, 255), 0.22f), cui_mix(c, cui__rgba(0, 0, 0, 255), 0.28f));
-    cui_draw_circle(ui, (cui_vec2){ r.x + r.w * 0.78f, r.y + r.h * 0.22f }, r.w * 0.5f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.07f));
     cui__draw_sheen(ui, r, n->radius, 0.6f);
     cui_draw_icon(ui, CUI_ICON_MUSIC, r, r.w * 0.4f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.85f));
 }

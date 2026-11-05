@@ -290,6 +290,11 @@ All of them are in [docs/components-more.md](docs/components-more.md), with scre
 
 ## Light, dark and eight accents
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/accents-dark.png">
+  <img src="docs/images/showcase/accents.png" alt="The same controls in all eight accents">
+</picture>
+
 | | |
 |---|---|
 | ![Overview in light](docs/images/overview-light.png) | ![Overview in dark with violet](docs/images/overview-violet-dark.png) |
