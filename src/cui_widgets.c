@@ -280,6 +280,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     cui_button_variant v = o->variant;
     if (v == CUI_BUTTON_DEFAULT) v = (icon_only || ui->button_group_depth > 0) ? CUI_BUTTON_GHOST : CUI_BUTTON_SECONDARY;
     cui__btn_colors col = cui__button_colors(ui, v, o->selected);
+    if (o->color.r | o->color.g | o->color.b | o->color.a) col.fg = cui_color_of(ui, o->color);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.16f);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
     cui__spring(ui, &st->press, r.pressed ? 0.97f : 1.0f, CUI_SPRING_SNAPPY);

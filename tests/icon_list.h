@@ -162,4 +162,10 @@ static const struct { const char *name, *icon; } icon_list[] = {
     { "circle", CUI_ICON_CIRCLE },
     { "square-check", CUI_ICON_SQUARE_CHECK },
     { "square", CUI_ICON_SQUARE },
+    { "skip-back", CUI_ICON_SKIP_BACK },
+    { "skip-forward", CUI_ICON_SKIP_FORWARD },
+    { "shuffle", CUI_ICON_SHUFFLE },
+    { "repeat", CUI_ICON_REPEAT },
+    { "radio", CUI_ICON_RADIO },
+    { "audio-lines", CUI_ICON_AUDIO_LINES },
 };

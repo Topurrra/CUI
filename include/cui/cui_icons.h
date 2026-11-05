@@ -167,5 +167,11 @@
 #define CUI_ICON_CIRCLE                   "\xee\x81\xb6"
 #define CUI_ICON_SQUARE_CHECK             "\xee\x95\x99"
 #define CUI_ICON_SQUARE                   "\xee\x85\xa7"
+#define CUI_ICON_SKIP_BACK                "\xee\x85\x9f"
+#define CUI_ICON_SKIP_FORWARD             "\xee\x85\xa0"
+#define CUI_ICON_SHUFFLE                  "\xee\x85\x9e"
+#define CUI_ICON_REPEAT                   "\xee\x85\x86"
+#define CUI_ICON_RADIO                    "\xee\x85\x82"
+#define CUI_ICON_AUDIO_LINES              "\xee\x95\x9a"
 
 #endif /* CUI_ICONS_H */

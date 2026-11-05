@@ -35,6 +35,13 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
         int dark = cui__plat_system_dark();
         if (dark >= 0) mode = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT;
     }
+    /* CUI_THEME=dark|light and CUI_ACCENT=<name> override the app's choice
+     * (handy for screenshots and for trying an app in the other theme) */
+    if (cui__env_is("CUI_THEME", "dark")) mode = CUI_THEME_DARK;
+    if (cui__env_is("CUI_THEME", "light")) mode = CUI_THEME_LIGHT;
+    static const char *accents[CUI_ACCENT_COUNT] = { "neutral", "violet", "blue", "green", "amber", "orange", "coral", "rose" };
+    for (int i = 0; i < CUI_ACCENT_COUNT; i++)
+        if (cui__env_is("CUI_ACCENT", accents[i])) d->accent = (cui_accent)i;
     d->theme = mode;
     cui_ctx_desc cd;
     memset(&cd, 0, sizeof cd);

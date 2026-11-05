@@ -81,6 +81,7 @@ cui_button(ui, "Saving", .variant = CUI_BUTTON_PRIMARY, .loading = true);
 | `icon`, `icon_right` | Any `CUI_ICON_*` |
 | `loading` | Shows a spinner, ignores clicks, keeps the label so nothing jumps |
 | `disabled`, `selected`, `full_width`, `width` | |
+| `color` | Text and icon color. Pair it with `selected` for toggles: `.selected = liked, .color = liked ? CUI_COLOR_ACCENT : CUI_TRANSPARENT` |
 | `tooltip`, `shortcut` | Tooltip text and a shortcut hint |
 
 Use one primary button per view. Presses scale to 0.97 on a snappy spring. Keyboard: Tab to focus, Enter or Space to press.

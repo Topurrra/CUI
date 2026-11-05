@@ -55,8 +55,8 @@ static void topbar(cui_ctx *ui, app_state *s) {
     cui_row(ui, .gap = 12, .pad_x = 32, .pad_y = 14, .width = CUI_FILL) {
         cui_search(ui, "search", s->search, sizeof s->search, .placeholder = "Search orders, customers", .width = CUI_PX(320));
         cui_spacer(ui);
-        if (cui_icon_button(ui, s->dark ? CUI_ICON_SUN : CUI_ICON_MOON, .tooltip = "Toggle theme")) {
-            s->dark = !s->dark;
+        if (cui_icon_button(ui, cui_get_theme_mode(ui) == CUI_THEME_DARK ? CUI_ICON_SUN : CUI_ICON_MOON, .tooltip = "Toggle theme")) {
+            s->dark = cui_get_theme_mode(ui) != CUI_THEME_DARK;
             cui_set_theme(ui, s->dark ? CUI_THEME_DARK : CUI_THEME_LIGHT);
         }
         cui_icon_button(ui, CUI_ICON_BELL, .tooltip = "Notifications");

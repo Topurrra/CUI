@@ -110,7 +110,8 @@ static void editor_pane(cui_ctx *ui, notes_app *a) {
         cui_row(ui, .gap = 8) {
             cui_badge(ui, tags[n->tag], .tone = n->tag == 1 ? CUI_TONE_INFO : n->tag == 2 ? CUI_TONE_VIOLET : CUI_TONE_NEUTRAL, .dot = true);
             cui_text(ui, n->pinned ? "Pinned" : "", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true, .width = CUI_FILL);
-            if (cui_icon_button(ui, CUI_ICON_BOOKMARK, .tooltip = n->pinned ? "Unpin" : "Pin", .selected = n->pinned)) n->pinned = !n->pinned;
+            if (cui_icon_button(ui, CUI_ICON_BOOKMARK, .tooltip = n->pinned ? "Unpin" : "Pin", .selected = n->pinned,
+                                .color = n->pinned ? CUI_COLOR_ACCENT : CUI_TRANSPARENT)) n->pinned = !n->pinned;
             cui_menu(ui, "Note actions", .icon_only = true, .icon = CUI_ICON_ELLIPSIS, .placement = CUI_PLACE_BOTTOM_END) {
                 for (int t = 0; t < 3; t++)
                     if (cui_menu_item(ui, tags[t], .icon = CUI_ICON_TAG, .checked = n->tag == t)) n->tag = t;
@@ -177,7 +178,7 @@ static void frame(cui_ctx *ui, void *user) {
     case 0: add_note(a, "Untitled", "", 0); break;
     case 1: if (a->selected >= 0) a->notes[a->selected].pinned = !a->notes[a->selected].pinned; break;
     case 2: a->confirm_delete = true; break;
-    case 3: a->dark = !a->dark; cui_set_theme(ui, a->dark ? CUI_THEME_DARK : CUI_THEME_LIGHT); break;
+    case 3: a->dark = cui_get_theme_mode(ui) != CUI_THEME_DARK; cui_set_theme(ui, a->dark ? CUI_THEME_DARK : CUI_THEME_LIGHT); break;
     default: break;
     }
 }

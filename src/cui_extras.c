@@ -607,7 +607,8 @@ void cui_progress_ring(cui_ctx *ui, const char *label, float value, float size) 
     ui->nodes[i].self_align = CUI__ALIGN_NOSTRETCH;
     cui__ring_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->value = shown;
-    p->label = label ? cui__frame_strdup(ui, label, -1) : NULL;
+    /* "##key" keeps the id but shows no caption, like other components */
+    p->label = label && cui__display_len(label) > 0 ? cui__frame_strdup(ui, label, cui__display_len(label)) : NULL;
     ui->nodes[i].paint = cui__paint_ring;
     ui->nodes[i].paint_data = p;
 }

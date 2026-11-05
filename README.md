@@ -2,44 +2,128 @@
 
 # CUI
 
-**Modern native UI components for C.**
+### Modern native UI components for C
 
-Calm design, spring motion and full keyboard support.<br>
-Windows, macOS and Linux from one C99 codebase, with no dependencies.
+Polished components, spring motion and full keyboard support.<br>
+Windows, macOS and Linux from one C99 codebase. No dependencies. About 230 KB.
 
-[Getting started](docs/getting-started.md) ·
-[Components](docs/components.md) ·
-[Layout](docs/layout.md) ·
-[Theming](docs/theming.md) ·
-[Integration](docs/integration.md) ·
+<p>
+<img src="https://img.shields.io/badge/C99-pure-3b82f6?style=flat-square" alt="C99">
+<img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-8b5cf6?style=flat-square" alt="Platforms">
+<img src="https://img.shields.io/badge/dependencies-none-10b981?style=flat-square" alt="No dependencies">
+<img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT license">
+</p>
+
+[Getting started](docs/getting-started.md) &nbsp;·&nbsp;
+[Components](docs/components.md) &nbsp;·&nbsp;
+[Layout](docs/layout.md) &nbsp;·&nbsp;
+[Theming](docs/theming.md) &nbsp;·&nbsp;
+[Integration](docs/integration.md) &nbsp;·&nbsp;
 [Examples](examples)
+
+<br>
+
+<img src="docs/images/showcase/tracker.png" alt="An issue tracker built with CUI, in dark mode">
+
+<sub>An issue tracker in 360 lines of C: <a href="examples/tracker.c"><code>examples/tracker.c</code></a></sub>
 
 </div>
 
 <br>
 
-![A dashboard built with CUI](docs/images/dashboard.png)
-
 ## Why CUI
 
-C has great low level libraries and very few ways to build an interface that looks like it belongs in 2026. CUI fills that gap. It is a complete component library, not a toolkit of primitives: buttons, inputs, selects, date pickers, dialogs, toasts, tables, charts and a command palette, all designed to work together and to look good without any styling.
+C has excellent low level libraries and very few ways to build an interface that looks like it belongs in 2026. CUI is a complete component library, not a box of primitives: buttons, inputs, selects, date pickers, dialogs, toasts, tables, charts and a command palette, designed together and good looking without any styling.
 
-- **Looks right out of the box.** A neutral palette with one accent, hairline borders, soft layered shadows on floating layers only, concentric radii and Inter and Geist type. Light and dark themes and eight accents, all animated when they change.
-- **Moves with purpose.** Presses scale with a snappy spring, highlights glide between options, dialogs and menus open from where they were triggered, sliders stretch like rubber past their ends. Every animation has a reduced motion path.
-- **Keyboard first.** Tab and Shift+Tab move focus, Enter and Space activate, arrows drive menus, tabs, sliders and lists, Esc closes. The focus ring appears only for keyboard focus.
-- **Immediate mode, real layout.** Write your UI as plain C that runs every frame. Behind it is a flexbox style layout engine with rows, columns, grids, grow and shrink, wrapping text and scroll areas.
-- **Fast and frugal.** Building, laying out and painting a full screen takes **0.1 to 0.25 ms** of CPU. The app sleeps when nothing changes, so idle apps use no CPU at all.
-- **Truly portable.** Native Win32, Cocoa and X11 backends, optional SDL2 and GLFW backends for Wayland and other targets, OpenGL 3.3 with an automatic software fallback for VMs and remote desktops.
-- **Plays well with others.** The core outputs plain vertex and index buffers. Drop it into your engine with your own renderer in an afternoon. One header, MIT license.
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Looks right out of the box**<br>
+A neutral palette with one accent, hairline borders, layered shadows on floating surfaces only, concentric radii, Inter and Geist type. Light and dark themes, eight accents, animated when they change.
+
+</td>
+<td width="50%" valign="top">
+
+**Moves with purpose**<br>
+Presses scale on a snappy spring, highlights glide between options, menus open from their trigger, sliders stretch like rubber past their ends. Every animation has a reduced motion path.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Keyboard first**<br>
+Tab and Shift+Tab move focus, Enter and Space activate, arrows drive menus, tabs, sliders and lists, Esc closes. The focus ring appears only for keyboard users.
+
+</td>
+<td valign="top">
+
+**Immediate mode, real layout**<br>
+Your UI is plain C that runs every frame. Behind it sits a flexbox style engine: rows, columns, grids, grow and shrink, wrapping text, scroll areas, split views.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Fast, small, frugal**<br>
+A full screen builds, lays out and paints in **0.1 to 0.25 ms**. A complete app is about **230 KB**. Idle apps sleep and use no CPU.
+
+</td>
+<td valign="top">
+
+**Portable and friendly**<br>
+Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software fallback, or plug in your own renderer: the core just emits vertices.
+
+</td>
+</tr>
+</table>
+
+## Built with CUI
+
+Every screenshot here is a real app from [`examples/`](examples), rendered by CUI itself.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/showcase/music.png" alt="Music player"></td>
+<td width="50%"><img src="docs/images/showcase/finance.png" alt="Personal finance app"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Tempo</b>: generated cover art, track list, transport bar · <a href="examples/music.c">music.c</a></sub></td>
+<td align="center"><sub><b>Vault</b>: balance chart, painted card, budgets, goals · <a href="examples/finance.c">finance.c</a></sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/showcase/dashboard-dark.png" alt="Analytics dashboard"></td>
+<td><img src="docs/images/showcase/mail-dark.png" alt="Mail client"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Northwind</b>: KPIs, charts, sortable table · <a href="examples/dashboard.c">dashboard.c</a></sub></td>
+<td align="center"><sub><b>Mail</b>: three pane inbox and compose dialog · <a href="examples/mail.c">mail.c</a></sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/showcase/notes-dark.png" alt="Notes app"></td>
+<td><img src="docs/images/showcase/settings-dark.png" alt="Settings screen"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Notes</b>: split view, search, context menus, export · <a href="examples/notes.c">notes.c</a></sub></td>
+<td align="center"><sub><b>Settings</b>: forms, validation, preferences · <a href="examples/settings.c">settings.c</a></sub></td>
+</tr>
+</table>
 
 ## A first app
+
+<table>
+<tr>
+<td width="58%" valign="top">
 
 ```c
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 
 int main(void) {
-    cui_app *app = cui_app_create(&(cui_app_desc){ .title = "Hello", .width = 420, .height = 300 });
+    cui_app *app = cui_app_create(&(cui_app_desc){
+        .title = "Hello", .width = 420, .height = 300 });
     bool notifications = true;
     int clicks = 0;
 
@@ -47,10 +131,12 @@ int main(void) {
         cui_ctx *ui = cui_app_ui(app);
         cui_column(ui, .pad = 32, .gap = 16) {
             cui_heading(ui, "Hello, CUI", 2);
-            cui_secondary(ui, "A native window, a few components and no dependencies.");
+            cui_secondary(ui, "A native window, a few components "
+                              "and no dependencies.");
             cui_switch(ui, "Notifications", &notifications);
             cui_row(ui, .gap = 8) {
-                if (cui_button(ui, "Click me", .variant = CUI_BUTTON_PRIMARY)) clicks++;
+                if (cui_button(ui, "Click me", .variant = CUI_BUTTON_PRIMARY))
+                    clicks++;
                 cui_textf(ui, "Clicked %d times", clicks);
             }
         }
@@ -59,9 +145,20 @@ int main(void) {
 }
 ```
 
-<img src="docs/images/hello.png" width="420" alt="The hello example">
+</td>
+<td width="42%" valign="top">
 
-Components are functions. They draw themselves, handle input and return what happened. Options are named arguments, so the common case stays short and everything else is one `.field = value` away.
+<img src="docs/images/showcase/hello-dark.png" alt="The hello example">
+
+Components are functions. They draw themselves, handle input and return what happened.
+
+Options are named arguments, so the common case stays short and everything else is one `.field = value` away.
+
+Your variables are the state. There is nothing to sync.
+
+</td>
+</tr>
+</table>
 
 ## Build
 
@@ -69,9 +166,9 @@ CUI uses CMake and builds with GCC, Clang, MSVC and MinGW.
 
 ```sh
 git clone https://github.com/yappologistic/CUI.git
-cmake -S CUI -B build
+cmake -S CUI -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/examples/gallery
+./build/examples/tracker
 ```
 
 Use it from your own CMake project:
@@ -85,22 +182,30 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 
 ## Components
 
+<img src="docs/images/showcase/components-dark.png" alt="A mosaic of CUI components in dark mode">
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/components/command-palette-dark.png" alt="Command palette"></td>
+<td width="50%"><img src="docs/images/components/dialog-dark.png" alt="Dialog"></td>
+</tr>
+<tr>
+<td><img src="docs/images/components/table-dark.png" alt="Table"></td>
+<td><img src="docs/images/components/line-chart-dark.png" alt="Line chart"></td>
+</tr>
+</table>
+
 | | |
 |---|---|
-| ![Buttons](docs/images/components/buttons.png) | ![Toggles](docs/images/components/toggles.png) |
-| ![Inputs](docs/images/components/inputs.png) | ![Select](docs/images/components/select.png) |
-| ![Menu](docs/images/components/menu-dark.png) | ![Calendar](docs/images/components/calendar.png) |
-| ![Table](docs/images/components/table.png) | ![Charts](docs/images/components/line-chart-dark.png) |
-
-**Actions** button, icon button, button group, copy button, hold to confirm, segmented control, dropdown menu, context menu, command palette<br>
-**Inputs** text field, password with strength meter, search, text area, number field, tag input, one time code, select, combobox, date picker, calendar, color picker<br>
-**Selection** checkbox, switch, radio group, radio cards, elastic slider, range slider, chips, rating<br>
-**Navigation** tabs (underline and pill), sidebar navigation, breadcrumb, pagination, stepper<br>
-**Overlays** dialog, sheet, popover, tooltip, toast stack<br>
-**Feedback** alert, progress bar and ring, meter, spinner, skeleton, badge, avatar, avatar group, empty state, timeline<br>
-**Data** card, metric card, table, list, reorderable list, tree view, accordion, virtual list, line, area, bar, stacked bar and donut charts, sparkline, gauge<br>
-**Layout** row, column, grid, stack, scroll area, resizable split view, separator, spacer<br>
-**Custom** canvas with a full 2D drawing API, per component state and spring animation helpers
+| **Actions** | button, icon button, button group, copy button, hold to confirm, segmented control, dropdown menu, context menu, command palette |
+| **Inputs** | text field, password with strength meter, search, text area, number field, tag input, one time code, select, combobox, date picker, calendar, color picker |
+| **Selection** | checkbox, switch, radio group, radio cards, elastic slider, range slider, chips, rating |
+| **Navigation** | tabs (underline and pill), sidebar navigation, breadcrumb, pagination, stepper |
+| **Overlays** | dialog, sheet, popover, tooltip, toast stack |
+| **Feedback** | alert, progress bar and ring, meter, spinner, skeleton, badge, avatar, avatar group, empty state, timeline |
+| **Data** | card, metric card, table, list, reorderable list, tree view, accordion, virtual list, line, area, bar, stacked bar and donut charts, sparkline, gauge |
+| **Layout** | row, column, grid, stack, scroll area, resizable split view, separator, spacer |
+| **Custom** | canvas with a full 2D drawing API, per component state, spring animation helpers |
 
 Every component is documented with a screenshot, usage, options and keyboard behaviour in [docs/components.md](docs/components.md).
 
@@ -115,22 +220,31 @@ cui_set_theme(ui, CUI_THEME_DARK);      /* animates */
 cui_set_accent(ui, CUI_ACCENT_VIOLET);  /* neutral, violet, blue, green, amber, orange, coral, rose */
 ```
 
-All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`, `CUI_COLOR_ACCENT`...), so your own boxes follow the theme too. See [Theming](docs/theming.md).
+All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`, `CUI_COLOR_ACCENT`...), so your own boxes follow the theme too. Try any app in the other theme with `CUI_THEME=dark` or `CUI_THEME=light`. See [Theming](docs/theming.md).
+
+## Small by design
+
+| | |
+|---|---|
+| Whole library: every component, both renderers, X11 backend, fonts and icons | about 345 KB |
+| `hello` on Linux, stripped, whole executable | about 230 KB |
+| Embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons), compressed | 95 KB |
+
+The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off. Details in [Integration](docs/integration.md#binary-size).
 
 ## Examples
 
 | Example | |
 |---|---|
-| [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents |
+| [`tracker`](examples/tracker.c) | Issue tracker: grouped list, custom status glyphs, detail pane, activity |
+| [`music`](examples/music.c) | Music player: generated cover art, track list, transport bar |
+| [`finance`](examples/finance.c) | Personal finance: top navigation, charts, painted card, budgets, goals |
 | [`dashboard`](examples/dashboard.c) | Sidebar, top bar, KPIs, charts and a sortable table |
-| [`settings`](examples/settings.c) | Forms, validation, preferences and a danger zone |
-| [`notes`](examples/notes.c) | Split view, search, context menus, dialogs, shortcuts, file export |
 | [`mail`](examples/mail.c) | Three pane inbox, folders, reading pane, compose dialog |
+| [`notes`](examples/notes.c) | Split view, search, context menus, dialogs, shortcuts, file export |
+| [`settings`](examples/settings.c) | Forms, validation, preferences and a danger zone |
+| [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents |
 | [`hello`](examples/hello.c) | The smallest app |
-
-| | |
-|---|---|
-| ![The mail example](docs/images/mail.png) | ![The notes example](docs/images/notes.png) |
 
 ## Platforms
 
@@ -160,7 +274,7 @@ Measured on a 4 core cloud VM (wall clock), gallery pages at 1240 × 820 points 
 
 ## Status and limitations
 
-CUI 1.0 is complete enough to build real desktop apps, and it is tested on every push (unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux). Things it does not do yet:
+CUI 1.0 is complete enough to build real desktop apps, and it is tested on every push: unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. Things it does not do yet:
 
 - **Screen readers.** There is no accessibility tree yet. Keyboard navigation and focus are complete.
 - **Complex scripts.** Text is UTF-8 with kerning and font fallback, but there is no shaping: right-to-left scripts and scripts that need ligatures (Arabic, Devanagari) do not render correctly. CJK works once you add a fallback font.

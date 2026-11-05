@@ -41,6 +41,7 @@ trending-up trending-down dollar-sign shopping-cart wallet briefcase building-2 
 award thumbs-up thumbs-down smile at-sign hash percent paperclip printer scissors clipboard
 file-text notebook-pen square-pen badge-check circle-user user-plus key-round fingerprint
 bug rocket target compass history archive circle square-check square
+skip-back skip-forward shuffle repeat radio audio-lines
 """.split()
 
 
@@ -72,7 +73,26 @@ def build_icons(lucide, codepoints_path):
         for n in ICONS:
             f.write('#define CUI_ICON_%-24s "%s"\n' % (c_ident(n), utf8_escape(cps[n])))
         f.write("\n#endif /* CUI_ICONS_H */\n")
-    print("wrote", out, "and", hdr)
+    # the icon sheet used by tests/component_shots.c
+    with open(os.path.join(ROOT, "tests", "icon_list.h"), "w") as f:
+        f.write("/* Generated from cui_icons.h for the icon sheet. */\n")
+        f.write("static const struct { const char *name, *icon; } icon_list[] = {\n")
+        for n in ICONS:
+            f.write('    { "%s", CUI_ICON_%s },\n' % (n, c_ident(n)))
+        f.write("};\n")
+    # the table in docs/icons.md
+    doc = os.path.join(ROOT, "docs", "icons.md")
+    text = open(doc).read()
+    import re
+    rows = ["| | | | |", "|---|---|---|---|"]
+    names = ["`CUI_ICON_%s`" % c_ident(n) for n in ICONS]
+    for i in range(0, len(names), 4):
+        cells = names[i:i + 4] + [""] * (4 - len(names[i:i + 4]))
+        rows.append("| " + " | ".join(cells) + " |")
+    text = re.sub(r"\| \| \| \| \|\n\|---\|---\|---\|---\|\n(?:\|.*\|\n)*", "\n".join(rows) + "\n", text, count=1)
+    text = re.sub(r"CUI embeds \d+ icons", "CUI embeds %d icons" % len(ICONS), text)
+    open(doc, "w").write(text)
+    print("wrote", out, hdr, "tests/icon_list.h and docs/icons.md")
 
 
 def deflate(data):

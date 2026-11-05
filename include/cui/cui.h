@@ -503,6 +503,7 @@ typedef struct cui_button_opts {
     const char *tooltip;
     const char *shortcut;      /* shown as a hint in the tooltip, e.g. "Ctrl S" */
     cui_size width;
+    cui_color color;           /* text and icon color, e.g. CUI_COLOR_ACCENT for a toggled icon */
 } cui_button_opts;
 
 CUI_API bool cui_button_ex(cui_ctx *ui, const char *label, const cui_button_opts *opts);

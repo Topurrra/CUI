@@ -208,4 +208,6 @@ For unit tests, skip the window entirely: create a context with the software ren
 |---|---|
 | `CUI_RENDERER=software` | Use the software renderer even when OpenGL is available |
 | `CUI_SCALE=2` | Override the display scale |
+| `CUI_THEME=dark` | Start in the dark (or `light`) theme, whatever the app asks for |
+| `CUI_ACCENT=blue` | Start with another accent: `neutral`, `violet`, `blue`, `green`, `amber`, `orange`, `coral`, `rose` |
 | `CUI_SCREENSHOT=file.png` | Save a screenshot after `CUI_SCREENSHOT_FRAMES` frames (default 90) and quit |

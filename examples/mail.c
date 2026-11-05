@@ -139,7 +139,8 @@ static void reading_pane(cui_ctx *ui, mail_app *a) {
         cui_row(ui, .gap = 4, .pad_x = 20, .pad_y = 10) {
             if (cui_icon_button(ui, CUI_ICON_ARCHIVE, .tooltip = "Archive", .shortcut = "E")) { m->folder = 3; a->selected = -1; cui_toast(ui, "Archived", .action = "Undo"); }
             cui_icon_button(ui, CUI_ICON_TRASH_2, .tooltip = "Delete");
-            if (cui_icon_button(ui, CUI_ICON_STAR, .tooltip = m->starred ? "Unstar" : "Star", .selected = m->starred)) m->starred = !m->starred;
+            if (cui_icon_button(ui, CUI_ICON_STAR, .tooltip = m->starred ? "Unstar" : "Star", .selected = m->starred,
+                                .color = m->starred ? CUI_COLOR_WARNING : CUI_TRANSPARENT)) m->starred = !m->starred;
             cui_spacer(ui);
             if (cui_button(ui, "Reply", .icon = CUI_ICON_UNDO_2, .size = CUI_SIZE_SM)) {
                 a->compose = true;
