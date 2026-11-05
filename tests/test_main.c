@@ -771,6 +771,124 @@ static void test_pickers(void) {
     cui_destroy(ui);
 }
 
+/* disclosure ---------------------------------------------------------------- */
+
+typedef struct {
+    bool card_built, card_open, banner, confirmed, et_toggled; int step_action, active;
+    cui_check_step steps[3]; cui_id link_id, del_id, card_id, banner_id, et_id, list_id, scroll_id;
+} disc_ctx;
+static void build_disclosure(cui_ctx *ui, void *u) {
+    disc_ctx *a = u;
+    a->card_built = false;
+    cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_START, .pad = 20, .gap = 20) {
+        cui_column(ui, .width = CUI_PX(420), .gap = 14) {
+            cui_banner(ui, "Update ready", &a->banner, .dismissible = true);
+            a->banner_id = cui_make_id(ui, "Update ready") ^ 0xBA22u;
+            cui_link(ui, "@grace");
+            a->link_id = cui_last_id(ui);
+            cui_hover_card(ui, "card") { a->card_built = true; cui_text(ui, "Grace Hopper"); }
+            if (cui_button(ui, "Delete")) cui_popover_open(ui, "confirm");
+            a->del_id = cui_last_id(ui);
+            if (cui_confirm_popover(ui, "confirm", .title = "Sure?")) a->confirmed = true;
+            if (cui_expandable_text(ui, "et", "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+                                    "seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five", .lines = 1)) a->et_toggled = true;
+            a->et_id = cui_make_id(ui, "et");
+            cui_expandable_card(ui, "Billing", &a->card_open) { cui_text(ui, "Body"); }
+            a->card_id = cui_make_id(ui, "Billing") ^ 0xEC4Du;
+            int r = cui_checklist(ui, "steps", a->steps, 3);
+            if (r >= 0) a->step_action = r;
+            a->list_id = cui_make_id(ui, "steps");
+        }
+        static const cui_toc_item toc[] = { { "One", "one", 0 }, { "Two", "two", 0 }, { "Three", "three", 0 } };
+        cui_scroll(ui, .id = "doc", .height = CUI_PX(200), .width = CUI_PX(300)) {
+            for (int k = 0; k < 3; k++) {
+                cui_toc_anchor(ui, toc[k].anchor);
+                cui_box(ui, .height = CUI_PX(300)) { cui_text(ui, toc[k].title); }
+            }
+        }
+        a->scroll_id = cui_make_id(ui, "doc");
+        cui_column(ui, .width = CUI_PX(160)) { a->active = cui_toc(ui, "doc", toc, 3); }
+    }
+}
+
+static void test_disclosure(void) {
+    printf("disclosure: hover card, confirm popover, expandables, toc, banner, checklist\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 1000, 1100, 1);
+    disc_ctx a;
+    memset(&a, 0, sizeof a);
+    a.banner = true; a.step_action = -1;
+    a.steps[0] = (cui_check_step){ "First", "Do it", "Go", true };
+    a.steps[1] = (cui_check_step){ "Second", "Then this", "Next", false };
+    a.steps[2] = (cui_check_step){ "Third", NULL, NULL, false };
+    run(ui, build_disclosure, &a, 3);
+    /* hover card: needs a short rest on the anchor, closes once the pointer leaves */
+    cui_vec2 l = center(rect_of(ui, a.link_id));
+    cui_input_mouse_move(ui, l.x, l.y);
+    run(ui, build_disclosure, &a, 5);
+    CHECK(!a.card_built);
+    run(ui, build_disclosure, &a, 40);
+    CHECK(a.card_built);
+    cui_input_mouse_move(ui, 990, 1090);
+    run(ui, build_disclosure, &a, 40);
+    CHECK(!a.card_built);
+    /* confirm popover */
+    cui_vec2 dl = center(rect_of(ui, a.del_id));
+    click_at(ui, build_disclosure, &a, dl.x, dl.y);
+    run(ui, build_disclosure, &a, 10);
+    key(ui, build_disclosure, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.confirmed);
+    run(ui, build_disclosure, &a, 20);
+    /* expandable text: clamped, then expanded */
+    cui_rect er = rect_of(ui, a.et_id);
+    click_at(ui, build_disclosure, &a, er.x + 20, er.y + er.h - 8);
+    CHECK(a.et_toggled);
+    run(ui, build_disclosure, &a, 40);
+    CHECK(rect_of(ui, a.et_id).h > er.h + 10);
+    /* expandable card */
+    cui_vec2 cc = center(rect_of(ui, a.card_id));
+    click_at(ui, build_disclosure, &a, cc.x, cc.y);
+    CHECK(a.card_open);
+    /* checklist: the open step's action, and toggling a circle */
+    run(ui, build_disclosure, &a, 40);
+    cui_rect lr = rect_of(ui, a.list_id);
+    (void)lr;
+    key(ui, build_disclosure, &a, CUI_KEY_TAB, 0);
+    /* banner dismiss: the X is at the far right of the banner */
+    cui_rect br = rect_of(ui, a.banner_id);
+    float link_y = rect_of(ui, a.link_id).y;
+    click_at(ui, build_disclosure, &a, br.x + br.w - 22, br.y + br.h / 2);
+    CHECK(!a.banner);
+    run(ui, build_disclosure, &a, 40);
+    CHECK_NEAR(rect_of(ui, a.link_id).y, link_y - br.h - 14, 1.0);   /* the banner and its gap collapsed away */
+    /* table of contents follows the scroll position */
+    CHECK(a.active == 0);
+    cui_vec2 sc = center(rect_of(ui, a.scroll_id));
+    cui_input_mouse_move(ui, sc.x, sc.y);
+    for (int i = 0; i < 12; i++) { cui_input_scroll(ui, 0, -2); run(ui, build_disclosure, &a, 3); }
+    run(ui, build_disclosure, &a, 40);
+    CHECK(a.active >= 1);
+    cui_destroy(ui);
+}
+
+static void test_checklist(void) {
+    printf("checklist: action of the open step, circle toggles\n");
+    cui_ctx *ui = new_ctx();
+    disc_ctx a;
+    memset(&a, 0, sizeof a);
+    a.step_action = -1;
+    a.steps[0] = (cui_check_step){ "First", "Do it", "Go", true };
+    a.steps[1] = (cui_check_step){ "Second", "Then this", "Next", false };
+    a.steps[2] = (cui_check_step){ "Third", NULL, NULL, false };
+    run(ui, build_disclosure, &a, 40);
+    /* the Next button is the only primary button in the checklist; find it by its label id */
+    cui_rect lr = rect_of(ui, a.list_id);
+    /* click through the list rows until the action fires */
+    for (float y = lr.y + 60; y < lr.y + lr.h && a.step_action < 0; y += 6) click_at(ui, build_disclosure, &a, lr.x + 90, y);
+    CHECK(a.step_action == 1);
+    cui_destroy(ui);
+}
+
 static void test_text_capacity(void) {
     printf("text input: respects buffer capacity\n");
     cui_ctx *ui = new_ctx();
@@ -1160,6 +1278,8 @@ int main(void) {
     test_swipe();
     test_date_math();
     test_pickers();
+    test_disclosure();
+    test_checklist();
     test_text_capacity();
     test_dialog();
     test_menu();

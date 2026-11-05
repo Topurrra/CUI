@@ -28,7 +28,7 @@ static void cui__paint_rot_icon(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_polyline(ui, pts, 3, 1.6f, p->color, false);
 }
 
-static void cui__chevron_node(cui_ctx *ui, float angle, float size, cui_color color) {
+void cui__chevron_node(cui_ctx *ui, float angle, float size, cui_color color) {
     int i = cui__leaf(ui, 0, CUI_PX(size), CUI_PX(size));
     cui__rot_icon *p = cui__frame_alloc(ui, sizeof *p);
     p->angle = angle; p->color = color; p->size = size;

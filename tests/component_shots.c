@@ -544,6 +544,108 @@ static void scene_capture(cui_ctx *ui, int f) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28, .justify = CUI_JUSTIFY_CENTER) { body_capture(ui); }
 }
 
+static void body_hover_card(cui_ctx *ui) {
+    cui_row(ui, .gap = 6) {
+        cui_text(ui, "Assigned to");
+        cui_link(ui, "@grace");
+        cui_hover_card(ui, "grace-card", .width = 300) {
+            cui_row(ui, .gap = 12, .align = CUI_ALIGN_START) {
+                cui_avatar(ui, "Grace Hopper", .size = 44, .status = "online");
+                cui_column(ui, .gap = 4, .width = CUI_FILL) {
+                    cui_text(ui, "Grace Hopper", .font = CUI_FONT_MEDIUM);
+                    cui_text(ui, "Compilers, Cobol and very small nanoseconds.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_row(ui, .gap = 6, .pad_top = 4) {
+                        cui_icon(ui, CUI_ICON_CLOCK, 13, CUI_COLOR_TEXT_MUTED);
+                        cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+                    }
+                }
+            }
+        }
+        cui_text(ui, "and due Friday.");
+    }
+}
+static void scene_hover_card(cui_ctx *ui, int f) {
+    if (f < 0) { cui_rect r = cui_get_rect(ui, cui_make_id(ui, "@grace") ^ 0x11AC0009u); if (-f - 1 == 5) cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_hover_card(ui); }
+}
+static void body_confirm_pop(cui_ctx *ui) {
+    if (cui_button(ui, "Delete branch", .icon = CUI_ICON_TRASH_2)) cui_popover_open(ui, "confirm-delete");
+    cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "The branch and its 12 commits are removed from the remote.",
+                        .confirm_label = "Delete", .danger = true);
+}
+static void scene_confirm_pop(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "Delete branch"), -f - 1, 10); if (-f - 1 == 16) cui_input_mouse_move(ui, 400, 300); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_confirm_pop(ui); }
+}
+SCENE(expandables) {
+    static bool a = true, b = false;
+    cui_column(ui, .gap = 14, .width = CUI_PX(620)) {
+        cui_expandable_text(ui, "about",
+            "CUI is a component library for C. It draws everything itself, so an app looks the same on Windows, macOS and Linux, and it "
+            "ships the parts most apps need: inputs, pickers, menus, dialogs, tables, charts and a command palette.", .lines = 2);
+        cui_expandable_card(ui, "Billing", &a, .description = "Pro plan, renews on December 1", .icon = CUI_ICON_CREDIT_CARD, .badge = "Active", .badge_tone = CUI_TONE_SUCCESS) {
+            cui_row(ui, .gap = 8) { cui_button(ui, "Change plan", .size = CUI_SIZE_SM); cui_button(ui, "Invoices", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST); }
+        }
+        cui_expandable_card(ui, "Security", &b, .description = "Two-factor authentication is on", .icon = CUI_ICON_SHIELD) { cui_text(ui, "Recovery codes"); }
+    }
+}
+SCENE(banner_countdown) {
+    static bool open = true;
+    cui_column(ui, .gap = 20, .width = CUI_FILL) {
+        cui_banner(ui, "CUI 1.1 is out: data grid, kanban and forty new components.", &open, .action = "Read the notes", .dismissible = true);
+        cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER) {
+            cui_countdown(ui, "launch", 2 * 86400 + 5 * 3600 + 42 * 60 + 18);
+            cui_countdown(ui, "sale", 5 * 3600 + 42 * 60 + 18, .compact = true, .hide_days = true);
+        }
+    }
+}
+SCENE(checklist) {
+    static cui_check_step steps[] = {
+        { "Create your workspace", "Pick a name and invite your team.", "Create", true },
+        { "Connect a repository", "Link GitHub or GitLab to sync issues and pull requests.", "Connect", false },
+        { "Import your data", "Bring tasks over from a CSV or another tool.", "Import", false },
+        { "Turn on notifications", NULL, NULL, false },
+    };
+    cui_box(ui, .width = CUI_PX(440)) { cui_checklist(ui, "onboarding", steps, 4, .title = "Set up your workspace"); }
+}
+SCENE(toc) {
+    static const cui_toc_item toc[] = {
+        { "Introduction", "intro", 0 }, { "Install", "install", 0 }, { "With CMake", "cmake", 1 }, { "Without CMake", "nocmake", 1 },
+        { "First window", "window", 0 }, { "Next steps", "next", 0 },
+    };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_scroll(ui, .id = "reader", .height = CUI_PX(260), .width = CUI_FILL, .gap = 10) {
+            for (int k = 0; k < 6; k++) {
+                cui_toc_anchor(ui, toc[k].anchor);
+                cui_heading(ui, toc[k].title, toc[k].level ? 4 : 3);
+                cui_push_id_int(ui, k);
+                cui_text(ui, "Components are functions. They draw themselves, handle input and return what happened.", .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_pop_id(ui);
+            }
+            cui_gap(ui, 200);
+        }
+        cui_column(ui, .width = CUI_PX(180), .gap = 10) {
+            cui_text(ui, "On this page", .size = 12, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_MUTED);
+            cui_toc(ui, "reader", toc, 6);
+        }
+    }
+}
+static void scene_toc_input(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "reader"));
+        if (-f - 1 == 10) cui_input_mouse_move(ui, r.x + 40, r.y + 40);
+        if (-f - 1 >= 11 && -f - 1 < 17) cui_input_scroll(ui, 0, -1.2f);
+        if (-f - 1 == 18) cui_input_mouse_move(ui, 900, 10);
+        return;
+    }
+    frame_wrap(ui, body_toc);
+}
+static void body_undo(cui_ctx *ui) { cui_button(ui, "Archive 3 conversations", .icon = CUI_ICON_ARCHIVE); }
+static void scene_undo(cui_ctx *ui, int f) {
+    if (f < 0) { if (-f - 1 == 5) cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_undo(ui); }
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -765,6 +867,10 @@ int main(int argc, char **argv) {
         { "multi-select", scene_multi, 380, 420, true }, { "date-range", scene_range, 760, 440, true },
         { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },
         { "ruler-histogram", scene_rulers, 860, 200, true }, { "capture", scene_capture, 900, 300, true },
+        { "hover-card", scene_hover_card, 460, 220, true }, { "confirm-popover", scene_confirm_pop, 420, 260, true },
+        { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
+        { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
+        { "undo-toast", scene_undo, 460, 200, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

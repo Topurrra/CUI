@@ -694,6 +694,7 @@ typedef struct cui_toast_opts {
     cui_tone tone;
     float duration;            /* seconds, default 4; negative = until dismissed */
     const char *action;        /* optional action button label */
+    bool show_timer;           /* a draining line shows how long the action stays (undo) */
 } cui_toast_opts;
 /* Queue a toast. Returns a handle; cui_toast_action_clicked(handle) tells
  * whether its action button was pressed. */
@@ -964,6 +965,66 @@ CUI_API void cui_swipe_item_begin(cui_ctx *ui, const char *id, const cui_swipe_a
 CUI_API int cui_swipe_item_end(cui_ctx *ui);
 
 /* ------------------------------------------------------------------------ */
+/* Disclosure                                                               */
+/* ------------------------------------------------------------------------ */
+
+/* Hover card: rich content that appears when the pointer rests on the
+ * previous component, and stays while the pointer is over either. */
+typedef struct cui_hover_card_opts { int _; cui_placement placement; float width; float delay; } cui_hover_card_opts;
+CUI_API bool cui_hover_card_begin(cui_ctx *ui, const char *id, const cui_hover_card_opts *opts);
+CUI_API void cui_hover_card_end(cui_ctx *ui);
+
+/* Confirm popover: a small question anchored to the previous component.
+ * Open it with cui_popover_open(ui, id). Returns true when confirmed. */
+typedef struct cui_confirm_popover_opts {
+    int _;
+    const char *title;
+    const char *description;
+    const char *confirm_label;    /* default "Confirm" */
+    const char *cancel_label;     /* default "Cancel" */
+    bool danger;
+    cui_placement placement;
+} cui_confirm_popover_opts;
+CUI_API bool cui_confirm_popover_ex(cui_ctx *ui, const char *id, const cui_confirm_popover_opts *opts);
+
+/* Text clamped to a few lines with a fade and Show more / Show less. */
+typedef struct cui_expandable_text_opts { int _; int lines; float size; cui_color color; cui_color fade_to; } cui_expandable_text_opts;
+CUI_API bool cui_expandable_text_ex(cui_ctx *ui, const char *id, const char *text, const cui_expandable_text_opts *opts);
+
+/* Expandable card: a card whose header opens a body with a height spring. */
+typedef struct cui_expandable_card_opts { int _; const char *description; const char *icon; const char *badge; cui_tone badge_tone; } cui_expandable_card_opts;
+CUI_API bool cui_expandable_card_begin(cui_ctx *ui, const char *title, bool *open, const cui_expandable_card_opts *opts);
+CUI_API void cui_expandable_card_end(cui_ctx *ui);
+
+/* Table of contents for a scroll area: highlights the section in view on a
+ * progress rail, and scrolls to a section when clicked. Put
+ * cui_toc_anchor(ui, "anchor") at each heading inside the scroll area, and
+ * call cui_toc in the same scope as the scroll area. Returns the active index. */
+typedef struct cui_toc_item { const char *title; const char *anchor; int level; } cui_toc_item;
+CUI_API int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int count);
+CUI_API void cui_toc_anchor(cui_ctx *ui, const char *anchor);
+
+/* ------------------------------------------------------------------------ */
+/* More feedback                                                            */
+/* ------------------------------------------------------------------------ */
+
+/* Announcement banner across the top of a view. Collapses smoothly when
+ * dismissed (*open becomes false). Returns true when the action is clicked. */
+typedef struct cui_banner_opts { int _; cui_tone tone; const char *icon; const char *action; bool dismissible; } cui_banner_opts;
+CUI_API bool cui_banner_ex(cui_ctx *ui, const char *text, bool *open, const cui_banner_opts *opts);
+
+/* Countdown: days, hours, minutes and seconds as tiles whose digits roll. */
+typedef struct cui_countdown_opts { int _; bool hide_days; bool compact; } cui_countdown_opts;
+CUI_API void cui_countdown_ex(cui_ctx *ui, const char *id, double seconds_left, const cui_countdown_opts *opts);
+
+/* Onboarding checklist: a card with progress and steps. The first open step
+ * shows its description and action. Clicking a step's circle toggles done.
+ * Returns the index whose action was clicked, or -1. */
+typedef struct cui_check_step { const char *title; const char *description; const char *action; bool done; } cui_check_step;
+typedef struct cui_checklist_opts { int _; const char *title; const char *description; } cui_checklist_opts;
+CUI_API int cui_checklist_ex(cui_ctx *ui, const char *id, cui_check_step *steps, int count, const cui_checklist_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Pickers                                                                  */
 /* ------------------------------------------------------------------------ */
 
@@ -1229,6 +1290,13 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
 #define cui_reorder_item(ui, pos)           CUI__SCOPE(cui_reorder_item_begin((ui), (pos)), cui_reorder_item_end(ui))
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
+#define cui_hover_card(ui, id, ...)         CUI__SCOPE_IF(cui_hover_card_begin((ui), (id), CUI__OPTS(cui_hover_card_opts, __VA_ARGS__)), cui_hover_card_end(ui))
+#define cui_confirm_popover(ui, id, ...)    cui_confirm_popover_ex((ui), (id), CUI__OPTS(cui_confirm_popover_opts, __VA_ARGS__))
+#define cui_expandable_text(ui, id, text, ...) cui_expandable_text_ex((ui), (id), (text), CUI__OPTS(cui_expandable_text_opts, __VA_ARGS__))
+#define cui_expandable_card(ui, title, open, ...) CUI__SCOPE_IF(cui_expandable_card_begin((ui), (title), (open), CUI__OPTS(cui_expandable_card_opts, __VA_ARGS__)), cui_expandable_card_end(ui))
+#define cui_banner(ui, text, open, ...)     cui_banner_ex((ui), (text), (open), CUI__OPTS(cui_banner_opts, __VA_ARGS__))
+#define cui_countdown(ui, id, seconds, ...) cui_countdown_ex((ui), (id), (seconds), CUI__OPTS(cui_countdown_opts, __VA_ARGS__))
+#define cui_checklist(ui, id, steps, count, ...) cui_checklist_ex((ui), (id), (steps), (count), CUI__OPTS(cui_checklist_opts, __VA_ARGS__))
 #define cui_multi_select(ui, id, items, count, selected, ...) cui_multi_select_ex((ui), (id), (items), (count), (selected), CUI__OPTS(cui_multi_select_opts, __VA_ARGS__))
 #define cui_date_range_picker(ui, id, range, ...) cui_date_range_picker_ex((ui), (id), (range), CUI__OPTS(cui_date_range_opts, __VA_ARGS__))
 #define cui_time_picker(ui, id, hour, minute, ...) cui_time_picker_ex((ui), (id), (hour), (minute), CUI__OPTS(cui_time_opts, __VA_ARGS__))

@@ -675,7 +675,8 @@ int cui_toast_ex(cui_ctx *ui, const char *title, const cui_toast_opts *o) {
     if (o->description) snprintf(t->desc, sizeof t->desc, "%s", o->description);
     if (o->action) snprintf(t->action, sizeof t->action, "%s", o->action);
     t->tone = o->tone;
-    t->duration = o->duration != 0 ? o->duration : 4.0f;
+    t->show_timer = o->show_timer;
+    t->duration = o->duration != 0 ? o->duration : (o->show_timer ? 6.0f : 4.0f);
     t->height = 64;
     ui->animating = true;
     return t->handle;
@@ -692,6 +693,15 @@ void cui_toast_dismiss(cui_ctx *ui, int handle) {
 }
 
 typedef struct { float hover; } cui__toasts_state;
+
+typedef struct { float frac; cui_color c; } cui__toast_timer;
+static void cui__paint_toast_timer(cui_ctx *ui, cui_node *n, void *data) {
+    cui__toast_timer *p = data;
+    cui_rect r = n->rect;
+    float inset = n->radius.bl;
+    float w = (r.w - inset * 2) * cui__clampf(p->frac, 0, 1);
+    if (w > 0) cui_draw_rect(ui, (cui_rect){ r.x + inset, r.y + r.h - 3, w, 2 }, CUI_CORNERS(1), p->c);
+}
 
 static void cui__toasts_render(cui_ctx *ui) {
     if (ui->toast_count == 0) return;
@@ -780,6 +790,16 @@ static void cui__toasts_render(cui_ctx *ui) {
         n->elevation_alpha = 0.8f;
         n->opacity = e * alpha;
         n->scale = sc;
+        if (t->show_timer && t->duration > 0) {
+            /* a draining line: how long the action stays available */
+            cui__toast_timer *tp = cui__frame_alloc(ui, sizeof *tp);
+            tp->frac = 1.0f - t->age / t->duration;
+            tp->c = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, TEXT_MUTED) : CUI_C(ui, ACCENT);
+            n->paint = cui__paint_toast_timer;
+            n->paint_data = tp;
+            n->flags |= CUI_NF_PAINT_AFTER;
+            if (!hovered && !t->dismissed) ui->animating = true;
+        }
         cui_push_id_int(ui, t->handle);
         cui__open(ui, tn);
         const char *icon = NULL;

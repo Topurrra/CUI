@@ -257,3 +257,104 @@ int n = cui_signature_points(ui, "signature", &pts, &ends, &strokes);   /* point
 ```
 
 Stroke width follows speed, so signatures look inked rather than drawn with a fixed pen. A Clear button appears once something is drawn; `cui_signature_clear` does the same from code.
+
+## Disclosure
+
+### Hover card
+
+![Hover card](images/components/hover-card.png)
+
+```c
+cui_link(ui, "@grace");
+cui_hover_card(ui, "grace", .width = 300) {
+    cui_avatar(ui, "Grace Hopper", .size = 44);
+    cui_text(ui, "Compilers, Cobol and very small nanoseconds.");
+}
+```
+
+Attaches to the previous component. It opens after the pointer rests there for `delay` seconds (0.45) and stays open while the pointer is over the anchor or the card, with a short grace period to cross the gap. Options: `placement`, `width`, `delay`.
+
+### Confirm popover
+
+![Confirm popover](images/components/confirm-popover.png)
+
+```c
+if (cui_button(ui, "Delete branch")) cui_popover_open(ui, "confirm-delete");
+if (cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "This cannot be undone.",
+                        .confirm_label = "Delete", .danger = true))
+    delete_branch();
+```
+
+A small question anchored to the button that opened it. Focus moves to the confirm button, so Enter confirms and Esc cancels.
+
+### Expandable text and card
+
+![Expandable text and cards](images/components/expandables.png)
+
+```c
+cui_expandable_text(ui, "about", long_text, .lines = 3);
+
+static bool billing_open;
+cui_expandable_card(ui, "Billing", &billing_open, .description = "Pro plan", .icon = CUI_ICON_CREDIT_CARD, .badge = "Active") {
+    cui_button(ui, "Change plan");
+}
+```
+
+Expandable text clamps to `lines` with a fade (into `fade_to`, the background by default) and a Show more / Show less link; the height springs. The card's body opens with a height spring and its chevron turns; content inside is disabled while it closes.
+
+### Table of contents
+
+![Table of contents](images/components/toc.png)
+
+```c
+static const cui_toc_item toc[] = { { "Install", "install", 0 }, { "With CMake", "cmake", 1 } };
+cui_row(ui) {
+    cui_scroll(ui, .id = "doc", .width = CUI_FILL) {
+        cui_toc_anchor(ui, "install");  cui_heading(ui, "Install", 3);   /* ... */
+        cui_toc_anchor(ui, "cmake");    cui_heading(ui, "With CMake", 4);
+    }
+    cui_toc(ui, "doc", toc, 2);   /* same scope as the scroll area */
+}
+```
+
+The rail fills as you read, and a marker glides to the section in view. Clicking an entry scrolls there smoothly. `level` indents entries.
+
+## Feedback
+
+### Banner and countdown
+
+![Banner and countdown](images/components/banner-countdown.png)
+
+```c
+static bool show_update = true;
+if (cui_banner(ui, "Version 1.1 is ready to install.", &show_update, .action = "Restart", .dismissible = true)) restart();
+cui_countdown(ui, "launch", launch_time - cui_time(ui));
+cui_countdown(ui, "sale", sale_end - now, .compact = true, .hide_days = true);
+```
+
+The banner spans its container, tinted with its `tone` (the accent by default), and collapses smoothly when dismissed. The countdown shows days, hours, minutes and seconds as tiles whose digits roll; it schedules its own redraw each second.
+
+### Onboarding checklist
+
+![Onboarding checklist](images/components/checklist.png)
+
+```c
+static cui_check_step steps[] = {
+    { "Create your workspace", "Pick a name and invite your team.", "Create", true },
+    { "Connect a repository", "Sync issues and pull requests.", "Connect", false },
+};
+int act = cui_checklist(ui, "onboarding", steps, 2, .title = "Set up your workspace");
+if (act >= 0) run_step(act);
+```
+
+A card with a progress ring and steps; the first unfinished step opens to show its description and action button. Clicking a circle toggles `done`.
+
+### Undo toast
+
+![Undo toast](images/components/undo-toast.png)
+
+```c
+cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true);
+```
+
+`show_timer` adds a draining line along the bottom of the toast, so people can see how long Undo stays (6 seconds by default; hovering the stack pauses it).

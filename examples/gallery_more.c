@@ -237,6 +237,118 @@ static void page_capture(cui_ctx *ui) {
     cui_box(ui, .width = CUI_PX(520)) { cui_signature_pad(ui, "signature", .height = 180); }
 }
 
+
+/* ---- disclosure and feedback ---------------------------------------------- */
+
+static void page_disclosure(cui_ctx *ui) {
+    static bool banner = true;
+    static bool card1 = true, card2 = false;
+    static cui_check_step steps[] = {
+        { "Create your workspace", "Pick a name and invite your team.", "Create", true },
+        { "Connect a repository", "Link GitHub or GitLab to sync issues and pull requests.", "Connect", false },
+        { "Import your data", "Bring tasks over from a CSV or another tool.", "Import", false },
+        { "Turn on notifications", "Get pinged when something needs you.", "Enable", false },
+    };
+    static int deleted;
+    if (cui_banner(ui, "CUI 1.1 is out: data grid, kanban and forty new components.", &banner, .action = "Read the notes", .dismissible = true))
+        cui_toast(ui, "Opening release notes");
+    if (!banner && cui_button(ui, "Show the banner again", .size = CUI_SIZE_SM)) banner = true;
+
+    section(ui, "Hover card", "Rest the pointer on a name.");
+    cui_row(ui, .gap = 6) {
+        cui_text(ui, "Assigned to");
+        cui_link(ui, "@grace");
+        cui_hover_card(ui, "grace-card", .width = 300) {
+            cui_row(ui, .gap = 12, .align = CUI_ALIGN_START) {
+                cui_avatar(ui, "Grace Hopper", .size = 44, .status = "online");
+                cui_column(ui, .gap = 4, .width = CUI_FILL) {
+                    cui_text(ui, "Grace Hopper", .font = CUI_FONT_MEDIUM);
+                    cui_text(ui, "Compilers, Cobol and very small nanoseconds. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_row(ui, .gap = 6, .pad_top = 4) {
+                        cui_icon(ui, CUI_ICON_CALENDAR, 13, CUI_COLOR_TEXT_MUTED);
+                        cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+                    }
+                }
+            }
+        }
+        cui_text(ui, "and due Friday.");
+    }
+
+    section(ui, "Confirm popover", "Ask right where the action is.");
+    cui_row(ui, .gap = 12) {
+        if (cui_button(ui, "Delete branch", .icon = CUI_ICON_TRASH_2)) cui_popover_open(ui, "confirm-delete");
+        if (cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "The branch and its 12 commits are removed from the remote.",
+                                .confirm_label = "Delete", .danger = true)) deleted++;
+        if (deleted) cui_muted(ui, "Branch deleted");
+    }
+
+    section(ui, "Expandable text", "Long text clamps to a few lines with a fade.");
+    cui_expandable_text(ui, "about",
+        "CUI is a component library for C. It draws everything itself, so an app looks the same on Windows, macOS and Linux, and it "
+        "ships the parts most apps need: inputs, pickers, menus, dialogs, tables, charts and a command palette. Every component "
+        "supports the keyboard, light and dark themes and reduced motion. The core is plain C99 with no dependencies, and it "
+        "renders through OpenGL or a built-in software rasterizer, so it also runs in virtual machines and over remote desktop.",
+        .lines = 2);
+
+    section(ui, "Expandable cards", "A header that opens a body with a spring.");
+    cui_column(ui, .gap = 10) {
+        cui_expandable_card(ui, "Billing", &card1, .description = "Pro plan, renews on December 1", .icon = CUI_ICON_CREDIT_CARD, .badge = "Active", .badge_tone = CUI_TONE_SUCCESS) {
+            cui_row(ui, .gap = 16) {
+                cui_metric(ui, "This month", "$84.00", .width = CUI_FILL);
+                cui_metric(ui, "Seats", "7 of 10", .width = CUI_FILL);
+            }
+            cui_row(ui, .gap = 8) { cui_button(ui, "Change plan", .size = CUI_SIZE_SM); cui_button(ui, "Invoices", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST); }
+        }
+        cui_expandable_card(ui, "Security", &card2, .description = "Two-factor authentication is on", .icon = CUI_ICON_SHIELD) {
+            cui_text(ui, "Recovery codes were generated 3 months ago.", .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+    }
+
+    section(ui, "Countdown", "Digits roll as the time passes.");
+    {
+        static double target;
+        if (target == 0) target = cui_time(ui) + 2 * 86400 + 5 * 3600 + 42 * 60 + 18;
+        cui_row(ui, .gap = 24, .align = CUI_ALIGN_CENTER) {
+            cui_countdown(ui, "launch", target - cui_time(ui));
+            cui_countdown(ui, "sale", target - cui_time(ui) - 86400 * 2, .compact = true, .hide_days = true);
+        }
+    }
+
+    section(ui, "Onboarding checklist", "Progress, with the next step open.");
+    cui_box(ui, .width = CUI_PX(460)) {
+        int a = cui_checklist(ui, "onboarding", steps, 4, .title = "Set up your workspace");
+        if (a >= 0) { steps[a].done = true; cui_toast(ui, steps[a].title, .tone = CUI_TONE_SUCCESS); }
+    }
+
+    section(ui, "Undo toast", "A draining line shows how long Undo stays.");
+    if (cui_button(ui, "Archive 3 conversations", .icon = CUI_ICON_ARCHIVE)) cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true);
+}
+
+/* ---- docs page with a table of contents ---------------------------------- */
+
+static void page_reader(cui_ctx *ui) {
+    static const cui_toc_item toc[] = {
+        { "Introduction", "intro", 0 }, { "Install", "install", 0 }, { "With CMake", "cmake", 1 }, { "Without CMake", "nocmake", 1 },
+        { "First window", "window", 0 }, { "Immediate mode", "imm", 0 }, { "Layout", "layout", 0 }, { "Next steps", "next", 0 },
+    };
+    static const char *para = "Components are functions. They draw themselves, handle input and return what happened. Your variables are the "
+                              "source of truth, so there is nothing to keep in sync, and conditional interface is just an if statement. ";
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_scroll(ui, .id = "reader", .height = CUI_PX(560), .width = CUI_FILL, .gap = 14) {
+            for (int k = 0; k < 8; k++) {
+                cui_toc_anchor(ui, toc[k].anchor);
+                cui_heading(ui, toc[k].title, toc[k].level ? 4 : 3);
+                for (int p = 0; p < 3; p++) { cui_push_id_int(ui, k * 10 + p); cui_text(ui, para, .color = CUI_COLOR_TEXT_SECONDARY); cui_pop_id(ui); }
+            }
+            cui_gap(ui, 200);
+        }
+        cui_column(ui, .width = CUI_PX(200), .gap = 10) {
+            cui_text(ui, "On this page", .size = 12, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_MUTED);
+            cui_toc(ui, "reader", toc, 8);
+        }
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -246,6 +358,8 @@ static const more_page pages[] = {
     { "Smart inputs", CUI_ICON_SQUARE_PEN, page_inputs },
     { "Pickers", CUI_ICON_CALENDAR, page_pickers },
     { "Capture", CUI_ICON_UPLOAD, page_capture },
+    { "Disclosure", CUI_ICON_LAYERS, page_disclosure },
+    { "Reader", CUI_ICON_FILE_TEXT, page_reader },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

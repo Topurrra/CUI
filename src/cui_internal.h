@@ -323,7 +323,7 @@ typedef struct cui_toast_item {
     char action[48];
     cui_tone tone;
     float duration, age;
-    bool dismissed, action_clicked, hovered_pause;
+    bool dismissed, action_clicked, hovered_pause, show_timer;
     cui_spring enter;          /* 0..1 appear */
     cui_spring y;              /* stacked position */
     float height;
@@ -507,7 +507,8 @@ typedef struct { cui_color bg, bg_hover, bg_press, fg, border; } cui__btn_colors
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected);
 void cui__focus_ring(cui_ctx *ui, int node, float alpha);
 void cui__icon_swap(cui_ctx *ui, cui_id state_id, const char *icon, float size, cui_color c);
-cui_id cui__position_id(cui_ctx *ui, uint32_t salt);   /* stable id from the parent and child index */   /* keyboard focus ring painted after the node */
+cui_id cui__position_id(cui_ctx *ui, uint32_t salt);
+void cui__chevron_node(cui_ctx *ui, float angle, float size, cui_color color);   /* 0 points down */   /* stable id from the parent and child index */   /* keyboard focus ring painted after the node */
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *trailing_icon_default);
 static inline float cui__fsz(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color);
