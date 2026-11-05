@@ -269,12 +269,14 @@ typedef struct {
     float adv;       /* advance (points) */
     float center_off;/* tabular centering offset */
     int start, end;  /* byte range */
+    float track;     /* extra advance per glyph (points) */
 } cui__glyph_iter;
 
 static void cui__iter_init(cui__glyph_iter *it, cui_ctx *ui, cui_font font, float size, const char *s, int len, bool tab) {
     memset(it, 0, sizeof *it);
     it->ui = ui; it->font = font; it->size = size; it->s = s; it->len = len; it->tabular = tab;
     it->prev_font = -1;
+    it->track = size * (-0.0223f + 0.185f * expf(-0.1745f * size));
 }
 
 static bool cui__iter_next(cui__glyph_iter *it) {
@@ -298,6 +300,8 @@ static bool cui__iter_next(cui__glyph_iter *it) {
         it->center_off = (ta - adv) * 0.5f;
         adv = ta;
     }
+    /* optical tracking: a touch looser when small, tighter as text grows */
+    if (!fd->is_icon) { adv += it->track; it->center_off += it->track * 0.5f; }
     it->cp = cp; it->gi = gi; it->gfont = gf; it->gsize = gs;
     it->gx = it->x;
     it->adv = adv;
