@@ -2,11 +2,8 @@
 #ifndef CUI_INTERNAL_H
 #define CUI_INTERNAL_H
 
-#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
-#endif
-#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
-#define _DARWIN_C_SOURCE
 #endif
 
 #ifndef CUI_BUILDING

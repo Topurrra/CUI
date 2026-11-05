@@ -956,8 +956,9 @@ int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizo
     cui__tween(ui, &st->x, st->tx, 0.14f);
     if (fabsf(st->y - st->ty) < 0.25f) st->y = st->ty;
     if (fabsf(st->x - st->tx) < 0.25f) st->x = st->tx;
-    bool show = (ui->time - st->last_activity < 0.9) || st->hover_bar || st->drag_y;
-    if (show && ui->time - st->last_activity < 0.9) cui__wakeup_after(ui, (float)(0.9 - (ui->time - st->last_activity)) + 0.01f);
+    bool recent = st->last_activity > 0 && ui->time - st->last_activity < 0.9;
+    bool show = recent || st->hover_bar || st->drag_y;
+    if (recent) cui__wakeup_after(ui, (float)(0.9 - (ui->time - st->last_activity)) + 0.01f);
     cui__tween(ui, &st->bar_t, show ? 1.0f : 0.0f, show ? 0.12f : 0.3f);
 
     int i = cui__node_new(ui, id);
