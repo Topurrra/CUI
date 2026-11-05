@@ -431,12 +431,31 @@ static void scene_user_menu(cui_ctx *ui, int f) {
     if (f < 0) { click_id(ui, cui_make_id(ui, "Ada Lovelace") ^ 0x05E4u, -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 600, 20); return; }
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_user_menu(ui); }
 }
-SCENE(inline_edit) {
-    static char title[64] = "Q3 roadmap", owner[64] = "Grace Hopper";
-    cui_column(ui, .gap = 4) {
+static void body_inline_edit(cui_ctx *ui) {
+    static char title[64] = "Q3 roadmap", owner[64] = "Grace Hopper", due[64] = "End of September";
+    cui_column(ui, .gap = 10, .width = CUI_FILL) {
         cui_inline_edit(ui, "t", title, sizeof title, .font = CUI_FONT_DISPLAY, .size = 26);
-        cui_inline_edit(ui, "o", owner, sizeof owner);
+        cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER) {
+            cui_box(ui, .width = CUI_PX(64)) { cui_muted(ui, "Owner"); }
+            cui_inline_edit(ui, "o", owner, sizeof owner);
+        }
+        cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER) {
+            cui_box(ui, .width = CUI_PX(64)) { cui_muted(ui, "Due"); }
+            cui_inline_edit(ui, "d", due, sizeof due);
+        }
     }
+}
+static void scene_inline_edit(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int fr = -f - 1;
+        /* hover the title, and open the due date for editing */
+        cui_rect t = cui_get_rect(ui, cui_make_id(ui, "t")), d = cui_get_rect(ui, cui_make_id(ui, "d"));
+        if (fr == 6 && d.w > 0) { cui_input_mouse_move(ui, d.x + 20, d.y + d.h / 2); cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); }
+        if (fr == 7) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (fr == 12 && t.w > 0) cui_input_mouse_move(ui, t.x + t.w - 30, t.y + t.h / 2);
+        return;
+    }
+    frame_wrap(ui, body_inline_edit);
 }
 SCENE(scrub) {
     static float a = 80, b = 12, c = 24;
@@ -1788,7 +1807,7 @@ int main(int argc, char **argv) {
         { "accent-coral", scene_accent, 290, 252, true, false, CUI_ACCENT_CORAL }, { "accent-rose", scene_accent, 290, 252, true, false, CUI_ACCENT_ROSE },
         { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
-        { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },
+        { "inline-edit", scene_inline_edit, 420, 190, true }, { "scrub", scene_scrub, 600, 110, true },
         { "shortcut-recorder", scene_shortcut_rec, 760, 110, true },
         { "multi-select", scene_multi, 380, 420, true }, { "date-range", scene_range, 760, 440, true },
         { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },

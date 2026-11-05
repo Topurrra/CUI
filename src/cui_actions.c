@@ -822,6 +822,7 @@ int cui_inline_edit_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap, c
     on->dir = CUI_ROW; on->align = CUI_ALIGN_CENTER; on->gap = 8;
     on->pad[0] = on->pad[2] = 2; on->pad[1] = 6; on->pad[3] = 6;
     on->radius = CUI_CORNERS(8);
+    on->tx = -7;   /* hang the padding and border outside, so the text lines up with the text around it */
     if (o->width.kind) on->w = o->width;
     else on->self_align = CUI__ALIGN_NOSTRETCH;
     if (!st->editing) {
