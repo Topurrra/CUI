@@ -424,6 +424,29 @@ static void test_menu(void) {
     cui_destroy(ui);
 }
 
+typedef struct { bool open; int inside, under; } trap_ctx;
+static void build_trap(cui_ctx *ui, void *u) {
+    trap_ctx *t = u;
+    cui_column(ui, .pad = 20) { if (cui_button(ui, "Under")) t->under++; }
+    cui_dialog(ui, "Trap", &t->open) { if (cui_button(ui, "Inside")) t->inside++; }
+}
+
+static void test_focus_trap(void) {
+    printf("overlays: tab focus stays inside a modal\n");
+    cui_ctx *ui = new_ctx();
+    trap_ctx t = { true, 0, 0 };
+    run(ui, build_trap, &t, 3);
+    for (int i = 0; i < 6; i++) {
+        key(ui, build_trap, &t, CUI_KEY_TAB, 0);
+        if (i % 2 == 1) key(ui, build_trap, &t, CUI_KEY_ENTER, 0);   /* lands on Inside every second tab */
+        if (!t.open) break;
+    }
+    CHECK(t.under == 0);
+    CHECK(t.inside == 3);
+    CHECK(t.open);
+    cui_destroy(ui);
+}
+
 /* virtual list ---------------------------------------------------------- */
 
 typedef struct { int first, last, built; } vl_ctx;
@@ -517,6 +540,27 @@ static void test_renderer(void) {
     cui_destroy(ui);
 }
 
+typedef struct { int size; } atlas_ctx;
+static void build_atlas(cui_ctx *ui, void *u) {
+    atlas_ctx *a = u;
+    for (int k = 0; k < 6; k++)
+        cui_text(ui, "The quick brown fox jumps over the lazy dog 0123456789 !?@#$%&*()[]{}", .size = (float)(a->size + k * 7), .nowrap = true);
+}
+
+static void test_atlas_pressure(void) {
+    printf("text: glyph atlas grows and recovers under pressure\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 800, 600, 2);
+    atlas_ctx a = { 8 };
+    for (; a.size < 400; a.size += 9) run(ui, build_atlas, &a, 2);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    CHECK(dd->vertex_count > 0);
+    unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    free(px);
+    cui_destroy(ui);
+}
+
 /* stress ---------------------------------------------------------------- */
 
 typedef struct { int n; } stress_ctx;
@@ -562,10 +606,12 @@ int main(void) {
     test_text_capacity();
     test_dialog();
     test_menu();
+    test_focus_trap();
     test_virtual_list();
     test_theme();
     test_renderer();
     test_stress();
+    test_atlas_pressure();
     cui_sw_destroy(g_sw);
     printf("\n%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

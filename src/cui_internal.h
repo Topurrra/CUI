@@ -386,6 +386,10 @@ struct cui_ctx {
     int focus_move;                 /* +1/-1 tab navigation requested */
     cui_id *focus_order; int focus_count, focus_cap;
     cui_id *prev_focus_order; int prev_focus_count, prev_focus_cap;
+    cui_id *focus_layers; int focus_layers_cap;          /* layer of each focus entry */
+    cui_id *prev_focus_layers; int prev_focus_layers_cap;
+    cui_id modal_layer, prev_modal_layer;               /* topmost open modal */
+    bool edit_prev;                                     /* a text field had focus last frame */
     cui_id hover_id_for_tooltip;
     double hover_start;
     cui_id layer_stack[32]; int layer_depth;   /* current floating layer while building */

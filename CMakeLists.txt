@@ -157,3 +157,25 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/cuiConfig.cmake
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/cuiConfigVersion.cmake COMPATIBILITY SameMajorVersion)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/cuiConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/cuiConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cui)
+
+# pkg-config
+set(CUI_PC_LIBS "-lcui")
+if(CUI_BACKEND STREQUAL "x11")
+    set(CUI_PC_LIBS "${CUI_PC_LIBS} -lX11 -ldl -lpthread -lm")
+elseif(CUI_BACKEND STREQUAL "cocoa")
+    set(CUI_PC_LIBS "${CUI_PC_LIBS} -framework Cocoa -framework QuartzCore -framework OpenGL")
+elseif(CUI_BACKEND STREQUAL "win32")
+    set(CUI_PC_LIBS "${CUI_PC_LIBS} -luser32 -lgdi32 -lopengl32 -lshell32 -limm32 -ldwmapi")
+endif()
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/cui.pc
+"prefix=${CMAKE_INSTALL_PREFIX}
+libdir=\${prefix}/${CMAKE_INSTALL_LIBDIR}
+includedir=\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}
+
+Name: cui
+Description: ${PROJECT_DESCRIPTION}
+Version: ${PROJECT_VERSION}
+Cflags: -I\${includedir}
+Libs: -L\${libdir} ${CUI_PC_LIBS}
+")
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/cui.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)

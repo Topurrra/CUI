@@ -514,9 +514,14 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
     bool topmost = true;
     for (int i = 0; i < ui->dialog_depth; i++) (void)i;
     if (is_open && !persistent && topmost) {
-        if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && !ui->edit) { *open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
+        /* while a text field has focus, the first Esc leaves the field */
+        if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && !ui->edit_prev) { *open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
         if (ui->mreleased[0] && ui->hot == scrim_id && ui->active == scrim_id) *open = false;
-        if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && ui->edit) { /* first Esc leaves the field */ }
+    }
+    if (is_open) {
+        ui->modal_layer = id;
+        /* move keyboard focus into the dialog when it opens */
+        if (st->opened == ui->frame && ui->focus_visible) ui->focus = 0;
     }
     cui__interact(ui, scrim_id, 0);
     int z = 1000 + (int)(st->opened % 1000);
@@ -1203,6 +1208,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
         if (ui->mreleased[0] && ui->hot == scrim_id && ui->active == scrim_id) *open = false;
     }
     cui__interact(ui, scrim_id, 0);
+    if (is_open) ui->modal_layer = id;
     int root = cui__float_begin(ui, id, 3000, 0, CUI__PLACE_FULL, 0);
     cui_node *rn = &ui->nodes[root];
     rn->id = scrim_id;

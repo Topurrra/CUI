@@ -10,12 +10,13 @@
 
 typedef void (*setup_fn)(gallery *g);
 
+static float g_scale = 2;
 static int shoot(const char *path, int page, bool dark, int accent, float W, float H, int frames,
                  void (*interact)(cui_ctx *ui, int frame, gallery *g)) {
     cui_sw_renderer *sw = cui_sw_create();
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT,
                                               .accent = (cui_accent)accent });
-    cui_set_viewport(ui, W, H, 2);
+    cui_set_viewport(ui, W, H, g_scale);
     gallery g;
     gallery_init(&g);
     g.page = page;
@@ -57,6 +58,7 @@ static void hover_chart(cui_ctx *ui, int f, gallery *g) {
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     int only = argc > 2 ? atoi(argv[2]) : -1;
+    if (argc > 3) g_scale = (float)atof(argv[3]);
     int fails = 0;
     char path[512];
     static const char *slugs[PAGE_COUNT] = { "overview", "buttons", "inputs", "selection", "navigation", "overlays", "feedback", "data", "charts" };

@@ -16,3 +16,12 @@ target_link_libraries(cui_bench PRIVATE cui::cui)
 
 add_executable(cui_component_shots component_shots.c)
 target_link_libraries(cui_component_shots PRIVATE cui::cui)
+
+include(CheckLanguage)
+check_language(CXX)
+if(CMAKE_CXX_COMPILER)
+    enable_language(CXX)
+    add_executable(cui_cpp_compat cpp_compat.cpp)
+    target_link_libraries(cui_cpp_compat PRIVATE cui::cui)
+    add_test(NAME cui_cpp_compat COMMAND cui_cpp_compat)
+endif()

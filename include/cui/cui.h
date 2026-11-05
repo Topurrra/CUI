@@ -82,13 +82,20 @@ extern "C" {
 typedef struct cui_ctx cui_ctx;
 typedef uint32_t cui_id;
 
+/* Compound literals in C, brace initialization in C++. */
+#ifdef __cplusplus
+#  define CUI__LIT(T) T
+#else
+#  define CUI__LIT(T) (T)
+#endif
+
 typedef struct cui_vec2 { float x, y; } cui_vec2;
 typedef struct cui_rect { float x, y, w, h; } cui_rect;
 typedef struct cui_color { uint8_t r, g, b, a; } cui_color;
 
-#define CUI_RGB(hex)  ((cui_color){ (uint8_t)(((hex) >> 16) & 0xff), (uint8_t)(((hex) >> 8) & 0xff), (uint8_t)((hex) & 0xff), 255 })
-#define CUI_RGBA(hex) ((cui_color){ (uint8_t)(((hex) >> 24) & 0xff), (uint8_t)(((hex) >> 16) & 0xff), (uint8_t)(((hex) >> 8) & 0xff), (uint8_t)((hex) & 0xff) })
-#define CUI_TRANSPARENT ((cui_color){ 0, 0, 0, 0 })
+#define CUI_RGB(hex)  (CUI__LIT(cui_color){ (uint8_t)(((hex) >> 16) & 0xff), (uint8_t)(((hex) >> 8) & 0xff), (uint8_t)((hex) & 0xff), 255 })
+#define CUI_RGBA(hex) (CUI__LIT(cui_color){ (uint8_t)(((hex) >> 24) & 0xff), (uint8_t)(((hex) >> 16) & 0xff), (uint8_t)(((hex) >> 8) & 0xff), (uint8_t)((hex) & 0xff) })
+#define CUI_TRANSPARENT (CUI__LIT(cui_color){ 0, 0, 0, 0 })
 
 /* Semantic colors. Use these instead of raw colors so your UI follows the
  * theme (light/dark) and the accent. They can go anywhere a cui_color goes. */
@@ -107,7 +114,7 @@ typedef enum cui_token {
     CUI_TOKEN_COUNT
 } cui_token;
 
-#define CUI_TOKEN_COLOR(t) ((cui_color){ (uint8_t)(t), 0xC5, 0x1D, 0 })
+#define CUI_TOKEN_COLOR(t) (CUI__LIT(cui_color){ (uint8_t)(t), 0xC5, 0x1D, 0 })
 #define CUI_COLOR_BACKGROUND      CUI_TOKEN_COLOR(CUI_TOKEN_BACKGROUND)
 #define CUI_COLOR_SURFACE         CUI_TOKEN_COLOR(CUI_TOKEN_SURFACE)
 #define CUI_COLOR_SURFACE_RAISED  CUI_TOKEN_COLOR(CUI_TOKEN_SURFACE_RAISED)
@@ -339,11 +346,11 @@ CUI_API cui_text_metrics cui_measure_text(cui_ctx *ui, cui_font font, float size
 typedef enum cui_size_kind { CUI_SIZE_FIT = 0, CUI_SIZE_GROW, CUI_SIZE_FIXED, CUI_SIZE_PERCENT } cui_size_kind;
 typedef struct cui_size { cui_size_kind kind; float value; } cui_size;
 
-#define CUI_FIT       ((cui_size){ CUI_SIZE_FIT, 0 })
-#define CUI_FILL      ((cui_size){ CUI_SIZE_GROW, 1 })
-#define CUI_GROW(w)   ((cui_size){ CUI_SIZE_GROW, (float)(w) })
-#define CUI_PX(v)     ((cui_size){ CUI_SIZE_FIXED, (float)(v) })
-#define CUI_PCT(p)    ((cui_size){ CUI_SIZE_PERCENT, (float)(p) })   /* 0..100 of parent */
+#define CUI_FIT       (CUI__LIT(cui_size){ CUI_SIZE_FIT, 0 })
+#define CUI_FILL      (CUI__LIT(cui_size){ CUI_SIZE_GROW, 1 })
+#define CUI_GROW(w)   (CUI__LIT(cui_size){ CUI_SIZE_GROW, (float)(w) })
+#define CUI_PX(v)     (CUI__LIT(cui_size){ CUI_SIZE_FIXED, (float)(v) })
+#define CUI_PCT(p)    (CUI__LIT(cui_size){ CUI_SIZE_PERCENT, (float)(p) })   /* 0..100 of parent */
 
 typedef enum cui_dir { CUI_COLUMN = 0, CUI_ROW, CUI_STACK, CUI_GRID } cui_dir;
 /* CUI_ALIGN_DEFAULT: columns stretch their children, rows center them. */
@@ -816,7 +823,7 @@ CUI_API int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *comm
 /* ------------------------------------------------------------------------ */
 
 typedef struct cui_corners { float tl, tr, br, bl; } cui_corners;
-#define CUI_CORNERS(r) ((cui_corners){ (r), (r), (r), (r) })
+#define CUI_CORNERS(r) (CUI__LIT(cui_corners){ (r), (r), (r), (r) })
 
 CUI_API void cui_draw_rect(cui_ctx *ui, cui_rect r, cui_corners radius, cui_color fill);
 CUI_API void cui_draw_rect_border(cui_ctx *ui, cui_rect r, cui_corners radius, cui_color fill, cui_color border, float border_width);

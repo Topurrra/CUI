@@ -205,6 +205,8 @@ void cui_destroy(cui_ctx *ui) {
     cui__free(ui, ui->prev_hits);
     cui__free(ui, ui->focus_order);
     cui__free(ui, ui->prev_focus_order);
+    cui__free(ui, ui->focus_layers);
+    cui__free(ui, ui->prev_focus_layers);
     cui__free(ui, ui->dl.vtx);
     cui__free(ui, ui->dl.idx);
     cui__free(ui, ui->dl.cmd);
@@ -484,6 +486,8 @@ cui_interact cui__interact(cui_ctx *ui, cui_id id, int flags) {
     }
     if (flags & CUI_IF_FOCUSABLE) {
         CUI__GROW(ui, ui->focus_order, ui->focus_count, ui->focus_cap, 1);
+        CUI__GROW(ui, ui->focus_layers, ui->focus_count, ui->focus_layers_cap, 1);
+        ui->focus_layers[ui->focus_count] = ui->current_layer;
         ui->focus_order[ui->focus_count++] = id;
         if (ui->focus_next_request == id) { ui->focus = id; ui->focus_next_request = 0; }
     }
@@ -595,20 +599,30 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
       ui->prev_hit_count = ui->hit_count; ui->hit_count = 0; }
     { cui_id *t = ui->prev_focus_order; ui->prev_focus_order = ui->focus_order; ui->focus_order = t;
       int c = ui->prev_focus_cap; ui->prev_focus_cap = ui->focus_cap; ui->focus_cap = c;
+      cui_id *tl = ui->prev_focus_layers; ui->prev_focus_layers = ui->focus_layers; ui->focus_layers = tl;
+      int cl = ui->prev_focus_layers_cap; ui->prev_focus_layers_cap = ui->focus_layers_cap; ui->focus_layers_cap = cl;
       ui->prev_focus_count = ui->focus_count; ui->focus_count = 0; }
+    ui->prev_modal_layer = ui->modal_layer;
+    ui->modal_layer = 0;
 
     cui__compute_hot(ui);
     if (ui->active && !ui->mdown[0] && !ui->mreleased[0] && !ui->mpressed[0]) ui->active = 0;
 
-    /* Tab navigation (uses last frame's focus order) */
+    /* Tab navigation (uses last frame's focus order; stays inside an open modal) */
     if (cui_key_pressed(ui, CUI_KEY_TAB) && ui->prev_focus_count > 0) {
-        int idx = -1;
-        for (int i = 0; i < ui->prev_focus_count; i++) if (ui->prev_focus_order[i] == ui->focus) { idx = i; break; }
-        int dir = (ui->mods & CUI_MOD_SHIFT) ? -1 : 1;
-        if (idx < 0) idx = dir > 0 ? 0 : ui->prev_focus_count - 1;
-        else idx = (idx + dir + ui->prev_focus_count) % ui->prev_focus_count;
-        ui->focus = ui->prev_focus_order[idx];
-        ui->focus_visible = true;
+        int n = 0, cur = -1;
+        cui_id *cand = cui__frame_alloc(ui, sizeof(cui_id) * (size_t)ui->prev_focus_count);
+        for (int i = 0; i < ui->prev_focus_count; i++) {
+            if (ui->prev_modal_layer && ui->prev_focus_layers[i] != ui->prev_modal_layer) continue;
+            if (ui->prev_focus_order[i] == ui->focus) cur = n;
+            cand[n++] = ui->prev_focus_order[i];
+        }
+        if (n > 0) {
+            int dir = (ui->mods & CUI_MOD_SHIFT) ? -1 : 1;
+            int idx = cur < 0 ? (dir > 0 ? 0 : n - 1) : (cur + dir + n) % n;
+            ui->focus = cand[idx];
+            ui->focus_visible = true;
+        }
         ui->kpressed[CUI_KEY_TAB] = 0;
     }
     if (ui->mpressed[0] && ui->hot == 0) { ui->focus = 0; }
@@ -650,6 +664,7 @@ void cui_end_frame(cui_ctx *ui) {
     cui__layout(ui);
     cui__paint(ui);
 
+    ui->edit_prev = ui->edit != NULL;
     /* caret blink, tooltips and toasts ask for wakeups through ui->wakeup */
     if (ui->edit) cui__wake_in(ui, 0.53f - (float)fmod(ui->time - ui->caret_time, 0.53));
 
