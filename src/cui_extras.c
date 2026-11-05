@@ -93,10 +93,12 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
         ui->nodes[col].gap = 3; ui->nodes[col].w = CUI_FILL;
         cui__open(ui, col);
         int tr = cui__node_new(ui, 0);
-        ui->nodes[tr].dir = CUI_ROW; ui->nodes[tr].gap = 8;
+        ui->nodes[tr].dir = CUI_ROW; ui->nodes[tr].gap = 8; ui->nodes[tr].w = CUI_FILL; ui->nodes[tr].align = CUI_ALIGN_START;
         cui__open(ui, tr);
-        int t = cui__text_node(ui, choices[k].title, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
+        /* the title wraps rather than truncates, so a badge beside it never squeezes either */
+        int t = cui__text_node(ui, choices[k].title, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), true);
         ui->nodes[t].line_height = 1.35f;
+        ui->nodes[t].w = CUI_FILL;
         if (choices[k].badge) {
             cui_badge_opts bo;
             memset(&bo, 0, sizeof bo);
