@@ -34,6 +34,7 @@ static void cui__popup_set(cui_ctx *ui, cui_id id, bool open) {
     if (!p) return;
     if (open && !p->open) {
         p->opened_frame = ui->frame;
+        p->z = 1000 + ++ui->layer_seq;
         cui__menu_nav *nav = cui_state(ui, id ^ 0x4E4156u, sizeof *nav);
         nav->highlight = -1;
         nav->keyboard = false;
@@ -102,7 +103,8 @@ bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, floa
     if (!p->open && p->s.x <= 0.01f) { p->s.x = 0; p->s.v = 0; return false; }
     float t = cui__clampf(p->s.x, 0, 1);
     p->anchor = anchor;
-    int z = 100 + (int)(p->opened_frame % 1000);
+    int z = p->z ? p->z : 1000 + ++ui->layer_seq;
+    p->z = z;
     int root;
     if (p->at_mouse) {
         root = cui__float_begin(ui, id, z, 0, CUI__PLACE_POINT, 0);
@@ -194,7 +196,8 @@ bool cui_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *o) {
     /* menu triggers answer presses with color, not scale: the menu anchors to them */
     ui->nodes[ui->last_node].scale = 1.0f;
     cui_id anchor = ui->last_id;
-    if (clicked && p) {
+    bool key_activate = ui->focus == anchor && ui->focus_visible && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE));
+    if (clicked && p && !(p->open && key_activate)) {   /* Enter on an open menu picks the item */
         cui__popup_set(ui, pid, !p->open);
         p->at_mouse = false;
     }
@@ -326,7 +329,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui_pop_disabled(ui);
     bool open = p && p->open;
-    if (r.clicked && p) {
+    if (r.clicked && p && !(open && r.keyboard_activate)) {   /* Enter on an open list picks the item */
         cui__popup_set(ui, pid, !open);
         p->at_mouse = false;
         st->query[0] = 0;
@@ -475,7 +478,7 @@ static void cui__tooltip_render(cui_ctx *ui) {
     tt->visible = false;
     if (tt->t.x <= 0.01f || !tt->anchor) return;
     float t = cui__clampf(tt->t.x, 0, 1);
-    int root = cui__float_begin(ui, 0x7001718u, 10000, tt->anchor, CUI_PLACE_TOP, 6);
+    int root = cui__float_begin(ui, 0x7001718u, 0x7FFFFFF0, tt->anchor, CUI_PLACE_TOP, 6);
     cui_node *n = &ui->nodes[root];
     n->bg = ui->mode == CUI_THEME_DARK ? cui_oklch(0.93f, 0, 0, 1) : cui_oklch(0.20f, 0, 0, 1);
     n->radius = CUI_CORNERS(8);
@@ -495,14 +498,14 @@ static void cui__tooltip_render(cui_ctx *ui) {
 /* Dialogs and sheets                                                       */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_spring t; uint64_t opened; bool was_open; } cui__modal_state;
+typedef struct { cui_spring t; uint64_t opened; bool was_open; int z; } cui__modal_state;
 
 
 static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *open, const char *description, float width,
                              bool persistent, bool close_button, int kind, cui_side side) {
     cui__modal_state *st = cui_state(ui, id, sizeof *st);
     bool is_open = open && *open;
-    if (is_open && !st->was_open) st->opened = ui->frame;
+    if (is_open && !st->was_open) { st->opened = ui->frame; st->z = 1000 + ++ui->layer_seq; }
     st->was_open = is_open;
     float target = is_open ? 1.0f : 0.0f;
     if (is_open) cui__spring(ui, &st->t, target, kind == 0 ? 0.32f : 0.42f, 0.0f);
@@ -510,21 +513,23 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
     if (!is_open && st->t.x <= 0.01f) { st->t.x = 0; st->t.v = 0; return false; }
     float t = cui__clampf(st->t.x, 0, 1);
     cui_id scrim_id = id ^ 0x5C819u;
-    /* Esc and click outside, only for the topmost modal */
-    bool topmost = true;
-    for (int i = 0; i < ui->dialog_depth; i++) (void)i;
+    int z = st->z ? st->z : 1000 + ++ui->layer_seq;
+    st->z = z;
+    /* Esc and click outside: only the topmost modal reacts, and only when no popup inside it is open */
+    bool topmost = ui->prev_modal_layer == 0 || ui->prev_modal_layer == id;
+    for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open) topmost = false;
     if (is_open && !persistent && topmost) {
         /* while a text field has focus, the first Esc leaves the field */
         if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && !ui->edit_prev) { *open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
         if (ui->mreleased[0] && ui->hot == scrim_id && ui->active == scrim_id) *open = false;
     }
-    if (is_open) {
+    if (is_open && (!ui->modal_layer || z > ui->modal_z)) {
         ui->modal_layer = id;
+        ui->modal_z = z;
         /* move keyboard focus into the dialog when it opens */
         if (st->opened == ui->frame && ui->focus_visible) ui->focus = 0;
     }
     cui__interact(ui, scrim_id, 0);
-    int z = 1000 + (int)(st->opened % 1000);
     int root = cui__float_begin(ui, id, z, 0, CUI__PLACE_FULL, 0);
     cui_node *rn = &ui->nodes[root];
     rn->id = scrim_id;
@@ -728,7 +733,7 @@ static void cui__toasts_render(cui_ctx *ui) {
     float collapsed_h = front_h + peek * (float)CUI_MIN(visible - 1, 2);
     float H = expanded ? total : collapsed_h;
     if (H < 1) H = front_h;
-    int root = cui__float_begin(ui, root_id, 5000, 0, CUI__PLACE_POINT, 0);
+    int root = cui__float_begin(ui, root_id, 0x7FFFFF00, 0, CUI__PLACE_POINT, 0);
     cui_node *rn = &ui->nodes[root];
     rn->fx = ui->vw - W - 16;
     rn->fy = ui->vh - 16 - H;
@@ -1208,8 +1213,8 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
         if (ui->mreleased[0] && ui->hot == scrim_id && ui->active == scrim_id) *open = false;
     }
     cui__interact(ui, scrim_id, 0);
-    if (is_open) ui->modal_layer = id;
-    int root = cui__float_begin(ui, id, 3000, 0, CUI__PLACE_FULL, 0);
+    if (is_open) { ui->modal_layer = id; ui->modal_z = 0x7FFF0000; }
+    int root = cui__float_begin(ui, id, 0x7FFF0000, 0, CUI__PLACE_FULL, 0);
     cui_node *rn = &ui->nodes[root];
     rn->id = scrim_id;
     rn->bg = cui_alpha(CUI_C(ui, SCRIM), t * 0.7f);

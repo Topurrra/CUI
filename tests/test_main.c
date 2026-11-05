@@ -327,6 +327,67 @@ static void test_text_input(void) {
     cui_destroy(ui);
 }
 
+typedef struct { char buf[512]; char other[32]; int flags; cui_id id, other_id; } area_ctx;
+static void build_area(cui_ctx *ui, void *u) {
+    area_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 12) {
+        a->flags |= cui_textarea(ui, "notes", a->buf, sizeof a->buf, .height = 80, .width = CUI_PX(300));
+        a->id = cui_last_id(ui);
+        cui_input(ui, "other", a->other, sizeof a->other, .clearable = true, .width = CUI_PX(300));
+        a->other_id = cui_last_id(ui);
+    }
+}
+
+static uint32_t frame_hash(cui_ctx *ui) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    size_t n = (size_t)dd->width_px * dd->height_px * 4;
+    unsigned char *px = malloc(n);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) h = (h ^ px[i]) * 16777619u;
+    free(px);
+    return h;
+}
+
+static void test_textarea_and_clear(void) {
+    printf("text input: textarea wheel, focus flags, clear button undo\n");
+    cui_ctx *ui = new_ctx();
+    area_ctx a;
+    memset(&a, 0, sizeof a);
+    for (int i = 0; i < 20; i++) { char l[16]; snprintf(l, sizeof l, "line %d\n", i); strcat(a.buf, l); }
+    run(ui, build_area, &a, 2);
+    cui_vec2 c = center(rect_of(ui, a.id));
+    cui_input_mouse_move(ui, c.x, c.y);
+    run(ui, build_area, &a, 1);
+    uint32_t before = frame_hash(ui);
+    cui_input_scroll(ui, 0, -3);                 /* unfocused: the wheel still scrolls */
+    run(ui, build_area, &a, 2);
+    uint32_t after = frame_hash(ui);
+    CHECK(before != after);
+    CHECK(!cui_wants_keyboard(ui));
+
+    a.flags = 0;
+    click_at(ui, build_area, &a, c.x, c.y);
+    CHECK(a.flags & CUI_FOCUSED);
+    a.flags = 0;
+    key(ui, build_area, &a, CUI_KEY_ESCAPE, 0);
+    run(ui, build_area, &a, 1);
+    CHECK(a.flags & CUI_BLURRED);
+    CHECK(!(a.flags & CUI_FOCUSED));
+
+    /* clear button: empties the field and Ctrl+Z restores it */
+    strcpy(a.other, "keep me");
+    run(ui, build_area, &a, 2);
+    cui_rect fr = rect_of(ui, a.other_id);
+    click_at(ui, build_area, &a, fr.x + fr.w / 3, fr.y + fr.h / 2);   /* focus the field */
+    click_at(ui, build_area, &a, fr.x + fr.w - 16, fr.y + fr.h / 2);  /* the x button */
+    CHECK(a.other[0] == 0);
+    click_at(ui, build_area, &a, fr.x + fr.w / 3, fr.y + fr.h / 2);
+    key(ui, build_area, &a, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(a.other, "keep me") == 0);
+    cui_destroy(ui);
+}
+
 static void test_text_capacity(void) {
     printf("text input: respects buffer capacity\n");
     cui_ctx *ui = new_ctx();
@@ -710,6 +771,7 @@ int main(void) {
     test_keyboard_nav();
     test_toggles_and_slider();
     test_text_input();
+    test_textarea_and_clear();
     test_text_capacity();
     test_dialog();
     test_menu();

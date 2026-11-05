@@ -309,6 +309,7 @@ typedef struct cui_popup {
     bool at_mouse;
     cui_vec2 mouse;
     uint64_t opened_frame;
+    int z;                     /* stacking order: later opens are on top */
     uint64_t last_frame;
     float t;                   /* open animation 0..1 */
     cui_spring s;
@@ -390,6 +391,7 @@ struct cui_ctx {
     cui_id *focus_layers; int focus_layers_cap;          /* layer of each focus entry */
     cui_id *prev_focus_layers; int prev_focus_layers_cap;
     cui_id modal_layer, prev_modal_layer;               /* topmost open modal */
+    int modal_z;
     bool edit_prev;                                     /* a text field had focus last frame */
     cui_id hover_id_for_tooltip;
     double hover_start;
@@ -465,6 +467,7 @@ struct cui_ctx {
     bool acc_dis[32]; int acc_depth;
     int tree_depth;
     int button_group_depth;
+    int layer_seq;             /* increments whenever a popup or modal opens */
     struct cui_reorder_build *reorder;
 };
 

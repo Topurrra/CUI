@@ -604,6 +604,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
       ui->prev_focus_count = ui->focus_count; ui->focus_count = 0; }
     ui->prev_modal_layer = ui->modal_layer;
     ui->modal_layer = 0;
+    ui->modal_z = 0;
 
     cui__compute_hot(ui);
     if (ui->active && !ui->mdown[0] && !ui->mreleased[0] && !ui->mpressed[0]) ui->active = 0;

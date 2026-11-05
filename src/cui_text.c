@@ -223,12 +223,11 @@ static float cui__advance_em(cui_font_data *fd, int gi, uint32_t cp) {
     return adv / fd->upem;
 }
 
-static float cui__kern_em(cui_font_data *fd, uint32_t a, uint32_t b, int ga, int gb) {
+static float cui__kern_em(cui_ctx *ui, cui_font_data *fd, uint32_t a, uint32_t b, int ga, int gb) {
     if (fd->is_icon) return 0;
     if (a >= 32 && a < 127 && b >= 32 && b < 127) {
         if (!fd->kern_ascii) {
-            fd->kern_ascii = malloc(sizeof(float) * 95 * 95);
-            if (!fd->kern_ascii) return 0;
+            fd->kern_ascii = cui__alloc(ui, sizeof(float) * 95 * 95);
             for (int i = 0; i < 95; i++)
                 for (int j = 0; j < 95; j++) {
                     int g1 = fd->gi_ascii[i + 32], g2 = fd->gi_ascii[j + 32];
@@ -282,7 +281,7 @@ static bool cui__iter_next(cui__glyph_iter *it) {
     if (gf < 0) return false;
     cui_font_data *fd = &ui->fonts[gf];
     float gs = cui__glyph_size(ui, it->font, gf, it->size);
-    if (it->prev_font == gf && it->prev_gi && gi) it->x += cui__kern_em(fd, it->prev_cp, cp, it->prev_gi, gi) * gs;
+    if (it->prev_font == gf && it->prev_gi && gi) it->x += cui__kern_em(ui, fd, it->prev_cp, cp, it->prev_gi, gi) * gs;
     float adv = cui__advance_em(fd, gi, cp) * gs;
     it->center_off = 0;
     if (it->tabular && cp >= '0' && cp <= '9' && fd->tab_adv > 0) {

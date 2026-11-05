@@ -19,6 +19,7 @@ typedef struct cui_edit_state {
     double last_edit;
     int last_kind;
     int last_cursor;
+    bool had_focus;
     bool init;
     bool show_password;
 } cui_edit_state;
@@ -187,24 +188,32 @@ static void cui__delete_range(char *buf, int *len, int a, int b) {
 }
 
 static int cui__insert(char *buf, int *len, size_t cap, int pos, const char *s, int n, bool multiline) {
-    /* filter newlines in single line fields, and keep UTF-8 sequences whole */
-    char tmp[512];
+    /* filtered length: carriage returns dropped; newlines and tabs become
+     * spaces in single line fields */
     int m = 0;
-    for (int i = 0; i < n && m < (int)sizeof tmp - 1; i++) {
-        char c = s[i];
-        if (c == '\r') continue;
-        if (c == '\n' && !multiline) c = ' ';
-        if (c == '\t' && !multiline) c = ' ';
-        tmp[m++] = c;
-    }
+    for (int i = 0; i < n; i++) if (s[i] != '\r') m++;
     int room = (int)cap - 1 - *len;
-    if (m > room) {
-        m = room;
-        while (m > 0 && ((unsigned char)tmp[m] & 0xC0) == 0x80) m--;
+    if (m > room) m = room;
+    if (m <= 0) return 0;
+    /* never cut a UTF-8 sequence: find how many source bytes fit, then back off */
+    int take = 0, kept = 0;
+    while (take < n && kept < m) { if (s[take] != '\r') kept++; take++; }
+    while (take < n && take > 0 && ((unsigned char)s[take] & 0xC0) == 0x80) {
+        /* the next byte continues a sequence we would split: drop that sequence */
+        take--;
+        if (s[take] != '\r') kept--;
+        while (take > 0 && ((unsigned char)s[take] & 0xC0) == 0x80) { take--; if (s[take] != '\r') kept--; }
     }
+    m = kept;
     if (m <= 0) return 0;
     memmove(buf + pos + m, buf + pos, (size_t)(*len - pos + 1));
-    memcpy(buf + pos, tmp, (size_t)m);
+    int o = pos;
+    for (int i = 0; i < take; i++) {
+        char c = s[i];
+        if (c == '\r') continue;
+        if (!multiline && (c == '\n' || c == '\t')) c = ' ';
+        buf[o++] = c;
+    }
     *len += m;
     return m;
 }
@@ -247,14 +256,15 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
     if (e->cursor > len) e->cursor = len;
     if (e->anchor > len) e->anchor = len;
     bool focused = ui->focus == id;
-    if (focused && !ui->edit) res.gained = true;
+    if (focused && !e->had_focus) res.gained = true;
+    if (!focused && e->had_focus) res.blurred = true;
+    e->had_focus = focused;
     if (!focused) {
         e->selecting = false;
         return res;
     }
     res.focused = true;
     ui->edit = e;
-    if (!e->undo_count) cui__undo_push(ui, e, buf);
 
     cui_text_layout_line *lines = NULL;
     int nlines = 0;
@@ -332,7 +342,8 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
         if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s1; moved = true; continue; }
         CUI__MOVE(line_mod ? len : word_mod ? cui__word_right(buf, len, e->cursor) : cui__utf8_next(buf, len, e->cursor));
     }
-    if (multiline && (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN))) {
+    bool vertical = multiline && (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN));
+    if (vertical) {
         int ln = cui__line_of(lines, nlines, e->cursor);
         cui_text_layout_line *L = &lines[ln];
         float x = e->preferred_x >= 0 ? e->preferred_x : cui__text_width(ui, font, size, buf + L->start, e->cursor - L->start, false);
@@ -347,8 +358,6 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
             CUI__MOVE(pos);
         }
         e->preferred_x = x;
-    } else if (moved) {
-        e->preferred_x = -1;
     }
     if (cui_key_pressed(ui, CUI_KEY_HOME)) {
         if (multiline && !prim) { int ln = cui__line_of(lines, nlines, e->cursor); CUI__MOVE(lines[ln].start); }
@@ -458,6 +467,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
     if (edited) res.changed = true;
     if (edited || moved) ui->caret_time = ui->time;
     if (edited) e->last_cursor = e->cursor;
+    if ((edited || moved) && !vertical) e->preferred_x = -1;
 
     /* keep the caret visible */
     len = (int)strlen(buf);
@@ -471,16 +481,14 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
         }
     } else if (area.h > 0) {
         if (res.changed) nlines = cui__edit_lines(ui, font, size, buf, len, area.w, &lines);
-        int ln = cui__line_of(lines, nlines, e->cursor);
-        float cy = ln * line_h;
-        if (cy - e->scroll_y > area.h - line_h) e->scroll_y = cy - area.h + line_h;
-        if (cy - e->scroll_y < 0) e->scroll_y = cy;
+        if (res.changed || moved || e->selecting) {   /* follow the caret only when it moved */
+            int ln = cui__line_of(lines, nlines, e->cursor);
+            float cy = ln * line_h;
+            if (cy - e->scroll_y > area.h - line_h) e->scroll_y = cy - area.h + line_h;
+            if (cy - e->scroll_y < 0) e->scroll_y = cy;
+        }
         float total = nlines * line_h;
         if (e->scroll_y > total - area.h) e->scroll_y = CUI_MAX(0, total - area.h);
-        if (r.hovered && ui->scroll_dy != 0) {
-            e->scroll_y = cui__clampf(e->scroll_y - ui->scroll_dy * 40, 0, CUI_MAX(0, total - area.h));
-            ui->scroll_dy = 0;
-        }
     }
     if (ui->platform.set_text_input_rect) {
         cui_rect cr = area;
@@ -529,6 +537,14 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     bool password = o->password && !e->show_password;
     cui__edit_result er = cui__edit_logic(ui, id, e, buf, cap, multiline, password, o->read_only || disabled, area,
                                           CUI_FONT_BODY, size, line_h, rf);
+    if (multiline && rf.hovered && ui->scroll_dy != 0 && area.h > 0) {
+        /* wheel scrolls the text whether or not the field has focus */
+        cui_text_layout_line *wl = NULL;
+        int wn = cui__edit_lines(ui, CUI_FONT_BODY, size, buf, (int)strlen(buf), area.w, &wl);
+        float total = wn * line_h;
+        e->scroll_y = cui__clampf(e->scroll_y - ui->scroll_dy * 40, 0, CUI_MAX(0, total - area.h));
+        ui->scroll_dy = 0;
+    }
     int flags = 0;
     if (er.changed) flags |= CUI_CHANGED;
     if (er.submitted) flags |= CUI_SUBMITTED;
@@ -617,12 +633,14 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     if (p->focused) cui__wakeup_after(ui, 0.53f);
 
     /* trailing affordances */
-    if (o->clearable && len > 0 && !disabled) {
+    if (o->clearable && len > 0 && !disabled && !o->read_only) {
         cui_button_opts bo;
         memset(&bo, 0, sizeof bo);
         bo.size = CUI_SIZE_SM;
         cui_push_id_int(ui, (int)id);
         if (cui_icon_button_ex(ui, CUI_ICON_X, &bo)) {
+            cui__undo_push(ui, e, buf);   /* Ctrl+Z brings the text back */
+            e->last_edit = 0;
             buf[0] = 0;
             e->cursor = e->anchor = 0;
             e->scroll_x = 0;
