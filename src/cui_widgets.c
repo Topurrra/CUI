@@ -1211,9 +1211,9 @@ typedef struct { float hover; bool vertical; } cui__handle_paint;
 static void cui__paint_split_handle(cui_ctx *ui, cui_node *n, void *data) {
     cui__handle_paint *p = data;
     cui_rect r = n->rect;
-    cui_rect line = p->vertical ? (cui_rect){ r.x, r.y + r.h * 0.5f - 0.5f, r.w, 1 } : (cui_rect){ r.x + r.w * 0.5f - 0.5f, r.y, 1, r.h };
-    cui_draw_rect(ui, line, CUI_CORNERS(0), cui_mix(CUI_C(ui, BORDER), CUI_C(ui, ACCENT), p->hover));
     if (p->hover > 0.01f) {
+        cui_rect line = p->vertical ? (cui_rect){ r.x, r.y + r.h * 0.5f - 0.5f, r.w, 1 } : (cui_rect){ r.x + r.w * 0.5f - 0.5f, r.y, 1, r.h };
+        cui_draw_rect(ui, line, CUI_CORNERS(0), cui_alpha(CUI_C(ui, ACCENT), p->hover));
         cui_rect g = p->vertical ? (cui_rect){ r.x + r.w * 0.5f - 16, r.y + r.h * 0.5f - 2, 32, 4 } : (cui_rect){ r.x + r.w * 0.5f - 2, r.y + r.h * 0.5f - 16, 4, 32 };
         cui_draw_rect(ui, g, CUI_CORNERS(2), cui_alpha(CUI_C(ui, ACCENT), p->hover));
     }
@@ -1223,12 +1223,22 @@ void cui_split_next(cui_ctx *ui) {
     struct cui_split_build *b = ui->split;
     if (!b) return;
     cui__close(ui);
-    int h = cui__leaf(ui, b->id ^ 0x77u, b->vertical ? CUI_FILL : CUI_PX(9), b->vertical ? CUI_PX(9) : CUI_FILL);
-    cui__mark_interactive(ui, h, 0);
-    cui__handle_paint *hp = cui__frame_alloc(ui, sizeof *hp);
-    hp->hover = b->hover; hp->vertical = b->vertical;
-    ui->nodes[h].paint = cui__paint_split_handle;
-    ui->nodes[h].paint_data = hp;
+    /* the divider takes one point of layout, so panes with their own background meet at the line;
+       the grab area is a wider strip laid over it */
+    cui_id lid = b->id ^ 0x78u;
+    int line = cui__leaf(ui, lid, b->vertical ? CUI_FILL : CUI_PX(1), b->vertical ? CUI_PX(1) : CUI_FILL);
+    ui->nodes[line].bg = CUI_C(ui, BORDER);
+    cui_rect lr = cui__prev_rect(ui, lid), cr = cui__prev_rect(ui, b->id);
+    if (lr.w > 0 && lr.h > 0) {
+        int h = b->vertical ? cui__absolute(ui, b->id ^ 0x77u, lr.x - cr.x, lr.y - cr.y - 4, lr.w, 9)
+                            : cui__absolute(ui, b->id ^ 0x77u, lr.x - cr.x - 4, lr.y - cr.y, 9, lr.h);
+        cui__mark_interactive(ui, h, 0);
+        cui__handle_paint *hp = cui__frame_alloc(ui, sizeof *hp);
+        hp->hover = b->hover; hp->vertical = b->vertical;
+        ui->nodes[h].paint = cui__paint_split_handle;
+        ui->nodes[h].paint_data = hp;
+        ui->nodes[h].flags |= CUI_NF_ON_TOP;
+    }
     float rr = cui__clampf(*b->ratio, 0.02f, 0.98f);
     int p2 = cui__node_new(ui, 0);
     cui_node *pn = &ui->nodes[p2];

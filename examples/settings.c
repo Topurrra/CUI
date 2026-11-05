@@ -193,7 +193,7 @@ int main(void) {
     snprintf(s.email, sizeof s.email, "maya@fieldwork.studio");
     snprintf(s.username, sizeof s.username, "maya.okafor");
     snprintf(s.website, sizeof s.website, "https://fieldwork.studio");
-    snprintf(s.bio, sizeof s.bio, "Product designer in Lisbon. Currently on onboarding and the settings pages.");
+    snprintf(s.bio, sizeof s.bio, "Product designer in Berlin. Currently on onboarding and the settings pages.");
     s.timezone = 3;
     s.email_comments = s.email_mentions = true;
     s.push_mentions = true;

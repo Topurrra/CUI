@@ -22,8 +22,8 @@ static issue issues[] = {
     { "ENG-209", "Spring animations for popover placement flips", "Jonas Berg", "Nov 8", ST_PROGRESS, PRI_HIGH, { "Motion", NULL }, { CUI_TONE_VIOLET } },
     { "ENG-205", "Software renderer: SIMD path for text quads", "Lena Fischer", "Nov 12", ST_PROGRESS, PRI_MEDIUM, { "Perf", NULL }, { CUI_TONE_TEAL } },
     { "ENG-198", "Keyboard navigation for the color picker", "Priya Nair", "Nov 7", ST_REVIEW, PRI_HIGH, { "A11y", "Input" }, { CUI_TONE_INFO, CUI_TONE_NEUTRAL } },
-    { "ENG-196", "Wayland backend through libdecor", "Tomas Rivera", "Nov 9", ST_REVIEW, PRI_MEDIUM, { "Platform", NULL }, { CUI_TONE_WARNING } },
-    { "ENG-221", "Inline IME composition on macOS", "Aiko Tanaka", "Nov 14", ST_TODO, PRI_HIGH, { "Platform", "Input" }, { CUI_TONE_WARNING, CUI_TONE_NEUTRAL } },
+    { "ENG-196", "Wayland backend through libdecor", "Tomas Rivera", "Nov 9", ST_REVIEW, PRI_MEDIUM, { "Platform", NULL }, { CUI_TONE_ROSE } },
+    { "ENG-221", "Inline IME composition on macOS", "Aiko Tanaka", "Nov 14", ST_TODO, PRI_HIGH, { "Platform", "Input" }, { CUI_TONE_ROSE, CUI_TONE_NEUTRAL } },
     { "ENG-219", "Virtual table with sticky header", "Sam Whitfield", "Nov 18", ST_TODO, PRI_MEDIUM, { "Data", NULL }, { CUI_TONE_TEAL } },
     { "ENG-217", "Docs: theming cookbook", "Maya Okafor", "Nov 20", ST_TODO, PRI_LOW, { "Docs", NULL }, { CUI_TONE_NEUTRAL } },
     { "ENG-188", "Ship 1.0 release notes", "Jonas Berg", "Nov 1", ST_DONE, PRI_MEDIUM, { "Docs", NULL }, { CUI_TONE_NEUTRAL } },
@@ -31,7 +31,7 @@ static issue issues[] = {
 };
 #define ISSUE_COUNT ((int)(sizeof issues / sizeof issues[0]))
 
-static const char *status_names[ST_COUNT] = { "Backlog", "Todo", "In Progress", "In Review", "Done" };
+static const char *status_names[ST_COUNT] = { "Backlog", "Todo", "In progress", "In review", "Done" };
 static const char *priority_names[] = { "No priority", "Low", "Medium", "High", "Urgent" };
 
 typedef struct {
@@ -317,10 +317,10 @@ static void detail(cui_ctx *ui, app_state *s) {
             cui_separator(ui);
             cui_label(ui, "Activity");
             cui_column(ui, .gap = 0, .width = CUI_FILL) {
-                cui_timeline_item(ui, "Maya moved to In Progress", .time = "2h ago", .icon = CUI_ICON_ARROW_RIGHT, .tone = CUI_TONE_WARNING);
+                cui_timeline_item(ui, "Maya moved this to In progress", .time = "2h ago", .icon = CUI_ICON_ARROW_RIGHT, .tone = CUI_TONE_WARNING);
                 cui_timeline_item(ui, "Jonas linked a pull request", .time = "5h ago", .icon = CUI_ICON_GIT_BRANCH, .tone = CUI_TONE_ACCENT,
                                   .description = "Keep pending text across focus changes");
-                cui_timeline_item(ui, "Priya set priority to Urgent", .time = "Yesterday", .icon = CUI_ICON_TRIANGLE_ALERT, .tone = CUI_TONE_DANGER);
+                cui_timeline_item(ui, "Priya set the priority to Urgent", .time = "Yesterday", .icon = CUI_ICON_CIRCLE_ALERT, .tone = CUI_TONE_WARNING);
                 cui_timeline_item(ui, "Issue created", .time = "Nov 2", .icon = CUI_ICON_PLUS, .last = true);
             }
         }

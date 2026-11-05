@@ -15,7 +15,7 @@ typedef struct {
 } message;
 
 static message messages[] = {
-    { "Jonas Berg", "jonas@northlight.io", "Review of the onboarding flow", "I went through all six screens on a small laptop. Notes inline.", "9:41",
+    { "Jonas Berg", "jonas@northlight.io", "Review of the onboarding flow", "I went through all six screens on a 13 inch laptop. Step three scrolls before the button is visible.", "9:41",
       "Hi Maya,\n\nI went through all six screens on a 13 inch laptop. Step three scrolls before the button is visible, and the skip link reads like an error.\n\nCould we look at it together on Thursday at 10?\n\nJonas", 0, true, true, CUI_TONE_INFO },
     { "Priya Nair", "priya@harbor.dev", "Invoice 2024-118", "The October invoice is attached. Payment terms are 30 days as usual.", "8:15",
       "Hi,\n\nThe October invoice is attached. Payment terms are 30 days as usual. Let me know if the purchase order number needs to change.\n\nPriya", 0, true, false, -1 },
@@ -89,6 +89,15 @@ static void folders(cui_ctx *ui, mail_app *a) {
     }
 }
 
+/* list rows: a quiet fill when selected or hovered, a hairline between the others */
+typedef struct { bool hovered, selected, last; } row_bg;
+static void paint_row(cui_ctx *ui, cui_rect r, void *user) {
+    row_bg *b = user;
+    if (b->selected) cui_draw_rect(ui, r, CUI_CORNERS(10), cui_token_color(ui, CUI_TOKEN_ACTIVE));
+    else if (b->hovered) cui_draw_rect(ui, r, CUI_CORNERS(10), cui_token_color(ui, CUI_TOKEN_HOVER));
+    else if (!b->last) cui_draw_rect(ui, (cui_rect){ r.x + 26, r.y + r.h - 1, r.w - 38, 1 }, CUI_CORNERS(0), cui_token_color(ui, CUI_TOKEN_BORDER_SUBTLE));
+}
+
 static void message_list(cui_ctx *ui, mail_app *a) {
     static const char *names[] = { "Inbox", "Starred", "Sent", "Archive" };
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .gap = 10, .pad = 12) {
@@ -96,25 +105,36 @@ static void message_list(cui_ctx *ui, mail_app *a) {
             cui_heading(ui, names[a->folder], 4);
         }
         cui_search(ui, "search", a->query, sizeof a->query, .placeholder = "Search mail", .size = CUI_SIZE_SM);
-        cui_scroll(ui, .id = "list", .gap = 2, .fade_edges = true) {
+        cui_scroll(ui, .id = "list", .gap = 0, .fade_edges = true) {
             int shown = 0;
             for (int i = 0; i < MESSAGE_COUNT; i++) {
                 message *m = &messages[i];
                 if (!in_folder(m, a->folder) || !match(m, a->query)) continue;
                 shown++;
                 cui_push_id_int(ui, i);
-                if (cui_card_begin(ui, &(cui_card_opts){ .id = "row", .pad = 12, .gap = 4, .hoverable = true, .muted = a->selected != i, .selected = a->selected == i })) {
-                    a->selected = i;
-                    m->unread = false;
+                int next = i + 1;
+                while (next < MESSAGE_COUNT && (!in_folder(&messages[next], a->folder) || !match(&messages[next], a->query))) next++;
+                cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL) {
+                    bool *hover = cui_state(ui, cui_make_id(ui, "bg"), sizeof(bool));
+                    row_bg b = { *hover, a->selected == i, next >= MESSAGE_COUNT || a->selected == next };
+                    cui_canvas_result res = cui_canvas(ui, "bg", CUI_FILL, CUI_FILL, paint_row, &b, sizeof b);
+                    *hover = res.hovered;
+                    if (res.clicked) { a->selected = i; m->unread = false; }
+                    /* every row keeps the dot's gutter, so names line up read or unread */
+                    cui_row(ui, .width = CUI_FILL, .pad_y = 12, .pad_right = 12, .align = CUI_ALIGN_START) {
+                        cui_box(ui, .width = CUI_PX(26), .pad_top = 6, .align = CUI_ALIGN_CENTER) {
+                            if (m->unread) cui_box(ui, .width = CUI_PX(7), .height = CUI_PX(7), .radius = 4, .bg = CUI_COLOR_ACCENT) {}
+                        }
+                        cui_column(ui, .gap = 3, .width = CUI_FILL) {
+                            cui_row(ui, .gap = 8, .width = CUI_FILL) {
+                                cui_text(ui, m->from, .font = m->unread ? CUI_FONT_MEDIUM : CUI_FONT_BODY, .nowrap = true, .width = CUI_FILL);
+                                cui_text(ui, m->time, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
+                            }
+                            cui_text(ui, m->subject, .font = CUI_FONT_MEDIUM, .size = 12.5f, .nowrap = true);
+                            cui_text(ui, m->preview, .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
+                        }
+                    }
                 }
-                cui_row(ui, .gap = 8) {
-                    if (m->unread) cui_box(ui, .width = CUI_PX(7), .height = CUI_PX(7), .radius = 4, .bg = CUI_COLOR_ACCENT) {}
-                    cui_text(ui, m->from, .font = m->unread ? CUI_FONT_MEDIUM : CUI_FONT_BODY, .nowrap = true, .width = CUI_FILL);
-                    cui_text(ui, m->time, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
-                }
-                cui_text(ui, m->subject, .font = CUI_FONT_MEDIUM, .size = 12.5f, .nowrap = true);
-                cui_text(ui, m->preview, .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
-                cui_card_end(ui);
                 cui_context_menu(ui, "row-menu") {
                     if (cui_menu_item(ui, m->unread ? "Mark as read" : "Mark as unread", .icon = CUI_ICON_MAIL)) m->unread = !m->unread;
                     if (cui_menu_item(ui, m->starred ? "Unstar" : "Star", .icon = CUI_ICON_STAR)) m->starred = !m->starred;

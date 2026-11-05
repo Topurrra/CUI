@@ -75,9 +75,19 @@ static void list_pane(cui_ctx *ui, notes_app *a) {
                     if ((pass == 0) != n->pinned) continue;
                     if (a->filter > 0 && n->tag != a->filter - 1) continue;
                     if (!matches(n, a->query)) continue;
+                    /* one line of the note: its lines joined with a dot, list markers dropped */
                     char preview[160];
-                    snprintf(preview, sizeof preview, "%.150s", n->body[0] ? n->body : "No content");
-                    for (char *p = preview; *p; p++) if (*p == '\n') *p = ' ';
+                    int w = 0;
+                    if (!n->body[0]) w = snprintf(preview, sizeof preview, "No content");
+                    for (const char *p = n->body; *p && w < (int)sizeof preview - 8;) {
+                        const char *e = strchr(p, '\n');
+                        int len = e ? (int)(e - p) : (int)strlen(p);
+                        const char *q = p;
+                        while (len > 0 && (*q == '-' || *q == '*' || *q == ' ')) { q++; len--; }
+                        if (len > 0) w += snprintf(preview + w, sizeof preview - (size_t)w, "%s%.*s", w ? "  \xc2\xb7  " : "", len, q);
+                        if (!e) break;
+                        p = e + 1;
+                    }
                     cui_push_id_int(ui, i);
                     if (cui_list_item(ui, n->title[0] ? n->title : "Untitled", .subtitle = preview, .selected = a->selected == i,
                                       .icon = n->pinned ? CUI_ICON_BOOKMARK : CUI_ICON_FILE_TEXT))
@@ -136,10 +146,10 @@ static void editor_pane(cui_ctx *ui, notes_app *a) {
         cui_textarea(ui, "body", n->body, sizeof n->body, .placeholder = "Start writing", .height = -1);
         int words = 0;
         bool in_word = false;
-        for (const char *p = n->body; *p; p++) {
+        for (const char *p = n->body; *p; p++) {   /* a word has a letter or digit in it, so list dashes do not count */
             bool w = !isspace((unsigned char)*p);
-            if (w && !in_word) words++;
-            in_word = w;
+            if (!w) { in_word = false; continue; }
+            if (!in_word && isalnum((unsigned char)*p)) { words++; in_word = true; }
         }
         cui_textf(ui, "%d words  \xc2\xb7  %d characters", words, (int)strlen(n->body));
         cui_pop_id(ui);

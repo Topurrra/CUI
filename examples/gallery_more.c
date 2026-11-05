@@ -266,7 +266,7 @@ static void page_disclosure(cui_ctx *ui) {
                 cui_avatar(ui, "Jonas Berg", .size = 44, .status = "online");
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
                     cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
-                    cui_text(ui, "Design lead on the mobile app. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_text(ui, "Engineer on the rendering team. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                     cui_row(ui, .gap = 6, .pad_top = 4) {
                         cui_icon(ui, CUI_ICON_CALENDAR, 13, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
@@ -950,9 +950,9 @@ static void page_ai(cui_ctx *ui) {
         { "Atlas Mini", "Runs on your own machine", NULL, CUI_ICON_BOX },
     };
     static const cui_source sources[] = {
-        { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
-        { "Notes on subpixel text positioning", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
-        { "Spring physics for interface motion", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
+        { "Immediate mode GUIs and why they keep coming back", "https://fieldnotes.dev/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
+        { "Notes on subpixel text positioning", "https://glyphlab.io/notes/subpixel", "Shaping, hinting and subpixel positioning explained with examples." },
+        { "Spring physics for interface motion", "https://motionbook.dev/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
     };
     double now = cui_time(ui);
     if (busy && started < 0) started = now;
@@ -969,7 +969,7 @@ static void page_ai(cui_ctx *ui) {
             }
             cui_tool_call(ui, "search", "web_search", .icon = CUI_ICON_GLOBE, .detail = "immediate mode gui performance", .status = CUI_TASK_DONE, .seconds = 1.4f,
                           .input = "{\"query\": \"immediate mode gui performance\", \"limit\": 5}",
-                          .output = "{\"results\": [{\"title\": \"Immediate mode GUIs\", \"url\": \"https://example.com\"}], \"took_ms\": 1380}");
+                          .output = "{\"results\": [{\"title\": \"Immediate mode GUIs\", \"url\": \"https://fieldnotes.dev/immediate-mode\"}], \"took_ms\": 1380}");
             cui_tool_call(ui, "read", "read_file", .icon = CUI_ICON_FILE_TEXT, .detail = "quarterly-report.pdf", .status = busy ? CUI_TASK_RUNNING : CUI_TASK_DONE, .seconds = busy ? elapsed : 2.1f);
             if (busy) cui_agent_status(ui, "Reading quarterly-report.pdf", .status = CUI_TASK_RUNNING, .seconds = elapsed);
             cui_typewriter(ui, "answer", "They do very little work per frame: the interface is rebuilt from your data, laid out once and drawn in a handful of batches, so there is no tree of objects to keep in sync. Text is the expensive part, which is why glyphs are cached in an atlas, and motion feels quick when it is driven by springs instead of fixed curves.", .size = 15);

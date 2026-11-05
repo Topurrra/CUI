@@ -572,7 +572,7 @@ static void body_hover_card(cui_ctx *ui) {
                 cui_avatar(ui, "Jonas Berg", .size = 44, .status = "online");
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
                     cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
-                    cui_text(ui, "Design lead on the mobile app.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_text(ui, "Engineer on the rendering team.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                     cui_row(ui, .gap = 6, .pad_top = 4) {
                         cui_icon(ui, CUI_ICON_CLOCK, 13, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
@@ -672,16 +672,17 @@ SCENE(data_grid) {
     static uint32_t filt[2] = { 1u | 4u, 0 };
     static char search[32];
     cui_filter_bar(ui, "filters", fields, 2, filt, search, sizeof search);
-    static const cui_grid_column cols[] = { { "Name", 210, CUI_TEXT_LEFT, true }, { "Team", 120, CUI_TEXT_LEFT, true },
+    static const cui_grid_column cols[] = { { "Name", 250, CUI_TEXT_LEFT, true }, { "Team", 140, CUI_TEXT_LEFT, true },
                                             { "Commits", 100, CUI_TEXT_RIGHT, true }, { "Score", 150, CUI_TEXT_RIGHT, true } };
-    static const char *names[] = { "Jonas Berg", "Maya Okafor", "Lena Fischer", "Sam Whitfield", "Daniel Mensah", "Rosa Delgado" };
-    static const char *tm[] = { "Engine", "Design", "Platform", "Engine", "Platform", "Docs" };
-    static const int commits[] = { 884, 812, 640, 597, 431, 309 };
-    static const float score[] = { 97.2f, 93.5f, 88.1f, 84.0f, 71.9f, 66.4f };
-    static bool sel[6] = { false, true, true, false, false, false };
+    /* the rows the "Team is Engine or Platform" filter leaves */
+    static const char *names[] = { "Jonas Berg", "Lena Fischer", "Sam Whitfield", "Daniel Mensah" };
+    static const char *tm[] = { "Engine", "Platform", "Engine", "Platform" };
+    static const int commits[] = { 884, 640, 597, 431 };
+    static const float score[] = { 97.2f, 88.1f, 84.0f, 71.9f };
+    static bool sel[4] = { false, true, true, false };
     static cui_table_sort sort = { 2, true };
     int f0, l0;
-    if (cui_data_grid_begin(ui, "people", cols, 4, 6, &f0, &l0, .height = CUI_PX(282), .selected = sel, .sort = &sort)) {
+    if (cui_data_grid_begin(ui, "people", cols, 4, 4, &f0, &l0, .height = CUI_PX(202), .selected = sel, .sort = &sort)) {
         for (int r = f0; r < l0; r++) {
             char b1[16], b2[16];
             cui_data_grid_row(ui, r);
@@ -1065,7 +1066,7 @@ static void body_reasoning_tools(cui_ctx *ui) {
     }
     cui_tool_call(ui, "search", "web_search", .icon = CUI_ICON_GLOBE, .detail = "immediate mode gui performance", .status = CUI_TASK_DONE, .seconds = 1.4f,
                   .input = "{\"query\": \"immediate mode gui performance\", \"limit\": 5}",
-                  .output = "{\"results\": [{\"title\": \"Immediate mode GUIs\", \"url\": \"https://example.com\"}], \"took_ms\": 1380}");
+                  .output = "{\"results\": [{\"title\": \"Immediate mode GUIs\", \"url\": \"https://fieldnotes.dev/immediate-mode\"}], \"took_ms\": 1380}");
     cui_tool_call(ui, "read", "read_file", .icon = CUI_ICON_FILE_TEXT, .detail = "quarterly-report.pdf", .status = CUI_TASK_RUNNING, .seconds = 3.2f);
     cui_tool_call(ui, "run", "run_tests", .icon = CUI_ICON_SQUARE_TERMINAL, .detail = "ctest --output-on-failure", .status = CUI_TASK_FAILED, .seconds = 12.0f);
 }
@@ -1076,10 +1077,10 @@ static void scene_reasoning_tools(cui_ctx *ui, int f) {
 SCENE(agent_plan) {
     static const cui_plan_step steps[] = {
         { "Search for sources", "3 results", CUI_TASK_DONE },
+        { "Open the sources", "One link timed out", CUI_TASK_FAILED },
         { "Read the attached report", "Page 12 of 40", CUI_TASK_RUNNING },
         { "Compare the numbers with last quarter", NULL, CUI_TASK_PENDING },
         { "Draft the summary", NULL, CUI_TASK_PENDING },
-        { "Check the citations", "Two links timed out", CUI_TASK_FAILED },
     };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_box(ui, .width = CUI_PX(380)) { cui_agent_plan(ui, "plan", steps, 5, .title = "Research plan"); }
@@ -1091,9 +1092,9 @@ SCENE(agent_plan) {
     }
 }
 static const cui_source shot_sources[] = {
-    { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
-    { "Notes on subpixel text positioning", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
-    { "Spring physics for interface motion", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
+    { "Immediate mode GUIs and why they keep coming back", "https://fieldnotes.dev/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
+    { "Notes on subpixel text positioning", "https://glyphlab.io/notes/subpixel", "Shaping, hinting and subpixel positioning explained with examples." },
+    { "Spring physics for interface motion", "https://motionbook.dev/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
 };
 static void body_sources(cui_ctx *ui) {
     cui_text(ui, "They do very little work per frame: the interface is rebuilt from your data, laid out once and drawn in a handful of batches.", .size = 15);
@@ -1859,7 +1860,7 @@ int main(int argc, char **argv) {
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
-        { "data-grid", scene_data_grid, 760, 390, true }, { "code-block", scene_code_block, 720, 340, true },
+        { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "json-view", scene_json_view, 560, 330, true }, { "chat", scene_chat, 560, 440, true },
         { "comments", scene_comments, 600, 370, true }, { "presence-ticker", scene_presence_ticker, 640, 170, true },
         { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },

@@ -166,6 +166,8 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     hn->dir = CUI_ROW; hn->align = CUI_ALIGN_CENTER;
     hn->h = CUI_PX(CUI__GRID_HEAD); hn->w = CUI_PX(total);
     hn->bg = CUI_C(ui, SURFACE_MUTED);
+    /* the header's fill follows the frame's top corners instead of poking past them */
+    { float ir = CUI_MAX(0.0f, ui->theme.radius_control - 1); hn->radius = (cui_corners){ ss->x > 0.5f ? 0 : ir, ir, 0, 0 }; }
     hn->ty = ss->y;
     hn->flags |= CUI_NF_ON_TOP;
     cui__grid_row_paint *hp = cui__frame_alloc(ui, sizeof *hp);
@@ -503,7 +505,7 @@ bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fie
     if (search) {
         cui_input_opts io;
         memset(&io, 0, sizeof io);
-        io.placeholder = "Filter";
+        io.placeholder = "Search";
         io.size = CUI_SIZE_SM;
         io.width = CUI_PX(200);
         io.clearable = true;
