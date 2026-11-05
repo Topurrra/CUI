@@ -488,6 +488,10 @@ void cui__field_message(cui_ctx *ui, const char *hint, const char *error);
 int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizontal);
 void cui__scroll_end_ex(cui_ctx *ui);
 
+void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);
+void cui__paint_nav_highlight(cui_ctx *ui, cui_node *n, void *data);
+void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
+
 /* paint data helpers */
 #define CUI_PAINT_DATA(ui, type) ((type *)cui__frame_alloc((ui), sizeof(type)))
 
