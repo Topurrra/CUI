@@ -547,6 +547,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         outer = cui__node_new(ui, 0);
         ui->nodes[outer].gap = 6;
         ui->nodes[outer].w = o->width.kind ? o->width : CUI_FILL;
+        if (multiline && o->height < 0) ui->nodes[outer].h = CUI_FILL;
         cui__open(ui, outer);
         cui__field_label(ui, o->label);
     }
@@ -555,7 +556,9 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     bn->dir = CUI_ROW;
     bn->align = multiline ? CUI_ALIGN_START : CUI_ALIGN_CENTER;
     bn->gap = 8;
-    bn->h = CUI_PX(h);
+    bool fill_h = multiline && o->height < 0;
+    bn->h = fill_h ? CUI_FILL : CUI_PX(h);
+    if (fill_h) bn->min_h = 80;
     bn->w = outer >= 0 ? CUI_FILL : (o->width.kind ? o->width : CUI_FILL);
     bn->min_w = 80;
     if (style == CUI__FIELD_BOXED) {

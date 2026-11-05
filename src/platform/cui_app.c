@@ -68,6 +68,12 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     cui_set_platform(ui, &pi);
     app->running = true;
     app->last_time = cui__plat_now();
+    app->screenshot_path = getenv("CUI_SCREENSHOT");
+    if (app->screenshot_path) {
+        const char *f = getenv("CUI_SCREENSHOT_FRAMES");
+        app->screenshot_frames = f ? atoi(f) : 90;
+        d->continuous = true;
+    }
     if (!d->hidden) cui__plat_show(app);
     return app;
 }
@@ -157,7 +163,20 @@ static void cui__app_begin(cui_app *app) {
 }
 
 bool cui_app_frame(cui_app *app) {
-    if (app->in_frame) cui__app_render(app);
+    if (app->in_frame) {
+        cui__app_render(app);
+        if (app->screenshot_path && ++app->frames >= app->screenshot_frames) {
+            const cui_draw_data *dd = cui_get_draw_data(app->ui);
+            int w = dd->width_px, h = dd->height_px;
+            unsigned char *px = malloc((size_t)w * (size_t)h * 4);
+            if (px && cui_app_screenshot(app, px, w, h)) {
+                bool ok = cui_write_png(app->screenshot_path, px, w, h, w * 4);
+                fprintf(stderr, "cui: %s %s\n", ok ? "saved" : "could not save", app->screenshot_path);
+            }
+            free(px);
+            app->running = false;
+        }
+    }
     if (!app->running) return false;
     cui_ctx *ui = app->ui;
     double timeout;

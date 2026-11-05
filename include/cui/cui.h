@@ -552,7 +552,7 @@ typedef struct cui_input_opts {
     bool read_only;
     cui_control_size size;
     cui_size width;
-    float height;              /* textarea: visible height in points */
+    float height;              /* textarea: height in points; negative fills the space */
 } cui_input_opts;
 
 /* Single line text field. Returns CUI_CHANGED / CUI_SUBMITTED (Enter) flags. */

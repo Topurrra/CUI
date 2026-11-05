@@ -335,11 +335,19 @@ static void cui__xy_chart(cui_ctx *ui, const char *id_str, const cui_series *ser
         float *vals = cui__frame_alloc(ui, sizeof(float) * (size_t)(series[k].count > 0 ? series[k].count : 1));
         if (series[k].count > 0) memcpy(vals, series[k].values, sizeof(float) * (size_t)series[k].count);
         p->series[k].values = vals;
+        p->series[k].name = series[k].name ? cui__frame_strdup(ui, series[k].name, -1) : NULL;
     }
     p->count = count;
-    p->labels = o->labels;
     p->label_count = o->label_count > 0 ? o->label_count : npts;
+    p->labels = NULL;
+    if (o->labels) {
+        const char **copy = cui__frame_alloc(ui, sizeof(char *) * (size_t)(p->label_count > 0 ? p->label_count : 1));
+        for (int k = 0; k < p->label_count; k++) copy[k] = o->labels[k] ? cui__frame_strdup(ui, o->labels[k], -1) : "";
+        p->labels = copy;
+    }
     p->o = *o;
+    p->o.format = o->format ? cui__frame_strdup(ui, o->format, -1) : NULL;
+    p->o.labels = NULL;
     p->intro = st->intro.x;
     p->hover = st->hover_t > 0.01f ? st->hover : -1;
     p->hover_t = st->hover_t;
@@ -369,7 +377,7 @@ void cui_bar_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int
 
 /* ---- donut ---- */
 
-typedef struct { float *values; int count; float intro; int hover; float hover_t; float total; const char *format; } cui__donut_paint;
+typedef struct { float *values; int count; float intro; int hover; float hover_t; float total; const char *format; const char *const *labels; } cui__donut_paint;
 
 static void cui__paint_donut(cui_ctx *ui, cui_node *n, void *data) {
     cui__donut_paint *p = data;
@@ -395,12 +403,23 @@ static void cui__paint_donut(cui_ctx *ui, cui_node *n, void *data) {
         }
         a += sw;
     }
-    const char *val = cui__fmt_value(ui, p->format, p->hover >= 0 && p->hover_t > 0.5f ? p->values[p->hover] : p->total);
+    /* percentage data shows the leading (or hovered) segment instead of a total */
+    bool pct = p->format && strstr(p->format, "%%");
+    int show = p->hover >= 0 && p->hover_t > 0.5f ? p->hover : -1;
+    if (show < 0 && pct) {
+        show = 0;
+        for (int k = 1; k < p->count; k++) if (p->values[k] > p->values[show]) show = k;
+    }
+    const char *val = cui__fmt_value(ui, p->format, show >= 0 ? p->values[show] : p->total);
     float vs = CUI_MAX(14.0f, size * 0.16f);
     float vw = cui__text_width(ui, CUI_FONT_DISPLAY, vs, val, -1, true);
     float vh = cui__font_line_height(ui, CUI_FONT_DISPLAY, vs);
     cui__draw_text_line(ui, CUI_FONT_DISPLAY, vs, c.x - vw * 0.5f, c.y - vh * 0.62f, CUI_C(ui, FOREGROUND), val, -1, true);
-    const char *sub = p->hover >= 0 && p->hover_t > 0.5f ? cui__frame_printf(ui, "%.0f%%", (double)(p->values[p->hover] / total * 100)) : "Total";
+    const char *sub = "Total";
+    if (show >= 0) {
+        if (p->labels && p->labels[show]) sub = p->labels[show];
+        else sub = cui__frame_printf(ui, "%.0f%%", (double)(p->values[show] / total * 100));
+    }
     float sw2 = cui__text_width(ui, CUI_FONT_BODY, ui->theme.text_sm, sub, -1, true);
     cui__draw_text_line(ui, CUI_FONT_BODY, ui->theme.text_sm, c.x - sw2 * 0.5f, c.y + vh * 0.42f, CUI_C(ui, TEXT_SECONDARY), sub, -1, true);
 }
@@ -444,9 +463,16 @@ void cui_donut_chart_ex(cui_ctx *ui, const char *id_str, const float *values, co
     cui__donut_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->values = cui__frame_alloc(ui, sizeof(float) * (size_t)(count > 0 ? count : 1));
     for (int k = 0; k < count; k++) p->values[k] = values[k] > 0 ? values[k] : 0;
-    p->count = count; p->intro = st->intro.x; p->total = total; p->format = o->format;
+    p->count = count; p->intro = st->intro.x; p->total = total;
+    p->format = o->format ? cui__frame_strdup(ui, o->format, -1) : NULL;
     p->hover = st->hover_t > 0.01f ? st->hover : -1;
     p->hover_t = st->hover_t;
+    p->labels = NULL;
+    if (labels) {
+        const char **copy = cui__frame_alloc(ui, sizeof(char *) * (size_t)(count > 0 ? count : 1));
+        for (int k = 0; k < count; k++) copy[k] = labels[k] ? cui__frame_strdup(ui, labels[k], -1) : "";
+        p->labels = copy;
+    }
     ui->nodes[dn].paint = cui__paint_donut;
     ui->nodes[dn].paint_data = p;
     if (!o->no_legend && labels) {

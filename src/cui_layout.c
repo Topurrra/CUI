@@ -247,7 +247,7 @@ static void cui__measure_w(cui_ctx *ui, int i) {
     if (n->flags & CUI_NF_TEXT) {
         pref = cui__text_width(ui, n->font, n->font_size, n->text, n->text_len, (n->flags & CUI_NF_TABULAR) != 0);
         if (n->flags & CUI_NF_WRAP) minc = cui__text_min_width(ui, n->font, n->font_size, n->text, n->text_len);
-        else minc = pref;
+        else minc = CUI_MIN(pref, n->font_size * 2.5f);   /* single lines can shrink and show an ellipsis */
         pref = ceilf(pref * 4) / 4;
         minc = ceilf(minc * 4) / 4;
     } else {

@@ -25,6 +25,9 @@ struct cui_app {
     bool in_live_resize;
     void *plat;                /* backend state */
     char *clipboard;           /* last clipboard string handed to CUI */
+    const char *screenshot_path;  /* CUI_SCREENSHOT: save a PNG and quit */
+    int screenshot_frames;
+    int frames;
 };
 
 /* Implemented by each backend. */
