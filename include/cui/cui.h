@@ -1118,6 +1118,80 @@ typedef struct cui_ticker_opts { int _; float speed; float height; } cui_ticker_
 CUI_API void cui_ticker_ex(cui_ctx *ui, const char *id, const cui_ticker_item *items, int count, const cui_ticker_opts *opts);
 
 /* ------------------------------------------------------------------------ */
+/* More charts                                                              */
+/* ------------------------------------------------------------------------ */
+/* Every chart below has a hover tooltip, animates in once, follows the theme
+ * and returns the index of the mark that was clicked, or -1. Colors default
+ * to the series palette; numbers use `format` (printf, default compact). */
+
+/* Heatmap: a rows x cols matrix (values[row * cols + col]) on one hue,
+ * light to dark, with a scale below. */
+typedef struct cui_heatmap_opts {
+    int _;
+    const char *const *row_labels, *const *col_labels;
+    float cell;                /* cell size, default fits the width */
+    float min, max;            /* value range, default the data's */
+    cui_color color;           /* hue of the scale, default the accent */
+    const char *format;
+    cui_size width;
+} cui_heatmap_opts;
+CUI_API int cui_heatmap_ex(cui_ctx *ui, const char *id, const float *values, int rows, int cols, const cui_heatmap_opts *opts);
+
+/* Calendar heatmap: one cell per day from start, weeks as columns, in five
+ * levels, with month and weekday labels and a Less / More legend. */
+typedef struct cui_calendar_heatmap_opts { int _; float cell; cui_color color; const char *format; const char *unit; } cui_calendar_heatmap_opts;
+CUI_API int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id, cui_date start, const float *values, int days, const cui_calendar_heatmap_opts *opts);
+
+/* Treemap: rectangles with areas proportional to their values. */
+typedef struct cui_viz_item { const char *label; float value; cui_color color; } cui_viz_item;
+typedef struct cui_treemap_opts { int _; cui_size width; float height; const char *format; } cui_treemap_opts;
+CUI_API int cui_treemap_ex(cui_ctx *ui, const char *id, const cui_viz_item *items, int count, const cui_treemap_opts *opts);
+
+/* Radar chart: series over shared axes (series[i].values[axis]). */
+typedef struct cui_radar_opts { int _; float size; float max; const char *format; bool no_legend; } cui_radar_opts;
+CUI_API int cui_radar_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const char *const *axes, int axis_count,
+                               const cui_radar_opts *opts);
+
+/* Funnel: stages narrowing by value, with the conversion between them. */
+typedef struct cui_funnel_opts { int _; cui_size width; float height; const char *format; cui_color color; } cui_funnel_opts;
+CUI_API int cui_funnel_ex(cui_ctx *ui, const char *id, const cui_viz_item *stages, int count, const cui_funnel_opts *opts);
+
+/* Sankey: flows between nodes; columns follow the links from the sources. */
+typedef struct cui_sankey_link { int from, to; float value; } cui_sankey_link;
+typedef struct cui_sankey_opts { int _; cui_size width; float height; const char *format; float node_width; } cui_sankey_opts;
+CUI_API int cui_sankey_ex(cui_ctx *ui, const char *id, const char *const *nodes, int node_count, const cui_sankey_link *links, int link_count,
+                          const cui_sankey_opts *opts);
+
+/* Waffle: a 10 x 10 grid of squares split by share, with a legend. */
+typedef struct cui_waffle_opts { int _; float cell; int columns, rows; const char *format; } cui_waffle_opts;
+CUI_API int cui_waffle_ex(cui_ctx *ui, const char *id, const cui_viz_item *items, int count, const cui_waffle_opts *opts);
+
+/* Split bar: one bar split into parts, with a legend of values and shares. */
+typedef struct cui_split_bar_opts { int _; cui_size width; float height; const char *format; bool no_legend; } cui_split_bar_opts;
+CUI_API int cui_split_bar_ex(cui_ctx *ui, const char *id, const cui_viz_item *items, int count, const cui_split_bar_opts *opts);
+
+/* Bar list: ranked horizontal bars. Rows are keyed by label, so when the
+ * values change the bars grow and the rows slide to their new rank. */
+typedef struct cui_bar_list_opts { int _; cui_size width; const char *format; int max_rows; bool keep_order; cui_color color; } cui_bar_list_opts;
+CUI_API int cui_bar_list_ex(cui_ctx *ui, const char *id, const cui_viz_item *items, int count, const cui_bar_list_opts *opts);
+
+/* Activity rings: concentric progress rings; values past 1 keep winding. */
+typedef struct cui_rings_opts { int _; float size; float thickness; const char *center; const char *caption; } cui_rings_opts;
+CUI_API int cui_activity_rings_ex(cui_ctx *ui, const char *id, const cui_viz_item *rings, int count, const cui_rings_opts *opts);
+
+/* Scatter (or bubble) chart: points per series, optional sizes. */
+typedef struct cui_scatter_series { const char *name; const cui_vec2 *points; const float *sizes; int count; cui_color color; } cui_scatter_series;
+typedef struct cui_scatter_opts {
+    int _;
+    cui_size width;
+    float height;
+    const char *x_label, *y_label;
+    const char *x_format, *y_format;
+    bool no_legend;
+} cui_scatter_opts;
+CUI_API int cui_scatter_chart_ex(cui_ctx *ui, const char *id, const cui_scatter_series *series, int count, const cui_scatter_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Planning                                                                 */
 /* ------------------------------------------------------------------------ */
 
@@ -1487,6 +1561,17 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_kanban_column_begin(ui, title, count, ...) cui_kanban_column_begin_ex((ui), (title), (count), CUI__OPTS(cui_kanban_column_opts, __VA_ARGS__))
 #define cui_week_calendar(ui, id, week, events, count, ...) cui_week_calendar_ex((ui), (id), (week), (events), (count), CUI__OPTS(cui_week_opts, __VA_ARGS__))
 #define cui_gantt(ui, id, tasks, count, origin, days, ...) cui_gantt_ex((ui), (id), (tasks), (count), (origin), (days), CUI__OPTS(cui_gantt_opts, __VA_ARGS__))
+#define cui_heatmap(ui, id, v, rows, cols, ...) cui_heatmap_ex((ui), (id), (v), (rows), (cols), CUI__OPTS(cui_heatmap_opts, __VA_ARGS__))
+#define cui_calendar_heatmap(ui, id, start, v, days, ...) cui_calendar_heatmap_ex((ui), (id), (start), (v), (days), CUI__OPTS(cui_calendar_heatmap_opts, __VA_ARGS__))
+#define cui_treemap(ui, id, items, n, ...)  cui_treemap_ex((ui), (id), (items), (n), CUI__OPTS(cui_treemap_opts, __VA_ARGS__))
+#define cui_radar_chart(ui, id, s, n, axes, na, ...) cui_radar_chart_ex((ui), (id), (s), (n), (axes), (na), CUI__OPTS(cui_radar_opts, __VA_ARGS__))
+#define cui_funnel(ui, id, stages, n, ...)  cui_funnel_ex((ui), (id), (stages), (n), CUI__OPTS(cui_funnel_opts, __VA_ARGS__))
+#define cui_sankey(ui, id, nodes, nn, links, nl, ...) cui_sankey_ex((ui), (id), (nodes), (nn), (links), (nl), CUI__OPTS(cui_sankey_opts, __VA_ARGS__))
+#define cui_waffle(ui, id, items, n, ...)   cui_waffle_ex((ui), (id), (items), (n), CUI__OPTS(cui_waffle_opts, __VA_ARGS__))
+#define cui_split_bar(ui, id, items, n, ...) cui_split_bar_ex((ui), (id), (items), (n), CUI__OPTS(cui_split_bar_opts, __VA_ARGS__))
+#define cui_bar_list(ui, id, items, n, ...) cui_bar_list_ex((ui), (id), (items), (n), CUI__OPTS(cui_bar_list_opts, __VA_ARGS__))
+#define cui_activity_rings(ui, id, rings, n, ...) cui_activity_rings_ex((ui), (id), (rings), (n), CUI__OPTS(cui_rings_opts, __VA_ARGS__))
+#define cui_scatter_chart(ui, id, s, n, ...) cui_scatter_chart_ex((ui), (id), (s), (n), CUI__OPTS(cui_scatter_opts, __VA_ARGS__))
 #define cui_chat_message(ui, text, ...)     cui_chat_message_ex((ui), (text), CUI__OPTS(cui_chat_opts, __VA_ARGS__))
 #define cui_comment(ui, id, author, text, ...) cui_comment_ex((ui), (id), (author), (text), CUI__OPTS(cui_comment_opts, __VA_ARGS__))
 #define cui_carousel(ui, id, count, index, ...) CUI__SCOPE(cui_carousel_begin((ui), (id), (count), (index), CUI__OPTS(cui_carousel_opts, __VA_ARGS__)), cui_carousel_end(ui))

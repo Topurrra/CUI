@@ -867,6 +867,91 @@ SCENE(gantt) {
     cui_gantt(ui, "plan", tasks, 6, org, 28, .day_width = 26, .today = 10);
 }
 
+/* ---- more charts ---- */
+static float viz_traffic[7 * 24], viz_days[364];
+static void viz_data(void) {
+    static bool done;
+    if (done) return;
+    for (int d = 0; d < 7; d++)
+        for (int h = 0; h < 24; h++) {
+            float work = d < 5 ? 1.0f : 0.45f;
+            viz_traffic[d * 24 + h] = expf(-powf((h - 13.5f) / 4.2f, 2)) * 90 * work + expf(-powf((h - 20.5f) / 2.0f, 2)) * 35 + (float)((d * 31 + h * 17) % 11);
+        }
+    unsigned sd = 7;
+    for (int k = 0; k < 364; k++) {
+        sd = sd * 1103515245u + 12345u;
+        int wd = (k + 3) % 7;   /* the start below is a Thursday */
+        float base = (wd >= 5 ? 0.6f : 3.2f) * (0.6f + 0.4f * sinf(k / 40.0f) * sinf(k / 40.0f));
+        float rr = (float)((sd >> 16) % 1000) / 1000.0f;
+        viz_days[k] = rr < 0.18f ? 0 : floorf(base * rr * 4);
+    }
+    done = true;
+}
+SCENE(heatmap) {
+    viz_data();
+    static const char *wd[] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+    static const char *hours[24] = { "0h", NULL, NULL, "3h", NULL, NULL, "6h", NULL, NULL, "9h", NULL, NULL, "12h", NULL, NULL, "15h", NULL, NULL, "18h", NULL, NULL, "21h", NULL, NULL };
+    cui_heatmap(ui, "traffic", viz_traffic, 7, 24, .row_labels = wd, .col_labels = hours, .format = "%.0f req");
+}
+SCENE(calendar_heatmap) {
+    viz_data();
+    cui_date start = { 2025, 11, 6 };
+    cui_calendar_heatmap(ui, "year", start, viz_days, 364, .unit = "contributions");
+}
+SCENE(treemap_radar) {
+    static const cui_viz_item mods[] = {
+        { "Layout", 412 }, { "Text", 318 }, { "Draw", 260 }, { "Controls", 233 }, { "Charts", 170 },
+        { "Overlays", 141 }, { "Platform", 120 }, { "Theme", 64 }, { "Icons", 52 }, { "Grid", 44 },
+    };
+    static const float a[] = { 82, 64, 90, 58, 75, 88 }, b[] = { 70, 85, 72, 80, 60, 79 };
+    static const char *axes[] = { "Speed", "Size", "Polish", "Docs", "Platforms", "Tests" };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) { cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB"); }
+        cui_series rs[] = { { "1.0", a, 6, { 0 } }, { "1.1", b, 6, { 0 } } };
+        cui_radar_chart(ui, "radar", rs, 2, axes, 6, .size = 210, .max = 100);
+    }
+}
+SCENE(funnel_split) {
+    static const cui_viz_item stages[] = { { "Visited", 12840 }, { "Signed up", 4210 }, { "Activated", 2380 }, { "Subscribed", 860 } };
+    static const cui_viz_item parts[] = { { "Layout", 38 }, { "Text", 24 }, { "Paint", 21 }, { "Input", 9 }, { "Other", 8 } };
+    static const cui_viz_item plats[] = { { "Windows", 46 }, { "macOS", 31 }, { "Linux", 23 } };
+    cui_row(ui, .gap = 36, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) { cui_funnel(ui, "funnel", stages, 4); }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 26) {
+            cui_split_bar(ui, "split", parts, 5, .format = "%.0f ms");
+            cui_waffle(ui, "waffle", plats, 3, .cell = 12);
+        }
+    }
+}
+SCENE(sankey) {
+    static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
+    static const cui_sankey_link links[] = {
+        { 0, 3, 420 }, { 1, 3, 260 }, { 2, 3, 180 }, { 0, 4, 300 }, { 1, 4, 220 },
+        { 3, 5, 610 }, { 3, 6, 250 }, { 5, 6, 330 }, { 5, 7, 280 },
+    };
+    cui_sankey(ui, "flow", nodes, 8, links, 9, .height = 300);
+}
+SCENE(bar_list_rings) {
+    static const cui_viz_item pages[] = { { "/docs", 4820 }, { "/", 3920 }, { "/gallery", 2410 }, { "/blog/fast-ui-in-c", 1830 }, { "/download", 1210 } };
+    static const cui_viz_item rings[] = { { "Move", 0.82f }, { "Exercise", 1.24f }, { "Stand", 0.58f } };
+    cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) { cui_bar_list(ui, "pages", pages, 5); }
+        cui_activity_rings(ui, "rings", rings, 3, .size = 180, .center = "82%", .caption = "of goal");
+    }
+}
+SCENE(scatter) {
+    static cui_vec2 a[40], b[40];
+    static float sa[40], sb[40];
+    for (int k = 0; k < 40; k++) {
+        float n = 200 + k * 95.0f;
+        a[k] = (cui_vec2){ n, 0.08f + n * 0.00006f + (float)((k * 37) % 13) * 0.004f };
+        b[k] = (cui_vec2){ n * 0.9f + 150, 0.15f + n * 0.00011f + (float)((k * 53) % 17) * 0.006f };
+        sa[k] = (float)(10 + (k * 7) % 40); sb[k] = (float)(20 + (k * 11) % 50);
+    }
+    cui_scatter_series ss[] = { { "Software", a, sa, 40, { 0 } }, { "OpenGL", b, sb, 40, { 0 } } };
+    cui_scatter_chart(ui, "scatter", ss, 2, .height = 300, .x_label = "Nodes", .y_label = "Frame time (ms)", .y_format = "%.2f");
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -1098,6 +1183,10 @@ int main(int argc, char **argv) {
         { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },
         { "kanban", scene_kanban, 920, 480, true }, { "week-calendar", scene_week_calendar, 960, 520, true },
         { "gantt", scene_gantt, 1000, 360, true },
+        { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
+        { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
+        { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
+        { "scatter", scene_scatter, 860, 360, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

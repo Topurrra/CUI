@@ -538,3 +538,90 @@ int clicked = cui_gantt(ui, "plan", tasks, 3, start_date, 28, .today = 10);
 ```
 
 A task list on the left and a timeline that scrolls sideways, with months, day numbers and shaded weekends. Drag a bar to reschedule it, or drag either end to change its length. The darker part of a bar is its progress. Dependencies draw as elbow arrows and milestones as diamonds.
+
+## More charts
+
+These follow the same rules as the [core charts](components.md#charts): a tooltip on hover, an intro animation, theme colors. Each returns the index of the mark that was clicked, or -1. Series colors come from a palette checked for color blindness in both modes: neighbouring series stay apart for protanopia and deuteranopia, and the palette rotates so the first series sits next to your accent. Charts that compare amounts on one scale (heatmaps, the treemap, the bar list) use shades of a single hue instead.
+
+### Heatmap
+
+![Heatmap](images/components/heatmap.png)
+
+```c
+float traffic[7 * 24];   /* values[row * cols + col] */
+cui_heatmap(ui, "traffic", traffic, 7, 24, .row_labels = weekdays, .col_labels = hours, .format = "%.0f req");
+```
+
+One hue, light to dark (dim to bright in dark mode), with a scale below. Column labels skip themselves when they would collide; pass NULL for the ones you do not want. `min` and `max` fix the range; `cell` fixes the size, otherwise the cells fit the width.
+
+### Calendar heatmap
+
+![Calendar heatmap](images/components/calendar-heatmap.png)
+
+```c
+cui_calendar_heatmap(ui, "year", start, per_day, 364, .unit = "contributions");
+```
+
+One square a day in five levels, weeks as columns starting on Monday, month labels where a month begins. The tooltip shows the date and the value; `unit` also adds a total under the grid.
+
+### Treemap and radar
+
+![Treemap and radar](images/components/treemap-radar.png)
+
+```c
+static const cui_viz_item mods[] = { { "Layout", 412 }, { "Text", 318 }, { "Draw", 260 } /* ... */ };
+cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB");
+
+cui_series releases[] = { { "1.0", a, 6 }, { "1.1", b, 6 } };
+cui_radar_chart(ui, "radar", releases, 2, axes, 6, .size = 210, .max = 100);
+```
+
+The treemap uses a squarified layout, so rectangles stay close to square; labels appear where they fit and the text color follows the fill. Give an item a `color` to pick it out. The radar draws a ring per tick with its value, fills each series lightly and lists them in a legend; hovering near an axis shows every series' value on it.
+
+### Funnel, split bar and waffle
+
+![Funnel, split bar and waffle](images/components/funnel-split.png)
+
+```c
+static const cui_viz_item stages[] = { { "Visited", 12840 }, { "Signed up", 4210 }, { "Activated", 2380 }, { "Subscribed", 860 } };
+cui_funnel(ui, "signup", stages, 4);
+cui_split_bar(ui, "frame", parts, 5, .format = "%.0f ms");
+cui_waffle(ui, "installs", platforms, 3, .cell = 12);
+```
+
+The funnel shows each stage's share of the first and, under it, the conversion from the stage before. The split bar is one bar cut into parts with 2 point gaps and a legend of values and shares. The waffle hands out its 100 squares by largest remainder, so the counts always add up. Hovering a part, a square or a legend row picks that item out.
+
+### Sankey
+
+![Sankey](images/components/sankey.png)
+
+```c
+static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
+static const cui_sankey_link links[] = { { 0, 3, 420 }, { 1, 3, 260 }, { 3, 5, 610 }, { 5, 6, 330 } /* ... */ };
+cui_sankey(ui, "flow", nodes, 8, links, 9, .height = 300);
+```
+
+Columns follow the links from the sources, and nodes with no way out line up on the right. Sources take the palette in order and every other node inherits the color of its largest inflow, so a flow keeps its color as it moves across the chart. Hover a node to highlight its links, or a ribbon to see the flow and its share of the source. A cycle in the links does not hang the layout.
+
+### Bar list and activity rings
+
+![Bar list and activity rings](images/components/bar-list-rings.png)
+
+```c
+cui_bar_list(ui, "pages", pages, 5);   /* ranked by value; set keep_order to keep yours */
+static const cui_viz_item rings[] = { { "Move", 0.82f }, { "Exercise", 1.24f }, { "Stand", 0.58f } };
+cui_activity_rings(ui, "rings", rings, 3, .size = 180, .center = "82%", .caption = "of goal");
+```
+
+Bar list rows are keyed by their label: when the values change, the bars grow or shrink and the rows slide to their new rank. `max_rows` keeps the top few. Ring values are fractions of a goal; past 1 a ring keeps winding, with a shadow under its tip so the overlap reads.
+
+### Scatter and bubble
+
+![Scatter](images/components/scatter.png)
+
+```c
+cui_scatter_series s[] = { { "Software", points_a, sizes_a, 40 }, { "OpenGL", points_b, sizes_b, 40 } };
+cui_scatter_chart(ui, "frames", s, 2, .height = 300, .x_label = "Nodes", .y_label = "Frame time (ms)", .y_format = "%.2f");
+```
+
+Leave `sizes` NULL for a scatter. With sizes, the area of a bubble follows its value. Every mark has a 1.5 point ring in the surface color, so overlapping points stay apart, and the nearest point under the pointer gets guide lines to both axes.

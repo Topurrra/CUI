@@ -1606,6 +1606,132 @@ static void test_media(void) {
     cui_destroy(ui);
 }
 
+typedef struct { int mode; int hit; cui_id id; int empty; } viz_ctx;
+
+static void build_viz(cui_ctx *ui, void *u) {
+    viz_ctx *a = u;
+    static const float hm[3 * 4] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+    static const cui_viz_item items[] = { { "a", 10 }, { "b", 40 }, { "c", 25 }, { "d", 25 } };
+    static const char *nodes[] = { "A", "B", "C", "D" };
+    static const cui_sankey_link links[] = { { 0, 2, 10 }, { 1, 2, 5 }, { 2, 3, 12 }, { 3, 0, 1 } };   /* with a cycle */
+    static float days[60];
+    static const cui_vec2 pts[] = { { 0, 0 }, { 5, 5 }, { 10, 10 } };
+    static const float rv[] = { 1, 2, 3, 4, 5 };
+    static const char *axes[] = { "p", "q", "r", "s", "t" };
+    for (int k = 0; k < 60; k++) days[k] = (float)(k % 5);
+    int r = -1;
+    cui_column(ui, .pad = 20, .width = CUI_FILL) {
+        if (a->empty) {
+            /* nothing to show, zeros and NaN: no crash, no NaN geometry */
+            float nanv = NAN;
+            cui_viz_item z[2] = { { "z", 0 }, { "n", nanv } };
+            cui_heatmap(ui, "h0", NULL, 0, 0);
+            cui_treemap(ui, "t0", z, 2);
+            cui_funnel(ui, "f0", z, 2);
+            cui_waffle(ui, "w0", z, 2);
+            cui_split_bar(ui, "s0", z, 2);
+            cui_bar_list(ui, "b0", z, 2);
+            cui_activity_rings(ui, "r0", z, 2);
+            cui_sankey(ui, "k0", nodes, 4, NULL, 0);
+            cui_scatter_chart(ui, "c0", NULL, 0);
+            cui_radar_chart(ui, "d0", NULL, 0, axes, 2);
+            cui_date d0 = { 2026, 1, 1 };
+            cui_calendar_heatmap(ui, "y0", d0, days, 0);
+        } else switch (a->mode) {
+        case 0: r = cui_heatmap(ui, "hm", hm, 3, 4, .cell = 30); break;
+        case 1: r = cui_treemap(ui, "tm", items, 4, .width = CUI_PX(400), .height = 200); break;
+        case 2: r = cui_funnel(ui, "fn", items, 4, .width = CUI_PX(400)); break;
+        case 3: r = cui_bar_list(ui, "bl", items, 4, .width = CUI_PX(400)); break;
+        case 4: r = cui_split_bar(ui, "sb", items, 4, .width = CUI_PX(400)); break;
+        case 5: r = cui_waffle(ui, "wf", items, 4, .cell = 10); break;
+        case 6: r = cui_sankey(ui, "sk", nodes, 4, links, 4, .width = CUI_PX(500), .height = 200); break;
+        case 7: r = cui_activity_rings(ui, "ar", items, 2, .size = 120, .thickness = 12); break;
+        case 8: { cui_scatter_series ss = { "s", pts, NULL, 3, { 0 } }; r = cui_scatter_chart(ui, "sc", &ss, 1, .width = CUI_PX(400), .height = 240); } break;
+        case 9: { cui_date d1 = { 2026, 3, 2 }; r = cui_calendar_heatmap(ui, "cal", d1, days, 60); } break;   /* a Monday */
+        case 10: { cui_series rs = { "r", rv, 5, { 0 } }; r = cui_radar_chart(ui, "rd", &rs, 1, axes, 5, .size = 200); } break;
+        }
+        a->id = cui_last_id(ui);
+    }
+    if (r >= 0) a->hit = r;
+}
+
+static void test_viz(void) {
+    printf("more charts: hit testing for every chart, empty and degenerate data\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 800, 1);
+    viz_ctx a;
+    memset(&a, 0, sizeof a);
+    a.empty = 1;
+    run(ui, build_viz, &a, 4);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    bool finite = true;
+    for (int v = 0; v < dd->vertex_count; v++) if (!isfinite(dd->vertices[v].x) || !isfinite(dd->vertices[v].y)) finite = false;
+    CHECK(finite);
+    a.empty = 0;
+    cui_rect r;
+    /* heatmap: cell (row 1, col 2) is index 6 */
+    a.mode = 0; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + 2 * 33 + 15, r.y + 33 + 15);
+    CHECK(a.hit == 6);
+    /* treemap: the largest item fills the top left */
+    a.mode = 1; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + 10, r.y + 10);
+    CHECK(a.hit == 1);
+    CHECK(r.w == 400 && r.h == 200);
+    /* funnel: third row */
+    a.mode = 2; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + r.w / 2, r.y + 2 * 54 + 20);
+    CHECK(a.hit == 2);
+    /* bar list: ranked, the first row is the largest item */
+    a.mode = 3; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + 20, r.y + 15);
+    CHECK(a.hit == 1);
+    click_at(ui, build_viz, &a, r.x + 20, r.y + 3 * 40 + 15);
+    CHECK(a.hit == 0);
+    /* split bar: shares 10/100, then 40: x at 30% is item b */
+    a.mode = 4; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + r.w * 0.3f, r.y + 5);
+    CHECK(a.hit == 1);
+    /* waffle: the first column is item a (10 cells) */
+    a.mode = 5; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + 5, r.y + 5);
+    CHECK(a.hit == 0);
+    click_at(ui, build_viz, &a, r.x + 13 * 3 + 5, r.y + 5);
+    CHECK(a.hit == 1);
+    /* sankey: node C sits in the middle column */
+    a.mode = 6; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    /* scan the middle for node C by clicking on a grid; only nodes report clicks */
+    int got_c = 0, other = 0;
+    for (float x = r.x + r.w * 0.2f; x < r.x + r.w * 0.8f && !got_c; x += 4)
+        for (float y = r.y + 4; y < r.y + r.h && !got_c; y += 12) {
+            a.hit = -1;
+            click_at(ui, build_viz, &a, x, y);
+            if (a.hit == 2) got_c = 1;
+            else if (a.hit >= 0) other = 1;
+        }
+    CHECK(got_c && !other);
+    /* rings: the outer ring is item 0 */
+    a.mode = 7; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + r.w / 2, r.y + 6);
+    CHECK(a.hit == 0);
+    click_at(ui, build_viz, &a, r.x + r.w / 2, r.y + 6 + 15);
+    CHECK(a.hit == 1);
+    /* scatter: the nearest point */
+    a.mode = 8; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    /* the middle point (5, 5) is near the plot's center */
+    click_at(ui, build_viz, &a, r.x + r.w * 0.52f, r.y + r.h * 0.5f);
+    CHECK(a.hit == 1);
+    /* calendar: March 2 2026 is a Monday, so day 8 is the second column's Tuesday */
+    a.mode = 9; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + 32 + 14 + 5, r.y + 20 + 14 + 5);
+    CHECK(a.hit == 8);
+    /* radar: the axis straight up is 0 */
+    a.mode = 10; a.hit = -1; run(ui, build_viz, &a, 3); r = rect_of(ui, a.id);
+    click_at(ui, build_viz, &a, r.x + r.w / 2, r.y + 40);
+    CHECK(a.hit == 0);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -1628,6 +1754,7 @@ int main(void) {
     test_data_grid();
     test_planning();
     test_media();
+    test_viz();
     test_text_capacity();
     test_dialog();
     test_menu();

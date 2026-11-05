@@ -185,10 +185,13 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
     c[CUI_TOKEN_FOCUS_RING] = cui_mix(c[CUI_TOKEN_ACCENT], c[CUI_TOKEN_BACKGROUND], dark ? 0.35f : 0.45f);
     if (accent == CUI_ACCENT_NEUTRAL) c[CUI_TOKEN_FOCUS_RING] = cui_oklch(series_l, 0.15f, 250, 0.9f);
 
-    /* curated series palette; rotated so the first series sits at the accent hue */
-    static const float sh[6] = { 252, 300, 45, 182, 10, 80 };
-    static const float sc[6] = { 0.15f, 0.17f, 0.16f, 0.12f, 0.17f, 0.14f };
-    static const float sl[6] = { 0.00f, -0.02f, 0.08f, 0.05f, 0.02f, 0.17f };
+    /* Series palette: blue, orange, aqua, violet, yellow, magenta. Each mode
+     * has its own steps, and the order keeps every neighbour (the last and
+     * first too) apart under color blindness, so any rotation is safe. It is
+     * rotated so the first series sits nearest the accent hue. */
+    static const uint32_t sp[2][6] = { { 0x2a78d6, 0xeb6834, 0x1baf7a, 0x6250d6, 0xeda100, 0xe87ba4 },
+                                       { 0x4892ed, 0xe8672e, 0x20ab7a, 0x8e7fe6, 0xd17f00, 0xdd6197 } };
+    static const float sh[6] = { 252, 45, 165, 285, 80, 350 };
     int first = 0;
     if (accent != CUI_ACCENT_NEUTRAL) {
         float best = 1e9f;
@@ -198,11 +201,9 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         }
     }
     for (int i = 0; i < 6; i++) {
-        int k = (first + i) % 6;
-        float l = series_l + sl[k] * (dark ? 0.4f : 1.0f);
-        c[CUI_TOKEN_SERIES_1 + i] = cui_oklch(l, sc[k], sh[k], 1);
+        uint32_t v = sp[dark][(first + i) % 6];
+        c[CUI_TOKEN_SERIES_1 + i] = cui__rgba((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v, 255);
     }
-    if (accent != CUI_ACCENT_NEUTRAL) c[CUI_TOKEN_SERIES_1] = c[CUI_TOKEN_ACCENT];
 
     t->radius_control = 18;
     t->radius_panel = 22;

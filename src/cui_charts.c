@@ -7,7 +7,7 @@ static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_sca
 
 typedef struct { cui_spring intro; cui_spring hx; float hover_t; int hover; bool init; float plot_x, plot_w; } cui__chart_state;
 
-static void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo, float *out_hi, float *out_step) {
+void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo, float *out_hi, float *out_step) {
     if (hi <= lo) { hi = lo + 1; }
     float range = hi - lo;
     float rough = range / (float)target_ticks;
@@ -21,7 +21,7 @@ static void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo,
     *out_step = step;
 }
 
-static const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v) {
+const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v) {
     if (fmt) return cui__frame_printf(ui, fmt, (double)v);
     float a = fabsf(v);
     if (a >= 1e9f) return cui__frame_printf(ui, "%.1fB", (double)(v / 1e9f));
