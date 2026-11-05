@@ -242,18 +242,10 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 
 ## Components
 
-<img src="docs/images/showcase/components-dark.png" alt="A mosaic of CUI components in dark mode">
-
-<table>
-<tr>
-<td width="50%"><img src="docs/images/components/command-palette-dark.png" alt="Command palette"></td>
-<td width="50%"><img src="docs/images/components/dialog-dark.png" alt="Dialog"></td>
-</tr>
-<tr>
-<td><img src="docs/images/components/table-dark.png" alt="Table"></td>
-<td><img src="docs/images/components/line-chart-dark.png" alt="Line chart"></td>
-</tr>
-</table>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/components-dark.png">
+  <img src="docs/images/showcase/components.png" alt="A mosaic of CUI components: a sign up form, metric cards, a calendar with time slots, a bar chart, team members and settings">
+</picture>
 
 | | |
 |---|---|
@@ -271,7 +263,10 @@ Every component is documented with a screenshot, usage, options and keyboard beh
 
 ### And the ones usually sold separately
 
-<img src="docs/images/showcase/components-pro-dark.png" alt="A mosaic of the extended CUI components in dark mode">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/components-pro-dark.png">
+  <img src="docs/images/showcase/components-pro.png" alt="A mosaic of the extended CUI components: an AI answer with tools, a contribution heatmap, a sankey diagram, an agent plan, control tiles, a player and a radar chart">
+</picture>
 
 | | |
 |---|---|
