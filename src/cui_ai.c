@@ -986,7 +986,7 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
 typedef struct { cui_spring level, scale; float state_t[4]; bool init; } cui__orb_state;
 typedef struct { float t, level, w[4]; cui_color a, b, c; float hover; } cui__orb_paint;
 
-static void cui__orb_blob(cui_ctx *ui, cui_vec2 c, float r, float amp, float t, float seed, cui_color inner, cui_color outer) {
+static void cui__orb_blob(cui_ctx *ui, cui_vec2 c, float r, float amp, float t, float seed, cui_color inner, cui_color outer, bool edged) {
     enum { N = 72 };
     cui_cvert v[N + 1];
     uint32_t idx[N * 3];
@@ -1000,7 +1000,7 @@ static void cui__orb_blob(cui_ctx *ui, cui_vec2 c, float r, float amp, float t, 
     }
     for (int i = 0; i < N; i++) { idx[i * 3] = 0; idx[i * 3 + 1] = (uint32_t)(i + 1); idx[i * 3 + 2] = (uint32_t)((i + 1) % N + 1); }
     cui__draw_triangles(ui, v, N + 1, idx, N * 3);
-    cui_draw_polyline(ui, edge, N, 1.2f, cui_alpha(outer, 0.8f), true);   /* a soft edge */
+    if (edged) cui_draw_polyline(ui, edge, N, 1.2f, cui_alpha(outer, 0.8f), true);   /* a soft edge */
 }
 
 static void cui__paint_orb(cui_ctx *ui, cui_node *n, void *data) {
@@ -1017,9 +1017,15 @@ static void cui__paint_orb(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_shadow(ui, (cui_rect){ c.x - gr, c.y - gr, gr * 2, gr * 2 }, CUI_CORNERS(gr), R * 0.55f, 0, (cui_vec2){ 0, 0 },
                     cui_alpha(p->a, 0.4f + 0.15f * p->hover + 0.2f * p->level * (listen + speak)));
     float rr = R * breath * pulse;
-    cui__orb_blob(ui, (cui_vec2){ c.x - R * 0.06f, c.y + R * 0.04f }, rr, amp, p->t, 0.0f, cui_alpha(p->b, 0.9f), cui_alpha(p->a, 0.85f));
-    cui__orb_blob(ui, (cui_vec2){ c.x + R * 0.08f, c.y - R * 0.05f }, rr * 0.9f, amp * 1.2f, p->t * 1.15f, 2.1f, cui_alpha(p->c, 0.75f), cui_alpha(p->b, 0.55f));
-    cui__orb_blob(ui, c, rr * 0.72f, amp * 0.8f, p->t * 0.8f, 4.2f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.55f), cui_alpha(p->c, 0.25f));
+    /* one silhouette; the color inside drifts in swirls that fade out before they reach the edge */
+    cui__orb_blob(ui, c, rr, amp, p->t, 0.0f, p->b, cui_mix(p->a, cui__rgba(0, 0, 0, 255), 0.08f), true);
+    float sa = p->t * 0.7f, sb = p->t * 0.55f + 2.4f;
+    cui__orb_blob(ui, (cui_vec2){ c.x + cosf(sa) * R * 0.2f, c.y + sinf(sa) * R * 0.2f }, rr * 0.56f, amp * 1.6f, p->t * 1.2f, 2.1f,
+                  cui_alpha(p->c, 0.85f), cui_alpha(p->c, 0), false);
+    cui__orb_blob(ui, (cui_vec2){ c.x + cosf(sb) * R * 0.22f, c.y + sinf(sb) * R * 0.22f }, rr * 0.5f, amp * 1.4f, p->t * 0.9f, 4.2f,
+                  cui_alpha(cui_mix(p->b, cui__rgba(0xec, 0x48, 0x99, 255), 0.35f), 0.7f), cui_alpha(p->b, 0), false);
+    cui__orb_blob(ui, (cui_vec2){ c.x - R * 0.08f, c.y - R * 0.1f }, rr * 0.62f, amp, p->t * 0.8f, 5.3f,
+                  cui_alpha(cui__rgba(255, 255, 255, 255), 0.42f), cui_alpha(cui__rgba(255, 255, 255, 255), 0), false);
     /* a soft specular light, upper left, like glass catching a lamp */
     float hs = rr * 0.42f;
     cui_rect hl = { c.x - rr * 0.42f - hs * 0.5f, c.y - rr * 0.46f - hs * 0.5f, hs, hs * 0.8f };
