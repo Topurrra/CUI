@@ -168,7 +168,7 @@ elseif(CUI_BACKEND STREQUAL "win32")
     set(CUI_PC_LIBS "${CUI_PC_LIBS} -luser32 -lgdi32 -lopengl32 -lshell32 -limm32 -ldwmapi")
 endif()
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/cui.pc
-"prefix=${CMAKE_INSTALL_PREFIX}
+"prefix=\${pcfiledir}/../..
 libdir=\${prefix}/${CMAKE_INSTALL_LIBDIR}
 includedir=\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}
 
