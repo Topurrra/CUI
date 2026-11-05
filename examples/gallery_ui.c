@@ -519,11 +519,11 @@ typedef struct { const char *name, *email, *role, *status; int status_tone; cons
 static void page_data(cui_ctx *ui, gallery *g) {
     section(ui, "Table", "Sortable columns, row selection and components in cells.");
     static person_row rows[] = {
-        { "Jonas Berg", "jonas@northlight.io", "Owner", "Active", CUI_TONE_SUCCESS, "$12,400" },
-        { "Priya Nair", "priya@harbor.dev", "Admin", "Active", CUI_TONE_SUCCESS, "$9,850" },
-        { "Tomas Rivera", "tomas@kiln.app", "Editor", "Invited", CUI_TONE_WARNING, "$7,200" },
-        { "Lena Fischer", "lena@fischer.dev", "Viewer", "Active", CUI_TONE_SUCCESS, "$3,100" },
-        { "Aiko Tanaka", "aiko@tanaka.design", "Editor", "Suspended", CUI_TONE_DANGER, "$1,975" },
+        { "Jonas Berg", "jonas@northlight.io", "Owner", "Active", CUI_TONE_SUCCESS, "$12,384" },
+        { "Priya Nair", "priya@harbor.dev", "Admin", "Active", CUI_TONE_SUCCESS, "$9,846" },
+        { "Tomas Rivera", "tomas@kiln.app", "Editor", "Invited", CUI_TONE_WARNING, "$7,215" },
+        { "Lena Fischer", "lena@fischer.dev", "Viewer", "Active", CUI_TONE_SUCCESS, "$3,127" },
+        { "Aiko Tanaka", "aiko@tanaka.design", "Editor", "Suspended", CUI_TONE_DANGER, "$1,962" },
     };
     int order[5] = { 0, 1, 2, 3, 4 };
     for (int i = 1; i < 5; i++) {
@@ -598,10 +598,11 @@ static void page_data(cui_ctx *ui, gallery *g) {
         }
     }
     section(ui, "Reorderable list", "Drag a row. The others make room as you go.");
-    cui_card(ui, .pad = 12) {
-        static const char *tasks[5] = { "Write the release notes", "Record the demo video", "Update the screenshots", "Tag version 1.0", "Celebrate" };
-        static const int tones[5] = { CUI_TONE_INFO, CUI_TONE_VIOLET, CUI_TONE_TEAL, CUI_TONE_WARNING, CUI_TONE_SUCCESS };
-        static const char *labels[5] = { "Docs", "Video", "Docs", "Release", "Team" };
+    cui_column(ui, .width = CUI_FILL) {   /* the rows carry their own edges: no card around them */
+        static const char *tasks[5] = { "Write the release notes", "Record the demo video", "Update the screenshots", "Tag version 1.0", "Post the announcement" };
+        /* one tone per label, wherever it appears */
+        static const int tones[5] = { CUI_TONE_INFO, CUI_TONE_NEUTRAL, CUI_TONE_INFO, CUI_TONE_WARNING, CUI_TONE_TEAL };
+        static const char *labels[5] = { "Docs", "Video", "Docs", "Release", "Blog" };
         cui_reorder_begin(ui, "tasks", g->task_order, 5);
         for (int i = 0; i < 5; i++) {
             cui_reorder_item(ui, i) {
@@ -632,12 +633,15 @@ static void page_data(cui_ctx *ui, gallery *g) {
         int first, last;
         cui_virtual_list(ui, "big", 10000, 36, CUI_PX(220), &first, &last) {
             for (int i = first; i < last; i++) {
-                char buf[64];
-                snprintf(buf, sizeof buf, "Row %d", i + 1);
+                char buf[64], amount[32];
+                unsigned h = (unsigned)(i + 1) * 2654435761u;
+                snprintf(buf, sizeof buf, "Invoice 2026-%05d", 10000 - i);
+                snprintf(amount, sizeof amount, "$%u.%02u", 40 + (h >> 8) % 2400, (h >> 4) % 100);
                 cui_row(ui, .height = CUI_PX(36), .pad_x = 12, .gap = 12) {
                     cui_icon(ui, CUI_ICON_FILE_TEXT, 15, CUI_COLOR_TEXT_MUTED);
                     cui_text(ui, buf, .nowrap = true, .width = CUI_FILL, .tabular = true);
-                    cui_text(ui, (i % 3 == 0) ? "Synced" : "Local", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
+                    cui_text(ui, amount, .size = 13, .tabular = true, .nowrap = true);
+                    cui_text(ui, (h >> 20) % 5 == 0 ? "Due" : "Paid", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true, .width = CUI_PX(32));
                 }
             }
         }

@@ -234,7 +234,7 @@ SCENE(table) {
     static const char *names[] = { "Jonas Berg", "Priya Nair", "Aiko Tanaka" };
     static const char *roles[] = { "Owner", "Admin", "Editor" };
     static const char *st[] = { "Active", "Active", "Invited" };
-    static const char *am[] = { "$12,400", "$9,850", "$1,975" };
+    static const char *am[] = { "$12,384", "$9,846", "$1,962" };
     cui_box(ui, .width = CUI_PX(620)) {
         cui_table(ui, "t", cols, 4, .sort = &sort, .selectable = true) {
             for (int i = 0; i < 3; i++) {
