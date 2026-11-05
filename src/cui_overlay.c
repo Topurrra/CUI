@@ -487,9 +487,43 @@ static void cui__tooltip_render(cui_ctx *ui) {
     n->ty = (1 - t) * 3;
     n->max_w = 280;
     n->elevation = CUI_ELEVATION_RAISED;
-    int tx = cui__text_node(ui, tt->text, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm),
-                            ui->mode == CUI_THEME_DARK ? cui_oklch(0.18f, 0, 0, 1) : cui_oklch(0.98f, 0, 0, 1), true);
-    ui->nodes[tx].line_height = 1.35f;
+    bool dark = ui->mode == CUI_THEME_DARK;
+    cui_color fg = dark ? cui_oklch(0.18f, 0, 0, 1) : cui_oklch(0.98f, 0, 0, 1);
+    /* "Label  ·  Ctrl B": the shortcut sits beside the label as quiet key caps */
+    const char *sep = strstr(tt->text, "  \xc2\xb7  ");
+    if (sep) {
+        n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
+        n->pad[1] = 6;
+        int tx = cui__text_node(ui, tt->text, (int)(sep - tt->text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, false);
+        ui->nodes[tx].line_height = 1.35f;
+        const char *keys = sep + 6;
+        int row = cui__node_new(ui, 0);
+        ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 3;
+        cui__open(ui, row);
+        while (*keys) {
+            const char *e = strchr(keys, ' ');
+            int len = e ? (int)(e - keys) : (int)strlen(keys);
+            if (len > 0) {
+                int k = cui__node_new(ui, 0);
+                cui_node *kn = &ui->nodes[k];
+                kn->pad[1] = kn->pad[3] = 5; kn->pad[0] = kn->pad[2] = 1;
+                kn->radius = CUI_CORNERS(5);
+                kn->bg = cui_alpha(fg, 0.14f);
+                kn->min_w = 18;
+                kn->dir = CUI_ROW; kn->justify = CUI_JUSTIFY_CENTER;
+                cui__open(ui, k);
+                int kt = cui__text_node(ui, keys, len, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), cui_alpha(fg, 0.75f), false);
+                ui->nodes[kt].line_height = 1.4f;
+                cui__close(ui);
+            }
+            if (!e) break;
+            keys = e + 1;
+        }
+        cui__close(ui);
+    } else {
+        int tx = cui__text_node(ui, tt->text, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, true);
+        ui->nodes[tx].line_height = 1.35f;
+    }
     cui__float_end(ui);
 }
 

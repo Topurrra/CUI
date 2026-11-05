@@ -798,7 +798,11 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
         cui__add_hit(ui, n->id, hr, n->flags);
     }
     if (n->elevation) cui__draw_elevation(ui, r, n->radius, n->elevation, n->elevation_alpha);
-    if (n->bg.a || (n->border > 0 && n->border_color.a)) cui_draw_rect_border(ui, r, n->radius, n->bg, n->border_color, n->border);
+    /* a clipping box draws its outline over its children, so a header or a
+     * row background inside it never hides the edge */
+    bool border_after = (n->flags & CUI_NF_CLIP) && n->border > 0 && n->border_color.a;
+    if (border_after) { if (n->bg.a) cui_draw_rect(ui, r, n->radius, n->bg); }
+    else if (n->bg.a || (n->border > 0 && n->border_color.a)) cui_draw_rect_border(ui, r, n->radius, n->bg, n->border_color, n->border);
     if (n->elevation && n->bg.a > 200 && ui->mode == CUI_THEME_DARK) cui__draw_top_light(ui, r, n->radius, n->elevation == CUI_ELEVATION_RESTING ? 0.045f : 0.085f);
     if (n->paint && !(n->flags & CUI_NF_PAINT_AFTER)) n->paint(ui, n, n->paint_data);
     if (n->flags & CUI_NF_TEXT) cui__paint_text(ui, n);
@@ -819,6 +823,7 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
             if (ui->nodes[c].flags & CUI_NF_ON_TOP) cui__paint_node(ui, c, child_clip);
     if (clips) cui_pop_clip(ui);
     n = &ui->nodes[i];
+    if (border_after) cui_draw_rect_border(ui, r, n->radius, cui__rgba(0, 0, 0, 0), n->border_color, n->border);
     if (n->paint && (n->flags & CUI_NF_PAINT_AFTER)) n->paint(ui, n, n->paint_data);
     if (n->flags & (CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) cui__paint_scrollbars(ui, n, clip);
     if (xf) cui__pop_xform(ui);

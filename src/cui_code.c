@@ -202,11 +202,6 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
-static void cui__paint_block_border(cui_ctx *ui, cui_node *n, void *data) {
-    (void)data;
-    cui_draw_rect_border(ui, n->rect, n->radius, cui__rgba(0, 0, 0, 0), CUI_C(ui, BORDER), 1);
-}
-
 void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o) {
     cui_code_opts d;
     memset(&d, 0, sizeof d);
@@ -241,9 +236,8 @@ void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const 
     on->w = CUI_FILL;
     on->radius = CUI_CORNERS(ui->theme.radius_control);
     on->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    on->flags |= CUI_NF_CLIP | CUI_NF_PAINT_AFTER;
-    on->paint = cui__paint_block_border;   /* over the title bar, so the outline stays whole */
-    on->paint_data = NULL;
+    on->border = 1; on->border_color = CUI_C(ui, BORDER);
+    on->flags |= CUI_NF_CLIP;   /* the outline is drawn over the title bar */
     cui__open(ui, outer);
     if ((o->title || o->lang) && !o->no_header) {
         int head = cui__node_new(ui, 0);
@@ -484,9 +478,8 @@ bool cui_json_view_ex(cui_ctx *ui, const char *id_str, const char *json, const c
     on->w = CUI_FILL;
     on->radius = CUI_CORNERS(ui->theme.radius_control);
     on->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    on->flags |= CUI_NF_CLIP | CUI_NF_PAINT_AFTER;
-    on->paint = cui__paint_block_border;   /* over the title bar, so the outline stays whole */
-    on->paint_data = NULL;
+    on->border = 1; on->border_color = CUI_C(ui, BORDER);
+    on->flags |= CUI_NF_CLIP;   /* the outline is drawn over the title bar */
     cui__open(ui, outer);
     cui_box sb;
     memset(&sb, 0, sizeof sb);
