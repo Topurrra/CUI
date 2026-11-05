@@ -372,6 +372,89 @@ SCENE(timeline) {
     }
 }
 
+/* ---- extended components ---- */
+
+static void click_id(cui_ctx *ui, cui_id id, int f, int at) {
+    cui_rect r = cui_get_rect(ui, id);
+    if (f == at) cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2);
+    if (f == at + 1) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    if (f == at + 2) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+}
+
+SCENE(split_button) {
+    static const char *items[] = { "Save as draft", "Save and publish", "Schedule..." };
+    cui_row(ui, .gap = 12) {
+        cui_split_button(ui, "Save", items, 3, .icon = CUI_ICON_SAVE);
+        cui_split_button(ui, "Export", items, 3, .variant = CUI_BUTTON_OUTLINE, .icon = CUI_ICON_DOWNLOAD);
+        cui_split_button(ui, "Run", items, 3, .variant = CUI_BUTTON_SECONDARY, .icon = CUI_ICON_PLAY);
+    }
+}
+SCENE(toggle_group) {
+    static bool fmt[4] = { true, true, false, false };
+    static bool al[3] = { false, true, false };
+    static const char *labels[] = { "Bold", "Italic", "Underline", "Code" };
+    static const char *icons[] = { CUI_ICON_BOLD, CUI_ICON_ITALIC, CUI_ICON_UNDERLINE, CUI_ICON_CODE };
+    static const char *views[] = { "List", "Board", "Calendar" };
+    static const char *vicons[] = { CUI_ICON_LIST, CUI_ICON_LAYOUT_DASHBOARD, CUI_ICON_CALENDAR };
+    cui_row(ui, .gap = 14) {
+        cui_toggle_group(ui, "fmt", labels, 4, fmt, .icons = icons, .icon_only = true);
+        cui_toggle_group(ui, "views", views, 3, al, .icons = vicons, .exclusive = true);
+    }
+}
+static int morph_frame;
+static void body_morph(cui_ctx *ui) {
+    cui_row(ui, .gap = 12) {
+        cui_confirm_button(ui, "Delete project", .icon = CUI_ICON_TRASH_2);
+        cui_confirm_button(ui, "Remove member", .icon = CUI_ICON_USER, .timeout = 60);
+        cui_status_button(ui, "Save changes", CUI_STATUS_BUSY, .icon = CUI_ICON_SAVE);
+        cui_status_button(ui, "Publish", CUI_STATUS_SUCCESS, .success_label = "Published");
+    }
+}
+static void scene_morph(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "Remove member"), -f - 1, 20); return; }
+    morph_frame = f;
+    frame_wrap(ui, body_morph);
+}
+static void body_user_menu(cui_ctx *ui) {
+    cui_box(ui, .width = CUI_PX(270)) {
+        cui_user_menu(ui, "Ada Lovelace", .detail = "ada@analytical.engine", .status = "online", .placement = CUI_PLACE_BOTTOM_START) {
+            cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER, .shortcut = "Ctrl P");
+            cui_menu_item(ui, "Billing", .icon = CUI_ICON_CREDIT_CARD);
+            cui_menu_item(ui, "Settings", .icon = CUI_ICON_SETTINGS, .shortcut = "Ctrl ,");
+            cui_menu_separator(ui);
+            cui_menu_item(ui, "Log out", .icon = CUI_ICON_LOG_OUT);
+        }
+    }
+}
+static void scene_user_menu(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "Ada Lovelace") ^ 0x05E4u, -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 600, 20); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_user_menu(ui); }
+}
+SCENE(inline_edit) {
+    static char title[64] = "Q3 roadmap", owner[64] = "Grace Hopper";
+    cui_column(ui, .gap = 4) {
+        cui_inline_edit(ui, "t", title, sizeof title, .font = CUI_FONT_DISPLAY, .size = 26);
+        cui_inline_edit(ui, "o", owner, sizeof owner);
+    }
+}
+SCENE(scrub) {
+    static float a = 80, b = 12, c = 24;
+    cui_row(ui, .gap = 12) {
+        cui_scrub(ui, "Opacity", &a, 0, 100, .suffix = "%");
+        cui_scrub(ui, "Radius", &b, 0, 48, .step = 0.5f, .format = "%.1f", .suffix = "px");
+        cui_scrub(ui, "Blur", &c, 0, 80, .suffix = "px", .width = CUI_PX(140));
+    }
+}
+SCENE(shortcut_rec) {
+    static cui_key_combo a = { CUI_MOD_CTRL | CUI_MOD_SHIFT, CUI_KEY_P }, b = { 0, CUI_KEY_NONE };
+    static double money = 1249.5;
+    cui_row(ui, .gap = 12, .align = CUI_ALIGN_END) {
+        cui_shortcut_recorder(ui, "a", &a);
+        cui_shortcut_recorder(ui, "b", &b, .placeholder = "Record shortcut");
+        cui_box(ui, .width = CUI_PX(220)) { cui_money_input(ui, "m", &money, .code = "USD"); }
+    }
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -586,6 +669,10 @@ int main(int argc, char **argv) {
         { "radio-cards", scene_radio_cards, 780, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },
+        { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
+        { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
+        { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },
+        { "shortcut-recorder", scene_shortcut_rec, 760, 110, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

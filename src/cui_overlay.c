@@ -12,7 +12,6 @@ void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
 /* ------------------------------------------------------------------------ */
 
 
-typedef struct { int highlight; int item_count; int prev_item_count; bool keyboard; } cui__menu_nav;
 
 cui_popup *cui__popup_get(cui_ctx *ui, cui_id id, bool create) {
     for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].id == id) return &ui->popups[i];
@@ -29,7 +28,7 @@ cui_popup *cui__popup_get(cui_ctx *ui, cui_id id, bool create) {
     return p;
 }
 
-static void cui__popup_set(cui_ctx *ui, cui_id id, bool open) {
+void cui__popup_set(cui_ctx *ui, cui_id id, bool open) {
     cui_popup *p = cui__popup_get(ui, id, true);
     if (!p) return;
     if (open && !p->open) {
@@ -42,7 +41,7 @@ static void cui__popup_set(cui_ctx *ui, cui_id id, bool open) {
     p->open = open;
 }
 
-static void cui__close_all_popups(cui_ctx *ui) {
+void cui__close_all_popups(cui_ctx *ui) {
     for (int i = 0; i < ui->popup_count; i++) ui->popups[i].open = false;
 }
 

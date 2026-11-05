@@ -382,6 +382,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
             cui__undo_push(ui, e, buf);
             cui__delete_range(buf, &len, s0, s1);
             e->cursor = e->anchor = s0;
+            s1 = s0;   /* the selection is gone; a paste in the same frame inserts at the caret */
             edited = true;
         }
     }
@@ -525,6 +526,12 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         if (o->autofocus) ui->focus = id;
     }
     cui_id area_id = id ^ 0xED17u;
+    if (ui->tf_select_all == id && ui->focus == id) {
+        e->anchor = 0;
+        e->cursor = (int)strlen(buf);
+        e->scroll_x = 0;
+        ui->tf_select_all = 0;
+    }
     cui_push_disabled(ui, disabled);
     /* the text area itself takes focus; clicks on padding also land on the field */
     cui_interact rf = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_TEXT | CUI_IF_DRAG);
@@ -532,15 +539,21 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     if (rf.hovered) cui__set_cursor(ui, CUI_CURSOR_TEXT);
     bool was_focused = ui->focus == id;
     float size = cui__fs(ui, o->size == CUI_SIZE_SM ? ui->theme.text_sm : ui->theme.text_body);
-    float line_h = size * 1.5f;
+    cui_font font = CUI_FONT_BODY;
+    if (ui->tf_override) {   /* inline edit: type that matches the text it replaces */
+        font = ui->tf_font;
+        size = ui->tf_size;
+        ui->tf_override = false;
+    }
+    float line_h = size * (size > 18 ? 1.3f : 1.5f);
     cui_rect area = cui__prev_rect(ui, area_id);
     bool password = o->password && !e->show_password;
     cui__edit_result er = cui__edit_logic(ui, id, e, buf, cap, multiline, password, o->read_only || disabled, area,
-                                          CUI_FONT_BODY, size, line_h, rf);
+                                          font, size, line_h, rf);
     if (multiline && rf.hovered && ui->scroll_dy != 0 && area.h > 0) {
         /* wheel scrolls the text whether or not the field has focus */
         cui_text_layout_line *wl = NULL;
-        int wn = cui__edit_lines(ui, CUI_FONT_BODY, size, buf, (int)strlen(buf), area.w, &wl);
+        int wn = cui__edit_lines(ui, font, size, buf, (int)strlen(buf), area.w, &wl);
         float total = wn * line_h;
         e->scroll_y = cui__clampf(e->scroll_y - ui->scroll_dy * 40, 0, CUI_MAX(0, total - area.h));
         ui->scroll_dy = 0;
@@ -598,6 +611,12 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     cui__mark_interactive(ui, box, CUI_IF_FOCUSABLE);
     cui__open(ui, box);
     const char *icon = o->icon ? o->icon : search_icon;
+    if (o->prefix) {
+        int pt = cui__text_node(ui, o->prefix, -1, CUI_FONT_BODY, size, CUI_C(ui, TEXT_MUTED), false);
+        ui->nodes[pt].line_height = 1.3f;
+        ui->nodes[pt].self_align = CUI_ALIGN_CENTER;
+        ui->nodes[box].gap = 4;
+    }
     if (icon) {
         int ib = cui__node_new(ui, 0);
         if (multiline) ui->nodes[ib].pad[0] = (line_h - 16) * 0.5f;
@@ -617,7 +636,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     p->multiline = multiline;
     p->scroll_x = e->scroll_x; p->scroll_y = e->scroll_y;
     p->caret_phase = ui->time - ui->caret_time;
-    p->font = CUI_FONT_BODY; p->size = size;
+    p->font = font; p->size = size;
     p->placeholder = o->placeholder;
     p->text = CUI_C(ui, FOREGROUND);
     p->placeholder_color = CUI_C(ui, TEXT_MUTED);
@@ -626,12 +645,17 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     p->line_h = line_h;
     if (multiline) {
         cui_rect a = area;
-        p->line_count = cui__edit_lines(ui, CUI_FONT_BODY, size, p->buf, len, a.w > 0 ? a.w : 200, &p->lines);
+        p->line_count = cui__edit_lines(ui, font, size, p->buf, len, a.w > 0 ? a.w : 200, &p->lines);
     }
     an_->paint = cui__paint_edit;
     an_->paint_data = p;
     if (p->focused) cui__wakeup_after(ui, 0.53f);
 
+    if (o->suffix) {
+        int st_ = cui__text_node(ui, o->suffix, -1, CUI_FONT_BODY, size, CUI_C(ui, TEXT_MUTED), false);
+        ui->nodes[st_].line_height = 1.3f;
+        ui->nodes[st_].self_align = CUI_ALIGN_CENTER;
+    }
     /* trailing affordances */
     if (o->clearable && len > 0 && !disabled && !o->read_only) {
         cui_button_opts bo;

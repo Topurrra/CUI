@@ -470,6 +470,12 @@ struct cui_ctx {
     int button_group_depth;
     int layer_seq;             /* increments whenever a popup or modal opens */
     struct cui_reorder_build *reorder;
+    /* one shot font override for the next text field (inline edit) */
+    bool tf_override;
+    cui_font tf_font;
+    float tf_size;
+    cui_id tf_select_all;      /* this field selects all of its text when it next has focus */
+    struct cui_swipe_build *swipe;
 };
 
 /* ---- theme ---- */
@@ -487,6 +493,16 @@ float cui__control_height(cui_ctx *ui, cui_control_size s);
 cui_popup *cui__popup_get(cui_ctx *ui, cui_id id, bool create);
 bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, float width, float pad, float gap, bool menu);
 void cui__popup_end(cui_ctx *ui);
+void cui__popup_set(cui_ctx *ui, cui_id id, bool open);
+void cui__close_all_popups(cui_ctx *ui);
+typedef struct { int highlight; int item_count; int prev_item_count; bool keyboard; } cui__menu_nav;
+typedef struct { cui_color bg, bg_hover, bg_press, fg, border; } cui__btn_colors;
+cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected);
+void cui__focus_ring(cui_ctx *ui, int node, float alpha);
+void cui__icon_swap(cui_ctx *ui, cui_id state_id, const char *icon, float size, cui_color c);
+cui_id cui__position_id(cui_ctx *ui, uint32_t salt);   /* stable id from the parent and child index */   /* keyboard focus ring painted after the node */
+int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *trailing_icon_default);
+static inline float cui__fsz(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color);
 void cui__icon_node(cui_ctx *ui, const char *icon, float size, cui_color color);
 void cui__field_label(cui_ctx *ui, const char *label);

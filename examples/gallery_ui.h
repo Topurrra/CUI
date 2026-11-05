@@ -49,5 +49,6 @@ typedef struct gallery {
 void gallery_init(gallery *g);
 void gallery_frame(cui_ctx *ui, gallery *g);
 const char *gallery_page_name(int page);
+int gallery_page_total(void);   /* PAGE_COUNT plus the extended pages */
 
 #endif

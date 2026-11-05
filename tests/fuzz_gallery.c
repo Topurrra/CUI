@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
             }
             case 7: cui_input_text(ui, texts[rnd() % (sizeof texts / sizeof texts[0])]); break;
             case 8: if (rnd() % 50 == 0) { W = frand(300, 1600); H = frand(200, 1000); cui_set_viewport(ui, W, H, (rnd() % 3) ? 1.0f : 2.0f); } break;
-            default: if (rnd() % 200 == 0) g.page = (int)(rnd() % PAGE_COUNT); break;
+            default: if (rnd() % 200 == 0) g.page = (int)(rnd() % (unsigned)gallery_page_total()); break;
             }
         }
         if (rnd() % 300 == 0) cui_set_theme(ui, (cui_theme_mode)(rnd() % 2));

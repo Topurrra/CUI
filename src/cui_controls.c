@@ -577,6 +577,8 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         in->dir = CUI_ROW; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER; in->gap = 6;
         in->h = CUI_PX(kind == 1 ? h : inner_h);
         in->pad[1] = in->pad[3] = kind == 0 ? 14 : 10;
+        bool icon_only = icons && icons[k] && (!items[k] || cui__display_len(items[k]) == 0);
+        if (icon_only) { in->pad[1] = in->pad[3] = 0; in->w = CUI_PX(kind == 1 ? h : inner_h); }   /* square segment */
         if (full_width) in->w = CUI_FILL;
         in->radius = CUI_CORNERS(inner_h * 0.5f);
         if (kind == 2 && !sel) in->bg = cui_alpha(CUI_C(ui, HOVER), st->hover[k]);
@@ -591,7 +593,7 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         cui__open(ui, it);
         cui_color fg = sel ? CUI_C(ui, FOREGROUND) : cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), st->hover[k] * 0.7f);
         if (icons && icons[k]) cui__icon_node(ui, icons[k], 15, fg);
-        if (items[k] && *items[k]) cui__label_text(ui, items[k], CUI_FONT_MEDIUM, cui__fs(ui, size == CUI_SIZE_SM ? ui->theme.text_sm : ui->theme.text_body), fg);
+        if (items[k] && cui__display_len(items[k]) > 0) cui__label_text(ui, items[k], CUI_FONT_MEDIUM, cui__fs(ui, size == CUI_SIZE_SM ? ui->theme.text_sm : ui->theme.text_body), fg);
         cui__close(ui);
         if (ir[k].focus_visible) {
             ui->nodes[it].flags |= CUI_NF_PAINT_AFTER;

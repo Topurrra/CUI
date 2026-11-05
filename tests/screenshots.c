@@ -69,6 +69,17 @@ int main(int argc, char **argv) {
             fails += shoot(path, p, d, 0, 1240, p == PAGE_DATA ? 1500 : 1000, 90, p == PAGE_CHARTS ? hover_chart : NULL);
         }
     }
+    for (int p = PAGE_COUNT; p < gallery_page_total(); p++) {
+        if (only >= 0 && only != p) continue;
+        char slug[64];
+        int n = 0;
+        for (const char *c = gallery_page_name(p); *c && n < 60; c++) slug[n++] = *c == ' ' ? '-' : (char)((*c >= 'A' && *c <= 'Z') ? *c + 32 : *c);
+        slug[n] = 0;
+        for (int d = 0; d < 2; d++) {
+            snprintf(path, sizeof path, "%s/more-%s-%s.png", dir, slug, d ? "dark" : "light");
+            fails += shoot(path, p, d, 0, 1240, 1500, 90, NULL);
+        }
+    }
     if (only < 0) {
         snprintf(path, sizeof path, "%s/dialog-light.png", dir);
         fails += shoot(path, PAGE_OVERLAYS, false, 0, 1240, 800, 90, open_dialog);

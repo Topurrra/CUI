@@ -318,6 +318,14 @@ static void test_text_input(void) {
     CHECK(strcmp(e.buf, "Hello thereHe") == 0);
     key(ui, build_edit, &e, CUI_KEY_Z, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
     CHECK(strcmp(e.buf, "\xc3\xa9t\xc3\xa9") == 0);
+    /* cut and paste in one frame: the paste lands where the cut text was */
+    key(ui, build_edit, &e, CUI_KEY_A, CUI_MOD_PRIMARY);
+    cui_input_key(ui, CUI_KEY_X, true, CUI_MOD_PRIMARY);
+    cui_input_key(ui, CUI_KEY_X, false, CUI_MOD_PRIMARY);
+    cui_input_key(ui, CUI_KEY_V, true, CUI_MOD_PRIMARY);
+    cui_input_key(ui, CUI_KEY_V, false, CUI_MOD_PRIMARY);
+    run(ui, build_edit, &e, 1);
+    CHECK(strcmp(e.buf, "\xc3\xa9t\xc3\xa9") == 0);
     e.flags = 0;
     key(ui, build_edit, &e, CUI_KEY_ENTER, 0);
     CHECK(e.flags & CUI_SUBMITTED);
@@ -385,6 +393,237 @@ static void test_textarea_and_clear(void) {
     click_at(ui, build_area, &a, fr.x + fr.w / 3, fr.y + fr.h / 2);
     key(ui, build_area, &a, CUI_KEY_Z, CUI_MOD_PRIMARY);
     CHECK(strcmp(a.other, "keep me") == 0);
+    cui_destroy(ui);
+}
+
+/* more actions ------------------------------------------------------------ */
+
+typedef struct {
+    int split; bool fmt[3], al[3]; int confirm_fires; bool status_click; cui_status status;
+    cui_reaction re[2]; int dial; cui_id dial_id, split_id, tg_id, tg2_id, confirm_id, status_id, re_id;
+} act_ctx;
+static void build_actions(cui_ctx *ui, void *u) {
+    act_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 16) {
+        static const char *items[] = { "Draft", "Publish" };
+        int r = cui_split_button(ui, "Save", items, 2);
+        if (r >= 0) a->split = r;
+        a->split_id = cui_last_id(ui);
+        static const char *labels[] = { "B", "I", "U" };
+        cui_toggle_group(ui, "fmt", labels, 3, a->fmt);
+        a->tg_id = cui_last_id(ui);
+        cui_toggle_group(ui, "al", labels, 3, a->al, .exclusive = true);
+        a->tg2_id = cui_last_id(ui);
+        if (cui_confirm_button(ui, "Delete")) a->confirm_fires++;
+        a->confirm_id = cui_last_id(ui);
+        if (cui_status_button(ui, "Save now", a->status)) a->status_click = true;
+        a->status_id = cui_last_id(ui);
+        cui_reactions(ui, "re", a->re, 2);
+        a->re_id = cui_last_id(ui);
+        cui_row(ui, .height = CUI_PX(200), .align = CUI_ALIGN_END) {
+            static const cui_speed_action acts[] = { { CUI_ICON_FILE, "Note" }, { CUI_ICON_IMAGE, "Image" } };
+            int d = cui_speed_dial(ui, "dial", acts, 2);
+            if (d >= 0) a->dial = d;
+            a->dial_id = cui_last_id(ui);
+        }
+    }
+}
+
+static void test_more_actions(void) {
+    printf("actions: split button, toggle group, confirm, status, reactions, speed dial\n");
+    cui_ctx *ui = new_ctx();
+    act_ctx a;
+    memset(&a, 0, sizeof a);
+    a.split = -1; a.dial = -1;
+    a.re[0] = (cui_reaction){ CUI_ICON_HEART, 3, false };
+    a.re[1] = (cui_reaction){ CUI_ICON_STAR, 1, true };
+    a.al[0] = true;
+    run(ui, build_actions, &a, 3);
+    /* split: main part, then the menu by keyboard */
+    cui_rect sr = rect_of(ui, a.split_id);
+    click_at(ui, build_actions, &a, sr.x + 20, sr.y + sr.h / 2);
+    CHECK(a.split == 0);
+    click_at(ui, build_actions, &a, sr.x + sr.w - 10, sr.y + sr.h / 2);
+    run(ui, build_actions, &a, 3);
+    key(ui, build_actions, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_actions, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_actions, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.split == 2);
+    run(ui, build_actions, &a, 20);
+    /* toggles */
+    cui_rect tr = rect_of(ui, a.tg_id);
+    click_at(ui, build_actions, &a, tr.x + 12, tr.y + tr.h / 2);
+    CHECK(a.fmt[0] && !a.fmt[1]);
+    click_at(ui, build_actions, &a, tr.x + tr.w - 12, tr.y + tr.h / 2);
+    CHECK(a.fmt[0] && a.fmt[2]);
+    cui_rect t2 = rect_of(ui, a.tg2_id);
+    click_at(ui, build_actions, &a, t2.x + t2.w - 12, t2.y + t2.h / 2);
+    CHECK(!a.al[0] && !a.al[1] && a.al[2]);
+    /* confirm: arm, then confirm; an armed button disarms after its timeout */
+    cui_vec2 cc = center(rect_of(ui, a.confirm_id));
+    click_at(ui, build_actions, &a, cc.x, cc.y);
+    CHECK(a.confirm_fires == 0);
+    run(ui, build_actions, &a, 20);
+    cc = center(rect_of(ui, a.confirm_id));
+    click_at(ui, build_actions, &a, cc.x, cc.y);
+    CHECK(a.confirm_fires == 1);
+    run(ui, build_actions, &a, 20);
+    cc = center(rect_of(ui, a.confirm_id));
+    click_at(ui, build_actions, &a, cc.x, cc.y);
+    run(ui, build_actions, &a, 240);   /* 4 seconds */
+    cc = center(rect_of(ui, a.confirm_id));
+    click_at(ui, build_actions, &a, cc.x, cc.y);
+    CHECK(a.confirm_fires == 1);
+    /* status: clicks only count while idle */
+    cui_vec2 sc = center(rect_of(ui, a.status_id));
+    click_at(ui, build_actions, &a, sc.x, sc.y);
+    CHECK(a.status_click);
+    a.status_click = false; a.status = CUI_STATUS_BUSY;
+    run(ui, build_actions, &a, 30);
+    sc = center(rect_of(ui, a.status_id));
+    click_at(ui, build_actions, &a, sc.x, sc.y);
+    CHECK(!a.status_click);
+    /* reactions */
+    cui_rect rr = rect_of(ui, a.re_id);
+    click_at(ui, build_actions, &a, rr.x + 14, rr.y + rr.h / 2);
+    CHECK(a.re[0].active && a.re[0].count == 4);
+    click_at(ui, build_actions, &a, rr.x + 14, rr.y + rr.h / 2);
+    CHECK(!a.re[0].active && a.re[0].count == 3);
+    /* speed dial: open, pick the nearest action */
+    cui_rect dr = rect_of(ui, a.dial_id);
+    click_at(ui, build_actions, &a, dr.x + dr.w / 2, dr.y + dr.h / 2);
+    run(ui, build_actions, &a, 40);
+    click_at(ui, build_actions, &a, dr.x + dr.w / 2, dr.y - 12 - 21);
+    CHECK(a.dial == 0);
+    cui_destroy(ui);
+}
+
+typedef struct { char title[64]; float v; double money; cui_key_combo combo; int edit_flags; cui_id title_id, scrub_id, money_id, rec_id, other_id; char other[16]; } inp_ctx;
+static void build_more_inputs(cui_ctx *ui, void *u) {
+    inp_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 16) {
+        a->edit_flags |= cui_inline_edit(ui, "title", a->title, sizeof a->title);
+        a->title_id = cui_last_id(ui);
+        cui_scrub(ui, "Size", &a->v, 0, 100);
+        a->scrub_id = cui_last_id(ui);
+        cui_money_input(ui, "money", &a->money, .width = CUI_PX(240));
+        a->money_id = cui_last_id(ui);
+        cui_shortcut_recorder(ui, "rec", &a->combo);
+        a->rec_id = cui_last_id(ui);
+        cui_input(ui, "other", a->other, sizeof a->other, .width = CUI_PX(200));
+        a->other_id = cui_last_id(ui);
+    }
+}
+
+static void test_more_inputs(void) {
+    printf("inputs: inline edit, scrub, money, shortcut recorder\n");
+    cui_ctx *ui = new_ctx();
+    inp_ctx a;
+    memset(&a, 0, sizeof a);
+    strcpy(a.title, "Roadmap");
+    a.v = 20;
+    a.money = 1234.5;
+    run(ui, build_more_inputs, &a, 3);
+    /* inline edit: Enter saves, Esc restores */
+    cui_vec2 t = center(rect_of(ui, a.title_id));
+    click_at(ui, build_more_inputs, &a, t.x, t.y);
+    run(ui, build_more_inputs, &a, 1);
+    CHECK(cui_wants_keyboard(ui));
+    type(ui, build_more_inputs, &a, "Plan");        /* text starts selected, typing replaces it */
+    key(ui, build_more_inputs, &a, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(a.title, "Plan") == 0);
+    CHECK(a.edit_flags & CUI_CHANGED);
+    run(ui, build_more_inputs, &a, 2);
+    t = center(rect_of(ui, a.title_id));
+    click_at(ui, build_more_inputs, &a, t.x, t.y);
+    run(ui, build_more_inputs, &a, 1);
+    type(ui, build_more_inputs, &a, "Oops");
+    key(ui, build_more_inputs, &a, CUI_KEY_ESCAPE, 0);
+    CHECK(strcmp(a.title, "Plan") == 0);
+    run(ui, build_more_inputs, &a, 2);
+    /* scrub: drag 50 points to the right adds 50 steps of 1 */
+    cui_vec2 s = center(rect_of(ui, a.scrub_id));
+    cui_input_mouse_move(ui, s.x, s.y);
+    run(ui, build_more_inputs, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_more_inputs, &a, 1);
+    cui_input_mouse_move(ui, s.x + 25, s.y);
+    run(ui, build_more_inputs, &a, 1);
+    cui_input_mouse_move(ui, s.x + 50, s.y);
+    run(ui, build_more_inputs, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_more_inputs, &a, 1);
+    CHECK_NEAR(a.v, 70, 0.01);
+    /* a click without a drag types a value */
+    s = center(rect_of(ui, a.scrub_id));
+    click_at(ui, build_more_inputs, &a, s.x, s.y);
+    run(ui, build_more_inputs, &a, 1);
+    type(ui, build_more_inputs, &a, "33");
+    key(ui, build_more_inputs, &a, CUI_KEY_ENTER, 0);
+    CHECK_NEAR(a.v, 33, 0.01);
+    run(ui, build_more_inputs, &a, 2);
+    /* money: plain digits while typing, filtered to two decimals */
+    cui_vec2 m = center(rect_of(ui, a.money_id));
+    click_at(ui, build_more_inputs, &a, m.x, m.y);
+    key(ui, build_more_inputs, &a, CUI_KEY_A, CUI_MOD_PRIMARY);
+    type(ui, build_more_inputs, &a, "99.999x");
+    CHECK_NEAR(a.money, 99.99, 0.0001);
+    cui_vec2 o = center(rect_of(ui, a.other_id));
+    click_at(ui, build_more_inputs, &a, o.x, o.y);   /* blur */
+    CHECK_NEAR(a.money, 99.99, 0.0001);
+    /* shortcut recorder */
+    cui_vec2 r = center(rect_of(ui, a.rec_id));
+    click_at(ui, build_more_inputs, &a, r.x, r.y);
+    key(ui, build_more_inputs, &a, CUI_KEY_K, CUI_MOD_CTRL | CUI_MOD_SHIFT);
+    CHECK(a.combo.key == CUI_KEY_K && a.combo.mods == (CUI_MOD_CTRL | CUI_MOD_SHIFT));
+    CHECK(strcmp(cui_shortcut_label(ui, a.combo), "Ctrl Shift K") == 0);
+    click_at(ui, build_more_inputs, &a, r.x, r.y);
+    key(ui, build_more_inputs, &a, CUI_KEY_BACKSPACE, 0);
+    CHECK(a.combo.key == CUI_KEY_NONE);
+    cui_destroy(ui);
+}
+
+typedef struct { int result; cui_id row; } swipe_ctx;
+static void build_swipe(cui_ctx *ui, void *u) {
+    swipe_ctx *a = u;
+    cui_column(ui, .pad = 20, .width = CUI_PX(600)) {
+        static const cui_swipe_action left[] = { { CUI_ICON_CHECK, "Done", CUI_TONE_SUCCESS } };
+        static const cui_swipe_action right[] = { { CUI_ICON_ARCHIVE, "Archive", CUI_TONE_INFO }, { CUI_ICON_TRASH_2, "Delete", CUI_TONE_DANGER } };
+        cui_swipe_item_begin(ui, "row", left, 1, right, 2);
+        cui_text(ui, "Swipe me", .width = CUI_FILL);
+        int r = cui_swipe_item_end(ui);
+        if (r >= 0) a->result = r;
+        a->row = cui_make_id(ui, "row");
+    }
+}
+
+static void drag(cui_ctx *ui, build_fn fn, void *u, float x0, float y, float x1, int steps) {
+    cui_input_mouse_move(ui, x0, y);
+    run(ui, fn, u, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, fn, u, 1);
+    for (int i = 1; i <= steps; i++) { cui_input_mouse_move(ui, x0 + (x1 - x0) * i / steps, y); run(ui, fn, u, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, fn, u, 1);
+}
+
+static void test_swipe(void) {
+    printf("swipe actions: long swipe triggers, short swipe reveals\n");
+    cui_ctx *ui = new_ctx();
+    swipe_ctx a = { -1, 0 };
+    run(ui, build_swipe, &a, 3);
+    cui_rect r = rect_of(ui, a.row);
+    CHECK(r.w > 500);
+    drag(ui, build_swipe, &a, r.x + r.w - 40, r.y + r.h / 2, r.x + r.w - 40 - 420, 8);
+    CHECK(a.result == 100);
+    run(ui, build_swipe, &a, 60);
+    a.result = -1;
+    drag(ui, build_swipe, &a, r.x + 300, r.y + r.h / 2, r.x + 300 - 120, 6);
+    CHECK(a.result == -1);
+    run(ui, build_swipe, &a, 60);
+    /* now open on the right: the delete button sits at the far right */
+    click_at(ui, build_swipe, &a, r.x + r.w - 30, r.y + r.h / 2);
+    CHECK(a.result == 101);
     cui_destroy(ui);
 }
 
@@ -772,6 +1011,9 @@ int main(void) {
     test_toggles_and_slider();
     test_text_input();
     test_textarea_and_clear();
+    test_more_actions();
+    test_more_inputs();
+    test_swipe();
     test_text_capacity();
     test_dialog();
     test_menu();

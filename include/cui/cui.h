@@ -561,6 +561,8 @@ typedef struct cui_input_opts {
     cui_control_size size;
     cui_size width;
     float height;              /* textarea: height in points; negative fills the space */
+    const char *prefix;        /* muted text before the value, e.g. "$" or "https://" */
+    const char *suffix;        /* muted text after the value, e.g. "USD" or "kg" */
 } cui_input_opts;
 
 /* Single line text field. Returns CUI_CHANGED / CUI_SUBMITTED (Enter) flags. */
@@ -870,6 +872,126 @@ CUI_API void cui_reorder_item_end(cui_ctx *ui);
 CUI_API void cui_progress_ring(cui_ctx *ui, const char *label, float value, float size);
 
 /* ------------------------------------------------------------------------ */
+/* More actions                                                             */
+/* ------------------------------------------------------------------------ */
+
+/* Split button: a main action with a menu of related actions on the chevron.
+ * Returns 0 when the main part is clicked, 1 + i when menu item i is chosen
+ * and -1 otherwise. */
+typedef struct cui_split_button_opts {
+    int _;
+    cui_button_variant variant;   /* default primary */
+    cui_control_size size;
+    const char *icon;
+    const char *const *item_icons;
+    bool disabled;
+} cui_split_button_opts;
+CUI_API int cui_split_button_ex(cui_ctx *ui, const char *label, const char *const *items, int count, const cui_split_button_opts *opts);
+
+/* Toggle group: a row of toggles (bold, italic...). values[i] is toggled
+ * when item i is clicked; with exclusive set exactly one stays on. Labels
+ * become tooltips when icon_only is set. Returns true when a value changed. */
+typedef struct cui_toggle_group_opts { int _; const char *const *icons; bool exclusive; bool icon_only; cui_control_size size; } cui_toggle_group_opts;
+CUI_API bool cui_toggle_group_ex(cui_ctx *ui, const char *id, const char *const *labels, int count, bool *values, const cui_toggle_group_opts *opts);
+
+/* Two step destructive button: the first click morphs it into a confirm
+ * state with a countdown, the second click confirms. Returns true once. */
+typedef struct cui_confirm_opts {
+    int _;
+    const char *confirm_label;    /* default "Click to confirm" */
+    const char *icon;
+    cui_button_variant variant;   /* resting look, default secondary */
+    cui_control_size size;
+    float timeout;                /* seconds before it disarms, default 3 */
+} cui_confirm_opts;
+CUI_API bool cui_confirm_button_ex(cui_ctx *ui, const char *label, const cui_confirm_opts *opts);
+
+/* Button that shows the result of the work it started: idle, a spinner while
+ * busy, then a check (or an error) that settles back. Width morphs smoothly
+ * between the states. Returns true when clicked while idle. */
+typedef enum cui_status { CUI_STATUS_IDLE = 0, CUI_STATUS_BUSY, CUI_STATUS_SUCCESS, CUI_STATUS_ERROR } cui_status;
+typedef struct cui_status_button_opts {
+    int _;
+    const char *busy_label;       /* default label + "..." */
+    const char *success_label;    /* default "Done" */
+    const char *error_label;      /* default "Failed" */
+    const char *icon;
+    cui_button_variant variant;   /* default primary */
+    cui_control_size size;
+} cui_status_button_opts;
+CUI_API bool cui_status_button_ex(cui_ctx *ui, const char *label, cui_status status, const cui_status_button_opts *opts);
+
+/* Reactions: icon pills with counts. Clicking toggles `active` and adjusts
+ * the count. Returns the index that changed, or -1. */
+typedef struct cui_reaction { const char *icon; int count; bool active; } cui_reaction;
+CUI_API int cui_reactions(cui_ctx *ui, const char *id, cui_reaction *items, int count);
+
+/* Speed dial: a round floating action button that fans out related actions.
+ * Returns the chosen action index, or -1. */
+typedef struct cui_speed_action { const char *icon; const char *label; } cui_speed_action;
+typedef struct cui_speed_dial_opts { int _; const char *icon; cui_placement placement; const char *tooltip; } cui_speed_dial_opts;
+CUI_API int cui_speed_dial_ex(cui_ctx *ui, const char *id, const cui_speed_action *actions, int count, const cui_speed_dial_opts *opts);
+
+/* Theme switcher: light, dark and (optionally) system, as a compact icon
+ * segmented control. mode is 0 light, 1 dark, 2 system. Light and dark are
+ * applied for you; for system call cui_set_theme with the OS setting.
+ * Returns true when mode changed. */
+CUI_API bool cui_theme_switcher(cui_ctx *ui, int *mode, bool with_system);
+/* Sun and moon icon button that toggles the theme with a morph. */
+CUI_API bool cui_theme_toggle(cui_ctx *ui);
+
+/* User menu: an avatar, a name and a line of detail that opens a menu of
+ * account actions. Put menu items between begin and end. */
+typedef struct cui_user_menu_opts { int _; const char *detail; const char *status; cui_texture avatar; bool compact; cui_placement placement; float width; } cui_user_menu_opts;
+CUI_API bool cui_user_menu_begin(cui_ctx *ui, const char *name, const cui_user_menu_opts *opts);
+CUI_API void cui_user_menu_end(cui_ctx *ui);
+
+/* Swipe actions: drag a row sideways (or swipe on a trackpad) to reveal
+ * actions behind it. A long swipe triggers the first action. The row content
+ * goes between begin and end; end returns the chosen action: 0..left_count-1
+ * for left actions, 100 + i for right actions, or -1. */
+typedef struct cui_swipe_action { const char *icon; const char *label; cui_tone tone; } cui_swipe_action;
+CUI_API void cui_swipe_item_begin(cui_ctx *ui, const char *id, const cui_swipe_action *left, int left_count,
+                                  const cui_swipe_action *right, int right_count);
+CUI_API int cui_swipe_item_end(cui_ctx *ui);
+
+/* ------------------------------------------------------------------------ */
+/* More inputs                                                              */
+/* ------------------------------------------------------------------------ */
+
+/* Inline edit: text that turns into a field in place. Click (or Enter when
+ * focused) to edit, Enter or clicking away saves, Esc cancels. Returns
+ * CUI_CHANGED when an edit is committed. */
+typedef struct cui_inline_edit_opts { int _; cui_font font; float size; const char *placeholder; cui_size width; } cui_inline_edit_opts;
+CUI_API int cui_inline_edit_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_inline_edit_opts *opts);
+
+/* Scrub field: drag sideways anywhere on it to change the value (Shift for
+ * fine steps), or click to type a number. Arrow keys step when focused. */
+typedef struct cui_scrub_opts {
+    int _;
+    float step;                /* default (max - min) / 100 */
+    const char *format;        /* default "%.0f" */
+    const char *suffix;        /* e.g. "px" or "%" */
+    const char *icon;          /* shown instead of the label */
+    cui_size width;
+} cui_scrub_opts;
+CUI_API bool cui_scrub_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_scrub_opts *opts);
+
+/* Money field: shows the amount with thousands separators, edits as plain
+ * digits, keeps a fixed number of decimals. */
+typedef struct cui_money_opts { int _; const char *label; const char *symbol; const char *code; int decimals; cui_size width; const char *hint; } cui_money_opts;
+CUI_API bool cui_money_input_ex(cui_ctx *ui, const char *id, double *value, const cui_money_opts *opts);
+
+/* Shortcut recorder: click and press a key combination to record it.
+ * Backspace clears, Esc cancels. Returns true when the combination changed.
+ * cui_shortcut_label formats a combination ("Ctrl Shift K"). */
+typedef struct cui_key_combo { int mods; cui_key key; } cui_key_combo;
+typedef struct cui_shortcut_recorder_opts { int _; const char *placeholder; cui_size width; } cui_shortcut_recorder_opts;
+CUI_API bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id, cui_key_combo *combo, const cui_shortcut_recorder_opts *opts);
+CUI_API const char *cui_shortcut_label(cui_ctx *ui, cui_key_combo combo);
+CUI_API const char *cui_key_name(cui_key key);
+
+/* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
 
@@ -1015,6 +1137,16 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
 #define cui_reorder_item(ui, pos)           CUI__SCOPE(cui_reorder_item_begin((ui), (pos)), cui_reorder_item_end(ui))
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
+#define cui_split_button(ui, label, items, count, ...) cui_split_button_ex((ui), (label), (items), (count), CUI__OPTS(cui_split_button_opts, __VA_ARGS__))
+#define cui_toggle_group(ui, id, labels, count, values, ...) cui_toggle_group_ex((ui), (id), (labels), (count), (values), CUI__OPTS(cui_toggle_group_opts, __VA_ARGS__))
+#define cui_confirm_button(ui, label, ...)  cui_confirm_button_ex((ui), (label), CUI__OPTS(cui_confirm_opts, __VA_ARGS__))
+#define cui_status_button(ui, label, status, ...) cui_status_button_ex((ui), (label), (status), CUI__OPTS(cui_status_button_opts, __VA_ARGS__))
+#define cui_speed_dial(ui, id, actions, count, ...) cui_speed_dial_ex((ui), (id), (actions), (count), CUI__OPTS(cui_speed_dial_opts, __VA_ARGS__))
+#define cui_user_menu(ui, name, ...)        CUI__SCOPE_IF(cui_user_menu_begin((ui), (name), CUI__OPTS(cui_user_menu_opts, __VA_ARGS__)), cui_user_menu_end(ui))
+#define cui_inline_edit(ui, id, buf, cap, ...) cui_inline_edit_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_inline_edit_opts, __VA_ARGS__))
+#define cui_scrub(ui, label, value, min, max, ...) cui_scrub_ex((ui), (label), (value), (min), (max), CUI__OPTS(cui_scrub_opts, __VA_ARGS__))
+#define cui_money_input(ui, id, value, ...) cui_money_input_ex((ui), (id), (value), CUI__OPTS(cui_money_opts, __VA_ARGS__))
+#define cui_shortcut_recorder(ui, id, combo, ...) cui_shortcut_recorder_ex((ui), (id), (combo), CUI__OPTS(cui_shortcut_recorder_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 
 #ifdef __cplusplus

@@ -2,6 +2,8 @@
 
 Every component, what it is for, how to use it and what it does with the keyboard. Screenshots are rendered by `tests/component_shots.c`, so they always match the code.
 
+Looking for split buttons, data grids, kanban boards, more charts, motion effects or AI interface pieces? They are in [More components](components-more.md).
+
 Contents:
 [Text](#text) ·
 [Button](#button) ·
@@ -93,6 +95,8 @@ if (cui_icon_button(ui, CUI_ICON_TRASH_2, .tooltip = "Delete", .shortcut = "Del"
 ```
 
 A round button with only an icon, ghost by default. Always give it a `tooltip`: it is the button's name.
+
+When a button's icon changes (copy to check, play to pause), the old icon shrinks away while the new one scales in. Nothing to set up: change the icon you pass.
 
 ## Segmented control
 

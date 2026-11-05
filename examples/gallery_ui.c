@@ -1,5 +1,6 @@
 /* CUI component gallery. Every component in the library, on one screen. */
 #include "gallery_ui.h"
+#include "gallery_more.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -12,7 +13,8 @@ static const char *page_icons[PAGE_COUNT] = {
     CUI_ICON_LAYERS, CUI_ICON_BELL, CUI_ICON_DATABASE, CUI_ICON_CHART_LINE
 };
 
-const char *gallery_page_name(int page) { return page >= 0 && page < PAGE_COUNT ? page_names[page] : ""; }
+const char *gallery_page_name(int page) { return page >= 0 && page < PAGE_COUNT ? page_names[page] : gallery_more_name(page - PAGE_COUNT); }
+int gallery_page_total(void) { return PAGE_COUNT + gallery_more_count(); }
 
 void gallery_init(gallery *g) {
     memset(g, 0, sizeof *g);
@@ -75,14 +77,23 @@ static void sidebar(cui_ctx *ui, gallery *g) {
             cui_spacer(ui);
             cui_badge(ui, "v1.0", .size = CUI_SIZE_SM);
         }
-        cui_nav_section(ui, "Components");
-        for (int i = 0; i < PAGE_COUNT; i++) {
-            if (cui_nav_item(ui, page_names[i], .icon = page_icons[i], .selected = g->page == i, .group = "pages")) {
-                g->page = i;
-                cui_scroll_to(ui, "main", 0);
+        cui_scroll(ui, .id = "nav", .height = CUI_FILL, .gap = 2) {
+            cui_nav_section(ui, "Components");
+            for (int i = 0; i < PAGE_COUNT; i++) {
+                if (cui_nav_item(ui, page_names[i], .icon = page_icons[i], .selected = g->page == i, .group = "pages")) {
+                    g->page = i;
+                    cui_scroll_to(ui, "main", 0);
+                }
+            }
+            cui_gap(ui, 10);
+            cui_nav_section(ui, "Extended");
+            for (int i = 0; i < gallery_more_count(); i++) {
+                if (cui_nav_item(ui, gallery_more_name(i), .icon = gallery_more_icon(i), .selected = g->page == PAGE_COUNT + i, .group = "pages")) {
+                    g->page = PAGE_COUNT + i;
+                    cui_scroll_to(ui, "main", 0);
+                }
             }
         }
-        cui_spacer(ui);
         cui_column(ui, .gap = 12, .pad = 8) {
             const char *modes[2] = { "Light", "Dark" };
             const char *mode_icons[2] = { CUI_ICON_SUN, CUI_ICON_MOON };
@@ -751,9 +762,10 @@ void gallery_frame(cui_ctx *ui, gallery *g) {
                 cui_column(ui, .width = CUI_FILL, .max_width = 920, .pad_x = 40, .pad_top = 36, .pad_bottom = 64, .gap = 20) {
                     if (g->page != PAGE_OVERVIEW) {
                         cui_column(ui, .gap = 6, .pad_bottom = 8) {
-                            cui_heading(ui, page_names[g->page], 2);
+                            cui_heading(ui, g->page < PAGE_COUNT ? page_names[g->page] : gallery_more_name(g->page - PAGE_COUNT), 2);
                         }
                     }
+                    if (g->page >= PAGE_COUNT) gallery_more_page(ui, g->page - PAGE_COUNT);
                     switch (g->page) {
                     case PAGE_OVERVIEW: page_overview(ui, g); break;
                     case PAGE_BUTTONS: page_buttons(ui, g); break;

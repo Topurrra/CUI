@@ -47,7 +47,7 @@ static void cui__paint_focus_after(cui_ctx *ui, cui_node *n, void *data) {
 }
 
 /* Attach a keyboard focus ring to node i (alpha animated by caller). */
-static void cui__focus_ring(cui_ctx *ui, int i, float alpha) {
+void cui__focus_ring(cui_ctx *ui, int i, float alpha) {
     if (alpha <= 0.01f) return;
     cui_node *n = &ui->nodes[i];
     float *d = cui__frame_alloc(ui, sizeof(float));
@@ -193,9 +193,8 @@ void cui_icon(cui_ctx *ui, const char *icon, float size, cui_color color) {
 /* Buttons                                                                  */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_color bg, bg_hover, bg_press, fg, border; } cui__btn_colors;
 
-static cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected) {
+cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected) {
     cui__btn_colors c;
     cui_color clear = cui__rgba(0, 0, 0, 0);
     cui_color fg = CUI_C(ui, FOREGROUND);
@@ -265,6 +264,41 @@ static void cui__spinner_node(cui_ctx *ui, float size, cui_color c) {
 }
 
 
+/* Icons that change animate: the old one shrinks and fades while the new one
+ * scales in. The state is keyed by position so a changing id (for example a
+ * tooltip that says "Play" or "Pause") still animates. */
+typedef struct { char cur[8], prev[8]; float t; } cui__swap_state;
+
+void cui__icon_swap(cui_ctx *ui, cui_id sid, const char *icon, float size, cui_color c) {
+    cui__swap_state *st = cui_state(ui, sid, sizeof *st);
+    if (strncmp(st->cur, icon, sizeof st->cur - 1) != 0) {
+        if (st->cur[0]) { memcpy(st->prev, st->cur, sizeof st->prev); st->t = 0; }
+        else st->t = 1;
+        snprintf(st->cur, sizeof st->cur, "%s", icon);
+    }
+    cui__tween(ui, &st->t, 1.0f, 0.2f);
+    if (st->t >= 1.0f || !st->prev[0]) { cui__icon_node(ui, icon, size, c); return; }
+    int box = cui__leaf(ui, 0, CUI_PX(size), CUI_PX(size));
+    cui_node *b = &ui->nodes[box];
+    b->dir = CUI_STACK; b->align = CUI_ALIGN_CENTER; b->justify = CUI_JUSTIFY_CENTER;
+    b->self_align = CUI_ALIGN_CENTER;
+    float t = st->t;
+    cui__open(ui, box);
+    cui__icon_node(ui, cui__frame_strdup(ui, st->prev, -1), size, c);
+    ui->nodes[ui->node_count - 1].opacity = CUI_MAX(0.001f, 1.0f - t * 1.6f);
+    ui->nodes[ui->node_count - 1].scale = 1.0f - 0.45f * t;
+    cui__icon_node(ui, icon, size, c);
+    ui->nodes[ui->node_count - 1].opacity = CUI_MAX(0.001f, t);
+    ui->nodes[ui->node_count - 1].scale = 0.55f + 0.45f * t;
+    cui__close(ui);
+}
+
+cui_id cui__position_id(cui_ctx *ui, uint32_t salt) {
+    int par = cui__current(ui);
+    uint32_t key[2] = { par >= 0 ? ui->nodes[par].id : 0, par >= 0 ? (uint32_t)ui->nodes[par].child_count : 0 };
+    return cui__hash(key, sizeof key, salt);
+}
+
 static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_only, const cui_button_opts *o) {
     cui_button_opts d;
     memset(&d, 0, sizeof d);
@@ -291,6 +325,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     float pad = o->size == CUI_SIZE_SM ? 12 : o->size == CUI_SIZE_LG ? 20 : 15;
     if (v == CUI_BUTTON_LINK) pad = 2;
 
+    cui_id swap_id = cui__position_id(ui, 0x1C05A9u);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW;
@@ -319,7 +354,7 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     cui__open(ui, i);
     const char *icon = icon_only ? icon_only : o->icon;
     if (o->loading) cui__spinner_node(ui, icon_size - 2, col.fg);
-    else if (icon) cui__icon_node(ui, icon, icon_size, col.fg);
+    else if (icon) cui__icon_swap(ui, swap_id, icon, icon_size, col.fg);
     if (!icon_only && label && cui__display_len(label) > 0) {
         cui__label_text(ui, label, CUI_FONT_MEDIUM, cui__fs(ui, fs), col.fg);
     }
