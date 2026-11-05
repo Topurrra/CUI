@@ -358,6 +358,29 @@ void cui_draw_arc(cui_ctx *ui, cui_vec2 c, float r, float a0, float a1, float th
 
 /* ---- composite helpers used by components ---- */
 
+/* A lit top edge: dark surfaces read as raised when their upper rim catches
+ * a little light. Fades out down the sides. */
+void cui__draw_top_light(cui_ctx *ui, cui_rect r, cui_corners rad, float alpha) {
+    if (r.w < 4 || r.h < 4 || alpha <= 0) return;
+    static const float bands[3] = { 0.16f, 0.3f, 0.5f };
+    for (int k = 0; k < 3; k++) {
+        cui_push_clip(ui, (cui_rect){ r.x - 1, r.y - 1, r.w + 2, r.h * bands[k] + 1 });
+        cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui__rgba(255, 255, 255, (int)(255 * alpha / 3)), 1);
+        cui_pop_clip(ui);
+    }
+}
+
+/* Sheen for solid controls: a soft vertical light and a lit upper rim. */
+void cui__draw_sheen(cui_ctx *ui, cui_rect r, cui_corners rad, float k) {
+    if (r.w < 2 || r.h < 2 || k <= 0) return;
+    bool dark = ui->mode == CUI_THEME_DARK;
+    cui_draw_rect_gradient(ui, r, rad, cui__rgba(255, 255, 255, (int)(255 * 0.12f * k)), cui__rgba(0, 0, 0, (int)(255 * (dark ? 0.06f : 0.09f) * k)));
+    cui_push_clip(ui, (cui_rect){ r.x - 1, r.y - 1, r.w + 2, r.h * 0.34f + 1 });
+    cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui__rgba(255, 255, 255, (int)(255 * 0.2f * k)), 1);
+    cui_pop_clip(ui);
+}
+
+
 void cui__draw_check(cui_ctx *ui, cui_rect r, float t, float thick, cui_color c) {
     if (t <= 0.001f) return;
     cui_vec2 a = { r.x + r.w * 0.22f, r.y + r.h * 0.53f };

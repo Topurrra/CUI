@@ -194,6 +194,10 @@ void cui_icon(cui_ctx *ui, const char *icon, float size, cui_color color) {
 /* ------------------------------------------------------------------------ */
 
 
+void cui__paint_sheen(cui_ctx *ui, cui_node *n, void *data) {
+    cui__draw_sheen(ui, n->rect, n->radius, data ? *(float *)data : 1.0f);
+}
+
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected) {
     cui__btn_colors c;
     cui_color clear = cui__rgba(0, 0, 0, 0);
@@ -348,6 +352,20 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     if (col.border.a) { n->border = 1; n->border_color = col.border; }
     n->scale = st->press.x;
     n->opacity = disabled ? 0.45f : 1.0f;
+    if (v == CUI_BUTTON_PRIMARY || v == CUI_BUTTON_DANGER) {
+        /* solid buttons: a little light from above, and a soft lift */
+        float *k = cui__frame_alloc(ui, sizeof *k);
+        *k = r.pressed ? 0.45f : 1.0f;
+        n->paint = cui__paint_sheen;
+        n->paint_data = k;
+        n->elevation = CUI_ELEVATION_RESTING;
+        n->elevation_alpha = r.pressed ? 0.3f : 0.7f + 0.3f * st->hover;
+    } else if (v == CUI_BUTTON_SECONDARY) {
+        float *k = cui__frame_alloc(ui, sizeof *k);
+        *k = r.pressed ? 0.1f : 0.32f;
+        n->paint = cui__paint_sheen;
+        n->paint_data = k;
+    }
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     if (disabled && ui->hot == id) cui__set_cursor(ui, CUI_CURSOR_NOT_ALLOWED);
@@ -481,7 +499,9 @@ void cui_avatar_ex(cui_ctx *ui, const char *name, const cui_avatar_opts *o) {
         n->paint = cui__paint_avatar_img;
         n->paint_data = p;
     } else {
-        n->bg = cui_mix(CUI_C(ui, SURFACE), tone, dark ? 0.24f : 0.16f);
+        n->bg = cui_mix(CUI_C(ui, SURFACE), tone, dark ? 0.3f : 0.16f);
+        n->border = 1;   /* a fine rim of the same hue gives the disc an edge on any surface */
+        n->border_color = cui_alpha(tone, dark ? 0.4f : 0.28f);
     }
     cui__open(ui, i);
     if (!o->image) {

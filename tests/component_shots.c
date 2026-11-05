@@ -854,7 +854,9 @@ SCENE(week_calendar) {
     cui_date wk = { 2026, 11, 2 };
     cui_week_calendar(ui, "week", wk, events, 11, .start_hour = 8, .end_hour = 17, .hour_height = 44, .height = CUI_PX(400));
 }
-SCENE(gantt) {
+static void body_gantt(cui_ctx *ui);
+static void scene_gantt(cui_ctx *ui, int f) { if (f < 0) return; frame_wrap(ui, body_gantt); }
+static void body_gantt(cui_ctx *ui) {
     static cui_gantt_task tasks[] = {
         { "Research", "Ada Lovelace", 0, 5, 1, CUI_TONE_VIOLET, -1, false },
         { "Wireframes", "Hedy Lamarr", 4, 10, 1, CUI_TONE_ROSE, 0, false },
@@ -1411,6 +1413,193 @@ SCENE(mosaic_pro) {
     }
 }
 
+/* ---- README heroes: components on a lit stage ---- */
+typedef struct { unsigned a, b; float ax, ay, bx, by; } stage_look;
+
+static void paint_stage(cui_ctx *ui, cui_rect r, void *user) {
+    const stage_look *l = user;
+    bool dark = cui_get_theme_mode(ui) == CUI_THEME_DARK;
+    cui_draw_rect(ui, r, CUI_CORNERS(0), cui_token_color(ui, CUI_TOKEN_BACKGROUND));
+    /* two soft lights */
+    float R = r.w * 0.34f;
+    cui_color ca = CUI_RGB(l->a), cb = CUI_RGB(l->b);
+    ca.a = dark ? 70 : 46; cb.a = dark ? 56 : 38;
+    cui_rect ga = { r.x + r.w * l->ax - R, r.y + r.h * l->ay - R, R * 2, R * 2 };
+    cui_rect gb = { r.x + r.w * l->bx - R * 0.8f, r.y + r.h * l->by - R * 0.8f, R * 1.6f, R * 1.6f };
+    cui_draw_shadow(ui, ga, CUI_CORNERS(R), R * 0.9f, 0, (cui_vec2){ 0, 0 }, ca);
+    cui_draw_shadow(ui, gb, CUI_CORNERS(R * 0.8f), R * 0.8f, 0, (cui_vec2){ 0, 0 }, cb);
+    /* a faint dot grid gives the stage some tooth */
+    cui_color dot = cui_token_color(ui, CUI_TOKEN_FOREGROUND);
+    dot.a = dark ? 16 : 20;
+    for (float y = r.y + 12; y < r.y + r.h; y += 24)
+        for (float x = r.x + 12; x < r.x + r.w; x += 24) cui_draw_circle(ui, (cui_vec2){ x, y }, 0.9f, dot);
+}
+
+static void stage(cui_ctx *ui, const stage_look *look, void (*body)(cui_ctx *ui)) {
+    cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_canvas(ui, "stage", CUI_FILL, CUI_FILL, paint_stage, look, sizeof *look);
+        cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .pad = 40, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) { body(ui); }
+    }
+}
+
+/* a window frame with traffic light dots */
+static void window_begin(cui_ctx *ui, const char *title, float w) {
+    cui_box_begin(ui, &(cui_box){ .width = CUI_PX(w), .radius = 22, .bg = CUI_COLOR_SURFACE, .border = 1, .border_color = CUI_COLOR_BORDER,
+                                  .elevation = CUI_ELEVATION_FLOATING, .clip = true });
+    cui_row(ui, .width = CUI_FILL, .pad_x = 16, .pad_y = 12, .gap = 8, .align = CUI_ALIGN_CENTER) {
+        static const unsigned dots[3] = { 0xff5f57, 0xfebc2e, 0x28c840 };
+        for (int k = 0; k < 3; k++) cui_box(ui, .width = CUI_PX(11), .height = CUI_PX(11), .radius = 6, .bg = CUI_RGB(dots[k])) {}
+        cui_text(ui, title, .size = 12.5f, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_FILL, .align = CUI_TEXT_CENTER);
+        cui_box(ui, .width = CUI_PX(49)) {}
+    }
+    cui_separator(ui);
+}
+static void window_end(cui_ctx *ui) { cui_box_end(ui); }
+
+static const stage_look look_violet = { 0x7c3aed, 0x2563eb, 0.18f, 0.12f, 0.86f, 0.9f };
+static const stage_look look_teal = { 0x0d9488, 0x6366f1, 0.82f, 0.1f, 0.12f, 0.9f };
+static const stage_look look_rose = { 0xdb2777, 0x7c3aed, 0.85f, 0.85f, 0.15f, 0.15f };
+static const stage_look look_amber = { 0xd97706, 0xdb2777, 0.15f, 0.85f, 0.85f, 0.15f };
+
+static void hero_board_body(cui_ctx *ui) { cui_box(ui, .width = CUI_PX(860)) { body_kanban(ui); } }
+static void scene_hero_board(cui_ctx *ui, int f) {
+    if (f < 0) { scene_kanban(ui, f); return; }
+    stage(ui, &look_violet, hero_board_body);
+}
+
+static void hero_ai_body(cui_ctx *ui) {
+    static char draft[128] = "Compare it with last quarter";
+    static int model = 0, vote = 1;
+    static const cui_source srcs[] = {
+        { "Glyph atlas for text", "https://github.com/cui/pull/214", "Rasterize each glyph once and reuse it from a texture." },
+        { "Batching draw calls", "https://docs.cui.dev/rendering", "One draw call per texture or clip change." },
+    };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER) {
+        window_begin(ui, "Muse", 640);
+        cui_column(ui, .width = CUI_FILL, .pad = 22, .gap = 12) {
+            cui_chat_message(ui, "Why does the new build feel so much faster?", .mine = true);
+            cui_reasoning(ui, "think", .thinking = true, .seconds = 4) {
+                cui_text(ui, "Compare frame timings before and after, then look at what changed in text rendering.", .size = 13.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+            }
+            cui_tool_call(ui, "search", "search_commits", .icon = CUI_ICON_GIT_BRANCH, .detail = "rendering, last 30 days", .status = CUI_TASK_DONE, .seconds = 0.8f);
+            cui_tool_call(ui, "bench", "run_benchmark", .icon = CUI_ICON_ACTIVITY, .detail = "gallery, 600 frames", .status = CUI_TASK_RUNNING, .seconds = 2.4f);
+            cui_text(ui, "Most of it comes from caching glyphs in an atlas and drawing all text in one batch: a frame now takes a quarter of a millisecond.", .size = 14.5f);
+            cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                cui_citation(ui, 1, &srcs[0]);
+                cui_citation(ui, 2, &srcs[1]);
+                cui_spacer(ui);
+                cui_response_actions(ui, "act", .copy_text = "x", .vote = &vote, .no_share = true);
+            }
+            cui_chat_composer(ui, "composer", draft, sizeof draft, .models = shot_models, .model_count = 3, .model = &model);
+        }
+        window_end(ui);
+        cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 14) {
+            cui_voice_orb(ui, "orb", CUI_VOICE_LISTENING, 0.65f, .size = 190);
+            cui_agent_status(ui, "Listening", .status = CUI_TASK_RUNNING, .seconds = 7);
+        }
+    }
+}
+static void scene_hero_ai(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    stage(ui, &look_violet, hero_ai_body);
+}
+
+static void hero_desk_body(cui_ctx *ui) {
+    static bool wifi = true, focus = true, bt = false, dark = true;
+    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0xdb, 0x27, 0x77, 255 }, 96, 222, true };
+    static float peaks[64], progress = 0.42f;
+    for (int k = 0; k < 64; k++) peaks[k] = 0.2f + 0.78f * fabsf(sinf(k * 0.41f) * sinf(k * 0.13f + 1.1f));
+    cui_column(ui, .gap = 64, .align = CUI_ALIGN_CENTER) {
+        cui_row(ui, .gap = 20, .align = CUI_ALIGN_START) {
+            cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
+                cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Studio");
+                cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm", .color = CUI_RGB(0x6366f1));
+                cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
+                cui_control_tile(ui, "Dark mode", &dark, .icon = CUI_ICON_SUN);
+            }
+            cui_column(ui, .gap = 12, .width = CUI_PX(360)) {
+                cui_now_playing(ui, "np", &np, .width = CUI_FILL);
+                cui_card(ui, .pad = 14, .gap = 8, .width = CUI_FILL) {
+                    cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                        cui_icon_button(ui, CUI_ICON_PLAY, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_SECONDARY);
+                        cui_box(ui, .width = CUI_FILL) { cui_waveform(ui, "wave", peaks, 64, &progress, .height = 32); }
+                        cui_text(ui, "0:42", .size = 12, .tabular = true, .color = CUI_COLOR_TEXT_MUTED);
+                    }
+                }
+            }
+        }
+        body_dock(ui);
+    }
+}
+static void scene_hero_desk(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "dock"));
+        if (-f - 1 == 15) cui_input_mouse_move(ui, r.x + r.w * 0.47f, r.y + r.h * 0.5f);
+        return;
+    }
+    stage(ui, &look_rose, hero_desk_body);
+}
+
+static void hero_pick_body(cui_ctx *ui) {
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START) {
+        cui_column(ui, .gap = 10, .width = CUI_PX(730)) { body_range(ui); cui_gap(ui, 330); }
+        cui_card(ui, .pad = 18, .gap = 12) {
+            cui_text(ui, "Wake up", .font = CUI_FONT_MEDIUM, .size = 15);
+            static int h = 6, m = 40;
+            static const char *hours[24], *mins[60];
+            static char hb[24][4], mb[60][4];
+            for (int k = 0; k < 24; k++) { snprintf(hb[k], 4, "%02d", k); hours[k] = hb[k]; }
+            for (int k = 0; k < 60; k++) { snprintf(mb[k], 4, "%02d", k); mins[k] = mb[k]; }
+            cui_row(ui, .gap = 0) {
+                cui_wheel_picker(ui, "h", hours, 24, &h, .width = CUI_PX(76), .loop = true, .join_right = true);
+                cui_wheel_picker(ui, "m", mins, 60, &m, .width = CUI_PX(76), .loop = true, .join_left = true);
+            }
+            static bool on = true;
+            cui_switch(ui, "Repeat on weekdays", &on);
+        }
+    }
+}
+static void scene_hero_pick(cui_ctx *ui, int f) {
+    if (f < 0) { scene_range(ui, f); return; }
+    stage(ui, &look_teal, hero_pick_body);
+}
+
+static void hero_palette_body(cui_ctx *ui) {
+    cui_box(ui, .width = CUI_PX(10), .height = CUI_PX(10)) {}
+}
+static void scene_hero_palette(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    stage(ui, &look_amber, hero_palette_body);
+    static bool open = true;
+    static const cui_command cmds[] = {
+        { "New project", CUI_ICON_PLUS, "Actions", "Ctrl N" }, { "Invite teammate", CUI_ICON_USER_PLUS, "Actions", NULL },
+        { "Deploy to production", CUI_ICON_ROCKET, "Actions", "Ctrl D" },
+        { "Toggle dark mode", CUI_ICON_MOON, "Preferences", "Ctrl J" }, { "Open settings", CUI_ICON_SETTINGS, "Preferences", "Ctrl ," },
+    };
+    cui_command_palette(ui, &open, cmds, 5);
+}
+
+static void hero_plan_body(cui_ctx *ui) {
+    window_begin(ui, "Roadmap", 1000);
+    cui_column(ui, .width = CUI_FILL, .pad = 18) { body_gantt(ui); }
+    window_end(ui);
+}
+static void scene_hero_plan(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    stage(ui, &look_teal, hero_plan_body);
+}
+
+static void hero_charts_body(cui_ctx *ui) {
+    cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_START) {
+        cui_column(ui, .width = CUI_GROW(1.2f), .gap = 20) { pro_activity(ui); pro_flow(ui); }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 20) { pro_radar(ui); pro_plan(ui); }
+    }
+}
+static void scene_hero_charts(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    stage(ui, &look_violet, hero_charts_body);
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -1443,7 +1632,7 @@ int main(int argc, char **argv) {
         { "toast", scene_toast, 420, 220, true }, { "tooltip", scene_tooltip, 260, 150, false },
         { "alerts", scene_alerts, 620, 210, true }, { "feedback", scene_feedback, 520, 220, false },
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
-        { "empty-state", scene_empty, 580, 300, false }, { "table", scene_table, 680, 250, true },
+        { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 300, true },
         { "bar-donut", scene_bar_chart, 760, 290, true }, { "command-palette", scene_palette, 680, 460, true },
@@ -1452,6 +1641,13 @@ int main(int argc, char **argv) {
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },
         { "mosaic-pro", scene_mosaic_pro, 1440, 900, true, true, CUI_ACCENT_VIOLET },
+        { "hero-board", scene_hero_board, 1000, 600, true, false, CUI_ACCENT_VIOLET },
+        { "hero-ai", scene_hero_ai, 1080, 760, true, false, CUI_ACCENT_VIOLET },
+        { "hero-desk", scene_hero_desk, 1000, 600, true, false, CUI_ACCENT_ROSE },
+        { "hero-pick", scene_hero_pick, 1160, 560, true, false, CUI_ACCENT_GREEN },
+        { "hero-palette", scene_hero_palette, 900, 520, true, false, CUI_ACCENT_AMBER },
+        { "hero-plan", scene_hero_plan, 1100, 520, true, false, CUI_ACCENT_GREEN },
+        { "hero-charts", scene_hero_charts, 1000, 700, true, false, CUI_ACCENT_VIOLET },
         { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
         { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },

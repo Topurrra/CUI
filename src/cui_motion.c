@@ -347,6 +347,7 @@ static void cui__paint_dock_item(cui_ctx *ui, cui_node *n, void *data) {
     cui_rect r = n->rect;
     float rad = r.w * 0.26f;
     cui_draw_rect(ui, r, CUI_CORNERS(rad), p->bg);
+    cui__draw_sheen(ui, r, CUI_CORNERS(rad), 0.9f);
     if (p->hover > 0.01f) cui_draw_rect(ui, r, CUI_CORNERS(rad), cui_alpha(cui__rgba(255, 255, 255, 255), 0.08f * p->hover));
     float is = r.w * 0.48f;
     cui_draw_icon(ui, p->icon, r, is, p->fg);
@@ -552,6 +553,12 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     nd->min_h = o->wide ? 64 : 112;
     nd->radius = CUI_CORNERS(22);
     nd->bg = cui_mix(off_bg, on_bg, st->on);
+    if (st->on > 0.01f) {
+        float *k = cui__frame_alloc(ui, sizeof *k);
+        *k = 0.45f * st->on;
+        nd->paint = cui__paint_sheen;
+        nd->paint_data = k;
+    }
     nd->scale = st->press.x;
     cui__mark_interactive(ui, n, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
@@ -680,6 +687,15 @@ static void cui__paint_scrub(cui_ctx *ui, cui_node *n, void *data) {
 
 typedef struct { bool dragging; float hover; float drag_pos; cui_spring press; } cui__np_state;
 
+static void cui__paint_art_color(cui_ctx *ui, cui_node *n, void *data) {
+    cui_color c = *(cui_color *)data;
+    cui_rect r = n->rect;
+    cui_draw_rect_gradient(ui, r, n->radius, cui_mix(c, cui__rgba(255, 255, 255, 255), 0.22f), cui_mix(c, cui__rgba(0, 0, 0, 255), 0.28f));
+    cui_draw_circle(ui, (cui_vec2){ r.x + r.w * 0.78f, r.y + r.h * 0.22f }, r.w * 0.5f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.07f));
+    cui__draw_sheen(ui, r, n->radius, 0.6f);
+    cui_draw_icon(ui, CUI_ICON_MUSIC, r, r.w * 0.4f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.85f));
+}
+
 static void cui__paint_art(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_image(ui, *(cui_texture *)data, n->rect, (cui_rect){ 0, 0, 1, 1 }, n->radius, cui__rgba(255, 255, 255, 255));
 }
@@ -725,6 +741,12 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
     cui_node *ann = &ui->nodes[an];
     ann->radius = CUI_CORNERS(art * 0.2f);
     ann->bg = cui__color_set(np->art_color) ? cui_color_of(ui, np->art_color) : CUI_C(ui, SURFACE_MUTED);
+    if (!np->art) {   /* no artwork: a lit tile in its color with a note */
+        cui_color *ac = cui__frame_alloc(ui, sizeof *ac);
+        *ac = ann->bg;
+        ann->paint = cui__paint_art_color;
+        ann->paint_data = ac;
+    }
     if (np->art) {
         cui_texture *tex = cui__frame_alloc(ui, sizeof *tex);
         *tex = np->art;
@@ -753,6 +775,9 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
     pnn->w = CUI_PX(pb); pnn->h = CUI_PX(pb); pnn->radius = CUI_CORNERS(pb * 0.5f);
     pnn->dir = CUI_STACK; pnn->align = CUI_ALIGN_CENTER; pnn->justify = CUI_JUSTIFY_CENTER;
     pnn->bg = cui_mix(CUI_C(ui, FOREGROUND), CUI_C(ui, BACKGROUND), pr.hovered ? 0.12f : 0.0f);
+    pnn->paint = cui__paint_sheen;
+    pnn->paint_data = NULL;
+    pnn->elevation = CUI_ELEVATION_RESTING; pnn->elevation_alpha = 1;
     pnn->scale = st->press.x;
     cui__mark_interactive(ui, pn, CUI_IF_FOCUSABLE);
     if (pr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);

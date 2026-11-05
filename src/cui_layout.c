@@ -799,6 +799,7 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
     }
     if (n->elevation) cui__draw_elevation(ui, r, n->radius, n->elevation, n->elevation_alpha);
     if (n->bg.a || (n->border > 0 && n->border_color.a)) cui_draw_rect_border(ui, r, n->radius, n->bg, n->border_color, n->border);
+    if (n->elevation && n->bg.a > 200 && ui->mode == CUI_THEME_DARK) cui__draw_top_light(ui, r, n->radius, n->elevation == CUI_ELEVATION_RESTING ? 0.045f : 0.085f);
     if (n->paint && !(n->flags & CUI_NF_PAINT_AFTER)) n->paint(ui, n, n->paint_data);
     if (n->flags & CUI_NF_TEXT) cui__paint_text(ui, n);
     bool clips = (n->flags & (CUI_NF_CLIP | CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) != 0;

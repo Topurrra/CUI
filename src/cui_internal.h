@@ -141,6 +141,8 @@ void cui__pop_xform(cui_ctx *ui);
 void cui__draw_glyph_quad(cui_ctx *ui, float x0, float y0, float x1, float y1,
                           float u0, float v0, float u1, float v1, cui_color c);
 void cui__draw_check(cui_ctx *ui, cui_rect r, float t, float thickness, cui_color c);
+void cui__draw_top_light(cui_ctx *ui, cui_rect r, cui_corners rad, float alpha);
+void cui__draw_sheen(cui_ctx *ui, cui_rect r, cui_corners rad, float k);
 void cui__draw_spinner(cui_ctx *ui, cui_vec2 center, float radius, float thickness, cui_color c);
 void cui__draw_focus_ring(cui_ctx *ui, cui_rect r, cui_corners radius, float alpha);
 void cui__draw_elevation(cui_ctx *ui, cui_rect r, cui_corners radius, cui_elevation e, float alpha);
@@ -539,6 +541,7 @@ void cui__scroll_end_ex(cui_ctx *ui);
 void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);
 void cui__paint_nav_highlight(cui_ctx *ui, cui_node *n, void *data);
 void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
+void cui__paint_sheen(cui_ctx *ui, cui_node *n, void *data);   /* data: float strength or NULL */
 
 /* paint data helpers */
 #define CUI_PAINT_DATA(ui, type) ((type *)cui__frame_alloc((ui), sizeof(type)))
