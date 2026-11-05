@@ -1774,7 +1774,7 @@ int main(int argc, char **argv) {
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },
         { "mosaic-pro", scene_mosaic_pro, 1440, 900, true, true, CUI_ACCENT_GREEN },
         { "hero-board", scene_hero_board, 1000, 600, true, false, CUI_ACCENT_NEUTRAL },
-        { "hero-ai", scene_hero_ai, 1080, 760, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-ai", scene_hero_ai, 1080, 640, true, false, CUI_ACCENT_NEUTRAL },
         { "hero-desk", scene_hero_desk, 1000, 600, true, false, CUI_ACCENT_NEUTRAL },
         { "hero-pick", scene_hero_pick, 1160, 560, true, false, CUI_ACCENT_NEUTRAL },
         { "hero-palette", scene_hero_palette, 900, 520, true, false, CUI_ACCENT_NEUTRAL },
