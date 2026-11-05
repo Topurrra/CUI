@@ -124,10 +124,13 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 | [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents |
 | [`dashboard`](examples/dashboard.c) | Sidebar, top bar, KPIs, charts and a sortable table |
 | [`settings`](examples/settings.c) | Forms, validation, preferences and a danger zone |
-| [`notes`](examples/notes.c) | Split view, search, context menus, dialogs, shortcuts |
+| [`notes`](examples/notes.c) | Split view, search, context menus, dialogs, shortcuts, file export |
+| [`mail`](examples/mail.c) | Three pane inbox, folders, reading pane, compose dialog |
 | [`hello`](examples/hello.c) | The smallest app |
 
-![The notes example](docs/images/notes.png)
+| | |
+|---|---|
+| ![The mail example](docs/images/mail.png) | ![The notes example](docs/images/notes.png) |
 
 ## Platforms
 
