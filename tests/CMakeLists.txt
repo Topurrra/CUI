@@ -10,3 +10,6 @@ if(CUI_WITH_APP)
     add_executable(cui_app_smoke app_smoke.c ../examples/gallery_ui.c)
     target_link_libraries(cui_app_smoke PRIVATE cui::cui)
 endif()
+
+add_executable(cui_bench bench.c ../examples/gallery_ui.c)
+target_link_libraries(cui_bench PRIVATE cui::cui)

@@ -191,6 +191,12 @@ typedef struct {
 
 static void cui__blend(uint8_t *p, cui__px s, bool bgra) {
     if (s.a <= 0.0005f) return;
+    if (s.a >= 0.9995f) {
+        int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
+        p[ri] = (uint8_t)(cui__sat(s.r) * 255.0f + 0.5f); p[1] = (uint8_t)(cui__sat(s.g) * 255.0f + 0.5f);
+        p[bi] = (uint8_t)(cui__sat(s.b) * 255.0f + 0.5f); p[3] = 255;
+        return;
+    }
     float ia = 1.0f - s.a;
     int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
     float dr = p[ri] / 255.0f, dg = p[1] / 255.0f, db = p[bi] / 255.0f, da = p[3] / 255.0f;
@@ -271,6 +277,113 @@ static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const c
     }
 }
 
+
+/* Fast path for axis aligned quads (almost everything CUI draws): no
+ * barycentrics, linear local coordinates and early outs for the interior of
+ * rounded rectangles. Returns false when the quad does not qualify. */
+static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const cui_vertex *v1, const cui_vertex *v2,
+                             const cui_vertex *v3, const cui__sw_tex *tex, int cx0, int cy0, int cx1, int cy1) {
+    if (v0->y != v1->y || v1->x != v2->x || v2->y != v3->y || v3->x != v0->x) return false;
+    if (v0->x >= v1->x || v0->y >= v3->y) return false;
+    if (memcmp(&v0->color, &v1->color, 4) != 0 || memcmp(&v2->color, &v3->color, 4) != 0) return false;
+    int mode = (int)(v0->mode + 0.5f);
+    float qx0 = v0->x, qy0 = v0->y, qx1 = v1->x, qy1 = v3->y;
+    int x0 = CUI_MAX(cx0, (int)ceilf(qx0 - 0.5f)), x1 = CUI_MIN(cx1, (int)ceilf(qx1 - 0.5f));
+    int y0 = CUI_MAX(cy0, (int)ceilf(qy0 - 0.5f)), y1 = CUI_MIN(cy1, (int)ceilf(qy1 - 0.5f));
+    if (x0 >= x1 || y0 >= y1) return true;
+    bool bgra = job->fmt == CUI_SW_BGRA;
+    int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
+    float qh = qy1 - qy0, qw = qx1 - qx0;
+    bool gradient = memcmp(&v0->color, &v3->color, 4) != 0;
+    float hw = v0->hw, hh = v0->hh, bw = v0->border;
+    float rmax = CUI_MAX(CUI_MAX(v0->r_tl, v0->r_tr), CUI_MAX(v0->r_br, v0->r_bl));
+    rmax = CUI_MIN(rmax, CUI_MIN(hw, hh));
+    float bcr = v0->border_color.r / 255.0f, bcg = v0->border_color.g / 255.0f, bcb = v0->border_color.b / 255.0f, bca = v0->border_color.a / 255.0f;
+    float du = (v1->u - v0->u) / qw, dv = (v3->v - v0->v) / qh;
+    bool text_exact = mode == CUI_SHADE_TEXT && tex && fabsf(du * (float)tex->w - 1.0f) < 0.001f && fabsf(dv * (float)tex->h - 1.0f) < 0.001f;
+    for (int y = y0; y < y1; y++) {
+        float py = (float)y + 0.5f;
+        float ty = (py - qy0) / qh;
+        float cr, cg, cb, ca;
+        if (gradient) {
+            cr = (v0->color.r + (v3->color.r - v0->color.r) * ty) / 255.0f;
+            cg = (v0->color.g + (v3->color.g - v0->color.g) * ty) / 255.0f;
+            cb = (v0->color.b + (v3->color.b - v0->color.b) * ty) / 255.0f;
+            ca = (v0->color.a + (v3->color.a - v0->color.a) * ty) / 255.0f;
+        } else {
+            cr = v0->color.r / 255.0f; cg = v0->color.g / 255.0f; cb = v0->color.b / 255.0f; ca = v0->color.a / 255.0f;
+        }
+        uint8_t opaque[4];
+        opaque[ri] = (uint8_t)(cr * 255.0f + 0.5f); opaque[1] = (uint8_t)(cg * 255.0f + 0.5f);
+        opaque[bi] = (uint8_t)(cb * 255.0f + 0.5f); opaque[3] = 255;
+        float ly = v0->ly + (py - qy0);
+        float ay = fabsf(ly);
+        uint8_t *row = job->pixels + (size_t)y * (size_t)job->stride;
+        if (mode == CUI_SHADE_TEXT) {
+            float vv = v0->v + (py - qy0) * dv;
+            int tyi = (int)(vv * (float)(tex ? tex->h : 1));
+            for (int x = x0; x < x1; x++) {
+                float px = (float)x + 0.5f;
+                float cov;
+                if (!tex || tex->fmt != CUI_TEXTURE_R8) cov = 1.0f;
+                else if (text_exact) {
+                    int txi = (int)((v0->u + (px - qx0) * du) * (float)tex->w);
+                    if (txi < 0 || txi >= tex->w || tyi < 0 || tyi >= tex->h) continue;
+                    uint8_t t = tex->data[(size_t)tyi * (size_t)tex->w + (size_t)txi];
+                    if (!t) continue;
+                    cov = t / 255.0f;
+                } else cov = cui__sample_r8(tex, v0->u + (px - qx0) * du, vv);
+                float al = ca * cov;
+                cui__px o = { cr * al, cg * al, cb * al, al };
+                cui__blend(row + (size_t)x * 4, o, bgra);
+            }
+            continue;
+        }
+        for (int x = x0; x < x1; x++) {
+            float px = (float)x + 0.5f;
+            float lx = v0->lx + (px - qx0);
+            cui__px o;
+            if (mode == CUI_SHADE_SOLID) {
+                if (ca >= 0.999f) { memcpy(row + (size_t)x * 4, opaque, 4); continue; }
+                o.r = cr * ca; o.g = cg * ca; o.b = cb * ca; o.a = ca;
+            } else if (mode == CUI_SHADE_RRECT) {
+                float ax = fabsf(lx);
+                float inset = bw + 0.5f;
+                bool deep = (ax <= hw - inset - rmax && ay <= hh - inset) || (ax <= hw - inset && ay <= hh - inset - rmax);
+                if (deep) {
+                    if (ca >= 0.999f) { memcpy(row + (size_t)x * 4, opaque, 4); continue; }
+                    if (ca <= 0.0005f) continue;
+                    o.r = cr * ca; o.g = cg * ca; o.b = cb * ca; o.a = ca;
+                } else {
+                    float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
+                    float outer = cui__sat(0.5f - d);
+                    if (outer <= 0) continue;
+                    float inner = bw > 0 ? cui__sat(0.5f - (d + bw)) : outer;
+                    float fa = ca * inner, ba = bca * (outer - inner);
+                    o.r = cr * fa + bcr * ba; o.g = cg * fa + bcg * ba; o.b = cb * fa + bcb * ba; o.a = fa + ba;
+                }
+            } else if (mode == CUI_SHADE_SHADOW) {
+                float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
+                float sigma = bw > 0.01f ? bw : 0.01f;
+                float z = d / (sigma * 1.41421356f);
+                if (z > 2.8f) continue;
+                float al = ca * 0.5f * (1.0f - cui__erf(z));
+                o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
+            } else {
+                float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
+                float cov = cui__sat(0.5f - d);
+                if (cov <= 0) continue;
+                float u = v0->u + (px - qx0) * du, vv = v0->v + (py - qy0) * dv;
+                cui__px t = tex && tex->fmt == CUI_TEXTURE_RGBA8 ? cui__sample_rgba(tex, u, vv) : (cui__px){ 1, 1, 1, 1 };
+                float k = ca * cov;
+                o.r = t.r * cr * k; o.g = t.g * cg * k; o.b = t.b * cb * k; o.a = t.a * k;
+            }
+            cui__blend(row + (size_t)x * 4, o, bgra);
+        }
+    }
+    return true;
+}
+
 static void cui__sw_run(cui__sw_job *job) {
     const cui_draw_data *dd = job->dd;
     cui_sw_renderer *r = job->r;
@@ -286,6 +399,10 @@ static void cui__sw_run(cui__sw_job *job) {
         const cui__sw_tex *tex = (slot >= 0 && slot < r->tex_count && r->tex[slot].used) ? &r->tex[slot] : NULL;
         for (uint32_t k = 0; k + 2 < cmd->index_count; k += 3) {
             const uint32_t *ix = dd->indices + cmd->index_offset + k;
+            if (k + 5 < cmd->index_count && ix[3] == ix[0] && ix[4] == ix[2] && ix[1] == ix[0] + 1 && ix[2] == ix[0] + 2 && ix[5] == ix[0] + 3) {
+                const cui_vertex *q = &dd->vertices[ix[0]];
+                if (cui__raster_quad(job, &q[0], &q[1], &q[2], &q[3], tex, cx0, cy0, cx1, cy1)) { k += 3; continue; }
+            }
             cui__raster_tri(job, &dd->vertices[ix[0]], &dd->vertices[ix[1]], &dd->vertices[ix[2]], tex, cx0, cy0, cx1, cy1);
         }
     }
