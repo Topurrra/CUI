@@ -16,6 +16,7 @@ Windows, macOS and Linux from one C99 codebase. No dependencies. About 230 KB.
 
 [Getting started](docs/getting-started.md) &nbsp;·&nbsp;
 [Components](docs/components.md) &nbsp;·&nbsp;
+[More components](docs/components-more.md) &nbsp;·&nbsp;
 [Layout](docs/layout.md) &nbsp;·&nbsp;
 [Theming](docs/theming.md) &nbsp;·&nbsp;
 [Integration](docs/integration.md) &nbsp;·&nbsp;
@@ -33,7 +34,7 @@ Windows, macOS and Linux from one C99 codebase. No dependencies. About 230 KB.
 
 ## Why CUI
 
-C has excellent low level libraries and very few ways to build an interface that looks like it belongs in 2026. CUI is a complete component library, not a box of primitives: buttons, inputs, selects, date pickers, dialogs, toasts, tables, charts and a command palette, designed together and good looking without any styling.
+C has excellent low level libraries and very few ways to build an interface that looks like it belongs in 2026. CUI is a complete component library, not a box of primitives: buttons, inputs, selects, date pickers, dialogs, toasts, tables and a command palette, plus the pieces usually sold separately: a data grid, kanban boards, calendars and gantt charts, a dozen kinds of chart, motion effects and a full set of AI interface components. All of it is designed together, good looking without any styling, and free.
 
 <table>
 <tr>
@@ -85,6 +86,12 @@ Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software
 Every screenshot here is a real app from [`examples/`](examples), rendered by CUI itself.
 
 <table>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/assistant.png" alt="An AI assistant built with CUI"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Muse</b>: reasoning, tool calls, sources, a plan and a composer with a model picker · <a href="examples/assistant.c">assistant.c</a></sub></td>
+</tr>
 <tr>
 <td width="50%"><img src="docs/images/showcase/music.png" alt="Music player"></td>
 <td width="50%"><img src="docs/images/showcase/finance.png" alt="Personal finance app"></td>
@@ -209,6 +216,25 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 
 Every component is documented with a screenshot, usage, options and keyboard behaviour in [docs/components.md](docs/components.md).
 
+### And the ones usually sold separately
+
+<img src="docs/images/showcase/components-pro-dark.png" alt="A mosaic of the extended CUI components in dark mode">
+
+| | |
+|---|---|
+| **Actions** | split button, toggle group, confirm button, status button, reactions, speed dial, theme switcher, user menu, swipe actions |
+| **Inputs** | inline edit, scrub field, money field, prefix and suffix, shortcut recorder, multi-select, date range picker, time picker, wheel picker, time dial, ruler and histogram sliders |
+| **Capture** | dropzone with real file drops, avatar upload, signature pad |
+| **Disclosure** | hover card, confirm popover, expandable text and card, table of contents, banner, countdown, onboarding checklist, undo toast |
+| **Data** | virtualized data grid (sort, resize, select, edit), tree cells, filter bar, code block with highlighting, JSON viewer |
+| **Planning** | kanban board, week calendar, gantt chart with dependencies |
+| **Conversation** | chat bubbles, comments, presence, rolling counter, ticker, carousel, image compare, card stack |
+| **Charts** | heatmap, calendar heatmap, treemap, radar, funnel, sankey, waffle, split bar, ranked bar list, activity rings, scatter and bubble |
+| **Motion** | shimmer text, typewriter, word reveal, rotating words, loaders, dock, tab bar, control tiles, waveform, now playing |
+| **AI** | reasoning, tool calls, agent plan and status, sources and citations, context meter, response actions, prompt suggestions, model picker, chat composer, voice orb |
+
+All of them are in [docs/components-more.md](docs/components-more.md), with screenshots in light and dark.
+
 ## Light, dark and eight accents
 
 | | |
@@ -226,8 +252,9 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 
 | | |
 |---|---|
-| Whole library: every component, both renderers, X11 backend, fonts and icons | about 345 KB |
+| Whole library: every component, both renderers, X11 backend, fonts and icons | about 570 KB |
 | `hello` on Linux, stripped, whole executable | about 230 KB |
+| `assistant` (the AI app above), whole executable | about 320 KB |
 | Embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons), compressed | 95 KB |
 
 The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off. Details in [Integration](docs/integration.md#binary-size).
@@ -236,6 +263,7 @@ The library is compiled for dead code stripping, so apps only carry what they us
 
 | Example | |
 |---|---|
+| [`assistant`](examples/assistant.c) | AI assistant: reasoning, tool calls, sources, plan, composer with a model picker |
 | [`tracker`](examples/tracker.c) | Issue tracker: grouped list, custom status glyphs, detail pane, activity |
 | [`music`](examples/music.c) | Music player: generated cover art, track list, transport bar |
 | [`finance`](examples/finance.c) | Personal finance: top navigation, charts, painted card, budgets, goals |
@@ -243,7 +271,7 @@ The library is compiled for dead code stripping, so apps only carry what they us
 | [`mail`](examples/mail.c) | Three pane inbox, folders, reading pane, compose dialog |
 | [`notes`](examples/notes.c) | Split view, search, context menus, dialogs, shortcuts, file export |
 | [`settings`](examples/settings.c) | Forms, validation, preferences and a danger zone |
-| [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents |
+| [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents (the extended ones are under *Extended*) |
 | [`hello`](examples/hello.c) | The smallest app |
 
 ## Platforms
@@ -286,6 +314,7 @@ CUI 1.0 is complete enough to build real desktop apps, and it is tested on every
 - [Getting started](docs/getting-started.md): install, build, the app loop, your first screens
 - [Layout](docs/layout.md): rows, columns, sizes, alignment, grids, scrolling, split views
 - [Components](docs/components.md): every component with screenshots, options and keyboard support
+- [More components](docs/components-more.md): data grid, planning, more charts, motion and AI interfaces
 - [Theming](docs/theming.md): tokens, light and dark, accents, fonts, icons, motion
 - [Custom components](docs/custom-components.md): canvas, drawing API, state and animation
 - [Integration](docs/integration.md): use CUI in your engine with your own window and renderer

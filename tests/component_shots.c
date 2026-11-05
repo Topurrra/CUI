@@ -1308,6 +1308,109 @@ SCENE(mosaic) {
     }
 }
 
+/* A mosaic of the extended components, for the README. */
+static void pro_assistant(cui_ctx *ui) {
+    static char draft[128] = "Compare it with last quarter";
+    static int model = 0, vote = 1;
+    cui_card(ui, .gap = 12, .width = CUI_FILL) {
+        cui_chat_message(ui, "Why does the new build feel so much faster?", .mine = true);
+        cui_reasoning(ui, "think", .seconds = 6) { cui_text(ui, "hidden"); }
+        cui_tool_call(ui, "search", "search_commits", .icon = CUI_ICON_GIT_BRANCH, .detail = "last 30 days", .status = CUI_TASK_DONE, .seconds = 0.8f);
+        cui_text(ui, "Most of the gain comes from caching glyphs in an atlas and drawing text in one batch, so a frame now takes a quarter of a millisecond.", .size = 14);
+        cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER) {
+            static const cui_source a = { "Glyph atlas", "https://github.com/cui/pull/214", "Cache rasterized glyphs" };
+            static const cui_source b = { "Batching", "https://docs.cui.dev/rendering", "One draw call per texture" };
+            cui_citation(ui, 1, &a);
+            cui_citation(ui, 2, &b);
+            cui_spacer(ui);
+            cui_response_actions(ui, "act", .copy_text = "x", .vote = &vote, .no_share = true);
+        }
+        cui_chat_composer(ui, "composer", draft, sizeof draft, .models = shot_models, .model_count = 3, .model = &model);
+    }
+}
+static void pro_board(cui_ctx *ui) {
+    static const char *titles[] = { "Keyboard navigation in the date range picker", "Spring presets for menus" };
+    static const char *tags[] = { "A11y", "Motion" };
+    static const cui_tone tones[] = { CUI_TONE_INFO, CUI_TONE_VIOLET };
+    static const char *who[] = { "Alan Turing", "Barbara Liskov" };
+    cui_kanban_begin(ui, "pro-board");
+    cui_kanban_column_begin(ui, "In progress", 2, .dot = CUI_RGB(0x8b5cf6), .limit = 3, .width = 460);
+    for (int k = 0; k < 2; k++) {
+        cui_kanban_card_begin(ui, k);
+        cui_badge(ui, tags[k], .tone = tones[k], .size = CUI_SIZE_SM);
+        cui_text(ui, titles[k], .font = CUI_FONT_MEDIUM, .size = 13.5f);
+        if (k == 0) cui_progress(ui, 0.6f, .height = 4);
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+            cui_avatar(ui, who[k], .size = 22);
+            cui_spacer(ui);
+            cui_icon(ui, CUI_ICON_MESSAGE_SQUARE, 13, CUI_COLOR_TEXT_MUTED);
+            cui_text(ui, k ? "2" : "5", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+        }
+        cui_kanban_card_end(ui);
+    }
+    cui_kanban_column_end(ui);
+    cui_kanban_end(ui, NULL);
+}
+static void pro_activity(cui_ctx *ui) {
+    viz_data();
+    cui_card(ui, .gap = 12, .width = CUI_FILL) {
+        cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+            cui_column(ui, .gap = 2, .width = CUI_FILL) {
+                cui_text(ui, "Contributions", .font = CUI_FONT_MEDIUM, .size = 15);
+                cui_text(ui, "The last six months", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+            }
+            cui_counter(ui, "total", 642, .size = 26, .font = CUI_FONT_DISPLAY);
+        }
+        cui_date start = { 2026, 5, 11 };
+        cui_calendar_heatmap(ui, "half", start, viz_days + 180, 182, .cell = 11);
+    }
+}
+static void pro_flow(cui_ctx *ui) {
+    static const char *nodes[] = { "Search", "Social", "Direct", "Sign up", "Bounced", "Paid" };
+    static const cui_sankey_link links[] = { { 0, 3, 420 }, { 1, 3, 260 }, { 2, 3, 180 }, { 0, 4, 300 }, { 1, 4, 140 }, { 3, 5, 520 }, { 3, 4, 340 } };
+    cui_card(ui, .gap = 12, .width = CUI_FILL) {
+        cui_text(ui, "Where sign ups come from", .font = CUI_FONT_MEDIUM, .size = 15);
+        cui_sankey(ui, "flow", nodes, 6, links, 7, .height = 190);
+    }
+}
+static void pro_player(cui_ctx *ui) {
+    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0x7c, 0x3a, 0xed, 255 }, 96, 222, true };
+    cui_now_playing(ui, "np", &np, .width = CUI_FILL);
+}
+static void pro_plan(cui_ctx *ui) {
+    static const cui_plan_step steps[] = {
+        { "Profile the frame", "0.24 ms", CUI_TASK_DONE },
+        { "Cache glyphs in an atlas", NULL, CUI_TASK_DONE },
+        { "Batch text draws", "Merging 4 passes", CUI_TASK_RUNNING },
+        { "Measure again", NULL, CUI_TASK_PENDING },
+    };
+    cui_agent_plan(ui, "plan", steps, 4, .title = "Speed up rendering");
+}
+static void pro_tiles(cui_ctx *ui) {
+    static bool wifi = true, focus = false, dark = true, bt = true;
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_FILL) {
+        cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Studio");
+        cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON);
+        cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO, .detail = "2 devices");
+        cui_control_tile(ui, "Dark mode", &dark, .icon = CUI_ICON_SUN);
+    }
+}
+static void pro_radar(cui_ctx *ui) {
+    static const float a[] = { 92, 70, 88, 64, 80 }, b[] = { 70, 86, 66, 82, 62 };
+    static const char *axes[] = { "Speed", "Size", "Polish", "Docs", "Tests" };
+    cui_card(ui, .gap = 6, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+        cui_series rs[] = { { "2.0", a, 5, { 0 } }, { "1.0", b, 5, { 0 } } };
+        cui_radar_chart(ui, "radar", rs, 2, axes, 5, .size = 170, .max = 100);
+    }
+}
+SCENE(mosaic_pro) {
+    cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_START) {
+        cui_column(ui, .width = CUI_GROW(1.15f), .gap = 20) { pro_assistant(ui); pro_board(ui); }
+        cui_column(ui, .width = CUI_GROW(1.2f), .gap = 20) { pro_activity(ui); pro_flow(ui); pro_player(ui); }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 20) { pro_plan(ui); pro_tiles(ui); pro_radar(ui); }
+    }
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -1348,6 +1451,7 @@ int main(int argc, char **argv) {
         { "radio-cards", scene_radio_cards, 780, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },
+        { "mosaic-pro", scene_mosaic_pro, 1440, 900, true, true, CUI_ACCENT_VIOLET },
         { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
         { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },
