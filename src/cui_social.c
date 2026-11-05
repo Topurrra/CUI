@@ -143,15 +143,23 @@ void cui_typing_indicator(cui_ctx *ui, const char *name) {
 /* Comments                                                                 */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_color c; float x, y_avatar; } cui__thread_paint;
+/* where each depth's last avatar ended, written as rows paint, so a reply's rail starts under its parent's avatar */
+typedef struct { float bottom[8]; } cui__thread_rail;
+typedef struct { cui_color c; int depth; float indent, av, parent_indent, parent_av; cui__thread_rail *rail; } cui__thread_paint;
 static void cui__paint_thread(cui_ctx *ui, cui_node *n, void *data) {
-    /* elbow from the parent's rail into this reply's avatar */
     cui__thread_paint *p = data;
     cui_rect r = n->rect;
-    float x = r.x + p->x, y = r.y + p->y_avatar;
-    cui_draw_rect(ui, (cui_rect){ x, r.y - 4, 1.5f, y - r.y - 4 }, CUI_CORNERS(0.75f), p->c);
-    cui_draw_arc(ui, (cui_vec2){ x + 8, y - 8 }, 8, CUI_PI * 0.5f, CUI_PI, 1.5f, p->c);
-    cui_draw_rect(ui, (cui_rect){ x + 8, y - 0.75f, 8, 1.5f }, CUI_CORNERS(0.75f), p->c);
+    float ay = r.y + 6, mid = ay + p->av * 0.5f;
+    if (p->depth > 0 && p->depth < 8) {
+        /* down from the parent's avatar, then a soft elbow into this reply's avatar */
+        float x = r.x + p->parent_indent + p->parent_av * 0.5f - 0.75f;
+        float top = CUI_MIN(p->rail->bottom[p->depth - 1] + 6, mid - 8);
+        float end = r.x + p->indent - 6;
+        cui_draw_rect(ui, (cui_rect){ x, top, 1.5f, mid - 8 - top }, CUI_CORNERS(0.75f), p->c);
+        cui_draw_arc(ui, (cui_vec2){ x + 8.75f, mid - 8 }, 8, CUI_PI * 0.5f, CUI_PI, 1.5f, p->c);
+        if (end > x + 8.75f) cui_draw_rect(ui, (cui_rect){ x + 8.75f, mid - 0.75f, end - x - 8.75f, 1.5f }, CUI_CORNERS(0.75f), p->c);
+    }
+    if (p->depth < 8) p->rail->bottom[p->depth] = ay + p->av;
 }
 
 int cui_comment_ex(cui_ctx *ui, const char *id_str, const char *author, const char *text, const cui_comment_opts *o) {
@@ -166,19 +174,21 @@ int cui_comment_ex(cui_ctx *ui, const char *id_str, const char *author, const ch
     cui_node *rn = &ui->nodes[row];
     rn->dir = CUI_ROW; rn->gap = 12; rn->align = CUI_ALIGN_START;
     rn->w = CUI_FILL; rn->pad[3] = indent; rn->pad[0] = 6; rn->pad[2] = 6;
-    if (o->depth > 0) {
-        cui__thread_paint *tp = cui__frame_alloc(ui, sizeof *tp);
-        tp->c = CUI_C(ui, BORDER_STRONG);
-        tp->x = indent - 44 + 17 - 0.75f;
-        tp->y_avatar = 6 + av * 0.5f;
-        rn->paint = cui__paint_thread;
-        rn->paint_data = tp;
-    }
+    cui__thread_paint *tp = cui__frame_alloc(ui, sizeof *tp);
+    tp->c = CUI_C(ui, BORDER);
+    tp->depth = CUI_MAX(0, o->depth);
+    tp->indent = indent; tp->av = av;
+    tp->parent_indent = CUI_MAX(0.0f, indent - 44); tp->parent_av = o->depth > 1 ? 28 : 34;
+    tp->rail = cui_state(ui, (cui_id)0x7EAD5EEDu, sizeof(cui__thread_rail));
+    rn->paint = cui__paint_thread;
+    rn->paint_data = tp;
     cui__open(ui, row);
     cui_avatar_opts ao;
     memset(&ao, 0, sizeof ao);
     ao.size = av;
+    int avn = ui->node_count;
     cui_avatar_ex(ui, author, &ao);
+    ui->nodes[avn].self_align = CUI_ALIGN_START;   /* beside the name, not the middle of a long comment */
     int col = cui__node_new(ui, 0);
     ui->nodes[col].w = CUI_FILL; ui->nodes[col].gap = 4;
     cui__open(ui, col);
@@ -203,13 +213,12 @@ int cui_comment_ex(cui_ctx *ui, const char *id_str, const char *author, const ch
     ui->nodes[body].line_height = 1.5f;
     int acts = cui__node_new(ui, 0);
     ui->nodes[acts].dir = CUI_ROW; ui->nodes[acts].gap = 2; ui->nodes[acts].pad[0] = 2;
-    ui->nodes[acts].tx = -8;
+    ui->nodes[acts].tx = -11;   /* the first icon lines up with the text above */
     cui__open(ui, acts);
     cui_button_opts bo;
     memset(&bo, 0, sizeof bo);
     bo.size = CUI_SIZE_SM; bo.variant = CUI_BUTTON_GHOST; bo.icon = CUI_ICON_HEART;
-    bool liked = o->liked && *o->liked;
-    bo.selected = liked;
+    bool liked = o->liked && *o->liked;   /* liked tints the heart; no pill, so the row keeps its rhythm */
     bo.color = liked ? (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, DANGER) : CUI_C(ui, ACCENT)) : CUI_C(ui, TEXT_SECONDARY);
     const char *lk = o->likes && *o->likes > 0 ? cui__frame_printf(ui, "%d###like", *o->likes) : "###like";
     if (cui_button_ex(ui, lk, &bo)) {

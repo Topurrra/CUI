@@ -420,9 +420,9 @@ A collapsible tree with typed colors. Collapsed objects and arrays show their si
 
 ```c
 cui_chat_divider(ui, "Today");
-cui_chat_message(ui, "Did the grid ship?", .author = "Jonas Berg", .time = "9:41", .last_in_group = false);
-cui_chat_message(ui, "Virtualized and sortable.", .author = "Jonas Berg", .grouped = true, .last_in_group = true);
-cui_chat_message(ui, "It did!", .mine = true, .status = "Read", .time = "9:43");
+cui_chat_message(ui, "Did the data grid make it into 1.1?", .author = "Jonas Berg", .time = "9:41", .last_in_group = false);
+cui_chat_message(ui, "I need it for the billing page.", .author = "Jonas Berg", .grouped = true, .last_in_group = true);
+cui_chat_message(ui, "It did. 2,000 rows scroll at 60 fps on my laptop.", .mine = true, .status = "Read", .time = "9:43");
 cui_typing_indicator(ui, "Jonas");
 ```
 
