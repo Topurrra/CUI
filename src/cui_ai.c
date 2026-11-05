@@ -452,6 +452,8 @@ int cui_source_list(cui_ctx *ui, const char *id_str, const cui_source *sources, 
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
+    cui_scroll_state *ss = cui_state(ui, id, sizeof *ss);
+    ss->fade = cui__backdrop(ui);   /* cards that run past the edge fade out instead of being cut */
     cui__scroll_begin_ex(ui, id, &sb, true);
     ui->nodes[cui__current(ui)].h = CUI_FIT;
     ui->nodes[cui__current(ui)].min_h = 0;

@@ -82,6 +82,8 @@ void cui_kanban_begin(cui_ctx *ui, const char *id_str) {
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
+    cui_scroll_state *ss = cui_state(ui, b->id ^ 0x5C2u, sizeof *ss);
+    ss->fade = cui__backdrop(ui);   /* columns past the edge fade out */
     cui__scroll_begin_ex(ui, b->id ^ 0x5C2u, &sb, true);
     ui->nodes[cui__current(ui)].h = CUI_FIT;
     ui->nodes[cui__current(ui)].min_h = 0;

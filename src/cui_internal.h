@@ -539,6 +539,7 @@ int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizo
 void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo, float *out_hi, float *out_step);
 const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v);
 void cui__scroll_end_ex(cui_ctx *ui);
+cui_color cui__backdrop(cui_ctx *ui);
 
 void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);
 void cui__paint_nav_highlight(cui_ctx *ui, cui_node *n, void *data);

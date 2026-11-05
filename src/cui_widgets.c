@@ -1046,6 +1046,36 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
         if (top > 0) cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y, r.w, fh }, (cui_corners){ rc.tl, rc.tr, 0, 0 }, cui_alpha(st->fade, top), clear);
         if (bot > 0) cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y + r.h - fh, r.w, fh }, (cui_corners){ 0, 0, rc.br, rc.bl }, clear, cui_alpha(st->fade, bot));
     }
+    float max_x = st->content_w - r.w;
+    if (st->fade.a > 0 && max_x > 0.5f && (n->flags & CUI_NF_SCROLL_X)) {
+        /* sideways: vertex colors make a smooth eased ramp */
+        float fw = CUI_MIN(36.0f, r.w * 0.15f);
+        float lt = cui__clampf(st->x / fw, 0, 1), rt = cui__clampf((max_x - st->x) / fw, 0, 1);
+        cui_color clear = st->fade; clear.a = 0;
+        for (int side = 0; side < 2; side++) {
+            float k = side ? rt : lt;
+            if (k <= 0) continue;
+            enum { S = 6 };
+            cui_cvert v[(S + 1) * 2];
+            uint32_t idx[S * 6];
+            for (int q = 0; q <= S; q++) {
+                float u = (float)q / S;                      /* 0 at the edge, 1 inside */
+                float a = 1 - u * u * (3 - 2 * u);
+                float x = side ? r.x + r.w - u * fw : r.x + u * fw;
+                if (q == 0) x += side ? 1.0f : -1.0f;   /* past the edge pixel the clip rounds out to */
+                cui_color c = cui_alpha(st->fade, a * k);
+                if (c.a == 0) c = clear;
+                v[q * 2] = (cui_cvert){ x, r.y, c };
+                v[q * 2 + 1] = (cui_cvert){ x, r.y + r.h, c };
+            }
+            for (int q = 0; q < S; q++) {
+                uint32_t b = (uint32_t)(q * 2);
+                uint32_t *t = idx + q * 6;
+                t[0] = b; t[1] = b + 1; t[2] = b + 2; t[3] = b + 1; t[4] = b + 3; t[5] = b + 2;
+            }
+            cui__draw_triangles(ui, v, (S + 1) * 2, idx, S * 6);
+        }
+    }
     if (max_y > 0.5f) {
         cui_rect zone = { r.x + r.w - CUI__BAR_ZONE, r.y, CUI__BAR_ZONE, r.h };
         cui__paint_add_hit(ui, n->id ^ 0x5C5C5C5Cu, cui__rect_intersect(zone, clip), CUI_NF_INTERACTIVE);
@@ -1060,7 +1090,6 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
             cui_draw_rect(ui, th, CUI_CORNERS(w * 0.5f), c);
         }
     }
-    float max_x = st->content_w - r.w;
     if ((n->flags & CUI_NF_SCROLL_X) && max_x > 0.5f && st->bar_t > 0.01f) {
         float thumb_w = CUI_MAX(28.0f, r.w * r.w / st->content_w);
         float track = r.w - thumb_w - 6;
@@ -1082,8 +1111,15 @@ void cui_scroll_begin(cui_ctx *ui, const cui_scroll_opts *o) {
     b.pad = o->pad;
     b.gap = o->gap;
     cui_scroll_state *st = cui_state(ui, id, sizeof *st);
-    st->fade = o->fade_edges ? (cui__color_set(o->fade_color) ? cui_color_of(ui, o->fade_color) : CUI_C(ui, BACKGROUND)) : cui__rgba(0, 0, 0, 0);
+    st->fade = o->fade_edges ? (cui__color_set(o->fade_color) ? cui_color_of(ui, o->fade_color) : cui__backdrop(ui)) : cui__rgba(0, 0, 0, 0);
     cui__scroll_begin_ex(ui, id, &b, o->horizontal);
+}
+
+/* the color behind whatever is built next: the nearest opaque ancestor */
+cui_color cui__backdrop(cui_ctx *ui) {
+    for (int i = cui__current(ui); i >= 0; i = ui->nodes[i].parent)
+        if (ui->nodes[i].bg.a == 255) return ui->nodes[i].bg;
+    return CUI_C(ui, BACKGROUND);
 }
 
 void cui_scroll_end(cui_ctx *ui) { cui__scroll_end_ex(ui); }

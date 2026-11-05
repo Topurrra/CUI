@@ -108,7 +108,7 @@ cui_scroll(ui, .id = "messages", .gap = 8) {
 
 A scroll area fills the remaining height of its parent by default, scrolls smoothly with the wheel or trackpad, and shows a thin scrollbar while scrolling or when hovered near the edge. The thumb can be dragged. Set `.horizontal = true` to scroll both ways. Jump with `cui_scroll_to(ui, "messages", 0)`.
 
-With `.fade_edges = true` the content fades out at an edge that has more to scroll, instead of being cut off. It fades into `CUI_COLOR_BACKGROUND`; set `.fade_color` when the scroll area sits on a card or another surface.
+With `.fade_edges = true` the content fades out at an edge that has more to scroll, instead of being cut off. It works sideways too for `.horizontal` areas. The fade takes the color of the nearest opaque box around the scroll area (the page background if there is none); set `.fade_color` to override it. Source cards and the kanban board fade their overflow the same way.
 
 For long lists, build only what is visible:
 
