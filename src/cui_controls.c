@@ -29,6 +29,7 @@ static void cui__paint_toggle(cui_ctx *ui, cui_node *n, void *data) {
         cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), p->hover * 0.6f);
         cui_color bg = cui_mix(CUI_C(ui, SURFACE), on, t);
         cui_draw_rect_border(ui, r, rad, bg, cui_mix(border, on, t), 1);
+        cui__draw_sheen(ui, r, rad, 0.55f * t);
         if (p->indeterminate) {
             cui_rect dash = { r.x + 4.5f, r.y + r.h * 0.5f - 0.9f, r.w - 9, 1.8f };
             cui_draw_rect(ui, dash, CUI_CORNERS(0.9f), cui_alpha(glyph, t));
@@ -40,6 +41,7 @@ static void cui__paint_toggle(cui_ctx *ui, cui_node *n, void *data) {
         float h = r.h, w = r.w;
         cui_color track = cui_mix(CUI_C(ui, CONTROL_TRACK), CUI_C(ui, CONTROL_TRACK_HOVER), p->hover);
         cui_draw_rect(ui, r, CUI_CORNERS(h * 0.5f), cui_mix(track, on, t));
+        cui__draw_sheen(ui, r, CUI_CORNERS(h * 0.5f), 0.5f * t);
         float pad = 2, d = h - pad * 2;
         float stretch = p->press * 4;
         float travel = w - pad * 2 - d - stretch;
@@ -55,6 +57,7 @@ static void cui__paint_toggle(cui_ctx *ui, cui_node *n, void *data) {
         float rr = r.w * 0.5f;
         cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), p->hover * 0.6f);
         cui_draw_rect_border(ui, r, CUI_CORNERS(rr), cui_mix(CUI_C(ui, SURFACE), on, t), cui_mix(border, on, t), 1);
+        cui__draw_sheen(ui, r, CUI_CORNERS(rr), 0.55f * t);
         float dot = 7.0f * t;
         if (dot > 0.2f) {
             cui_vec2 c = { r.x + rr, r.y + rr };

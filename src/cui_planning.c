@@ -205,7 +205,8 @@ bool cui_kanban_card_begin(cui_ctx *ui, int card_id) {
     cn->border_color = cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), cs->hover);
     cn->elevation = CUI_ELEVATION_RESTING; cn->elevation_alpha = 1;
     cn->tx = cs->sx.x;
-    cn->ty = cs->y.x + cs->sy.x;
+    cn->ty = cs->y.x + cs->sy.x - 1.5f * cs->hover;   /* a hovered card rises a little */
+    if (cs->hover > 0.01f) { cn->elevation = CUI_ELEVATION_RAISED; cn->elevation_alpha = 0.4f + 0.6f * cs->hover; }
     if (dragged && kr.w > 0) {
         st->slot_x = kr.x; st->slot_y = kr.y;
         cn->tx = ui->mx - st->grab_x - kr.x;

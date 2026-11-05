@@ -1013,11 +1013,17 @@ static void cui__paint_orb(cui_ctx *ui, cui_node *n, void *data) {
     float pulse = 1 + (0.1f * speak + 0.05f * listen) * p->level;
     float amp = 0.03f + 0.05f * idle * 0.3f + (0.09f * listen + 0.06f * speak) * (0.3f + p->level);
     /* glow */
-    for (int k = 4; k >= 1; k--) cui_draw_circle(ui, c, R * (1 + 0.12f * k) * pulse, cui_alpha(p->a, 0.04f + 0.02f * p->hover));
+    float gr = R * 1.05f * pulse;
+    cui_draw_shadow(ui, (cui_rect){ c.x - gr, c.y - gr, gr * 2, gr * 2 }, CUI_CORNERS(gr), R * 0.55f, 0, (cui_vec2){ 0, 0 },
+                    cui_alpha(p->a, 0.4f + 0.15f * p->hover + 0.2f * p->level * (listen + speak)));
     float rr = R * breath * pulse;
     cui__orb_blob(ui, (cui_vec2){ c.x - R * 0.06f, c.y + R * 0.04f }, rr, amp, p->t, 0.0f, cui_alpha(p->b, 0.9f), cui_alpha(p->a, 0.85f));
     cui__orb_blob(ui, (cui_vec2){ c.x + R * 0.08f, c.y - R * 0.05f }, rr * 0.9f, amp * 1.2f, p->t * 1.15f, 2.1f, cui_alpha(p->c, 0.75f), cui_alpha(p->b, 0.55f));
     cui__orb_blob(ui, c, rr * 0.72f, amp * 0.8f, p->t * 0.8f, 4.2f, cui_alpha(cui__rgba(255, 255, 255, 255), 0.55f), cui_alpha(p->c, 0.25f));
+    /* a soft specular light, upper left, like glass catching a lamp */
+    float hs = rr * 0.42f;
+    cui_rect hl = { c.x - rr * 0.42f - hs * 0.5f, c.y - rr * 0.46f - hs * 0.5f, hs, hs * 0.8f };
+    cui_draw_shadow(ui, hl, CUI_CORNERS(hs * 0.45f), hs * 0.55f, 0, (cui_vec2){ 0, 0 }, cui_alpha(cui__rgba(255, 255, 255, 255), 0.38f));
     /* thinking: a ring of dots sweeping around */
     if (think > 0.01f) {
         for (int k = 0; k < 12; k++) {

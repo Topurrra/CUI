@@ -46,10 +46,15 @@ bool cui_accordion_begin(cui_ctx *ui, const char *title, bool *open) {
     cui__spring(ui, &st->t, *open ? 1.0f : 0.0f, CUI_SPRING_SMOOTH);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.15f);
     float t = cui__clampf(st->t.x, 0, 1);
+    bool first = ui->nodes[cui__current(ui)].child_count == 0;
     int wrap = cui__node_new(ui, 0);
     cui_node *wn = &ui->nodes[wrap];
     wn->w = CUI_FILL; wn->self_align = CUI_ALIGN_STRETCH;
     cui__open(ui, wrap);
+    if (!first) {   /* hairlines between items, none above the first or below the last */
+        int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
+        ui->nodes[line].bg = CUI_C(ui, BORDER_SUBTLE);
+    }
     int head = cui__node_new(ui, id);
     cui_node *hn = &ui->nodes[head];
     hn->dir = CUI_ROW; hn->align = CUI_ALIGN_CENTER; hn->gap = 12;
@@ -72,8 +77,6 @@ bool cui_accordion_begin(cui_ctx *ui, const char *title, bool *open) {
         ui->nodes[head].flags |= CUI_NF_PAINT_AFTER;
     }
     if (t <= 0.001f && !*open) {
-        int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-        ui->nodes[line].bg = CUI_C(ui, BORDER);
         cui__close(ui);
         return false;
     }
@@ -107,8 +110,6 @@ void cui_accordion_end(cui_ctx *ui) {
     }
     cui__close(ui);   /* content */
     cui__close(ui);   /* clip */
-    int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-    ui->nodes[line].bg = CUI_C(ui, BORDER);
     cui__close(ui);   /* wrap */
 }
 
