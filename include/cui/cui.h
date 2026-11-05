@@ -1227,6 +1227,10 @@ CUI_API bool cui_typewriter_ex(cui_ctx *ui, const char *id, const char *text, co
 CUI_API void cui_text_reveal_ex(cui_ctx *ui, const char *id, const char *text, const cui_text_fx_opts *opts);
 /* One word at a time; the next one rolls up into place and the width follows. */
 CUI_API void cui_word_rotate_ex(cui_ctx *ui, const char *id, const char *const *words, int count, float interval, const cui_text_fx_opts *opts);
+/* A figure whose changed digits roll into place: up when the value rises, down
+ * when it falls, a beat apart from the left; unchanged characters stay still.
+ * Pass the formatted text ("$64,210", "1.2k"); digits are tabular. */
+CUI_API void cui_number_roll_ex(cui_ctx *ui, const char *id, const char *text, const cui_text_fx_opts *opts);
 
 /* Text painted with a gradient from one color to another; animate makes it drift. */
 typedef struct cui_gradient_text_opts { int _; cui_font font; float size; cui_color from, to; bool animate; cui_size width; } cui_gradient_text_opts;
@@ -1733,6 +1737,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_typewriter(ui, id, text, ...)   cui_typewriter_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_text_reveal(ui, id, text, ...)  cui_text_reveal_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_word_rotate(ui, id, words, n, interval, ...) cui_word_rotate_ex((ui), (id), (words), (n), (interval), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
+#define cui_number_roll(ui, id, text, ...)  cui_number_roll_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_gradient_text(ui, text, ...)  cui_gradient_text_ex((ui), (text), CUI__OPTS(cui_gradient_text_opts, __VA_ARGS__))
 #define cui_spotlight(ui, id, ...)          CUI__SCOPE(cui_spotlight_begin((ui), (id), CUI__OPTS(cui_spotlight_opts, __VA_ARGS__)), cui_spotlight_end(ui))
 #define cui_loader(ui, ...)                 cui_loader_ex((ui), CUI__OPTS(cui_loader_opts, __VA_ARGS__))

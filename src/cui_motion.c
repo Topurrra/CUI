@@ -224,6 +224,154 @@ void cui_word_rotate_ex(cui_ctx *ui, const char *id_str, const char *const *word
 }
 
 /* ------------------------------------------------------------------------ */
+/* Rolling number                                                           */
+/* ------------------------------------------------------------------------ */
+
+#define CUI__NR_MAX 24
+typedef struct {
+    char shown[96];
+    char prefix[24], suffix[24];                    /* "$" and " ms" stay put; only the figure rolls */
+    char from[CUI__NR_MAX][5], to[CUI__NR_MAX][5];   /* per slot, counted from the right */
+    cui_spring t[CUI__NR_MAX];
+    double start[CUI__NR_MAX];
+    int slots, dir;
+    cui_spring w;
+    bool init;
+} cui__nr_state;
+typedef struct { cui__nr_state s; cui_font font; float size; cui_color c; float lh; } cui__nr_paint;
+
+/* splits text into code points, last first */
+static int cui__nr_split(const char *text, char out[CUI__NR_MAX][5]) {
+    char tmp[CUI__NR_MAX][5];
+    int n = 0, len = (int)strlen(text);
+    for (int i = 0; i < len && n < CUI__NR_MAX;) {
+        uint32_t cp;
+        int k = cui__utf8_decode(text + i, len - i, &cp);
+        if (k <= 0) k = 1;
+        if (k > 4) k = 4;
+        memcpy(tmp[n], text + i, (size_t)k); tmp[n][k] = 0;
+        n++; i += k;
+    }
+    for (int i = 0; i < n; i++) memcpy(out[i], tmp[n - 1 - i], 5);
+    return n;
+}
+
+static double cui__nr_value(const char *s) {
+    char buf[64]; int w = 0; bool neg = false;
+    for (; *s && w < 62; s++) {
+        if (*s >= '0' && *s <= '9') buf[w++] = *s;
+        else if (*s == '.' && w) buf[w++] = '.';
+        else if (*s == '-' && !w) neg = true;
+    }
+    buf[w] = 0;
+    return (neg ? -1 : 1) * atof(buf);
+}
+
+static void cui__paint_number_roll(cui_ctx *ui, cui_node *n, void *data) {
+    cui__nr_paint *p = data;
+    cui_rect r = n->rect;
+    float fh = cui__font_line_height(ui, p->font, p->size);
+    float y = r.y + (r.h - fh) * 0.5f;
+    float x = r.x + r.w;
+    cui_push_clip(ui, (cui_rect){ r.x - 6, r.y, r.w + 12, r.h });
+    if (p->s.prefix[0]) cui__draw_text_line(ui, p->font, p->size, r.x, y, p->c, p->s.prefix, -1, true);
+    if (p->s.suffix[0]) {
+        x -= cui__text_width(ui, p->font, p->size, p->s.suffix, -1, true);
+        cui__draw_text_line(ui, p->font, p->size, x, y, p->c, p->s.suffix, -1, true);
+    }
+    for (int k = 0; k < p->s.slots; k++) {
+        const char *a = p->s.from[k], *b = p->s.to[k];
+        float t = p->s.t[k].x;
+        float wa = a[0] ? cui__text_width(ui, p->font, p->size, a, -1, true) : 0;
+        float wb = b[0] ? cui__text_width(ui, p->font, p->size, b, -1, true) : 0;
+        float sw = cui__lerp(wa, wb, cui__clampf(t, 0, 1));
+        x -= sw;
+        if (t >= 0.999f || !strcmp(a, b)) {
+            if (b[0]) cui__draw_text_line(ui, p->font, p->size, x + (sw - wb) * 0.5f, y, p->c, b, -1, true);
+            continue;
+        }
+        /* rising values roll up into place, falling ones roll down */
+        float d = p->lh * 0.85f * (float)p->s.dir;
+        if (a[0]) {
+            cui_color c = p->c; c.a = (uint8_t)(c.a * cui__clampf(1 - t * 1.4f, 0, 1));
+            cui__draw_text_line(ui, p->font, p->size, x + (sw - wa) * 0.5f, y - t * d, c, a, -1, true);
+        }
+        if (b[0]) {
+            cui_color c = p->c; c.a = (uint8_t)(c.a * cui__clampf(t * 1.3f, 0, 1));
+            cui__draw_text_line(ui, p->font, p->size, x + (sw - wb) * 0.5f, y + (1 - t) * d, c, b, -1, true);
+        }
+    }
+    cui_pop_clip(ui);
+}
+
+void cui_number_roll_ex(cui_ctx *ui, const char *id_str, const char *text, const cui_text_fx_opts *o) {
+    cui_text_fx_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    if (!text) text = "";
+    cui_id id = cui_make_id(ui, id_str);
+    cui__nr_state *st = cui_state(ui, id, sizeof *st);
+    float size = cui__fs(ui, o->size > 0 ? o->size : ui->theme.text_body);
+    cui_font font = o->font;
+    if (!st->init || strcmp(st->shown, text) != 0) {
+        /* prefix up to the first digit, suffix after the last one */
+        int len = (int)strlen(text), a = 0, b = len;
+        while (a < len && !(text[a] >= '0' && text[a] <= '9')) a++;
+        while (b > a && !(text[b - 1] >= '0' && text[b - 1] <= '9')) b--;
+        if (a > 0 && text[a - 1] == '-') a--;   /* a sign rolls with the figure */
+        snprintf(st->prefix, sizeof st->prefix, "%.*s", a, text);
+        snprintf(st->suffix, sizeof st->suffix, "%s", text + b);
+        char body[96];
+        snprintf(body, sizeof body, "%.*s", b - a, text + a);
+        char nw[CUI__NR_MAX][5];
+        int nn = cui__nr_split(body, nw);
+        if (!st->init) {
+            for (int k = 0; k < nn; k++) { memcpy(st->from[k], nw[k], 5); memcpy(st->to[k], nw[k], 5); st->t[k].x = 1; st->t[k].v = 0; }
+            st->slots = nn; st->dir = 1; st->init = true;
+        } else {
+            double ov = cui__nr_value(st->shown), nv = cui__nr_value(text);
+            st->dir = nv >= ov ? 1 : -1;
+            int slots = CUI_MAX(nn, st->slots);
+            /* only the characters that change roll, a beat apart from the left */
+            int rank = 0;
+            for (int k = slots - 1; k >= 0; k--) {
+                const char *cur = k < st->slots ? (st->t[k].x >= 0.5f ? st->to[k] : st->from[k]) : "";
+                const char *want = k < nn ? nw[k] : "";
+                if (strcmp(cur, want) == 0 && (k >= st->slots || st->t[k].x >= 0.999f)) {
+                    memcpy(st->from[k], want, 5); memcpy(st->to[k], want, 5); st->t[k].x = 1; st->t[k].v = 0;
+                    continue;
+                }
+                memcpy(st->from[k], cur, 5); memcpy(st->to[k], want, 5);
+                st->t[k].x = 0; st->t[k].v = 0;
+                st->start[k] = ui->time + 0.035 * rank++;
+            }
+            st->slots = slots;
+        }
+        snprintf(st->shown, sizeof st->shown, "%s", text);
+    }
+    bool still = cui__still(ui);
+    for (int k = 0; k < st->slots; k++) {
+        if (st->t[k].x >= 1 && st->t[k].v == 0) continue;
+        if (still) { st->t[k].x = 1; st->t[k].v = 0; continue; }
+        if (ui->time >= st->start[k]) cui__spring(ui, &st->t[k], 1.0f, 0.5f, 0.16f);
+        else { ui->animating = true; cui__wakeup_after(ui, (float)(st->start[k] - ui->time)); }
+    }
+    /* a slot that is now empty on both sides is dropped once it has rolled out */
+    while (st->slots > 0 && !st->to[st->slots - 1][0] && st->t[st->slots - 1].x >= 0.999f) st->slots--;
+    float tw = cui__text_width(ui, font, size, text, -1, true);
+    if (st->w.x <= 0) st->w.x = tw;
+    cui__spring(ui, &st->w, tw, 0.45f, 0.0f);
+    float lh = size * 1.3f;
+    int n = cui__leaf(ui, id, CUI_PX(CUI_MAX(1.0f, st->w.x)), CUI_PX(lh));
+    cui__nr_paint *p = cui__frame_alloc(ui, sizeof *p);
+    p->s = *st; p->font = font; p->size = size; p->lh = lh;
+    p->c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : CUI_C(ui, FOREGROUND);
+    ui->nodes[n].paint = cui__paint_number_roll;
+    ui->nodes[n].paint_data = p;
+    ui->last_id = id;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Gradient text                                                            */
 /* ------------------------------------------------------------------------ */
 

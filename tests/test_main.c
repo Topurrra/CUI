@@ -1391,6 +1391,37 @@ static void build_trunc(cui_ctx *ui, void *u) {
     }
 }
 
+typedef struct { const char *v; } roll_ctx;
+static void build_roll(cui_ctx *ui, void *user) {
+    roll_ctx *r = user;
+    cui_row(ui) { cui_number_roll(ui, "n", r->v, .size = 20); }
+}
+static void test_number_roll(void) {
+    printf("motion: a rolling number settles on its text, keeps a fixed prefix and fits its width\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, false);
+    roll_ctx r = { "$64,210" };
+    run(ui, build_roll, &r, 3);
+    cui_rect a = rect_of(ui, cui_make_id(ui, "n"));
+    CHECK(a.w > 40);
+    r.v = "$64,987";
+    run(ui, build_roll, &r, 2);
+    CHECK(cui_needs_redraw(ui));
+    run(ui, build_roll, &r, 90);
+    CHECK(!cui_needs_redraw(ui));
+    cui_rect b = rect_of(ui, cui_make_id(ui, "n"));
+    CHECK(fabsf(b.w - a.w) < 0.5f);   /* tabular digits: same count, same width */
+    r.v = "$9,870";
+    run(ui, build_roll, &r, 90);
+    cui_rect c = rect_of(ui, cui_make_id(ui, "n"));
+    CHECK(c.w < b.w - 5);
+    cui_set_reduced_motion(ui, true);
+    r.v = "$12";
+    run(ui, build_roll, &r, 2);
+    CHECK(!cui_needs_redraw(ui));
+    cui_destroy(ui);
+}
+
 static void test_truncated_tooltip(void) {
     printf("text: a truncated label shows its whole text on hover, and its row still clicks\n");
     cui_ctx *ui = new_ctx();
@@ -2148,6 +2179,7 @@ int main(void) {
     test_scroll_fade();
     test_pretty_wrap();
     test_truncated_tooltip();
+    test_number_roll();
     test_stress();
     test_atlas_pressure();
     cui_sw_destroy(g_sw);

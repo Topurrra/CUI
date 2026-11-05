@@ -645,6 +645,16 @@ cui_word_rotate(ui, "rot", words, 3, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26)
 
 The shimmer sweeps a soft highlight across muted text. The typewriter lays out the whole text first and uncovers it, so lines never reflow as it types. When you append to the text (streamed tokens), it carries on from where it was and speeds up when it falls far behind; any other change starts over. The reveal fades and lifts words in one after another whenever the text changes. Rotating words roll up into place, and the width follows the word.
 
+### Rolling numbers
+
+```c
+char rev[32];
+snprintf(rev, sizeof rev, "$%s", grouped(revenue));   /* any formatted figure */
+cui_number_roll(ui, "revenue", rev, .font = CUI_FONT_DISPLAY, .size = 28);
+```
+
+When the text changes, only the characters that differ roll: up into place when the value rises, down when it falls, each a beat after the one to its left. A prefix and suffix such as `$` or ` ms` stay put, digits are tabular so the figure keeps its width, and the width eases when the number grows or shrinks. With reduced motion the new value simply appears.
+
 ### Gradient text and spotlight cards
 
 ![Gradient text and spotlight cards](images/showcase/hero-effects-dark.png)
