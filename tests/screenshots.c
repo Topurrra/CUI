@@ -65,7 +65,9 @@ int main(int argc, char **argv) {
     for (int p = 0; p < PAGE_COUNT; p++) {
         if (only >= 0 && only != p) continue;
         for (int d = 0; d < 2; d++) {
-            snprintf(path, sizeof path, "%s/%s-%s.png", dir, slugs[p], d ? "dark" : "light");
+            /* "page-" keeps these apart from the component shots of the same
+             * name (buttons, inputs) when both land in one folder */
+            snprintf(path, sizeof path, "%s/page-%s-%s.png", dir, slugs[p], d ? "dark" : "light");
             fails += shoot(path, p, d, 0, 1240, p == PAGE_DATA ? 1500 : 1000, 90, p == PAGE_CHARTS ? hover_chart : NULL);
         }
     }
@@ -89,6 +91,8 @@ int main(int argc, char **argv) {
         fails += shoot(path, PAGE_OVERLAYS, false, 1, 1240, 800, 90, open_sheet);
         snprintf(path, sizeof path, "%s/toasts-light.png", dir);
         fails += shoot(path, PAGE_FEEDBACK, false, 0, 1240, 800, 60, toasts);
+        snprintf(path, sizeof path, "%s/overview-light.png", dir);
+        fails += shoot(path, PAGE_OVERVIEW, false, 0, 1240, 1000, 90, NULL);
         snprintf(path, sizeof path, "%s/overview-green-dark.png", dir);
         fails += shoot(path, PAGE_OVERVIEW, true, CUI_ACCENT_GREEN, 1240, 1000, 90, NULL);
         snprintf(path, sizeof path, "%s/selection-blue-light.png", dir);
