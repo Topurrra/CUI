@@ -42,6 +42,7 @@ void gallery_init(gallery *g) {
     g->selected_row = 1;
     g->sort.column = 0;
     g->selected_file = 2;
+    for (int i = 0; i < 5; i++) g->task_order[i] = i;
 }
 
 /* ---- small helpers ---- */
@@ -586,6 +587,21 @@ static void page_data(cui_ctx *ui, gallery *g) {
                 cui_list_item(ui, "Planning", .avatar = "Katherine Johnson", .subtitle = "Q1 roadmap", .trailing = "1h");
             }
         }
+    }
+    section(ui, "Reorderable list", "Drag a row. The others make room as you go.");
+    cui_card(ui, .pad = 12) {
+        static const char *tasks[5] = { "Write the release notes", "Record the demo video", "Update the screenshots", "Tag version 1.0", "Celebrate" };
+        static const int tones[5] = { CUI_TONE_INFO, CUI_TONE_VIOLET, CUI_TONE_TEAL, CUI_TONE_WARNING, CUI_TONE_SUCCESS };
+        static const char *labels[5] = { "Docs", "Video", "Docs", "Release", "Team" };
+        cui_reorder_begin(ui, "tasks", g->task_order, 5);
+        for (int i = 0; i < 5; i++) {
+            cui_reorder_item(ui, i) {
+                int t = g->task_order[i];
+                cui_text(ui, tasks[t], .nowrap = true, .width = CUI_FILL);
+                cui_badge(ui, labels[t], .tone = (cui_tone)tones[t]);
+            }
+        }
+        if (cui_reorder_end(ui)) cui_toast(ui, "Order saved");
     }
     section(ui, "Accordion", NULL);
     cui_card(ui, .pad_y = 4, .gap = 0) {

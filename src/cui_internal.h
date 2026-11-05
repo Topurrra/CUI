@@ -162,7 +162,8 @@ enum {
     CUI_NF_SCROLLBAR   = 1 << 10,
     CUI_NF_HIT_OPAQUE  = 1 << 11,  /* catches clicks (e.g. popover background) */
     CUI_NF_PAINT_AFTER = 1 << 12,  /* paint callback runs after children */
-    CUI_NF_ABSOLUTE    = 1 << 13   /* positioned at (fx, fy) inside the parent, out of flow */
+    CUI_NF_ABSOLUTE    = 1 << 13,  /* positioned at (fx, fy) inside the parent, out of flow */
+    CUI_NF_ON_TOP      = 1 << 14   /* painted after its siblings */
 };
 
 struct cui_node;
@@ -464,6 +465,7 @@ struct cui_ctx {
     bool acc_dis[32]; int acc_depth;
     int tree_depth;
     int button_group_depth;
+    struct cui_reorder_build *reorder;
 };
 
 /* ---- theme ---- */

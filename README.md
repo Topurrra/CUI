@@ -98,7 +98,7 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 **Navigation** tabs (underline and pill), sidebar navigation, breadcrumb, pagination, stepper<br>
 **Overlays** dialog, sheet, popover, tooltip, toast stack<br>
 **Feedback** alert, progress bar and ring, meter, spinner, skeleton, badge, avatar, avatar group, empty state, timeline<br>
-**Data** card, metric card, table, list, tree view, accordion, virtual list, line, area, bar, stacked bar and donut charts, sparkline, gauge<br>
+**Data** card, metric card, table, list, reorderable list, tree view, accordion, virtual list, line, area, bar, stacked bar and donut charts, sparkline, gauge<br>
 **Layout** row, column, grid, stack, scroll area, resizable split view, separator, spacer<br>
 **Custom** canvas with a full 2D drawing API, per component state and spring animation helpers
 

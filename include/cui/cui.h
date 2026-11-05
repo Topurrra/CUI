@@ -856,6 +856,15 @@ CUI_API int cui_password_strength(cui_ctx *ui, const char *password);
 typedef struct cui_timeline_opts { int _; const char *time; const char *description; const char *icon; cui_tone tone; bool last; } cui_timeline_opts;
 CUI_API void cui_timeline_item_ex(cui_ctx *ui, const char *title, const cui_timeline_opts *opts);
 
+/* Reorderable list: drag rows to reorder. `order` holds your item indices in
+ * display order and is rewritten when a row is dropped. Build the rows in
+ * display order: for (i...) cui_reorder_item(ui, i) { draw item order[i] }.
+ * Returns true on the frame the order changes. */
+CUI_API void cui_reorder_begin(cui_ctx *ui, const char *id, int *order, int count);
+CUI_API bool cui_reorder_end(cui_ctx *ui);
+CUI_API void cui_reorder_item_begin(cui_ctx *ui, int position);
+CUI_API void cui_reorder_item_end(cui_ctx *ui);
+
 /* Circular progress with the value in the middle. */
 CUI_API void cui_progress_ring(cui_ctx *ui, const char *label, float value, float size);
 
@@ -1003,6 +1012,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_tag_input(ui, id, buf, cap, ...) cui_tag_input_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_tag_opts, __VA_ARGS__))
 #define cui_button_group(ui)                CUI__SCOPE(cui_button_group_begin(ui), cui_button_group_end(ui))
 #define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
+#define cui_reorder_item(ui, pos)           CUI__SCOPE(cui_reorder_item_begin((ui), (pos)), cui_reorder_item_end(ui))
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 

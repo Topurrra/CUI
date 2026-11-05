@@ -40,6 +40,7 @@ typedef struct gallery {
     int selected_row;
     cui_table_sort sort;
     int selected_file;
+    int task_order[5];
     /* app */
     bool dark;
     int accent;

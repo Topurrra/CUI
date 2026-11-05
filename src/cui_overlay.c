@@ -1364,6 +1364,7 @@ void cui__widgets_begin_frame(cui_ctx *ui) {
     ui->acc_depth = 0;
     ui->tree_depth = 0;
     ui->button_group_depth = 0;
+    ui->reorder = NULL;
     ui->dialog_depth = 0;
     ui->split = NULL;
     ui->table = NULL;

@@ -795,7 +795,14 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
         child_clip = cui__rect_intersect(clip, cui__xform_rect(ui, r));
     }
     for (int c = n->abs_first; c >= 0; c = ui->nodes[c].next) cui__paint_node(ui, c, child_clip);
-    for (int c = n->first; c >= 0; c = ui->nodes[c].next) cui__paint_node(ui, c, child_clip);
+    bool any_top = false;
+    for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
+        if (ui->nodes[c].flags & CUI_NF_ON_TOP) { any_top = true; continue; }
+        cui__paint_node(ui, c, child_clip);
+    }
+    if (any_top)
+        for (int c = n->first; c >= 0; c = ui->nodes[c].next)
+            if (ui->nodes[c].flags & CUI_NF_ON_TOP) cui__paint_node(ui, c, child_clip);
     if (clips) cui_pop_clip(ui);
     n = &ui->nodes[i];
     if (n->paint && (n->flags & CUI_NF_PAINT_AFTER)) n->paint(ui, n, n->paint_data);

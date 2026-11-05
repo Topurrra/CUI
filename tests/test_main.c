@@ -506,6 +506,37 @@ static void test_extras(void) {
     cui_destroy(ui);
 }
 
+typedef struct { int order[4]; int changed; cui_id list; } reorder_ctx;
+static void build_reorder(cui_ctx *ui, void *u) {
+    reorder_ctx *r = u;
+    cui_column(ui, .pad = 20, .width = CUI_PX(300)) {
+        cui_reorder_begin(ui, "list", r->order, 4);
+        for (int i = 0; i < 4; i++) cui_reorder_item(ui, i) { cui_textf(ui, "Item %d", r->order[i]); }
+        if (cui_reorder_end(ui)) r->changed++;
+    }
+}
+
+static void test_reorder(void) {
+    printf("data: drag to reorder\n");
+    cui_ctx *ui = new_ctx();
+    reorder_ctx r = { { 0, 1, 2, 3 }, 0, 0 };
+    run(ui, build_reorder, &r, 3);
+    /* rows are about 39 points tall with a 6 point gap, starting at y = 20 */
+    cui_input_mouse_move(ui, 150, 40);
+    run(ui, build_reorder, &r, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_reorder, &r, 1);
+    for (int y = 40; y <= 140; y += 10) { cui_input_mouse_move(ui, 150, (float)y); run(ui, build_reorder, &r, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_reorder, &r, 3);
+    CHECK(r.changed == 1);
+    CHECK(r.order[0] == 1 && r.order[1] == 2 && r.order[2] == 0 && r.order[3] == 3);
+    /* a click without movement does not reorder */
+    click_at(ui, build_reorder, &r, 150, 40);
+    CHECK(r.changed == 1);
+    cui_destroy(ui);
+}
+
 /* virtual list ---------------------------------------------------------- */
 
 typedef struct { int first, last, built; } vl_ctx;
@@ -667,6 +698,7 @@ int main(void) {
     test_menu();
     test_focus_trap();
     test_extras();
+    test_reorder();
     test_virtual_list();
     test_theme();
     test_renderer();

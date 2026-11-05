@@ -41,7 +41,8 @@ Contents:
 [One time code](#one-time-code) ·
 [Password strength](#password-strength) ·
 [Button group, copy, hold](#button-group-copy-and-hold-to-confirm) ·
-[Timeline and progress ring](#timeline-and-progress-ring)
+[Timeline and progress ring](#timeline-and-progress-ring) ·
+[Reorderable list](#reorderable-list)
 
 ---
 
@@ -570,3 +571,18 @@ cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description =
 cui_timeline_item(ui, "Build failed", .time = "3h ago", .icon = CUI_ICON_CIRCLE_ALERT, .tone = CUI_TONE_DANGER, .last = true);
 cui_progress_ring(ui, "Onboarding", 0.72f, 110);
 ```
+
+## Reorderable list
+
+```c
+static int order[5] = { 0, 1, 2, 3, 4 };     /* your item indices, in display order */
+cui_reorder_begin(ui, "tasks", order, 5);
+for (int i = 0; i < 5; i++) {
+    cui_reorder_item(ui, i) {
+        cui_text(ui, tasks[order[i]].title, .nowrap = true, .width = CUI_FILL);
+    }
+}
+if (cui_reorder_end(ui)) save_order(order);
+```
+
+Press a row and drag: it lifts with a shadow and follows the pointer while the other rows glide out of the way. Dropping rewrites `order`. Buttons inside rows keep working, since a drag only starts after the pointer moves a few points.

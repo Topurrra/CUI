@@ -611,3 +611,154 @@ void cui_progress_ring(cui_ctx *ui, const char *label, float value, float size) 
     ui->nodes[i].paint = cui__paint_ring;
     ui->nodes[i].paint_data = p;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Reorderable list                                                         */
+/* ------------------------------------------------------------------------ */
+
+#define CUI__REORDER_MAX 256
+
+typedef struct {
+    int from;               /* dragged position, -1 when idle */
+    int to;                 /* drop position */
+    float grab;             /* mouse offset inside the dragged row */
+    float press_y;
+    bool pending;           /* pressed, waiting to cross the drag threshold */
+    int press_pos;
+    cui_spring lift;        /* 0..1 dragged look */
+} cui__reorder_state;
+
+typedef struct { cui_spring y; } cui__reorder_item_state;
+
+struct cui_reorder_build {
+    cui_id id;
+    int *order;
+    int count;
+    cui__reorder_state *st;
+    float slot_top[CUI__REORDER_MAX], slot_h[CUI__REORDER_MAX];
+    bool have_rects;
+    bool changed;
+    int item_node;
+    struct cui_reorder_build *prev;
+};
+
+static cui_id cui__reorder_item_id(struct cui_reorder_build *b, int item) { return cui__hash(&item, sizeof item, b->id ^ 0x5E0Du); }
+
+void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
+    struct cui_reorder_build *b = cui__frame_alloc(ui, sizeof *b);
+    b->id = cui_make_id(ui, id_str);
+    b->order = order;
+    b->count = count < CUI__REORDER_MAX ? count : CUI__REORDER_MAX;
+    b->st = cui_state(ui, b->id, sizeof(cui__reorder_state));
+    b->prev = ui->reorder;
+    ui->reorder = b;
+    cui__reorder_state *st = b->st;
+    if (st->from >= b->count) st->from = -1;
+    /* slot geometry from last frame */
+    b->have_rects = true;
+    for (int k = 0; k < b->count; k++) {
+        cui_id iid = cui__reorder_item_id(b, order[k]);
+        if (!cui__has_prev_rect(ui, iid)) { b->have_rects = false; break; }
+        cui_rect r = cui__prev_rect(ui, iid);
+        b->slot_top[k] = r.y;
+        b->slot_h[k] = r.h;
+    }
+    /* start a drag once the pointer moves a few points */
+    if (st->pending && ui->mdown[0] && fabsf(ui->my - st->press_y) > 4 && b->have_rects) {
+        st->pending = false;
+        st->from = st->to = st->press_pos;
+        st->grab = st->press_y - b->slot_top[st->from];
+    }
+    if (!ui->mdown[0]) st->pending = false;
+    if (st->from >= 0 && b->have_rects) {
+        /* drop position: the slot whose middle the dragged row's middle passed */
+        float mid = ui->my - st->grab + b->slot_h[st->from] * 0.5f;
+        int to = 0;
+        for (int k = 0; k < b->count; k++) if (mid > b->slot_top[k] + b->slot_h[k] * 0.5f) to = k;
+        if (mid < b->slot_top[0] + b->slot_h[0] * 0.5f) to = 0;
+        st->to = to;
+        if (!ui->mdown[0]) {
+            /* commit: move the item, then let every row glide from where it was drawn */
+            int from = st->from;
+            if (to != from) {
+                int item = order[from];
+                if (to > from) memmove(&order[from], &order[from + 1], sizeof(int) * (size_t)(to - from));
+                else memmove(&order[to + 1], &order[to], sizeof(int) * (size_t)(from - to));
+                order[to] = item;
+                b->changed = true;
+                /* rows that made room are already drawn at their new slots */
+                for (int k = 0; k < b->count; k++) {
+                    cui__reorder_item_state *is = cui_state(ui, cui__reorder_item_id(b, order[k]) ^ 0x1u, sizeof *is);
+                    is->y.x = 0; is->y.v = 0;
+                }
+                /* the dropped row starts where the pointer left it */
+                cui__reorder_item_state *ds = cui_state(ui, cui__reorder_item_id(b, item) ^ 0x1u, sizeof *ds);
+                ds->y.x = (ui->my - st->grab) - b->slot_top[to];
+            } else {
+                cui__reorder_item_state *ds = cui_state(ui, cui__reorder_item_id(b, order[from]) ^ 0x1u, sizeof *ds);
+                ds->y.x = (ui->my - st->grab) - b->slot_top[from];
+            }
+            st->from = -1;
+        }
+    }
+    cui__spring(ui, &st->lift, st->from >= 0 ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
+    int col = cui__node_new(ui, b->id);
+    ui->nodes[col].gap = 6;
+    ui->nodes[col].w = CUI_FILL;
+    cui__open(ui, col);
+    if (st->from >= 0) ui->active = b->id;   /* keep the pointer captured while dragging */
+}
+
+void cui_reorder_item_begin(cui_ctx *ui, int pos) {
+    struct cui_reorder_build *b = ui->reorder;
+    if (!b || pos < 0 || pos >= b->count) { int n = cui__node_new(ui, 0); cui__open(ui, n); return; }
+    cui__reorder_state *st = b->st;
+    int item = b->order[pos];
+    cui_id iid = cui__reorder_item_id(b, item);
+    cui_interact r = cui__interact(ui, iid, 0);
+    if (r.hovered && ui->mpressed[0]) { st->pending = true; st->press_y = ui->my; st->press_pos = pos; }
+    cui__reorder_item_state *is = cui_state(ui, iid ^ 0x1u, sizeof *is);
+    bool dragged = st->from == pos;
+    float target = 0;
+    if (st->from >= 0 && !dragged && b->have_rects) {
+        float shift = b->slot_h[st->from] + (b->count > 1 ? b->slot_top[1] - (b->slot_top[0] + b->slot_h[0]) : 0);
+        if (st->from < st->to && pos > st->from && pos <= st->to) target = -shift;
+        if (st->from > st->to && pos >= st->to && pos < st->from) target = shift;
+    }
+    if (dragged && b->have_rects) { is->y.x = ui->my - st->grab - b->slot_top[pos]; is->y.v = 0; ui->animating = true; }
+    else cui__spring(ui, &is->y, target, CUI_SPRING_SMOOTH);
+    int n = cui__node_new(ui, iid);
+    cui_node *nd = &ui->nodes[n];
+    nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->gap = 10;
+    nd->pad[0] = nd->pad[2] = 10; nd->pad[1] = 14; nd->pad[3] = 8;
+    nd->radius = CUI_CORNERS(ui->theme.radius_control - 4);
+    nd->bg = CUI_C(ui, SURFACE);
+    nd->border = 1;
+    nd->border_color = CUI_C(ui, BORDER);
+    nd->ty = is->y.x;
+    if (dragged) {
+        nd->elevation = CUI_ELEVATION_FLOATING;
+        nd->elevation_alpha = st->lift.x;
+        nd->scale = 1.0f + 0.015f * st->lift.x;
+        nd->flags |= CUI_NF_ON_TOP;   /* painted after its siblings */
+    }
+    cui__mark_interactive(ui, n, 0);
+    if (r.hovered || dragged) cui__set_cursor(ui, dragged ? CUI_CURSOR_MOVE : CUI_CURSOR_HAND);
+    b->item_node = n;
+    cui__open(ui, n);
+    cui__icon_node(ui, CUI_ICON_GRIP_VERTICAL, 16, CUI_C(ui, TEXT_MUTED));
+    cui_push_id_int(ui, item);
+}
+
+void cui_reorder_item_end(cui_ctx *ui) {
+    cui_pop_id(ui);
+    cui__close(ui);
+}
+
+bool cui_reorder_end(cui_ctx *ui) {
+    struct cui_reorder_build *b = ui->reorder;
+    if (!b) return false;
+    cui__close(ui);
+    ui->reorder = b->prev;
+    return b->changed;
+}
