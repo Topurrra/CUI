@@ -269,10 +269,12 @@ typedef struct cui_state_entry {
     bool has_rect;
     size_t size;
     void *data;
+    void (*dtor)(cui_ctx *ui, void *data);   /* frees memory owned by data */
     int next;
 } cui_state_entry;
 
 cui_state_entry *cui__state_entry(cui_ctx *ui, cui_id id);
+void cui__state_set_dtor(cui_ctx *ui, cui_id id, void (*dtor)(cui_ctx *ui, void *data));
 cui_rect cui__prev_rect(cui_ctx *ui, cui_id id);
 bool cui__has_prev_rect(cui_ctx *ui, cui_id id);
 

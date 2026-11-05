@@ -497,6 +497,12 @@ typedef enum { CUI__FIELD_BOXED = 0, CUI__FIELD_BARE = 1 } cui__field_style;
 
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *trailing_icon_default);
 
+static void cui__edit_dtor(cui_ctx *ui, void *data) {
+    cui_edit_state *e = data;
+    for (int i = 0; i < e->undo_count; i++) cui__free(ui, e->undo[i]);
+    e->undo_count = 0;
+}
+
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *search_icon) {
     cui_input_opts d;
     memset(&d, 0, sizeof d);
@@ -504,7 +510,12 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     if (!buf || cap == 0) return 0;
     bool disabled = o->disabled || cui_is_disabled(ui);
     cui_edit_state *e = cui_state(ui, id, sizeof *e);
-    if (!e->init) { e->init = true; e->preferred_x = -1; if (o->autofocus) ui->focus = id; }
+    if (!e->init) {
+        e->init = true;
+        e->preferred_x = -1;
+        cui__state_set_dtor(ui, id, cui__edit_dtor);
+        if (o->autofocus) ui->focus = id;
+    }
     cui_id area_id = id ^ 0xED17u;
     cui_push_disabled(ui, disabled);
     /* the text area itself takes focus; clicks on padding also land on the field */

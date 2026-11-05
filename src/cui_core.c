@@ -193,7 +193,10 @@ cui_ctx *cui_create(const cui_ctx_desc *desc) {
 void cui_destroy(cui_ctx *ui) {
     if (!ui) return;
     cui__fonts_shutdown(ui);
-    for (int i = 0; i < ui->state_count; i++) cui__free(ui, ui->states[i].data);
+    for (int i = 0; i < ui->state_count; i++) {
+        if (ui->states[i].dtor && ui->states[i].data) ui->states[i].dtor(ui, ui->states[i].data);
+        cui__free(ui, ui->states[i].data);
+    }
     cui__free(ui, ui->states);
     cui__free(ui, ui->state_buckets);
     cui__free(ui, ui->nodes);
@@ -300,6 +303,10 @@ void *cui_state(cui_ctx *ui, cui_id id, size_t size) {
     return e->data;
 }
 
+void cui__state_set_dtor(cui_ctx *ui, cui_id id, void (*dtor)(cui_ctx *ui, void *data)) {
+    cui__state_entry(ui, id)->dtor = dtor;
+}
+
 cui_rect cui__prev_rect(cui_ctx *ui, cui_id id) {
     cui_state_entry *e = cui__state_find(ui, id);
     if (e && e->has_rect) return e->rect;
@@ -322,6 +329,7 @@ static void cui__state_gc(cui_ctx *ui) {
         int *link = &ui->state_buckets[b];
         while (*link >= 0 && *link != i) link = &ui->states[*link].next;
         if (*link == i) *link = e->next;
+        if (e->dtor && e->data) e->dtor(ui, e->data);
         cui__free(ui, e->data);
         memset(e, 0, sizeof *e);
         e->next = ui->state_free;
