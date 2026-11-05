@@ -474,7 +474,14 @@ struct cui_ctx {
     bool tf_override;
     cui_font tf_font;
     float tf_size;
-    cui_id tf_select_all;      /* this field selects all of its text when it next has focus */
+    cui_id tf_select_all;
+    /* files dropped from the OS, valid for one frame */
+    char *drop_buf; size_t drop_used, drop_cap;
+    int drop_off[64]; int drop_count;
+    float drop_x, drop_y;
+    bool drop_claimed;
+    bool drag_hover; float drag_x, drag_y;
+    bool slider_no_header;     /* next range slider skips its label row */      /* this field selects all of its text when it next has focus */
     struct cui_swipe_build *swipe;
 };
 

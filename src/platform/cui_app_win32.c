@@ -11,6 +11,7 @@
 #endif
 #include <windows.h>
 #include <windowsx.h>
+#include <shellapi.h>
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -287,6 +288,30 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     case WM_MOUSEWHEEL:
         cui_input_scroll(ui, 0, (float)GET_WHEEL_DELTA_WPARAM(wp) / (float)WHEEL_DELTA);
         return 0;
+    case WM_DROPFILES: {
+        HDROP drop = (HDROP)wp;
+        UINT n = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+        if (n > 64) n = 64;
+        POINT pt = { 0, 0 };
+        DragQueryPoint(drop, &pt);
+        char *paths[64];
+        int got = 0;
+        for (UINT i = 0; i < n; i++) {
+            UINT len = DragQueryFileW(drop, i, NULL, 0);
+            WCHAR *wbuf = (WCHAR *)malloc(sizeof(WCHAR) * (len + 1));
+            if (!wbuf) continue;
+            DragQueryFileW(drop, i, wbuf, len + 1);
+            int u = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, NULL, 0, NULL, NULL);
+            char *ubuf = u > 0 ? (char *)malloc((size_t)u) : NULL;
+            if (ubuf) { WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, ubuf, u, NULL, NULL); paths[got++] = ubuf; }
+            free(wbuf);
+        }
+        DragFinish(drop);
+        cui_input_file_drop(ui, (const char *const *)paths, got, (float)pt.x / s, (float)pt.y / s);
+        for (int i = 0; i < got; i++) free(paths[i]);
+        SetForegroundWindow(hwnd);
+        return 0;
+    }
     case WM_MOUSEHWHEEL:
         cui_input_scroll(ui, -(float)GET_WHEEL_DELTA_WPARAM(wp) / (float)WHEEL_DELTA, 0);
         return 0;
@@ -361,6 +386,7 @@ bool cui__plat_init(cui_app *app) {
     w->hwnd = CreateWindowExW(0, wc.lpszClassName, title, style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                               NULL, NULL, inst, app);
     if (!w->hwnd) { free(w); app->plat = NULL; return false; }
+    DragAcceptFiles(w->hwnd, TRUE);   /* files dropped from Explorer arrive as WM_DROPFILES */
     w->scale = cui__win32_window_scale(w->hwnd);
     if (w->scale != scale) {
         RECT r2 = { 0, 0, (LONG)(app->desc.width * w->scale), (LONG)(app->desc.height * w->scale) };

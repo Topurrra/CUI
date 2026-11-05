@@ -160,3 +160,100 @@ if (cui_shortcut(ui, palette_key.mods, palette_key.key)) open_palette();
 ```
 
 Click and press a combination. While recording, the field shows the modifiers you hold with a pulsing dot, and app shortcuts stay quiet. Backspace clears, Esc or Tab cancels. `cui_shortcut_label(ui, combo)` gives the text ("Ctrl Shift K"), `cui_key_name(key)` one key.
+
+## Pickers
+
+### Multi-select
+
+![Multi-select](images/components/multi-select.png)
+
+```c
+static bool chosen[6];
+const char *langs[] = { "C", "C++", "Rust", "Zig", "Go", "Swift" };
+cui_multi_select(ui, "langs", langs, 6, chosen, .label = "Languages", .searchable = true);
+```
+
+The field shows chips (with remove buttons) for up to `max_chips` items and "+N" for the rest. The list keeps itself open while you tick items and has a select all / clear action. Up, Down and Space or Enter work in the list.
+
+### Date range picker
+
+![Date range picker](images/components/date-range.png)
+
+```c
+static cui_date_range trip;
+cui_date_range_picker(ui, "trip", &trip, .label = "Dates");
+cui_range_calendar(ui, "inline", &trip, 2);   /* the calendar on its own, one or two months */
+```
+
+Click a start and an end (in either order); while you choose the end, the band follows the pointer. Presets (today, last 7 days, this month...) sit on the left unless `.no_presets = true`. `cui_date_to_days` and `cui_date_from_days` convert dates to day numbers for arithmetic.
+
+### Time picker
+
+![Time picker](images/components/time-picker.png)
+
+```c
+static int hour = 9, minute = 30;
+cui_time_picker(ui, "start", &hour, &minute);
+cui_time_picker(ui, "end", &hour2, &minute2, .twelve_hour = true, .minute_step = 15);
+```
+
+Hour and minute columns (and AM / PM) that open scrolled to the current value. `hour` is always 0 to 23.
+
+### Wheel picker and time dial
+
+![Wheels and dial](images/components/wheels.png)
+
+```c
+cui_wheel_picker(ui, "month", month_names, 12, &month, .width = CUI_PX(128), .loop = true);
+cui_time_dial(ui, "alarm", &hour, &minute, 232);
+```
+
+Wheels are drums of options: drag with momentum, scroll or use the arrow keys, and they snap to an item. Set `loop` for values that wrap. Put several side by side with `join_left` / `join_right` to share one selection band, as in a date reel.
+
+The time dial sets hours on two rings (1 to 12 outside, 13 to 00 inside), then switches to minutes when you let go. The hand springs the short way round. Click the hour or minute at the top to choose which one you set.
+
+### Ruler and histogram sliders
+
+![Ruler and histogram](images/components/ruler-histogram.png)
+
+```c
+cui_ruler_slider(ui, "Height", &height, 120, 220, .unit = "cm");
+cui_histogram_slider(ui, "Price", bins, 24, &lo, &hi, 0, 240, .format = "$%.0f");
+```
+
+The ruler is a tape that slides under a fixed marker; throw it and it glides, then snaps to `step`. Options: `step`, `major_every` (labelled ticks), `spacing` (points per step), `format`, `unit`, `width`. The histogram slider is a range slider with the distribution it filters drawn above it; bars inside the range light up.
+
+## Capture
+
+![Dropzone, signature and avatar upload](images/components/capture.png)
+
+### Dropzone
+
+```c
+int n = cui_dropzone(ui, "attachments", .description = "PNG, JPG or PDF, up to 25 MB", .accept = "png;jpg;pdf");
+if (n > 0) for (int i = 0; i < n; i++) attach(cui_dropped_file(ui, i));
+if (n < 0) { char path[1024]; if (cui_app_file_dialog(NULL, &(cui_file_dialog_opts){ 0 }, path, sizeof path)) attach(path); }
+```
+
+Files dragged from the desktop or a file manager highlight the zone ("Release to add") and land on it; files that do not match `accept` are left out and the zone says so. `.compact = true` makes a one line version. Drag and drop works with every built-in backend; the live hover highlight appears where the platform reports drags in progress (macOS and X11), elsewhere the drop itself still lands.
+
+If you use your own window layer, feed drops with `cui_input_file_drop(ui, paths, count, x, y)` and hovering with `cui_input_file_hover(ui, true, x, y)`. Files dropped outside any dropzone are available to the app through `cui_dropped_file_count` and `cui_dropped_file` for that frame.
+
+### Avatar upload
+
+```c
+static cui_texture photo;
+if (cui_avatar_upload(ui, "photo", "Ada Lovelace", &photo, 88) < 0) browse_for_photo();
+```
+
+Drop an image on the avatar to replace it (the previous texture is destroyed). Hover shows a camera; the pencil badge marks it as editable.
+
+### Signature pad
+
+```c
+cui_signature_pad(ui, "signature", .height = 180);
+const cui_vec2 *pts; const int *ends; int strokes;
+int n = cui_signature_points(ui, "signature", &pts, &ends, &strokes);   /* points relative to the pad */
+```
+
+Stroke width follows speed, so signatures look inked rather than drawn with a fixed pen. A Clear button appears once something is drawn; `cui_signature_clear` does the same from code.

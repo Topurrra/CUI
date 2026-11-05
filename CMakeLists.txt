@@ -40,6 +40,7 @@ set(CUI_CORE_SOURCES
     src/cui_charts.c
     src/cui_extras.c
     src/cui_actions.c
+    src/cui_pickers.c
     src/cui_image.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)

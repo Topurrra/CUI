@@ -108,6 +108,28 @@ static cui_key cui__mac_key(NSEvent *e) {
     cui_input_mouse_move(self.app->ui, (float)p.x, (float)p.y);
 }
 - (void)mouseMoved:(NSEvent *)e { [self mouseAt:e]; }
+
+/* files dragged from Finder */
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info {
+    NSPoint p = [self convertPoint:[info draggingLocation] fromView:nil];
+    cui_input_file_hover(self.app->ui, true, (float)p.x, (float)p.y);
+    return NSDragOperationCopy;
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info { return [self draggingUpdated:info]; }
+- (void)draggingExited:(id<NSDraggingInfo>)info { (void)info; cui_input_file_hover(self.app->ui, false, 0, 0); }
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
+    NSPoint p = [self convertPoint:[info draggingLocation] fromView:nil];
+    NSArray<NSURL *> *urls = [[info draggingPasteboard] readObjectsForClasses:@[ [NSURL class] ]
+                                                                      options:@{ NSPasteboardURLReadingFileURLsOnlyKey : @YES }];
+    const char *paths[64];
+    int n = 0;
+    for (NSURL *u in urls) {
+        if (n >= 64) break;
+        if (u.fileSystemRepresentation) paths[n++] = u.fileSystemRepresentation;
+    }
+    cui_input_file_drop(self.app->ui, paths, n, (float)p.x, (float)p.y);
+    return n > 0;
+}
 - (void)mouseDragged:(NSEvent *)e { [self mouseAt:e]; }
 - (void)rightMouseDragged:(NSEvent *)e { [self mouseAt:e]; }
 - (void)otherMouseDragged:(NSEvent *)e { [self mouseAt:e]; }
@@ -272,6 +294,7 @@ bool cui__plat_init(cui_app *app) {
         v.app = app;
         v.wantsBestResolutionOpenGLSurface = YES;
         w.contentView = v;
+        [v registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
         [w makeFirstResponder:v];
         p.window = w;
         p.view = v;

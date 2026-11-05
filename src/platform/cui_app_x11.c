@@ -77,6 +77,12 @@ typedef struct {
     char *clip_owned;
     char *clip_read;
     bool mapped;
+    /* drag and drop (XDND) */
+    Atom xdnd_aware, xdnd_enter, xdnd_position, xdnd_status, xdnd_leave, xdnd_drop, xdnd_finished,
+         xdnd_selection, xdnd_action_copy, uri_list, cui_xdnd;
+    Window xdnd_source;
+    int xdnd_version;
+    float xdnd_x, xdnd_y;
 } cui__x11;
 
 static cui__x11 *cui__x(cui_app *app) { return app->plat; }
@@ -195,6 +201,22 @@ bool cui__plat_init(cui_app *app) {
     x->targets = XInternAtom(x->dpy, "TARGETS", False);
     x->cui_sel = XInternAtom(x->dpy, "CUI_SELECTION", False);
     XSetWMProtocols(x->dpy, x->win, &x->wm_delete, 1);
+    /* accept files dragged from file managers (XDND version 5) */
+    x->xdnd_aware = XInternAtom(x->dpy, "XdndAware", False);
+    x->xdnd_enter = XInternAtom(x->dpy, "XdndEnter", False);
+    x->xdnd_position = XInternAtom(x->dpy, "XdndPosition", False);
+    x->xdnd_status = XInternAtom(x->dpy, "XdndStatus", False);
+    x->xdnd_leave = XInternAtom(x->dpy, "XdndLeave", False);
+    x->xdnd_drop = XInternAtom(x->dpy, "XdndDrop", False);
+    x->xdnd_finished = XInternAtom(x->dpy, "XdndFinished", False);
+    x->xdnd_selection = XInternAtom(x->dpy, "XdndSelection", False);
+    x->xdnd_action_copy = XInternAtom(x->dpy, "XdndActionCopy", False);
+    x->uri_list = XInternAtom(x->dpy, "text/uri-list", False);
+    x->cui_xdnd = XInternAtom(x->dpy, "CUI_XDND", False);
+    {
+        Atom version = 5;
+        XChangeProperty(x->dpy, x->win, x->xdnd_aware, XA_ATOM, 32, PropModeReplace, (unsigned char *)&version, 1);
+    }
     XSizeHints *hints = XAllocSizeHints();
     if (hints) {
         hints->flags = PMinSize;
@@ -447,6 +469,117 @@ static int cui__x11_mods(unsigned int state) {
     return m;
 }
 
+/* ---- drag and drop ---- */
+
+static void cui__x11_xdnd_send(cui__x11 *x, Window to, Atom type, long l1, long l2, long l3, long l4) {
+    XEvent e;
+    memset(&e, 0, sizeof e);
+    e.xclient.type = ClientMessage;
+    e.xclient.display = x->dpy;
+    e.xclient.window = to;
+    e.xclient.message_type = type;
+    e.xclient.format = 32;
+    e.xclient.data.l[0] = (long)x->win;
+    e.xclient.data.l[1] = l1;
+    e.xclient.data.l[2] = l2;
+    e.xclient.data.l[3] = l3;
+    e.xclient.data.l[4] = l4;
+    XSendEvent(x->dpy, to, False, NoEventMask, &e);
+    XFlush(x->dpy);
+}
+
+static int cui__hexv(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* text/uri-list: one URI per line, "file://host/path" with %XX escapes */
+static void cui__x11_xdnd_deliver(cui_app *app, const char *data, size_t len) {
+    cui__x11 *x = cui__x(app);
+    char *paths[64];
+    int n = 0;
+    size_t i = 0;
+    while (i < len && n < 64) {
+        size_t e = i;
+        while (e < len && data[e] != '\n' && data[e] != '\r') e++;
+        if (e > i && data[i] != '#' && e - i > 7 && strncmp(data + i, "file://", 7) == 0) {
+            size_t p = i + 7;
+            while (p < e && data[p] != '/') p++;   /* skip the host */
+            char *out = malloc(e - p + 1);
+            if (out) {
+                size_t o = 0;
+                for (size_t k = p; k < e; k++) {
+                    if (data[k] == '%' && k + 2 < e && cui__hexv(data[k + 1]) >= 0 && cui__hexv(data[k + 2]) >= 0) {
+                        out[o++] = (char)(cui__hexv(data[k + 1]) * 16 + cui__hexv(data[k + 2]));
+                        k += 2;
+                    } else out[o++] = data[k];
+                }
+                out[o] = 0;
+                paths[n++] = out;
+            }
+        }
+        i = e;
+        while (i < len && (data[i] == '\n' || data[i] == '\r')) i++;
+    }
+    cui_input_file_drop(app->ui, (const char *const *)paths, n, x->xdnd_x, x->xdnd_y);
+    for (int k = 0; k < n; k++) free(paths[k]);
+}
+
+static bool cui__x11_xdnd_message(cui_app *app, XClientMessageEvent *m) {
+    cui__x11 *x = cui__x(app);
+    Atom t = m->message_type;
+    if (t == x->xdnd_enter) {
+        x->xdnd_source = (Window)m->data.l[0];
+        x->xdnd_version = (int)((unsigned long)m->data.l[1] >> 24);
+        return true;
+    }
+    if (t == x->xdnd_position) {
+        x->xdnd_source = (Window)m->data.l[0];
+        int rx = (int)(((unsigned long)m->data.l[2] >> 16) & 0xFFFF), ry = (int)((unsigned long)m->data.l[2] & 0xFFFF);
+        int wx = 0, wy = 0;
+        Window child;
+        XTranslateCoordinates(x->dpy, RootWindow(x->dpy, x->screen), x->win, rx, ry, &wx, &wy, &child);
+        x->xdnd_x = wx / x->scale;
+        x->xdnd_y = wy / x->scale;
+        cui_input_file_hover(app->ui, true, x->xdnd_x, x->xdnd_y);
+        /* accept, keep sending positions, and ask for a copy */
+        cui__x11_xdnd_send(x, x->xdnd_source, x->xdnd_status, 1 | 2, 0, 0, (long)x->xdnd_action_copy);
+        return true;
+    }
+    if (t == x->xdnd_leave) {
+        cui_input_file_hover(app->ui, false, 0, 0);
+        return true;
+    }
+    if (t == x->xdnd_drop) {
+        x->xdnd_source = (Window)m->data.l[0];
+        Time when = x->xdnd_version >= 1 ? (Time)m->data.l[2] : CurrentTime;
+        XConvertSelection(x->dpy, x->xdnd_selection, x->uri_list, x->cui_xdnd, x->win, when);
+        return true;
+    }
+    return false;
+}
+
+static void cui__x11_xdnd_selection(cui_app *app, XSelectionEvent *se) {
+    cui__x11 *x = cui__x(app);
+    if (se->property == None) {
+        cui_input_file_hover(app->ui, false, 0, 0);
+    } else {
+        Atom type;
+        int format;
+        unsigned long count = 0, after = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(x->dpy, x->win, x->cui_xdnd, 0, 1 << 22, True, AnyPropertyType, &type, &format, &count, &after, &data) == Success && data) {
+            cui__x11_xdnd_deliver(app, (const char *)data, count);
+            XFree(data);
+        }
+    }
+    if (x->xdnd_source && x->xdnd_version >= 2)
+        cui__x11_xdnd_send(x, x->xdnd_source, x->xdnd_finished, se->property != None ? 1 : 0, (long)x->xdnd_action_copy, 0, 0);
+    x->xdnd_source = 0;
+}
+
 static void cui__x11_event(cui_app *app, XEvent *ev) {
     cui__x11 *x = cui__x(app);
     cui_ctx *ui = app->ui;
@@ -454,7 +587,11 @@ static void cui__x11_event(cui_app *app, XEvent *ev) {
     float s = x->scale;
     switch (ev->type) {
     case ClientMessage:
+        if (cui__x11_xdnd_message(app, &ev->xclient)) break;
         if ((Atom)ev->xclient.data.l[0] == x->wm_delete) app->running = false;
+        break;
+    case SelectionNotify:
+        if (ev->xselection.property == x->cui_xdnd || (ev->xselection.selection == x->xdnd_selection)) cui__x11_xdnd_selection(app, &ev->xselection);
         break;
     case ConfigureNotify:
         if (ev->xconfigure.width != x->width || ev->xconfigure.height != x->height) {

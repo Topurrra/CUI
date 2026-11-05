@@ -60,6 +60,7 @@ bool cui__plat_init(cui_app *app) {
                                               SDL_SYSTEM_CURSOR_SIZEWE, SDL_SYSTEM_CURSOR_SIZENS, SDL_SYSTEM_CURSOR_SIZEALL, SDL_SYSTEM_CURSOR_NO };
     for (int i = 0; i < CUI_CURSOR_COUNT; i++) s->cursors[i] = SDL_CreateSystemCursor(ids[i]);
     SDL_StartTextInput();
+    SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     cui_platform_iface pi;
     memset(&pi, 0, sizeof pi);
     pi.user = app;
@@ -198,6 +199,15 @@ static void cui__sdl_event(cui_app *app, SDL_Event *e) {
         break;
     }
     case SDL_TEXTINPUT: cui_input_text(ui, e->text.text); break;
+    case SDL_DROPFILE: {
+        /* SDL reports no position for drops: use the pointer */
+        int mx = 0, my = 0;
+        SDL_GetMouseState(&mx, &my);
+        const char *paths[1] = { e->drop.file };
+        if (e->drop.file) cui_input_file_drop(ui, paths, 1, (float)mx, (float)my);
+        SDL_free(e->drop.file);
+        break;
+    }
     default: break;
     }
 }

@@ -149,6 +149,94 @@ static void page_inputs(cui_ctx *ui) {
     }
 }
 
+
+/* ---- pickers ------------------------------------------------------------- */
+
+static void page_pickers(cui_ctx *ui) {
+    static bool langs[8] = { true, false, true, false, false, true, false, false };
+    static cui_date_range range = { { 2026, 11, 3 }, { 2026, 11, 14 } };
+    static cui_date_range stay = { { 2026, 12, 18 }, { 2026, 12, 27 } };
+    static int hour = 9, minute = 30, h2 = 18, m2 = 45;
+    static int day = 13, month = 10, year = 6;
+    static int dh = 7, dm = 25;
+    static float height = 172, temp = 21.5f;
+    static float lo = 40, hi = 160;
+    static const float bins[] = { 2, 4, 7, 12, 18, 26, 31, 29, 34, 40, 37, 30, 24, 22, 18, 15, 11, 9, 7, 5, 4, 3, 2, 1 };
+
+    section(ui, "Multi-select", "Chips for the chosen items, checkboxes in the list.");
+    static const char *items[] = { "C", "C++", "Rust", "Zig", "Go", "Swift", "Kotlin", "Odin" };
+    cui_row(ui, .gap = 12, .align = CUI_ALIGN_START) {
+        cui_box(ui, .width = CUI_PX(320)) { cui_multi_select(ui, "langs", items, 8, langs, .label = "Languages", .searchable = true); }
+    }
+
+    section(ui, "Date range", "Presets on the left, two months to pick a start and an end.");
+    cui_row(ui, .gap = 12) {
+        cui_date_range_picker(ui, "range", &range, .width = CUI_PX(300));
+        cui_date_range_picker(ui, "stay", &stay, .width = CUI_PX(300), .no_presets = true);
+    }
+    cui_card(ui, .pad = 16) { cui_range_calendar(ui, "inline-range", &stay, 2); }
+
+    section(ui, "Time", "A field with hour and minute columns, 24 hour or 12 hour.");
+    cui_row(ui, .gap = 12) {
+        cui_time_picker(ui, "start", &hour, &minute);
+        cui_time_picker(ui, "end", &h2, &m2, .twelve_hour = true, .minute_step = 15);
+    }
+
+    section(ui, "Wheels and dial", "Drag, scroll or use the arrow keys. Several wheels make a date reel.");
+    cui_row(ui, .gap = 32, .align = CUI_ALIGN_CENTER) {
+        static const char *days[31], *months[12], *years[12];
+        static char dbuf[31][4], ybuf[12][6];
+        static const char *mn[12] = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+        for (int k = 0; k < 31; k++) { snprintf(dbuf[k], sizeof dbuf[k], "%d", k + 1); days[k] = dbuf[k]; }
+        for (int k = 0; k < 12; k++) { months[k] = mn[k]; snprintf(ybuf[k], sizeof ybuf[k], "%d", 2020 + k); years[k] = ybuf[k]; }
+        cui_card(ui, .dir = CUI_ROW, .gap = 0, .pad = 8) {
+            cui_wheel_picker(ui, "day", days, 31, &day, .width = CUI_PX(64), .loop = true, .join_right = true);
+            cui_wheel_picker(ui, "month", months, 12, &month, .width = CUI_PX(128), .loop = true, .join_left = true, .join_right = true);
+            cui_wheel_picker(ui, "year", years, 12, &year, .width = CUI_PX(80), .join_left = true);
+        }
+        cui_time_dial(ui, "dial", &dh, &dm, 232);
+    }
+
+    section(ui, "Ruler and histogram", "A tape that slides under a fixed marker, and a range over its data.");
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START) {
+        cui_column(ui, .width = CUI_FILL, .gap = 20) {
+            cui_ruler_slider(ui, "Height", &height, 120, 220, .unit = "cm");
+            cui_ruler_slider(ui, "Temperature", &temp, 10, 30, .step = 0.5f, .major_every = 4, .spacing = 14, .format = "%.1f", .unit = "\xc2\xb0" "C");
+        }
+        cui_card(ui, .width = CUI_FILL, .gap = 6) {
+            cui_histogram_slider(ui, "Price", bins, 24, &lo, &hi, 0, 240, .format = "$%.0f");
+            cui_muted(ui, "1,204 listings in range");
+        }
+    }
+}
+
+/* ---- capture ------------------------------------------------------------- */
+
+static void page_capture(cui_ctx *ui) {
+    static cui_texture avatar;
+    static char last[256] = "";
+    section(ui, "Dropzone", "Drop files from your desktop, or click to browse.");
+    int n = cui_dropzone(ui, "files", .description = "PNG, JPG or PDF, up to 25 MB", .accept = "png;jpg;jpeg;pdf");
+    if (n > 0) snprintf(last, sizeof last, "%s", cui_dropped_file(ui, 0));
+    cui_row(ui, .gap = 12) {
+        cui_box(ui, .width = CUI_FILL) { cui_dropzone(ui, "compact", .compact = true, .title = "Attach a file", .description = "Any type"); }
+        cui_box(ui, .width = CUI_FILL) { cui_dropzone(ui, "images", .compact = true, .title = "Add images", .description = "PNG or JPG", .icon = CUI_ICON_IMAGE, .accept = "png;jpg;jpeg"); }
+    }
+    if (last[0]) cui_muted(ui, last);
+
+    section(ui, "Avatar upload", "Drop an image on the avatar.");
+    cui_row(ui, .gap = 20, .align = CUI_ALIGN_CENTER) {
+        cui_avatar_upload(ui, "avatar", "Ada Lovelace", &avatar, 88);
+        cui_column(ui, .gap = 4) {
+            cui_label(ui, "Profile photo");
+            cui_secondary(ui, "At least 256 by 256 pixels.");
+        }
+    }
+
+    section(ui, "Signature", "Draw with the mouse or a pen. Faster strokes are thinner, like ink.");
+    cui_box(ui, .width = CUI_PX(520)) { cui_signature_pad(ui, "signature", .height = 180); }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -156,6 +244,8 @@ typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
 static const more_page pages[] = {
     { "Actions", CUI_ICON_SPARKLES, page_actions },
     { "Smart inputs", CUI_ICON_SQUARE_PEN, page_inputs },
+    { "Pickers", CUI_ICON_CALENDAR, page_pickers },
+    { "Capture", CUI_ICON_UPLOAD, page_capture },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

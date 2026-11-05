@@ -627,6 +627,150 @@ static void test_swipe(void) {
     cui_destroy(ui);
 }
 
+/* pickers ------------------------------------------------------------------ */
+
+static void test_date_math(void) {
+    printf("dates: day numbers round trip\n");
+    CHECK(cui_date_to_days((cui_date){ 1970, 1, 1 }) == 0);
+    CHECK(cui_date_to_days((cui_date){ 2000, 3, 1 }) == 11017);
+    cui_date d = cui_date_from_days(cui_date_to_days((cui_date){ 2024, 2, 29 }) + 1);
+    CHECK(d.year == 2024 && d.month == 3 && d.day == 1);
+    int bad = 0;
+    for (int z = -800000; z < 800000; z += 37) {
+        cui_date x = cui_date_from_days(z);
+        if (cui_date_to_days(x) != z) bad++;
+    }
+    CHECK(bad == 0);
+}
+
+typedef struct {
+    bool sel[4]; cui_date_range range; int wheel; float ruler; int dh, dm; int dropped; int drop_click;
+    cui_id ms_id, cal_id, wheel_id, ruler_id, dial_id, drop_id, sig_id;
+} pick_ctx;
+static void build_pickers(cui_ctx *ui, void *u) {
+    pick_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 16) {
+        static const char *items[] = { "Alpha", "Beta", "Gamma", "Delta" };
+        cui_multi_select(ui, "ms", items, 4, a->sel, .width = CUI_PX(300));
+        a->ms_id = cui_last_id(ui);
+        cui_range_calendar(ui, "cal", &a->range, 1);
+        a->cal_id = cui_last_id(ui);
+        static const char *w[] = { "One", "Two", "Three", "Four", "Five" };
+        cui_wheel_picker(ui, "wheel", w, 5, &a->wheel);
+        a->wheel_id = cui_last_id(ui);
+        cui_ruler_slider(ui, "Ruler", &a->ruler, 0, 100, .width = CUI_PX(300));
+        a->ruler_id = cui_last_id(ui);
+    }
+    cui_column(ui, .pad = 20, .gap = 16) {
+        cui_time_dial(ui, "dial", &a->dh, &a->dm, 200);
+        a->dial_id = cui_make_id(ui, "dial") ^ 0xFACEu;
+        int n = cui_dropzone(ui, "drop", .accept = "png;txt", .width = CUI_PX(300));
+        if (n > 0) a->dropped = n;
+        if (n < 0) a->drop_click++;
+        a->drop_id = cui_last_id(ui);
+        cui_signature_pad(ui, "sig", .width = CUI_PX(300), .height = 120);
+        a->sig_id = cui_make_id(ui, "sig") ^ 0x5161u;
+    }
+}
+static void build_pickers_root(cui_ctx *ui, void *u) {
+    cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_START) { build_pickers(ui, u); }
+}
+
+static void test_pickers(void) {
+    printf("pickers: multi-select, range calendar, wheel, ruler, dial, dropzone, signature\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 1000, 900, 1);
+    pick_ctx a;
+    memset(&a, 0, sizeof a);
+    a.range.start = (cui_date){ 2026, 11, 20 };   /* shows November 2026 */
+    a.ruler = 50;
+    a.dh = 9; a.dm = 0;
+    run(ui, build_pickers_root, &a, 3);
+    /* multi-select: open, then toggle items with the keyboard; the list stays open */
+    cui_vec2 m = center(rect_of(ui, a.ms_id));
+    click_at(ui, build_pickers_root, &a, m.x, m.y);
+    run(ui, build_pickers_root, &a, 3);
+    key(ui, build_pickers_root, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_pickers_root, &a, CUI_KEY_ENTER, 0);
+    key(ui, build_pickers_root, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_pickers_root, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_pickers_root, &a, CUI_KEY_SPACE, 0);
+    CHECK(a.sel[0] && !a.sel[1] && a.sel[2] && !a.sel[3]);
+    key(ui, build_pickers_root, &a, CUI_KEY_ESCAPE, 0);
+    run(ui, build_pickers_root, &a, 20);
+    /* range calendar: November 2026 starts on a Sunday; click the 3rd, then the 14th */
+    cui_rect cr = rect_of(ui, a.cal_id);
+    float top = cr.y + 30 + 8 + 12 * 2.2f;
+    a.range.start = (cui_date){ 0, 0, 0 };
+    int days[2] = { 14, 3 };   /* end first: the calendar orders them */
+    for (int k = 0; k < 2; k++) {
+        int cell = days[k] - 1 + 6;
+        click_at(ui, build_pickers_root, &a, cr.x + (cell % 7) * 36 + 18, top + (cell / 7) * 36 + 18);
+    }
+    CHECK(a.range.start.day == 3 && a.range.end.day == 14 && a.range.end.month == 11);
+    /* wheel: arrow keys and a drag */
+    cui_vec2 w = center(rect_of(ui, a.wheel_id));
+    click_at(ui, build_pickers_root, &a, w.x, w.y);
+    key(ui, build_pickers_root, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_pickers_root, &a, CUI_KEY_DOWN, 0);
+    CHECK(a.wheel == 2);
+    drag(ui, build_pickers_root, &a, w.x, w.y, w.x, 1);   /* no move: stays */
+    CHECK(a.wheel == 2);
+    cui_input_mouse_move(ui, w.x, w.y);
+    run(ui, build_pickers_root, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_pickers_root, &a, 1);
+    for (int i = 1; i <= 6; i++) { cui_input_mouse_move(ui, w.x, w.y + 34.0f * i / 6); run(ui, build_pickers_root, &a, 1); }
+    run(ui, build_pickers_root, &a, 10);   /* hold still so the throw has no speed */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_pickers_root, &a, 30);
+    CHECK(a.wheel == 1);
+    /* ruler: dragging left by 9 points per step moves the value up */
+    cui_vec2 rl = center(rect_of(ui, a.ruler_id));
+    cui_input_mouse_move(ui, rl.x, rl.y);
+    run(ui, build_pickers_root, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_pickers_root, &a, 1);
+    for (int i = 1; i <= 6; i++) { cui_input_mouse_move(ui, rl.x - 90.0f * i / 6, rl.y); run(ui, build_pickers_root, &a, 1); }
+    run(ui, build_pickers_root, &a, 10);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_pickers_root, &a, 30);
+    CHECK_NEAR(a.ruler, 60, 0.01);
+    /* dial: drag to 3 o'clock on the outer ring sets 3, then minutes */
+    cui_rect dr = rect_of(ui, a.dial_id);
+    cui_vec2 dc = center(dr);
+    drag(ui, build_pickers_root, &a, dc.x + dr.w * 0.42f, dc.y, dc.x + dr.w * 0.42f, 1);
+    CHECK(a.dh == 3);
+    drag(ui, build_pickers_root, &a, dc.x, dc.y + dr.h * 0.42f, dc.x, 1);   /* six o'clock = 30 minutes */
+    CHECK(a.dm == 30);
+    drag(ui, build_pickers_root, &a, dc.x - dr.w * 0.42f, dc.y, dc.x - dr.w * 0.42f, 1);
+    CHECK(a.dm == 45);
+    /* dropzone: files dropped on it are filtered; elsewhere they are left alone */
+    cui_vec2 z = center(rect_of(ui, a.drop_id));
+    const char *files[] = { "/tmp/a.png", "/tmp/b.exe", "/tmp/c.TXT" };
+    cui_input_file_drop(ui, files, 3, z.x, z.y);
+    run(ui, build_pickers_root, &a, 1);
+    CHECK(a.dropped == 2);
+    cui_input_file_drop(ui, files, 1, 5, 5);
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    build_pickers_root(ui, &a);
+    CHECK(cui_dropped_file_count(ui) == 1 && strcmp(cui_dropped_file(ui, 0), "/tmp/a.png") == 0);
+    cui_end_frame(ui);
+    CHECK(cui_dropped_file_count(ui) == 0);
+    click_at(ui, build_pickers_root, &a, z.x, z.y);
+    CHECK(a.drop_click == 1);
+    CHECK(cui_path_has_extension("photo.JPeG", "png;jpeg") && !cui_path_has_extension("dir.png/file", "png"));
+    /* signature: a drag makes a stroke */
+    cui_rect sr = rect_of(ui, a.sig_id);
+    drag(ui, build_pickers_root, &a, sr.x + 40, sr.y + 60, sr.x + 200, 12);
+    const cui_vec2 *pts; const int *ends; int nstroke = 0;
+    int np = cui_signature_points(ui, "sig", &pts, &ends, &nstroke);
+    CHECK(np > 5 && nstroke == 1);
+    cui_signature_clear(ui, "sig");
+    CHECK(cui_signature_points(ui, "sig", NULL, NULL, NULL) == 0);
+    cui_destroy(ui);
+}
+
 static void test_text_capacity(void) {
     printf("text input: respects buffer capacity\n");
     cui_ctx *ui = new_ctx();
@@ -1014,6 +1158,8 @@ int main(void) {
     test_more_actions();
     test_more_inputs();
     test_swipe();
+    test_date_math();
+    test_pickers();
     test_text_capacity();
     test_dialog();
     test_menu();

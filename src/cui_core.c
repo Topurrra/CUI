@@ -198,6 +198,7 @@ void cui_destroy(cui_ctx *ui) {
         cui__free(ui, ui->states[i].data);
     }
     cui__free(ui, ui->states);
+    cui__free(ui, ui->drop_buf);
     cui__free(ui, ui->state_buckets);
     cui__free(ui, ui->nodes);
     cui__free(ui, ui->float_roots);
@@ -414,6 +415,41 @@ void cui_input_key(cui_ctx *ui, cui_key key, bool down, int mods) {
     if (down && ui->kpressed[key] < 255) ui->kpressed[key]++;
     ui->kdown[key] = down;
 }
+
+void cui_input_file_hover(cui_ctx *ui, bool hovering, float x, float y) {
+    ui->drag_hover = hovering;
+    ui->drag_x = x; ui->drag_y = y;
+    if (hovering) { ui->mx = x; ui->my = y; ui->mouse_inside = true; }
+    cui__poke(ui);
+}
+
+void cui_input_file_drop(cui_ctx *ui, const char *const *paths, int count, float x, float y) {
+    ui->drag_hover = false;
+    for (int i = 0; i < count && ui->drop_count < 64; i++) {
+        if (!paths[i]) continue;
+        size_t n = strlen(paths[i]) + 1;
+        if (ui->drop_used + n > ui->drop_cap) {
+            size_t cap = ui->drop_cap ? ui->drop_cap * 2 : 1024;
+            while (cap < ui->drop_used + n) cap *= 2;
+            ui->drop_buf = cui__realloc(ui, ui->drop_buf, cap);
+            ui->drop_cap = cap;
+        }
+        memcpy(ui->drop_buf + ui->drop_used, paths[i], n);
+        ui->drop_off[ui->drop_count++] = (int)ui->drop_used;
+        ui->drop_used += n;
+    }
+    ui->drop_x = x; ui->drop_y = y;
+    ui->mx = x; ui->my = y;
+    ui->drop_claimed = false;
+    cui__poke(ui);
+}
+
+int cui_dropped_file_count(cui_ctx *ui) { return ui->drop_claimed ? 0 : ui->drop_count; }
+const char *cui_dropped_file(cui_ctx *ui, int index) {
+    if (index < 0 || index >= ui->drop_count) return NULL;
+    return ui->drop_buf + ui->drop_off[index];
+}
+bool cui_file_drag_active(cui_ctx *ui) { return ui->drag_hover; }
 
 void cui_input_text(cui_ctx *ui, const char *utf8) {
     if (!utf8) return;
@@ -676,6 +712,9 @@ void cui_end_frame(cui_ctx *ui) {
     ui->text_in_len = 0;
     ui->text_in[0] = 0;
     ui->input_this_frame = false;
+    ui->drop_count = 0;
+    ui->drop_used = 0;
+    ui->drop_claimed = false;
 
     if (ui->platform.set_cursor) ui->platform.set_cursor(ui->platform.user, ui->cursor);
 

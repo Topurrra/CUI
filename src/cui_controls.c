@@ -339,7 +339,8 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
     ui->nodes[col].gap = 6;
     ui->nodes[col].w = CUI_FILL;
     cui__open(ui, col);
-    cui__slider_header(ui, label, cui__frame_printf(ui, "%.0f \xe2\x80\x93 %.0f", (double)*lo, (double)*hi));
+    if (ui->slider_no_header) ui->slider_no_header = false;
+    else cui__slider_header(ui, label, cui__frame_printf(ui, "%.0f \xe2\x80\x93 %.0f", (double)*lo, (double)*hi));
     int tr = cui__leaf(ui, track_id, CUI_FILL, CUI_PX(22));
     ui->nodes[tr].self_align = CUI_ALIGN_STRETCH;
     cui__mark_interactive(ui, tr, CUI_IF_FOCUSABLE);

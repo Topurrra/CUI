@@ -248,6 +248,14 @@ CUI_API void cui_input_scroll(cui_ctx *ui, float dx, float dy);  /* in lines; +d
 CUI_API void cui_input_key(cui_ctx *ui, cui_key key, bool down, int mods);
 CUI_API void cui_input_text(cui_ctx *ui, const char *utf8);
 CUI_API void cui_input_focus(cui_ctx *ui, bool window_focused);
+/* Files dragged from the OS: hover while a drag is over the window (where the
+ * platform reports it), then the drop itself. Paths are UTF-8 and copied. */
+CUI_API void cui_input_file_hover(cui_ctx *ui, bool hovering, float x, float y);
+CUI_API void cui_input_file_drop(cui_ctx *ui, const char *const *paths, int count, float x, float y);
+/* Files dropped this frame (dropzones claim theirs first). */
+CUI_API int cui_dropped_file_count(cui_ctx *ui);
+CUI_API const char *cui_dropped_file(cui_ctx *ui, int index);
+CUI_API bool cui_file_drag_active(cui_ctx *ui);   /* files are being dragged over the window */
 
 /* Platform services. The built-in backends set these. */
 typedef struct cui_platform_iface {
@@ -956,6 +964,90 @@ CUI_API void cui_swipe_item_begin(cui_ctx *ui, const char *id, const cui_swipe_a
 CUI_API int cui_swipe_item_end(cui_ctx *ui);
 
 /* ------------------------------------------------------------------------ */
+/* Pickers                                                                  */
+/* ------------------------------------------------------------------------ */
+
+/* Multi-select: a field with chips for the chosen items and a list with
+ * checkboxes (and search). selected[i] is true for chosen items. */
+typedef struct cui_multi_select_opts {
+    int _;
+    const char *label;
+    const char *placeholder;
+    const char *const *icons;
+    bool searchable;
+    int max_chips;             /* chips before "+N", default 3 */
+    cui_size width;
+} cui_multi_select_opts;
+CUI_API bool cui_multi_select_ex(cui_ctx *ui, const char *id, const char *const *items, int count, bool *selected, const cui_multi_select_opts *opts);
+
+/* Date ranges. A zero start means nothing is chosen. */
+typedef struct cui_date_range { cui_date start, end; } cui_date_range;
+/* One or two months side by side; click a start and an end. */
+CUI_API bool cui_range_calendar(cui_ctx *ui, const char *id, cui_date_range *range, int months);
+typedef struct cui_date_range_opts { int _; const char *label; const char *placeholder; cui_size width; bool no_presets; } cui_date_range_opts;
+CUI_API bool cui_date_range_picker_ex(cui_ctx *ui, const char *id, cui_date_range *range, const cui_date_range_opts *opts);
+CUI_API int cui_date_to_days(cui_date d);      /* days since 1970-01-01 */
+CUI_API cui_date cui_date_from_days(int days);
+
+/* Time picker: a field that opens hour and minute columns. hour is 0..23. */
+typedef struct cui_time_opts { int _; const char *label; bool twelve_hour; int minute_step; cui_size width; } cui_time_opts;
+CUI_API bool cui_time_picker_ex(cui_ctx *ui, const char *id, int *hour, int *minute, const cui_time_opts *opts);
+
+/* Wheel picker: a drum of options that you drag, scroll or arrow through.
+ * Several side by side make a date or time reel. */
+/* join_left / join_right square off the selection band so wheels placed
+ * side by side share one continuous band. */
+typedef struct cui_wheel_opts { int _; int rows; cui_size width; bool loop; bool join_left, join_right; } cui_wheel_opts;
+CUI_API bool cui_wheel_picker_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_wheel_opts *opts);
+
+/* Time dial: a clock face. Drag the hand to set hours, then minutes. */
+CUI_API bool cui_time_dial(cui_ctx *ui, const char *id, int *hour, int *minute, float size);
+
+/* Ruler slider: a tape measure that slides under a fixed marker, with
+ * momentum and snapping to step. */
+typedef struct cui_ruler_opts { int _; float step; int major_every; float spacing; const char *format; const char *unit; cui_size width; } cui_ruler_opts;
+CUI_API bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_ruler_opts *opts);
+
+/* Range slider over a histogram of the data it filters. */
+typedef struct cui_histogram_opts { int _; float height; const char *format; } cui_histogram_opts;
+CUI_API bool cui_histogram_slider_ex(cui_ctx *ui, const char *label, const float *bins, int bin_count, float *lo, float *hi,
+                                     float min, float max, const cui_histogram_opts *opts);
+
+/* ------------------------------------------------------------------------ */
+/* Capture                                                                  */
+/* ------------------------------------------------------------------------ */
+
+/* Signature pad: draw with the mouse or a pen. The strokes are kept for you;
+ * read them with cui_signature_points (stroke_ends[i] is one past the last
+ * point of stroke i). */
+typedef struct cui_signature_opts { int _; cui_size width; float height; const char *placeholder; cui_color ink; } cui_signature_opts;
+CUI_API bool cui_signature_pad_ex(cui_ctx *ui, const char *id, const cui_signature_opts *opts);
+CUI_API int cui_signature_points(cui_ctx *ui, const char *id, const cui_vec2 **points, const int **stroke_ends, int *stroke_count);
+CUI_API void cui_signature_clear(cui_ctx *ui, const char *id);
+
+/* Dropzone: drop files from the OS, or click to browse. Returns the number
+ * of files dropped on it this frame (read them with cui_dropped_file), -1
+ * when clicked (open a file dialog), 0 otherwise. accept filters by
+ * extension, e.g. "png;jpg;pdf". */
+typedef struct cui_dropzone_opts {
+    int _;
+    const char *title;         /* default "Drop files here" */
+    const char *description;   /* default "or click to browse" */
+    const char *icon;
+    const char *accept;
+    float height;              /* default 160 */
+    cui_size width;
+    bool compact;              /* one row instead of a tall area */
+} cui_dropzone_opts;
+CUI_API int cui_dropzone_ex(cui_ctx *ui, const char *id, const cui_dropzone_opts *opts);
+CUI_API bool cui_path_has_extension(const char *path, const char *accept);
+
+/* Avatar upload: a round avatar that takes a dropped image, with a camera
+ * badge on hover. Returns 1 when *image changed, -1 when clicked (browse),
+ * 0 otherwise. A dropped image is loaded with cui_image_load. */
+CUI_API int cui_avatar_upload(cui_ctx *ui, const char *id, const char *name, cui_texture *image, float size);
+
+/* ------------------------------------------------------------------------ */
 /* More inputs                                                              */
 /* ------------------------------------------------------------------------ */
 
@@ -1137,6 +1229,14 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
 #define cui_reorder_item(ui, pos)           CUI__SCOPE(cui_reorder_item_begin((ui), (pos)), cui_reorder_item_end(ui))
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
+#define cui_multi_select(ui, id, items, count, selected, ...) cui_multi_select_ex((ui), (id), (items), (count), (selected), CUI__OPTS(cui_multi_select_opts, __VA_ARGS__))
+#define cui_date_range_picker(ui, id, range, ...) cui_date_range_picker_ex((ui), (id), (range), CUI__OPTS(cui_date_range_opts, __VA_ARGS__))
+#define cui_time_picker(ui, id, hour, minute, ...) cui_time_picker_ex((ui), (id), (hour), (minute), CUI__OPTS(cui_time_opts, __VA_ARGS__))
+#define cui_wheel_picker(ui, id, items, count, index, ...) cui_wheel_picker_ex((ui), (id), (items), (count), (index), CUI__OPTS(cui_wheel_opts, __VA_ARGS__))
+#define cui_ruler_slider(ui, label, value, min, max, ...) cui_ruler_slider_ex((ui), (label), (value), (min), (max), CUI__OPTS(cui_ruler_opts, __VA_ARGS__))
+#define cui_histogram_slider(ui, label, bins, n, lo, hi, min, max, ...) cui_histogram_slider_ex((ui), (label), (bins), (n), (lo), (hi), (min), (max), CUI__OPTS(cui_histogram_opts, __VA_ARGS__))
+#define cui_signature_pad(ui, id, ...)      cui_signature_pad_ex((ui), (id), CUI__OPTS(cui_signature_opts, __VA_ARGS__))
+#define cui_dropzone(ui, id, ...)           cui_dropzone_ex((ui), (id), CUI__OPTS(cui_dropzone_opts, __VA_ARGS__))
 #define cui_split_button(ui, label, items, count, ...) cui_split_button_ex((ui), (label), (items), (count), CUI__OPTS(cui_split_button_opts, __VA_ARGS__))
 #define cui_toggle_group(ui, id, labels, count, values, ...) cui_toggle_group_ex((ui), (id), (labels), (count), (values), CUI__OPTS(cui_toggle_group_opts, __VA_ARGS__))
 #define cui_confirm_button(ui, label, ...)  cui_confirm_button_ex((ui), (label), CUI__OPTS(cui_confirm_opts, __VA_ARGS__))

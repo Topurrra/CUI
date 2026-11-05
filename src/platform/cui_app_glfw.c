@@ -100,6 +100,15 @@ static void cb_char(GLFWwindow *w, unsigned int cp) {
 static void cb_focus(GLFWwindow *w, int f) { cui_input_focus(cui__glfw_app(w)->ui, f != 0); }
 static void cb_close(GLFWwindow *w) { cui__glfw_app(w)->running = false; }
 static void cb_refresh(GLFWwindow *w) { cui_request_redraw(cui__glfw_app(w)->ui); }
+static void cb_drop(GLFWwindow *w, int count, const char **paths) {
+    double x = 0, y = 0;
+    glfwGetCursorPos(w, &x, &y);
+#if !defined(__APPLE__)
+    float s; cui__glfw_scale(w, &s);
+    x /= s; y /= s;
+#endif
+    cui_input_file_drop(cui__glfw_app(w)->ui, paths, count, (float)x, (float)y);
+}
 
 bool cui__plat_init(cui_app *app) {
     if (!glfwInit()) return false;
@@ -126,6 +135,7 @@ bool cui__plat_init(cui_app *app) {
     glfwSetWindowFocusCallback(g->win, cb_focus);
     glfwSetWindowCloseCallback(g->win, cb_close);
     glfwSetWindowRefreshCallback(g->win, cb_refresh);
+    glfwSetDropCallback(g->win, cb_drop);
     int shapes[CUI_CURSOR_COUNT] = { GLFW_ARROW_CURSOR, GLFW_HAND_CURSOR, GLFW_IBEAM_CURSOR, GLFW_HRESIZE_CURSOR,
                                      GLFW_VRESIZE_CURSOR, GLFW_ARROW_CURSOR, GLFW_ARROW_CURSOR };
     for (int i = 0; i < CUI_CURSOR_COUNT; i++) g->cursors[i] = glfwCreateStandardCursor(shapes[i]);

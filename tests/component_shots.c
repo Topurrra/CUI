@@ -2,6 +2,7 @@
  *   cui_component_shots <out-dir> [scene] */
 #include <cui/cui.h>
 #include <cui/cui_render.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -455,6 +456,94 @@ SCENE(shortcut_rec) {
     }
 }
 
+static void body_multi(cui_ctx *ui) {
+    static bool sel[6] = { true, false, true, false, false, true };
+    static const char *items[] = { "C", "C++", "Rust", "Zig", "Go", "Swift" };
+    cui_box(ui, .width = CUI_PX(300)) { cui_multi_select(ui, "langs", items, 6, sel, .label = "Languages"); }
+}
+static void scene_multi(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "langs"), -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 600, 10); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_multi(ui); }
+}
+static void body_range(cui_ctx *ui) {
+    static cui_date_range r = { { 2026, 11, 3 }, { 2026, 11, 14 } };
+    cui_date_range_picker(ui, "range", &r, .width = CUI_PX(300));
+}
+static void scene_range(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "range"), -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 10, 10); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_range(ui); }
+}
+static void body_time(cui_ctx *ui) {
+    static int h = 9, m = 30, h2 = 18, m2 = 45;
+    cui_row(ui, .gap = 12) {
+        cui_time_picker(ui, "start", &h, &m);
+        cui_time_picker(ui, "end", &h2, &m2, .twelve_hour = true, .minute_step = 15);
+    }
+}
+static void scene_time(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "end"), -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 10, 10); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_time(ui); }
+}
+SCENE(wheels) {
+    static int day = 13, month = 10, year = 6, dh = 7, dm = 25;
+    static const char *days[31], *months[12], *years[12];
+    static char dbuf[31][4], ybuf[12][6];
+    static const char *mn[12] = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+    for (int k = 0; k < 31; k++) { snprintf(dbuf[k], sizeof dbuf[k], "%d", k + 1); days[k] = dbuf[k]; }
+    for (int k = 0; k < 12; k++) { months[k] = mn[k]; snprintf(ybuf[k], sizeof ybuf[k], "%d", 2020 + k); years[k] = ybuf[k]; }
+    cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER) {
+        cui_card(ui, .dir = CUI_ROW, .gap = 0, .pad = 8) {
+            cui_wheel_picker(ui, "day", days, 31, &day, .width = CUI_PX(64), .loop = true, .join_right = true);
+            cui_wheel_picker(ui, "month", months, 12, &month, .width = CUI_PX(128), .loop = true, .join_left = true, .join_right = true);
+            cui_wheel_picker(ui, "year", years, 12, &year, .width = CUI_PX(80), .join_left = true);
+        }
+        cui_time_dial(ui, "dial", &dh, &dm, 232);
+    }
+}
+SCENE(rulers) {
+    static float height = 172, lo = 40, hi = 160;
+    static const float bins[] = { 2, 4, 7, 12, 18, 26, 31, 29, 34, 40, 37, 30, 24, 22, 18, 15, 11, 9, 7, 5, 4, 3, 2, 1 };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) { cui_ruler_slider(ui, "Height", &height, 120, 220, .unit = "cm"); }
+        cui_card(ui, .width = CUI_GROW(1), .gap = 6) {
+            cui_histogram_slider(ui, "Price", bins, 24, &lo, &hi, 0, 240, .format = "$%.0f");
+            cui_muted(ui, "1,204 listings in range");
+        }
+    }
+}
+static void body_capture(cui_ctx *ui) {
+    static cui_texture avatar;
+    cui_row(ui, .gap = 20, .width = CUI_FILL, .align = CUI_ALIGN_START) {
+        cui_box(ui, .width = CUI_GROW(1)) { cui_dropzone(ui, "files", .description = "PNG, JPG or PDF, up to 25 MB", .accept = "png;jpg;pdf", .height = 200); }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 16) {
+            cui_signature_pad(ui, "sig", .height = 140);
+            cui_row(ui, .gap = 16, .align = CUI_ALIGN_CENTER) {
+                cui_avatar_upload(ui, "avatar", "Ada Lovelace", &avatar, 56);
+                cui_column(ui, .gap = 2) { cui_label(ui, "Profile photo"); cui_muted(ui, "Drop an image on the avatar"); }
+            }
+        }
+    }
+}
+static void scene_capture(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int fr = -f - 1;
+        cui_rect sig = cui_get_rect(ui, cui_make_id(ui, "sig") ^ 0x5161u);
+        if (fr >= 10 && fr <= 40 && sig.w > 0) {
+            /* write a quick scribble */
+            float t = (fr - 10) / 30.0f;
+            float x = sig.x + 50 + t * (sig.w - 120);
+            float y = sig.y + 70 + sinf(t * 14) * 18 - t * 10;
+            cui_input_mouse_move(ui, x, y);
+            if (fr == 10) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        }
+        if (fr == 41) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        cui_rect dz = cui_get_rect(ui, cui_make_id(ui, "files"));
+        if (fr >= 45) cui_input_file_hover(ui, true, dz.x + dz.w / 2, dz.y + dz.h / 2);
+        return;
+    }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28, .justify = CUI_JUSTIFY_CENTER) { body_capture(ui); }
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -673,6 +762,9 @@ int main(int argc, char **argv) {
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
         { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },
         { "shortcut-recorder", scene_shortcut_rec, 760, 110, true },
+        { "multi-select", scene_multi, 380, 420, true }, { "date-range", scene_range, 760, 440, true },
+        { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },
+        { "ruler-histogram", scene_rulers, 860, 200, true }, { "capture", scene_capture, 900, 300, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
