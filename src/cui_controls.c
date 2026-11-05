@@ -468,7 +468,7 @@ bool cui_chip_ex(cui_ctx *ui, const char *label, bool *selected, const cui_chip_
     cui_color base_bg = cui_mix(cui__rgba(0, 0, 0, 0), CUI_C(ui, HOVER), st->hover);
     n->bg = cui_mix(base_bg, CUI_C(ui, ACCENT_SUBTLE), st->sel);
     n->border = 1;
-    n->border_color = cui_mix(CUI_C(ui, BORDER_STRONG), cui_mix(CUI_C(ui, ACCENT), CUI_C(ui, BACKGROUND), 0.45f), st->sel);
+    n->border_color = cui_mix(cui__quiet_edge(ui, st->hover), cui_mix(CUI_C(ui, ACCENT), CUI_C(ui, BACKGROUND), 0.45f), st->sel);
     n->scale = st->press.x;
     n->opacity = disabled ? 0.45f : 1;
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
@@ -587,7 +587,7 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
             p->underline = true;
         } else {
             p->bg = CUI_C(ui, ACTIVE);
-            p->radius = inner_h * 0.5f;
+            p->radius = CUI_MIN(ui->theme.radius_control, inner_h * 0.5f);
         }
         ui->nodes[hl].paint = cui__paint_highlight;
         ui->nodes[hl].paint_data = p;
@@ -603,7 +603,8 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         bool icon_only = icons && icons[k] && (!items[k] || cui__display_len(items[k]) == 0);
         if (icon_only) { in->pad[1] = in->pad[3] = 0; in->w = CUI_PX(kind == 1 ? h : inner_h); }   /* square segment */
         if (full_width) in->w = CUI_FILL;
-        in->radius = CUI_CORNERS(inner_h * 0.5f);
+        /* segments nest inside the track (3 in), pill tabs stand alone */
+        in->radius = CUI_CORNERS(CUI_MIN(kind == 0 ? ui->theme.radius_control - 3 : ui->theme.radius_control, inner_h * 0.5f));
         if (kind == 2 && !sel) in->bg = cui_alpha(CUI_C(ui, HOVER), st->hover[k]);
         cui__mark_interactive(ui, it, CUI_IF_FOCUSABLE);
         if (ir[k].hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);

@@ -358,7 +358,7 @@ void cui_button_group_begin(cui_ctx *ui) {
     n->dir = CUI_ROW;
     n->self_align = CUI__ALIGN_NOSTRETCH;
     n->border = 1;
-    n->border_color = CUI_C(ui, BORDER_STRONG);
+    n->border_color = cui__quiet_edge(ui, 0);
     n->radius = CUI_CORNERS(CUI_MIN(ui->theme.radius_control, ui->theme.control_md * 0.5f));
     n->flags |= CUI_NF_CLIP | CUI_NF_PAINT_AFTER;
     n->paint = cui__paint_group_dividers;

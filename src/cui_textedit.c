@@ -592,11 +592,11 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     bn->w = outer >= 0 ? CUI_FILL : (o->width.kind ? o->width : CUI_FILL);
     bn->min_w = 80;
     if (style == CUI__FIELD_BOXED) {
-        float rad = multiline ? CUI_MIN(ui->theme.radius_control, 14.0f) : CUI_MIN(ui->theme.radius_control, h * 0.5f);
+        float rad = CUI_MIN(ui->theme.radius_control, h * 0.5f);
         bn->radius = CUI_CORNERS(rad);
-        bn->pad[1] = bn->pad[3] = multiline ? 14 : 14;
+        bn->pad[1] = bn->pad[3] = 12;
         if (multiline) { bn->pad[0] = bn->pad[2] = 8; }
-        if (o->icon || search_icon) bn->pad[3] = 12;
+        if (o->icon || search_icon) bn->pad[3] = 10;
         bn->bg = disabled ? CUI_C(ui, SURFACE_MUTED) : CUI_C(ui, SURFACE);
         bn->border = 1;
         cui_color border = cui_mix(CUI_C(ui, BORDER_STRONG), CUI_C(ui, TEXT_MUTED), e->hover * 0.45f);

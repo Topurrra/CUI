@@ -52,9 +52,9 @@ Spend the accent with intent: the selected item, the one series that matters, pr
 
 ```c
 cui_theme *t = cui_theme_get(ui);
-t->radius_control = 8;           /* squarer buttons and inputs (default 18, pill shaped at 36 pt) */
-t->radius_panel = 12;            /* menus, popovers (22) */
-t->radius_surface = 16;          /* cards, dialogs (28) */
+t->radius_control = 18;          /* pill shaped buttons and inputs (default 10) */
+t->radius_panel = 20;            /* menus, popovers (14) */
+t->radius_surface = 26;          /* cards, dialogs (18) */
 t->control_md = 32;              /* denser controls (36) */
 t->text_body = 14;               /* body text size (13) */
 t->font_scale = 1.1f;            /* scale all text */

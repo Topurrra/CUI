@@ -18,7 +18,24 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 
 - Group by proximity first, a hairline border second, a card only for a real boundary.
 - Cards rest on a border with no shadow. Only floating layers cast shadows: menus, popovers, dialogs, toasts.
-- Corners are concentric: an inner radius is the outer radius minus the padding between them. Controls are pill shaped (18 pt), panels 22 pt, surfaces 28 pt.
+- Corners are concentric: an inner radius is the outer radius minus the padding between them. Controls are soft rectangles (10 pt), panels 14 pt, surfaces 18 pt, so a menu item sits 6 pt inside its panel at 8 pt. Fully round shapes are kept for things that are round by nature: switches, slider thumbs, avatars, chips, progress bars.
+- Two kinds of edge. A field, checkbox or radio is marked only by its edge, so that edge is 3:1 against the surface. A button, chip or button group is already marked by its label, so its edge is a quiet hairline that firms up under the pointer.
+- Solid buttons are flat color with a faint lit upper rim. No gloss and no drop shadow: they sit in the page.
+- In dark mode, depth comes from lightness: the page is the darkest level and every layer above it is a step lighter. Floating layers add a hairline edge and a close, tight shadow rather than a wide haze.
+
+## Tokens
+
+| Token | Value | Used for |
+|---|---|---|
+| `radius_control` | 10 | buttons, fields, triggers, segmented tracks |
+| `radius_panel` | 14 | menus, popovers, nested panels (items 8) |
+| `radius_surface` | 18 | cards, dialogs, sheets |
+| `control_sm / md / lg` | 30 / 36 / 44 | control heights |
+| button padding | 11 / 14 / 18 | horizontal, by size |
+| field padding | 12 (10 beside an icon) | horizontal |
+| `BORDER` / `BORDER_STRONG` | OKLab L 0.915 / 0.665 light, 0.29 / 0.515 dark | hairlines / 3:1 control edges |
+| dark levels | 0.18 page, 0.21 surface, 0.24 raised | depth by lightness |
+| floating shadow | 12/32 at 12%, 1/3 at 6% (light) | menus, popovers, dialogs, toasts |
 
 ## Spacing
 
@@ -30,6 +47,8 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 - Motion explains cause and effect: what opened, what changed, where it came from.
 - Anything that reports state lands without overshoot (switch thumbs, progress, panel heights). Small feedback has a little life (presses, gliding highlights).
 - Presses scale to about 0.97, except for triggers that anchor a menu: those answer with color.
+- Frequent feedback is nearly instant, rare moments may take longer. Hover color settles in about 120 ms, presses in about 150 ms, a popover opens in about 250 ms and closes in about 150 ms, a dialog takes up to 400 ms.
+- Things already on screen move; new things fade and travel a few points at most (a popover rises 6 pt from 96% scale).
 - Exits are faster than entrances. Everything is interruptible because everything is a spring.
 - Every animation has a reduced motion path that keeps the final state and the feedback.
 

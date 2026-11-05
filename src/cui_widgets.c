@@ -174,7 +174,7 @@ bool cui_link(cui_ctx *ui, const char *text) {
     cui_id id = cui_make_id(ui, text) ^ 0x11AC0009u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__btn_state *st = cui_state(ui, id, sizeof *st);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.16f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
     int i = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body),
                            cui_mix(CUI_C(ui, ACCENT_STRONG), CUI_C(ui, FOREGROUND), ui->accent == CUI_ACCENT_NEUTRAL ? 1.0f : 0.0f), false);
@@ -209,11 +209,15 @@ void cui__paint_sheen(cui_ctx *ui, cui_node *n, void *data) {
     cui__draw_sheen(ui, n->rect, n->radius, data ? *(float *)data : 1.0f);
 }
 
+cui_color cui__quiet_edge(cui_ctx *ui, float hover) {
+    return cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), 0.35f + 0.65f * cui__clampf(hover, 0, 1));
+}
+
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected) {
     cui__btn_colors c;
     cui_color clear = cui__rgba(0, 0, 0, 0);
     cui_color fg = CUI_C(ui, FOREGROUND);
-    c.border = clear;
+    c.border = c.border_hover = clear;
     switch (v) {
     case CUI_BUTTON_PRIMARY: {
         cui_color a = CUI_C(ui, ACCENT);
@@ -237,7 +241,8 @@ cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selec
         c.bg_hover = CUI_C(ui, HOVER);
         c.bg_press = CUI_C(ui, ACTIVE);
         c.fg = fg;
-        c.border = CUI_C(ui, BORDER_STRONG);
+        c.border = cui__quiet_edge(ui, 0);
+        c.border_hover = cui__quiet_edge(ui, 1);
         break;
     case CUI_BUTTON_GHOST:
         c.bg = selected ? CUI_C(ui, ACTIVE) : clear;
@@ -330,14 +335,14 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     if (v == CUI_BUTTON_DEFAULT) v = (icon_only || ui->button_group_depth > 0) ? CUI_BUTTON_GHOST : CUI_BUTTON_SECONDARY;
     cui__btn_colors col = cui__button_colors(ui, v, o->selected);
     if (o->color.r | o->color.g | o->color.b | o->color.a) col.fg = cui_color_of(ui, o->color);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.16f);
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, 0.12f);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, 0.12f);
     cui__spring(ui, &st->press, r.pressed ? 0.97f : 1.0f, CUI_SPRING_SNAPPY);
 
     float h = cui__control_height(ui, o->size);
     float fs = o->size == CUI_SIZE_SM ? ui->theme.text_sm : o->size == CUI_SIZE_LG ? ui->theme.text_lg - 1 : ui->theme.text_body;
     float icon_size = o->size == CUI_SIZE_SM ? 14 : o->size == CUI_SIZE_LG ? 18 : 16;
-    float pad = o->size == CUI_SIZE_SM ? 12 : o->size == CUI_SIZE_LG ? 20 : 15;
+    float pad = o->size == CUI_SIZE_SM ? 11 : o->size == CUI_SIZE_LG ? 18 : 14;
     if (v == CUI_BUTTON_LINK) pad = 2;
 
     cui_id swap_id = id ^ 0x1C05A9u;   /* per button: positions repeat across unnamed containers */
@@ -360,22 +365,16 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     cui_color bg = cui_mix(col.bg, col.bg_hover, st->hover);
     if (r.pressed) bg = col.bg_press;
     n->bg = bg;
-    if (col.border.a) { n->border = 1; n->border_color = col.border; }
+    if (col.border.a) { n->border = 1; n->border_color = cui_mix(col.border, col.border_hover, st->hover); }
     n->scale = st->press.x;
     n->opacity = disabled ? 0.45f : 1.0f;
     if (disabled) {
         /* flat while disabled */
     } else if (v == CUI_BUTTON_PRIMARY || v == CUI_BUTTON_DANGER) {
-        /* solid buttons: a little light from above, and a soft lift */
+        /* solid buttons are flat color with a faint lit upper rim; no gloss,
+         * no drop shadow: they sit in the page, not above it */
         float *k = cui__frame_alloc(ui, sizeof *k);
-        *k = r.pressed ? 0.45f : 1.0f;
-        n->paint = cui__paint_sheen;
-        n->paint_data = k;
-        n->elevation = CUI_ELEVATION_RESTING;
-        n->elevation_alpha = r.pressed ? 0.3f : 0.7f + 0.3f * st->hover;
-    } else if (v == CUI_BUTTON_SECONDARY) {
-        float *k = cui__frame_alloc(ui, sizeof *k);
-        *k = r.pressed ? 0.1f : 0.32f;
+        *k = r.pressed ? 0.2f : 0.55f;
         n->paint = cui__paint_sheen;
         n->paint_data = k;
     }

@@ -51,8 +51,8 @@ int cui_split_button_ex(cui_ctx *ui, const char *label, const char *const *items
     cui__divider_paint *dp = cui__frame_alloc(ui, sizeof *dp);
     cui__btn_colors col = cui__button_colors(ui, v, false);
     bool filled = v == CUI_BUTTON_PRIMARY || v == CUI_BUTTON_DANGER;
-    dp->c = filled ? cui_alpha(col.fg, 0.28f) : CUI_C(ui, BORDER_STRONG);
-    if (v == CUI_BUTTON_OUTLINE) { gn->border = 1; gn->border_color = CUI_C(ui, BORDER_STRONG); }
+    dp->c = filled ? cui_alpha(col.fg, 0.28f) : cui__quiet_edge(ui, 0);
+    if (v == CUI_BUTTON_OUTLINE) { gn->border = 1; gn->border_color = cui__quiet_edge(ui, 0); }
     gn->paint = cui__paint_split_divider;
     gn->paint_data = dp;
     cui__open(ui, g);

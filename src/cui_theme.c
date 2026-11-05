@@ -157,8 +157,8 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         t->tone_green = cui_oklch(0.50f, 0.12f, 162, 1);
         c[CUI_TOKEN_SCRIM] = cui__rgba(10, 10, 12, 82);
     } else {
-        c[CUI_TOKEN_BACKGROUND] = cui__gray(0.19f);
-        c[CUI_TOKEN_SURFACE] = cui__gray(0.215f);
+        c[CUI_TOKEN_BACKGROUND] = cui__gray(0.18f);
+        c[CUI_TOKEN_SURFACE] = cui__gray(0.21f);
         c[CUI_TOKEN_SURFACE_RAISED] = cui__gray(0.24f);
         c[CUI_TOKEN_SURFACE_MUTED] = cui__gray(0.26f);
         c[CUI_TOKEN_FOREGROUND] = cui__gray(0.96f);
@@ -233,9 +233,11 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         c[CUI_TOKEN_SERIES_1 + i] = cui__rgba((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v, 255);
     }
 
-    t->radius_control = 18;
-    t->radius_panel = 22;
-    t->radius_surface = 28;
+    /* one scale, nested concentrically: a menu item (8) sits 6 inside its
+     * panel (14); controls are soft rectangles, not pills */
+    t->radius_control = 10;
+    t->radius_panel = 14;
+    t->radius_surface = 18;
     t->control_sm = 30;
     t->control_md = 36;
     t->control_lg = 44;
@@ -249,13 +251,15 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         t->shadow_resting[0] = (cui_shadow){ 1, 2, 0, 0.035f };
         t->shadow_raised[0] = (cui_shadow){ 6, 18, 0, 0.065f };
         t->shadow_raised[1] = (cui_shadow){ 1, 3, 0, 0.035f };
-        t->shadow_floating[0] = (cui_shadow){ 20, 48, 0, 0.11f };
-        t->shadow_floating[1] = (cui_shadow){ 3, 10, 0, 0.05f };
+        /* close and crisp rather than a wide haze: a tight contact shadow and
+         * a short drop pulled in at the sides */
+        t->shadow_floating[0] = (cui_shadow){ 12, 32, -4, 0.12f };
+        t->shadow_floating[1] = (cui_shadow){ 1, 3, 0, 0.06f };
     } else {
         t->shadow_resting[0] = (cui_shadow){ 1, 2, 0, 0.18f };
         t->shadow_raised[0] = (cui_shadow){ 8, 22, 0, 0.22f };
-        t->shadow_floating[0] = (cui_shadow){ 22, 55, 0, 0.34f };
-        t->shadow_floating[1] = (cui_shadow){ 2, 6, 0, 0.18f };
+        t->shadow_floating[0] = (cui_shadow){ 14, 36, -4, 0.40f };
+        t->shadow_floating[1] = (cui_shadow){ 1, 3, 0, 0.24f };
     }
     t->motion = 1;
     t->font_scale = 1;

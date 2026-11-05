@@ -390,11 +390,9 @@ void cui__draw_top_light(cui_ctx *ui, cui_rect r, cui_corners rad, float alpha) 
     }
 }
 
-/* Sheen for solid controls: a soft vertical light and a lit upper rim. */
+/* Sheen for solid controls: a lit upper rim that fades down the sides. */
 void cui__draw_sheen(cui_ctx *ui, cui_rect r, cui_corners rad, float k) {
     if (r.w < 2 || r.h < 2 || k <= 0) return;
-    bool dark = ui->mode == CUI_THEME_DARK;
-    cui_draw_rect_gradient(ui, r, rad, cui__rgba(255, 255, 255, (int)(255 * 0.08f * k)), cui__rgba(0, 0, 0, (int)(255 * (dark ? 0.045f : 0.06f) * k)));
     /* the lit rim fades out down the sides instead of stopping at a line */
     enum { B = 8 };
     for (int i = 1; i <= B; i++) {

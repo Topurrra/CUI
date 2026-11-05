@@ -294,9 +294,9 @@ typedef struct cui_theme {
     cui_color colors[CUI_TOKEN_COUNT];
     cui_color tone_sky, tone_teal, tone_green, tone_amber, tone_rose, tone_orchid, tone_violet;
 
-    float radius_control;   /* buttons, inputs                (default 18) */
-    float radius_panel;     /* menus, popovers, nested panels (default 22) */
-    float radius_surface;   /* cards, dialogs                 (default 28) */
+    float radius_control;   /* buttons, inputs                (default 10) */
+    float radius_panel;     /* menus, popovers, nested panels (default 14) */
+    float radius_surface;   /* cards, dialogs                 (default 18) */
 
     float control_sm, control_md, control_lg;   /* control heights (30/36/44) */
     float text_xs, text_sm, text_body, text_lg; /* 11/12/13/15 */
