@@ -1220,6 +1220,16 @@ CUI_API void cui_text_reveal_ex(cui_ctx *ui, const char *id, const char *text, c
 /* One word at a time; the next one rolls up into place and the width follows. */
 CUI_API void cui_word_rotate_ex(cui_ctx *ui, const char *id, const char *const *words, int count, float interval, const cui_text_fx_opts *opts);
 
+/* Text painted with a gradient from one color to another; animate makes it drift. */
+typedef struct cui_gradient_text_opts { int _; cui_font font; float size; cui_color from, to; bool animate; cui_size width; } cui_gradient_text_opts;
+CUI_API void cui_gradient_text_ex(cui_ctx *ui, const char *text, const cui_gradient_text_opts *opts);
+
+/* Spotlight card: a soft light follows the pointer across the card and lights
+ * the nearest stretch of its border. beam sends a light around the edge. */
+typedef struct cui_spotlight_opts { int _; cui_size width, height; float pad, gap; cui_color color; bool beam; } cui_spotlight_opts;
+CUI_API void cui_spotlight_begin(cui_ctx *ui, const char *id, const cui_spotlight_opts *opts);
+CUI_API void cui_spotlight_end(cui_ctx *ui);
+
 typedef enum cui_loader_style { CUI_LOADER_DOTS = 0, CUI_LOADER_BARS, CUI_LOADER_PULSE, CUI_LOADER_ORBIT, CUI_LOADER_GRID } cui_loader_style;
 typedef struct cui_loader_opts { int _; cui_loader_style style; float size; cui_color color; } cui_loader_opts;
 CUI_API void cui_loader_ex(cui_ctx *ui, const cui_loader_opts *opts);
@@ -1715,6 +1725,8 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_typewriter(ui, id, text, ...)   cui_typewriter_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_text_reveal(ui, id, text, ...)  cui_text_reveal_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_word_rotate(ui, id, words, n, interval, ...) cui_word_rotate_ex((ui), (id), (words), (n), (interval), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
+#define cui_gradient_text(ui, text, ...)  cui_gradient_text_ex((ui), (text), CUI__OPTS(cui_gradient_text_opts, __VA_ARGS__))
+#define cui_spotlight(ui, id, ...)          CUI__SCOPE(cui_spotlight_begin((ui), (id), CUI__OPTS(cui_spotlight_opts, __VA_ARGS__)), cui_spotlight_end(ui))
 #define cui_loader(ui, ...)                 cui_loader_ex((ui), CUI__OPTS(cui_loader_opts, __VA_ARGS__))
 #define cui_dock(ui, id, ...)               CUI__SCOPE(cui_dock_begin((ui), (id), CUI__OPTS(cui_dock_opts, __VA_ARGS__)), cui_dock_end(ui))
 #define cui_dock_item(ui, icon, label, ...) cui_dock_item_ex((ui), (icon), (label), CUI__OPTS(cui_dock_item_opts, __VA_ARGS__))

@@ -863,6 +863,21 @@ static void page_motion(cui_ctx *ui) {
         }
         if (cui_button(ui, "Replay", .size = CUI_SIZE_SM, .icon = CUI_ICON_ROTATE_CCW, .variant = CUI_BUTTON_OUTLINE)) replay++;
     }
+    section(ui, "Gradient text and spotlight cards", "A light follows the pointer across a card and along its edge; one sends a beam around its border.");
+    cui_gradient_text(ui, "Ship interfaces people love", .font = CUI_FONT_DISPLAY, .size = 34, .from = CUI_RGB(0x8b5cf6), .to = CUI_RGB(0xec4899), .animate = true);
+    cui_row(ui, .gap = 14, .align = CUI_ALIGN_STRETCH, .width = CUI_FILL) {
+        static const char *titles[] = { "Calm by default", "Motion with purpose", "Keyboard first" };
+        static const char *icons[] = { CUI_ICON_SUN, CUI_ICON_ZAP, CUI_ICON_KEYBOARD };
+        for (int k = 0; k < 3; k++) {
+            cui_push_id_int(ui, k);
+            cui_spotlight(ui, "spot", .width = CUI_GROW(1), .beam = k == 1) {
+                cui_icon(ui, icons[k], 20, CUI_COLOR_ACCENT);
+                cui_text(ui, titles[k], .font = CUI_FONT_MEDIUM, .size = 15);
+                cui_text(ui, "Move the pointer over the card.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+            }
+            cui_pop_id(ui);
+        }
+    }
     section(ui, "Loaders", "Dots, bars, pulse, orbit and grid.");
     cui_row(ui, .gap = 36, .align = CUI_ALIGN_CENTER) {
         for (int k = 0; k < 5; k++) cui_loader(ui, .style = (cui_loader_style)k, .size = 28);

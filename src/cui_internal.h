@@ -495,6 +495,7 @@ struct cui_ctx {
     void *card_stack;              /* card stack being built */
     void *kanban;                  /* kanban board being built */
     void *dock;                    /* dock being built */
+    void *spot;                    /* spotlight card being built */
     void *reasoning;               /* reasoning block being built */
     cui__text_fx_fn text_fx;       /* set while a node with a text effect paints */
     void *text_fx_data;

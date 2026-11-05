@@ -85,6 +85,12 @@ Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software
 
 <table>
 <tr>
+<td colspan="2"><img src="docs/images/showcase/hero-effects-dark.png" alt="Pricing cards with a pointer spotlight, a travelling border beam and gradient text"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Spotlight cards and gradient text</b>: a light follows the pointer, a beam runs along the featured card</sub></td>
+</tr>
+<tr>
 <td width="50%"><img src="docs/images/showcase/hero-desk-dark.png" alt="Control tiles, a now playing card, a waveform and a magnifying dock"></td>
 <td width="50%"><img src="docs/images/showcase/hero-board.png" alt="A kanban board with a card being dragged between columns"></td>
 </tr>
@@ -277,7 +283,7 @@ Every component is documented with a screenshot, usage, options and keyboard beh
 | **Planning** | kanban board, week calendar, gantt chart with dependencies |
 | **Conversation** | chat bubbles, comments, presence, rolling counter, ticker, carousel, image compare, card stack |
 | **Charts** | heatmap, calendar heatmap, treemap, radar, funnel, sankey, waffle, split bar, ranked bar list, activity rings, scatter and bubble |
-| **Motion** | shimmer text, typewriter, word reveal, rotating words, loaders, dock, tab bar, control tiles, waveform, now playing |
+| **Motion** | shimmer text, typewriter, word reveal, rotating words, gradient text, spotlight cards with a border beam, loaders, dock, tab bar, control tiles, waveform, now playing |
 | **AI** | reasoning, tool calls, agent plan and status, sources and citations, context meter, response actions, prompt suggestions, model picker, chat composer, voice orb |
 
 All of them are in [docs/components-more.md](docs/components-more.md), with screenshots in light and dark.

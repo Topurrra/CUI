@@ -1645,6 +1645,52 @@ static void scene_hero_data(cui_ctx *ui, int f) {
     stage(ui, &look_amber, hero_data_body);
 }
 
+static void plan_card(cui_ctx *ui, const char *id, const char *name, const char *price, const char *blurb, const char *const *feats, int nf, bool featured) {
+    cui_spotlight(ui, id, .width = CUI_PX(270), .pad = 22, .gap = 14, .beam = featured) {
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+            cui_text(ui, name, .font = CUI_FONT_MEDIUM, .size = 15, .width = CUI_FILL);
+            if (featured) cui_badge(ui, "Popular", .tone = CUI_TONE_ACCENT, .size = CUI_SIZE_SM);
+        }
+        cui_row(ui, .gap = 4, .align = CUI_ALIGN_END) {
+            cui_text(ui, price, .font = CUI_FONT_DISPLAY, .size = 36, .line_height = 1.0f);
+            cui_text(ui, "/ month", .size = 13, .color = CUI_COLOR_TEXT_MUTED);
+        }
+        cui_text(ui, blurb, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+        cui_separator(ui);
+        for (int k = 0; k < nf; k++) cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+            cui_icon(ui, CUI_ICON_CHECK, 15, featured ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_SECONDARY);
+            cui_text(ui, feats[k], .size = 13.5f);
+        }
+        cui_spacer(ui);
+        cui_button(ui, featured ? "Start free trial" : "Get started", .variant = featured ? CUI_BUTTON_PRIMARY : CUI_BUTTON_SECONDARY, .full_width = true);
+    }
+}
+static void hero_effects_body(cui_ctx *ui) {
+    static const char *f1[] = { "3 projects", "Community support", "Light and dark themes" };
+    static const char *f2[] = { "Unlimited projects", "Every component", "Priority support", "Figma kit" };
+    static const char *f3[] = { "Everything in Pro", "SSO and audit logs", "A dedicated engineer" };
+    cui_column(ui, .gap = 26, .align = CUI_ALIGN_CENTER) {
+        cui_column(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+            cui_badge(ui, "Pricing", .tone = CUI_TONE_ACCENT, .icon = CUI_ICON_SPARKLES);
+            cui_gradient_text(ui, "Ship interfaces people love", .font = CUI_FONT_DISPLAY, .size = 38, .from = CUI_RGB(0x8b5cf6), .to = CUI_RGB(0xec4899));
+            cui_text(ui, "Every component, every platform, one small C library.", .size = 15, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+        cui_row(ui, .gap = 18, .align = CUI_ALIGN_STRETCH) {
+            plan_card(ui, "free", "Hobby", "$0", "For side projects and learning.", f1, 3, false);
+            plan_card(ui, "pro", "Pro", "$19", "For teams shipping every week.", f2, 4, true);
+            plan_card(ui, "team", "Enterprise", "$49", "For companies with many apps.", f3, 3, false);
+        }
+    }
+}
+static void scene_hero_effects(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "team"));
+        if (-f - 1 == 10) cui_input_mouse_move(ui, r.x + r.w * 0.3f, r.y + r.h * 0.25f);
+        return;
+    }
+    stage(ui, &look_violet, hero_effects_body);
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -1695,6 +1741,7 @@ int main(int argc, char **argv) {
         { "hero-charts", scene_hero_charts, 1000, 700, true, false, CUI_ACCENT_VIOLET },
         { "hero-social", scene_hero_social, 1080, 620, true, false, CUI_ACCENT_GREEN },
         { "hero-data", scene_hero_data, 1000, 560, true, false, CUI_ACCENT_AMBER },
+        { "hero-effects", scene_hero_effects, 1000, 700, true, false, CUI_ACCENT_VIOLET },
         { "split-button", scene_split_button, 560, 110, true }, { "toggle-group", scene_toggle_group, 560, 110, true },
         { "morph-buttons", scene_morph, 760, 110, true }, { "user-menu", scene_user_menu, 340, 360, true },
         { "inline-edit", scene_inline_edit, 420, 150, true }, { "scrub", scene_scrub, 600, 110, true },

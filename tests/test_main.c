@@ -1735,7 +1735,7 @@ static void test_viz(void) {
 typedef struct {
     char text[256]; bool done; int clicks, dock_hits; bool tile; int tab; bool tab_changed;
     float progress; bool seeked; cui_now_playing np; int np_flags;
-    cui_id tile_id, tab_id, wave_id, np_id, dock_id;
+    cui_id tile_id, tab_id, wave_id, np_id, dock_id, spot_id;
 } motion_ctx;
 
 static void build_motion(cui_ctx *ui, void *u) {
@@ -1759,6 +1759,8 @@ static void build_motion(cui_ctx *ui, void *u) {
         cui_box(ui, .width = CUI_PX(400)) { if (cui_waveform(ui, "wave", peaks, 40, &a->progress)) a->seeked = true; a->wave_id = cui_last_id(ui); }
         a->np_flags |= cui_now_playing(ui, "np", &a->np);
         a->np_id = cui_last_id(ui);
+        cui_gradient_text(ui, "Gradient", .animate = true);
+        cui_spotlight(ui, "spot", .width = CUI_PX(200), .beam = true) { cui_text(ui, "Inside"); a->spot_id = cui_last_id(ui); }
         cui_dock(ui, "dock") {
             if (cui_dock_item(ui, CUI_ICON_FOLDER, "Files")) a->dock_hits++;
             if (cui_dock_item(ui, CUI_ICON_MAIL, "Mail", .badge = 2)) a->dock_hits += 10;
@@ -1825,6 +1827,14 @@ static void test_motion(void) {
     a.np_flags = 0;
     drag(ui, build_motion, &a, nr.x + nr.w * 0.5f, nr.y + nr.h - 16 - 7, nr.x + nr.w * 0.5f + 40, 4);
     CHECK((a.np_flags & CUI_PLAYER_SEEK) && a.np.position > 30);
+    /* spotlight: the card wraps its content */
+    {
+        cui_rect sr = rect_of(ui, cui_make_id(ui, "spot"));
+        CHECK(sr.w == 200 && sr.h > 40);
+        cui_input_mouse_move(ui, sr.x + 30, sr.y + 20);
+        run(ui, build_motion, &a, 5);
+        CHECK(cui_frame_count(ui) > 0);
+    }
     /* dock: clicking an item */
     cui_rect dr = rect_of(ui, a.dock_id);
     click_at(ui, build_motion, &a, dr.x + 8 + 23, dr.y + dr.h - 12 - 23);

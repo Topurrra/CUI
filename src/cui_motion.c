@@ -224,6 +224,140 @@ void cui_word_rotate_ex(cui_ctx *ui, const char *id_str, const char *const *word
 }
 
 /* ------------------------------------------------------------------------ */
+/* Gradient text                                                            */
+/* ------------------------------------------------------------------------ */
+
+typedef struct { int node; cui_color a, b; float shift; } cui__grad_fx;
+
+static cui_color cui__fx_gradient(cui_ctx *ui, void *data, int byte, float x, float line_y, float *dy, cui_color c) {
+    (void)byte; (void)line_y; (void)dy;
+    cui__grad_fx *p = data;
+    cui_rect r = ui->nodes[p->node].rect;
+    float t = r.w > 0 ? (x - r.x) / r.w : 0;
+    t = t + p->shift;
+    t = t - floorf(t);
+    float k = t < 0.5f ? t * 2 : (1 - t) * 2;   /* there and back, so a drift loops */
+    cui_color g = cui_mix(p->a, p->b, k);
+    g.a = (uint8_t)(g.a * c.a / 255);
+    return g;
+}
+
+void cui_gradient_text_ex(cui_ctx *ui, const char *text, const cui_gradient_text_opts *o) {
+    cui_gradient_text_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_text_fx_opts to;
+    memset(&to, 0, sizeof to);
+    to.font = o->font; to.size = o->size; to.width = o->width;
+    int i = cui__fx_text_node(ui, text, &to, CUI_C(ui, FOREGROUND));
+    cui__grad_fx *p = cui__frame_alloc(ui, sizeof *p);
+    p->node = i;
+    p->a = cui__color_set(o->from) ? cui_color_of(ui, o->from) : cui__mo_accent(ui);
+    p->b = cui__color_set(o->to) ? cui_color_of(ui, o->to) : ui->theme.colors[CUI_TOKEN_SERIES_1 + 3];
+    p->shift = 0;
+    if (o->animate && !cui__still(ui)) { p->shift = (float)fmod(ui->time * 0.12, 1.0); ui->animating = true; }
+    else p->shift = 0;
+    /* without a shift the left edge starts at the first color and the right ends at the second */
+    if (!o->animate) p->shift = 0;
+    ui->nodes[i].text_fx = cui__fx_gradient;
+    ui->nodes[i].text_fx_data = p;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Spotlight card                                                           */
+/* ------------------------------------------------------------------------ */
+
+typedef struct { float hover; float mx, my; bool init; } cui__spot_state;
+typedef struct { float hover, mx, my; cui_color c; bool beam; float t; } cui__spot_paint;
+
+static void cui__lit_border(cui_ctx *ui, cui_rect r, cui_corners rad, float cx, float cy, float reach, cui_color c) {
+    static const float k[3] = { 1.0f, 0.62f, 0.32f };
+    for (int i = 0; i < 3; i++) {
+        float s = reach * k[i];
+        cui_push_clip(ui, (cui_rect){ cx - s, cy - s, s * 2, s * 2 });
+        cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui_alpha(c, 0.36f), 1.5f);
+        cui_pop_clip(ui);
+    }
+}
+
+static void cui__paint_spot_under(cui_ctx *ui, cui_node *n, void *data) {
+    cui__spot_paint *p = data;
+    if (p->hover <= 0.01f) return;
+    cui_rect r = n->rect;
+    float R = CUI_MIN(220.0f, CUI_MAX(r.w, r.h) * 0.45f);
+    cui_push_clip(ui, (cui_rect){ r.x + 1, r.y + 1, r.w - 2, r.h - 2 });
+    cui_draw_shadow(ui, (cui_rect){ p->mx - R * 0.5f, p->my - R * 0.5f, R, R }, CUI_CORNERS(R * 0.5f), R * 0.6f, 0, (cui_vec2){ 0, 0 },
+                    cui_alpha(p->c, (ui->mode == CUI_THEME_DARK ? 0.16f : 0.1f) * p->hover));
+    cui_pop_clip(ui);
+}
+
+static void cui__paint_spot_over(cui_ctx *ui, cui_node *n, void *data) {
+    cui__spot_paint *p = data;
+    cui_rect r = n->rect;
+    if (p->hover > 0.01f) cui__lit_border(ui, r, n->radius, p->mx, p->my, 120, cui_alpha(p->c, p->hover));
+    if (p->beam) {
+        /* a light travelling around the edge */
+        float per = 2 * (r.w + r.h);
+        float d = fmodf(p->t * 140.0f, per);
+        float x, y;
+        if (d < r.w) { x = r.x + d; y = r.y; }
+        else if (d < r.w + r.h) { x = r.x + r.w; y = r.y + d - r.w; }
+        else if (d < 2 * r.w + r.h) { x = r.x + r.w - (d - r.w - r.h); y = r.y + r.h; }
+        else { x = r.x; y = r.y + r.h - (d - 2 * r.w - r.h); }
+        cui__lit_border(ui, r, n->radius, x, y, 70, p->c);
+    }
+}
+
+struct cui_spot_build { int node; struct cui_spot_build *prev; };
+
+void cui_spotlight_begin(cui_ctx *ui, const char *id_str, const cui_spotlight_opts *o) {
+    cui_spotlight_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_id id = cui_make_id(ui, id_str);
+    cui_rect pr = cui__prev_rect(ui, id);
+    bool inside = pr.w > 0 && ui->mouse_inside && ui->mx >= pr.x && ui->mx < pr.x + pr.w && ui->my >= pr.y && ui->my < pr.y + pr.h;
+    cui__spot_state *st = cui_state(ui, id, sizeof *st);
+    cui__tween(ui, &st->hover, inside ? 1.0f : 0.0f, 0.2f);
+    if (inside || !st->init) { st->mx = ui->mx; st->my = ui->my; st->init = true; }
+    int n = cui__node_new(ui, id);
+    cui_node *nd = &ui->nodes[n];
+    nd->w = o->width.kind ? o->width : CUI_FILL;
+    if (o->height.kind) nd->h = o->height;
+    float pad = o->pad > 0 ? o->pad : 20;
+    nd->pad[0] = nd->pad[1] = nd->pad[2] = nd->pad[3] = pad;
+    nd->gap = o->gap > 0 ? o->gap : 10;
+    nd->radius = CUI_CORNERS(ui->theme.radius_panel);
+    nd->bg = CUI_C(ui, SURFACE);
+    nd->border = 1; nd->border_color = CUI_C(ui, BORDER);
+    nd->elevation = CUI_ELEVATION_RESTING; nd->elevation_alpha = 1;
+    cui__spot_paint *p = cui__frame_alloc(ui, sizeof *p);
+    p->hover = st->hover; p->mx = st->mx; p->my = st->my;
+    p->c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT));
+    p->beam = o->beam && !cui__still(ui);
+    p->t = (float)fmod(ui->time, 10000.0);
+    nd->paint = cui__paint_spot_over;   /* the lit edge, above the content */
+    nd->paint_data = p;
+    nd->flags |= CUI_NF_PAINT_AFTER;
+    if (p->beam || st->hover > 0.01f) ui->animating = true;
+    cui__open(ui, n);
+    /* the light itself, under the content (absolute children paint first) */
+    int over = cui__absolute(ui, 0, 0, 0, pr.w > 0 ? pr.w : 0, pr.h > 0 ? pr.h : 0);
+    ui->nodes[over].paint = cui__paint_spot_under;
+    ui->nodes[over].paint_data = p;
+    struct cui_spot_build *b = cui__frame_alloc(ui, sizeof *b);
+    b->node = over; b->prev = (struct cui_spot_build *)ui->spot;
+    ui->spot = b;
+    ui->last_id = id;
+}
+
+void cui_spotlight_end(cui_ctx *ui) {
+    struct cui_spot_build *b = (struct cui_spot_build *)ui->spot;
+    if (b) ui->spot = b->prev;
+    cui__close(ui);
+}
+
+/* ------------------------------------------------------------------------ */
 /* Loaders                                                                  */
 /* ------------------------------------------------------------------------ */
 

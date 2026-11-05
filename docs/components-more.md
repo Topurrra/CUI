@@ -644,6 +644,21 @@ cui_word_rotate(ui, "rot", words, 3, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26)
 
 The shimmer sweeps a soft highlight across muted text. The typewriter lays out the whole text first and uncovers it, so lines never reflow as it types. When you append to the text (streamed tokens), it carries on from where it was and speeds up when it falls far behind; any other change starts over. The reveal fades and lifts words in one after another whenever the text changes. Rotating words roll up into place, and the width follows the word.
 
+### Gradient text and spotlight cards
+
+![Gradient text and spotlight cards](images/showcase/hero-effects-dark.png)
+
+```c
+cui_gradient_text(ui, "Ship interfaces people love", .font = CUI_FONT_DISPLAY, .size = 38,
+                  .from = CUI_RGB(0x8b5cf6), .to = CUI_RGB(0xec4899));
+cui_spotlight(ui, "pro", .width = CUI_PX(270), .beam = true) {
+    cui_text(ui, "Pro", .font = CUI_FONT_MEDIUM);
+    /* ... */
+}
+```
+
+Gradient text blends from one color to the other across its width; with `animate` the blend drifts slowly back and forth. A spotlight card is a card whose surface catches a soft light under the pointer, and the stretch of its border nearest the pointer lights up. With `beam`, a light also travels around the edge, which suits a featured plan or a call to action.
+
 ### Loaders
 
 ![Loaders](images/components/loaders.png)
