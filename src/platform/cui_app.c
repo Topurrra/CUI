@@ -80,13 +80,17 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
 
 void cui_app_destroy(cui_app *app) {
     if (!app) return;
-    if (app->in_frame) cui_end_frame(app->ui);
+    if (app->in_frame) { cui_end_frame(app->ui); app->in_frame = false; }
+    /* release textures while the GL context still exists */
     cui_set_renderer(app->ui, NULL);
     if (app->gl) cui_gl_destroy(app->gl);
+    app->gl = NULL;
+    /* close the window before the UI context goes away: the OS may still
+     * deliver focus and size messages while the window is destroyed */
+    cui__plat_shutdown(app);
     if (app->sw) cui_sw_destroy(app->sw);
     free(app->sw_pixels);
     cui_destroy(app->ui);
-    cui__plat_shutdown(app);
     free(app->clipboard);
     free(app);
 }

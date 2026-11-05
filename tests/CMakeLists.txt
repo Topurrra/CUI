@@ -13,3 +13,6 @@ endif()
 
 add_executable(cui_bench bench.c ../examples/gallery_ui.c)
 target_link_libraries(cui_bench PRIVATE cui::cui)
+
+add_executable(cui_component_shots component_shots.c)
+target_link_libraries(cui_component_shots PRIVATE cui::cui)

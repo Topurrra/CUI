@@ -396,6 +396,7 @@ void cui__plat_shutdown(cui_app *app) {
     if (!w) return;
     if (w->glrc) { wglMakeCurrent(NULL, NULL); wglDeleteContext(w->glrc); }
     if (w->hdc) ReleaseDC(w->hwnd, w->hdc);
+    SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);   /* no more messages to the app */
     DestroyWindow(w->hwnd);
     free(w);
     app->plat = NULL;
