@@ -819,6 +819,47 @@ typedef struct cui_command {
 CUI_API int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *commands, int count);
 
 /* ------------------------------------------------------------------------ */
+/* More components                                                          */
+/* ------------------------------------------------------------------------ */
+
+/* Radio cards: larger selectable cards for choices that need a description
+ * (plans, templates). */
+typedef struct cui_choice { const char *title; const char *description; const char *icon; const char *badge; } cui_choice;
+typedef struct cui_radio_cards_opts { int _; int columns; } cui_radio_cards_opts;
+CUI_API bool cui_radio_cards_ex(cui_ctx *ui, const char *id, const cui_choice *choices, int count, int *index, const cui_radio_cards_opts *opts);
+
+/* Tag input: tags are stored comma separated in buf. Enter or comma adds the
+ * typed tag, Backspace on an empty field removes the last one. */
+typedef struct cui_tag_opts { int _; const char *label; const char *placeholder; int max_tags; cui_size width; } cui_tag_opts;
+CUI_API bool cui_tag_input_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_tag_opts *opts);
+
+/* One time code input: `length` boxes; code must hold length + 1 bytes.
+ * Returns true when all boxes are filled (once per change). */
+CUI_API bool cui_otp_input(cui_ctx *ui, const char *id, char *code, int length);
+
+/* Connected buttons. Put buttons between begin and end. */
+CUI_API void cui_button_group_begin(cui_ctx *ui);
+CUI_API void cui_button_group_end(cui_ctx *ui);
+
+/* Icon button that copies text to the clipboard and confirms with a check. */
+CUI_API bool cui_copy_button(cui_ctx *ui, const char *id, const char *text);
+
+/* Hold to confirm: a destructive action that fills while held and fires when
+ * full. Returns true once. */
+typedef struct cui_hold_opts { int _; float duration; const char *icon; cui_button_variant variant; } cui_hold_opts;
+CUI_API bool cui_hold_button_ex(cui_ctx *ui, const char *label, const cui_hold_opts *opts);
+
+/* Password strength meter (0 weak .. 4 strong). Returns the score. */
+CUI_API int cui_password_strength(cui_ctx *ui, const char *password);
+
+/* Activity timeline item. */
+typedef struct cui_timeline_opts { int _; const char *time; const char *description; const char *icon; cui_tone tone; bool last; } cui_timeline_opts;
+CUI_API void cui_timeline_item_ex(cui_ctx *ui, const char *title, const cui_timeline_opts *opts);
+
+/* Circular progress with the value in the middle. */
+CUI_API void cui_progress_ring(cui_ctx *ui, const char *label, float value, float size);
+
+/* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
 
@@ -958,6 +999,11 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_bar_chart(ui, id, s, n, ...)    cui_bar_chart_ex((ui), (id), (s), (n), CUI__OPTS(cui_chart_opts, __VA_ARGS__))
 #define cui_donut_chart(ui, id, v, l, n, ...) cui_donut_chart_ex((ui), (id), (v), (l), (n), CUI__OPTS(cui_chart_opts, __VA_ARGS__))
 #define cui_image(ui, tex, ...)             cui_image_ex((ui), (tex), CUI__OPTS(cui_image_opts, __VA_ARGS__))
+#define cui_radio_cards(ui, id, ch, n, idx, ...) cui_radio_cards_ex((ui), (id), (ch), (n), (idx), CUI__OPTS(cui_radio_cards_opts, __VA_ARGS__))
+#define cui_tag_input(ui, id, buf, cap, ...) cui_tag_input_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_tag_opts, __VA_ARGS__))
+#define cui_button_group(ui)                CUI__SCOPE(cui_button_group_begin(ui), cui_button_group_end(ui))
+#define cui_hold_button(ui, label, ...)     cui_hold_button_ex((ui), (label), CUI__OPTS(cui_hold_opts, __VA_ARGS__))
+#define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 
 #ifdef __cplusplus

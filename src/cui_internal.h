@@ -463,6 +463,7 @@ struct cui_ctx {
     cui__vlist_build vl_stack[8]; int vl_depth;
     bool acc_dis[32]; int acc_depth;
     int tree_depth;
+    int button_group_depth;
 };
 
 /* ---- theme ---- */

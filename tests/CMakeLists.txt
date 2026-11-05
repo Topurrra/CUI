@@ -25,3 +25,7 @@ if(CMAKE_CXX_COMPILER)
     target_link_libraries(cui_cpp_compat PRIVATE cui::cui)
     add_test(NAME cui_cpp_compat COMMAND cui_cpp_compat)
 endif()
+
+add_executable(cui_fuzz fuzz_gallery.c ../examples/gallery_ui.c)
+target_link_libraries(cui_fuzz PRIVATE cui::cui)
+add_test(NAME cui_fuzz COMMAND cui_fuzz 3000)

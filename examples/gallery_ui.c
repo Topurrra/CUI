@@ -32,6 +32,9 @@ void gallery_init(gallery *g) {
     g->rating = 4;
     g->chips[0] = true; g->chips[2] = true;
     g->framework = -1;
+    g->plan_card = 1;
+    snprintf(g->tags, sizeof g->tags, "design, c99, native");
+    snprintf(g->otp, sizeof g->otp, "418");
     g->country = 2;
     g->step = 1;
     g->acc[0] = true;
@@ -199,6 +202,21 @@ static void page_buttons(cui_ctx *ui, gallery *g) {
             cui_button(ui, "Selected", .variant = CUI_BUTTON_GHOST, .selected = true, .icon = CUI_ICON_CHECK);
         }
     }
+    section(ui, "Groups, copy and hold to confirm", "Hold the button until it fills to confirm a destructive action.");
+    cui_card(ui) {
+        cui_row(ui, .gap = 12) {
+            cui_button_group(ui) {
+                cui_button(ui, "Bold##group", .icon = CUI_ICON_BOLD);
+                cui_button(ui, "Italic##group", .icon = CUI_ICON_ITALIC);
+                cui_button(ui, "Underline##group", .icon = CUI_ICON_UNDERLINE);
+            }
+            cui_row(ui, .gap = 6, .bg = CUI_COLOR_SURFACE_MUTED, .radius = 18, .pad_left = 14, .pad_right = 4, .pad_y = 2) {
+                cui_text(ui, "npm i cui", .font = CUI_FONT_MONO, .nowrap = true);
+                cui_copy_button(ui, "install", "npm i cui");
+            }
+            if (cui_hold_button(ui, "Hold to delete", .icon = CUI_ICON_TRASH_2)) cui_toast(ui, "Deleted", .tone = CUI_TONE_DANGER);
+        }
+    }
     section(ui, "Segmented control", "A highlight glides to the selected option.");
     cui_card(ui, .gap = 16) {
         const char *views[3] = { "List", "Board", "Timeline" };
@@ -237,6 +255,18 @@ static void page_inputs(cui_ctx *ui, gallery *g) {
             cui_search(ui, "search", g->search, sizeof g->search, .label = "Search", .placeholder = "Search projects");
         }
         cui_textarea(ui, "bio", g->bio, sizeof g->bio, .label = "About", .height = 96, .hint = "Markdown is supported.");
+    }
+    section(ui, "Tags, codes and password strength", NULL);
+    cui_card(ui, .gap = 16) {
+        cui_tag_input(ui, "tags", g->tags, sizeof g->tags, .label = "Topics", .placeholder = "Add a topic");
+        cui_column(ui, .gap = 8) {
+            cui_label(ui, "Verification code");
+            if (cui_otp_input(ui, "otp", g->otp, 6)) cui_toast(ui, "Code entered", .tone = CUI_TONE_SUCCESS);
+        }
+        cui_column(ui, .gap = 8) {
+            cui_input(ui, "new-pw", g->password, sizeof g->password, .label = "New password", .password = true, .placeholder = "Try a long passphrase");
+            cui_password_strength(ui, g->password);
+        }
     }
     section(ui, "Pickers", NULL);
     cui_card(ui, .gap = 16) {
@@ -279,6 +309,15 @@ static void page_selection(cui_ctx *ui, gallery *g) {
         cui_radio(ui, "Hobby", &g->plan, 0, .description = "For side projects. Free forever.");
         cui_radio(ui, "Pro", &g->plan, 1, .description = "For professionals. $12 per month.");
         cui_radio(ui, "Team", &g->plan, 2, .description = "For growing teams. $49 per month.");
+    }
+    section(ui, "Radio cards", "For choices that need a sentence of explanation.");
+    {
+        static const cui_choice plans[] = {
+            { "Hobby", "Side projects and experiments. Free forever.", CUI_ICON_ROCKET, NULL },
+            { "Pro", "For professionals who ship every week.", CUI_ICON_ZAP, "Popular" },
+            { "Team", "Shared workspaces, roles and audit logs.", CUI_ICON_USERS, NULL },
+        };
+        cui_radio_cards(ui, "plans", plans, 3, &g->plan_card);
     }
     section(ui, "Sliders", "Drag past either end: the track stretches like rubber.");
     cui_card(ui, .gap = 20) {
@@ -422,6 +461,21 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_skeleton(ui, CUI_FILL, 88);
             cui_skeleton(ui, CUI_PCT(90), 12);
             cui_skeleton(ui, CUI_PCT(60), 12);
+        }
+    }
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+        cui_card(ui, .gap = 14) {
+            cui_heading(ui, "Activity", 4);
+            cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description = "Release 1.0.3 is live in all regions.", .icon = CUI_ICON_ROCKET, .tone = CUI_TONE_SUCCESS);
+            cui_timeline_item(ui, "Review requested", .time = "1h ago", .description = "Grace asked you to review the theming changes.", .icon = CUI_ICON_MESSAGE_SQUARE, .tone = CUI_TONE_INFO);
+            cui_timeline_item(ui, "Build failed", .time = "3h ago", .icon = CUI_ICON_CIRCLE_ALERT, .tone = CUI_TONE_DANGER, .last = true);
+        }
+        cui_card(ui, .gap = 14) {
+            cui_heading(ui, "Goals", 4);
+            cui_row(ui, .gap = 24, .justify = CUI_JUSTIFY_AROUND) {
+                cui_progress_ring(ui, "Onboarding", 0.72f, 104);
+                cui_progress_ring(ui, "Quota", 0.35f, 104);
+            }
         }
     }
     section(ui, "Badges and avatars", NULL);

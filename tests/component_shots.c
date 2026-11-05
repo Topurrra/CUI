@@ -331,6 +331,47 @@ static void scene_icons(cui_ctx *ui, int f) {
     }
 }
 
+SCENE(radio_cards) {
+    static int sel = 1;
+    static const cui_choice plans[] = {
+        { "Hobby", "Side projects. Free forever.", CUI_ICON_ROCKET, NULL },
+        { "Pro", "For people who ship weekly.", CUI_ICON_ZAP, "Popular" },
+        { "Team", "Roles and audit logs.", CUI_ICON_USERS, NULL },
+    };
+    cui_box(ui, .width = CUI_PX(720)) { cui_radio_cards(ui, "plans", plans, 3, &sel); }
+}
+SCENE(tag_otp) {
+    static char tags[128] = "design, c99, native";
+    static char otp[8] = "418";
+    static char pw[32] = "correct horse";
+    cui_column(ui, .gap = 16, .width = CUI_PX(460)) {
+        cui_tag_input(ui, "tags", tags, sizeof tags, .label = "Topics");
+        cui_otp_input(ui, "otp", otp, 6);
+        cui_column(ui, .gap = 8) { cui_input(ui, "pw", pw, sizeof pw, .label = "Password", .password = true); cui_password_strength(ui, pw); }
+    }
+}
+SCENE(button_extras) {
+    cui_row(ui, .gap = 12) {
+        cui_button_group(ui) {
+            cui_button(ui, "Bold", .icon = CUI_ICON_BOLD);
+            cui_button(ui, "Italic", .icon = CUI_ICON_ITALIC);
+            cui_button(ui, "Underline", .icon = CUI_ICON_UNDERLINE);
+        }
+        cui_copy_button(ui, "copy", "text");
+        cui_hold_button(ui, "Hold to delete", .icon = CUI_ICON_TRASH_2);
+    }
+}
+SCENE(timeline) {
+    cui_row(ui, .gap = 32, .align = CUI_ALIGN_START) {
+        cui_column(ui, .gap = 0, .width = CUI_PX(380)) {
+            cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description = "Release 1.0.3 is live.", .icon = CUI_ICON_ROCKET, .tone = CUI_TONE_SUCCESS);
+            cui_timeline_item(ui, "Review requested", .time = "1h ago", .icon = CUI_ICON_MESSAGE_SQUARE, .tone = CUI_TONE_INFO);
+            cui_timeline_item(ui, "Build failed", .time = "3h ago", .icon = CUI_ICON_CIRCLE_ALERT, .tone = CUI_TONE_DANGER, .last = true);
+        }
+        cui_progress_ring(ui, "Onboarding", 0.72f, 110);
+    }
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -367,6 +408,8 @@ int main(int argc, char **argv) {
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 300, true },
         { "bar-donut", scene_bar_chart, 760, 290, true }, { "command-palette", scene_palette, 680, 460, true },
         { "icons", scene_icons, 1040, 1080, false },
+        { "radio-cards", scene_radio_cards, 780, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
+        { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

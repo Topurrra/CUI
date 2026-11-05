@@ -447,6 +447,65 @@ static void test_focus_trap(void) {
     cui_destroy(ui);
 }
 
+typedef struct { char tags[128]; char otp[8]; int otp_done; int held; cui_id tag_id, otp_id, hold_id; } extras_ctx;
+static void build_extras(cui_ctx *ui, void *u) {
+    extras_ctx *x = u;
+    cui_column(ui, .pad = 20, .gap = 16, .width = CUI_PX(500)) {
+        cui_tag_input(ui, "tags", x->tags, sizeof x->tags);
+        x->tag_id = cui_last_id(ui);
+        if (cui_otp_input(ui, "otp", x->otp, 4)) x->otp_done++;
+        x->otp_id = cui_last_id(ui);
+        if (cui_hold_button(ui, "Hold", .duration = 0.5f)) x->held++;
+        x->hold_id = cui_make_id(ui, "Hold");
+    }
+}
+
+static void test_extras(void) {
+    printf("extras: tag input, one time code, hold to confirm\n");
+    cui_ctx *ui = new_ctx();
+    extras_ctx x;
+    memset(&x, 0, sizeof x);
+    snprintf(x.tags, sizeof x.tags, "alpha, beta");
+    run(ui, build_extras, &x, 3);
+    cui_rect tr = rect_of(ui, x.tag_id);
+    click_at(ui, build_extras, &x, tr.x + tr.w - 40, tr.y + tr.h / 2);
+    type(ui, build_extras, &x, "gamma");
+    key(ui, build_extras, &x, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(x.tags, "alpha, beta, gamma") == 0);
+    type(ui, build_extras, &x, "delta,eps");
+    CHECK(strcmp(x.tags, "alpha, beta, gamma, delta") == 0);
+    key(ui, build_extras, &x, CUI_KEY_BACKSPACE, 0);   /* edits "eps" */
+    key(ui, build_extras, &x, CUI_KEY_BACKSPACE, 0);
+    key(ui, build_extras, &x, CUI_KEY_BACKSPACE, 0);
+    key(ui, build_extras, &x, CUI_KEY_BACKSPACE, 0);   /* empty field: removes "delta" */
+    CHECK(strcmp(x.tags, "alpha, beta, gamma") == 0);
+    /* one time code */
+    cui_rect orr = rect_of(ui, x.otp_id);
+    click_at(ui, build_extras, &x, orr.x + 10, orr.y + 10);
+    type(ui, build_extras, &x, "12a");
+    CHECK(strcmp(x.otp, "12a") == 0 && x.otp_done == 0);
+    type(ui, build_extras, &x, "9x");
+    CHECK(strcmp(x.otp, "12a9") == 0 && x.otp_done == 1);
+    key(ui, build_extras, &x, CUI_KEY_BACKSPACE, 0);
+    CHECK(strcmp(x.otp, "12a") == 0);
+    snprintf(g_clip, sizeof g_clip, " 7-7-7-7 ");
+    key(ui, build_extras, &x, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(strcmp(x.otp, "7777") == 0 && x.otp_done == 2);
+    /* hold: a short press does nothing, a long one fires once */
+    cui_vec2 hc = center(rect_of(ui, x.hold_id));
+    click_at(ui, build_extras, &x, hc.x, hc.y);
+    CHECK(x.held == 0);
+    cui_set_reduced_motion(ui, false);
+    cui_input_mouse_move(ui, hc.x, hc.y);
+    run(ui, build_extras, &x, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_extras, &x, 60);    /* one second at 60 fps */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_extras, &x, 2);
+    CHECK(x.held == 1);
+    cui_destroy(ui);
+}
+
 /* virtual list ---------------------------------------------------------- */
 
 typedef struct { int first, last, built; } vl_ctx;
@@ -607,6 +666,7 @@ int main(void) {
     test_dialog();
     test_menu();
     test_focus_trap();
+    test_extras();
     test_virtual_list();
     test_theme();
     test_renderer();

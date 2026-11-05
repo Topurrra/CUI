@@ -35,7 +35,13 @@ Contents:
 [List and tree](#list-and-tree) ·
 [Accordion](#accordion) ·
 [Charts](#charts) ·
-[Image](#image)
+[Image](#image) ·
+[Radio cards](#radio-cards) ·
+[Tag input](#tag-input) ·
+[One time code](#one-time-code) ·
+[Password strength](#password-strength) ·
+[Button group, copy, hold](#button-group-copy-and-hold-to-confirm) ·
+[Timeline and progress ring](#timeline-and-progress-ring)
 
 ---
 
@@ -495,4 +501,72 @@ cui_texture tex = cui_image_load(ui, "photo.jpg", &w, &h);      /* PNG, JPEG, BM
 cui_image(ui, tex, .width = CUI_PX(240), .height = CUI_PX(160), .radius = 12);
 cui_texture raw = cui_image_create(ui, w, h, rgba_pixels);        /* from memory */
 cui_image_destroy(ui, tex);
+```
+
+## Radio cards
+
+![Radio cards](images/components/radio-cards.png)
+
+```c
+static const cui_choice plans[] = {
+    { "Hobby", "Side projects. Free forever.", CUI_ICON_ROCKET, NULL },     /* title, description, icon, badge */
+    { "Pro", "For people who ship weekly.", CUI_ICON_ZAP, "Popular" },
+    { "Team", "Roles and audit logs.", CUI_ICON_USERS, NULL },
+};
+cui_radio_cards(ui, "plan", plans, 3, &plan, .columns = 3);
+```
+
+Bigger targets for choices that need a sentence of explanation. Keyboard: arrows move the selection.
+
+## Tag input
+
+![Tag input, code input and password strength](images/components/tag-otp.png)
+
+```c
+static char tags[256] = "design, c99";
+cui_tag_input(ui, "topics", tags, sizeof tags, .label = "Topics", .max_tags = 8);
+```
+
+Tags live in your buffer as a comma separated list. Enter or a comma adds the typed tag, the x on a chip removes it, Backspace in an empty field removes the last one.
+
+## One time code
+
+```c
+static char code[7];                        /* length + 1 */
+if (cui_otp_input(ui, "code", code, 6)) verify(code);   /* true once when complete */
+```
+
+Type or paste: letters and digits fill the boxes in order, anything else is ignored. Backspace removes the last character.
+
+## Password strength
+
+```c
+cui_input(ui, "pw", pw, sizeof pw, .label = "Password", .password = true);
+int score = cui_password_strength(ui, pw);   /* 0 too short .. 4 strong */
+```
+
+## Button group, copy and hold to confirm
+
+![Button group, copy and hold](images/components/button-extras.png)
+
+```c
+cui_button_group(ui) {
+    cui_button(ui, "Bold", .icon = CUI_ICON_BOLD);
+    cui_button(ui, "Italic", .icon = CUI_ICON_ITALIC);
+}
+cui_copy_button(ui, "copy-key", api_key);                      /* confirms with a check */
+if (cui_hold_button(ui, "Hold to delete", .icon = CUI_ICON_TRASH_2)) delete_everything();
+```
+
+The hold button fills while pressed (or while Space is held with keyboard focus) and fires once when full; let go early and it springs back. Options: `duration` (1.2 s), `icon`, `variant` (danger by default).
+
+## Timeline and progress ring
+
+![Timeline and progress ring](images/components/timeline.png)
+
+```c
+cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description = "Release 1.0.3 is live.",
+                  .icon = CUI_ICON_ROCKET, .tone = CUI_TONE_SUCCESS);
+cui_timeline_item(ui, "Build failed", .time = "3h ago", .icon = CUI_ICON_CIRCLE_ALERT, .tone = CUI_TONE_DANGER, .last = true);
+cui_progress_ring(ui, "Onboarding", 0.72f, 110);
 ```

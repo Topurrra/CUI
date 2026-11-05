@@ -92,12 +92,12 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 | ![Menu](docs/images/components/menu-dark.png) | ![Calendar](docs/images/components/calendar.png) |
 | ![Table](docs/images/components/table.png) | ![Charts](docs/images/components/line-chart-dark.png) |
 
-**Actions** button, icon button, segmented control, dropdown menu, context menu, command palette<br>
-**Inputs** text field, password, search, text area, number field, select, combobox, date picker, calendar, color picker<br>
-**Selection** checkbox, switch, radio group, elastic slider, range slider, chips, rating<br>
+**Actions** button, icon button, button group, copy button, hold to confirm, segmented control, dropdown menu, context menu, command palette<br>
+**Inputs** text field, password with strength meter, search, text area, number field, tag input, one time code, select, combobox, date picker, calendar, color picker<br>
+**Selection** checkbox, switch, radio group, radio cards, elastic slider, range slider, chips, rating<br>
 **Navigation** tabs (underline and pill), sidebar navigation, breadcrumb, pagination, stepper<br>
 **Overlays** dialog, sheet, popover, tooltip, toast stack<br>
-**Feedback** alert, progress, meter, spinner, skeleton, badge, avatar, avatar group, empty state<br>
+**Feedback** alert, progress bar and ring, meter, spinner, skeleton, badge, avatar, avatar group, empty state, timeline<br>
 **Data** card, metric card, table, list, tree view, accordion, virtual list, line, area, bar, stacked bar and donut charts, sparkline, gauge<br>
 **Layout** row, column, grid, stack, scroll area, resizable split view, separator, spacer<br>
 **Custom** canvas with a full 2D drawing API, per component state and spring animation helpers

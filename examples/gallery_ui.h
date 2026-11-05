@@ -26,6 +26,9 @@ typedef struct gallery {
     int rating;
     bool chips[6];
     int framework;
+    int plan_card;
+    char tags[256];
+    char otp[8];
     int country;
     /* navigation */
     int tab, tab2, page_index, step;
