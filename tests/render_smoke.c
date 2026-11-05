@@ -22,8 +22,8 @@ static void ui_frame(cui_ctx *ui) {
             cui_badge(ui, "Active", .tone = CUI_TONE_SUCCESS, .dot = true);
             cui_badge(ui, "Pending", .tone = CUI_TONE_WARNING);
             cui_badge(ui, "Failed", .tone = CUI_TONE_DANGER);
-            cui_avatar(ui, "Ada Lovelace", .status = "online");
-            cui_avatar(ui, "Grace Hopper");
+            cui_avatar(ui, "Maya Okafor", .status = "online");
+            cui_avatar(ui, "Jonas Berg");
             cui_kbd(ui, "Ctrl K");
             cui_code(ui, "cui_button()");
         }

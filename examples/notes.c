@@ -108,7 +108,7 @@ static void editor_pane(cui_ctx *ui, notes_app *a) {
         }
         note *n = &a->notes[a->selected];
         cui_row(ui, .gap = 8) {
-            cui_badge(ui, tags[n->tag], .tone = n->tag == 1 ? CUI_TONE_INFO : n->tag == 2 ? CUI_TONE_VIOLET : CUI_TONE_NEUTRAL, .dot = true);
+            cui_badge(ui, tags[n->tag], .tone = n->tag == 1 ? CUI_TONE_INFO : n->tag == 2 ? CUI_TONE_VIOLET : CUI_TONE_NEUTRAL);
             cui_text(ui, n->pinned ? "Pinned" : "", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true, .width = CUI_FILL);
             if (cui_icon_button(ui, CUI_ICON_BOOKMARK, .tooltip = n->pinned ? "Unpin" : "Pin", .selected = n->pinned,
                                 .color = n->pinned ? CUI_COLOR_ACCENT : CUI_TRANSPARENT)) n->pinned = !n->pinned;

@@ -29,7 +29,7 @@ static void field_row(cui_ctx *ui, const char *title, const char *desc) {
 static void profile(cui_ctx *ui, settings *s) {
     cui_card(ui, .gap = 24) {
         cui_row(ui, .gap = 16) {
-            cui_avatar(ui, "Ada Lovelace", .size = 64);
+            cui_avatar(ui, "Maya Okafor", .size = 64);
             cui_column(ui, .gap = 8, .width = CUI_FILL) {
                 cui_label(ui, "Profile photo");
                 cui_row(ui, .gap = 8) {
@@ -188,9 +188,9 @@ static void frame(cui_ctx *ui, void *user) {
 
 int main(void) {
     static settings s;
-    snprintf(s.first, sizeof s.first, "Ada");
-    snprintf(s.last, sizeof s.last, "Lovelace");
-    snprintf(s.email, sizeof s.email, "ada@analytical.engine");
+    snprintf(s.first, sizeof s.first, "Maya");
+    snprintf(s.last, sizeof s.last, "Okafor");
+    snprintf(s.email, sizeof s.email, "maya@fieldwork.studio");
     snprintf(s.username, sizeof s.username, "ada");
     snprintf(s.website, sizeof s.website, "https://ada.dev");
     snprintf(s.bio, sizeof s.bio, "First programmer. Interested in engines, poetry and calm software.");

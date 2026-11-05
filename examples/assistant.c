@@ -20,9 +20,9 @@ typedef struct {
 } app_state;
 
 static const cui_model models[] = {
-    { "Atlas", "Our most capable model for complex work", "New", CUI_ICON_SPARKLES },
-    { "Atlas Fast", "Quick answers for everyday tasks", NULL, CUI_ICON_ZAP },
-    { "Atlas Mini", "Lightweight and economical", NULL, CUI_ICON_BOX },
+    { "Atlas", "Longer answers, reads files and code", "New", CUI_ICON_LAYERS },
+    { "Atlas Fast", "Short answers in about a second", NULL, CUI_ICON_ZAP },
+    { "Atlas Mini", "Runs on your own machine", NULL, CUI_ICON_BOX },
 };
 
 static const cui_source sources[] = {
@@ -42,7 +42,7 @@ static void sidebar(cui_ctx *ui, app_state *s) {
         cui_row(ui, .gap = 10, .pad_x = 6, .pad_top = 4, .pad_bottom = 10, .align = CUI_ALIGN_CENTER) {
             cui_box(ui, .width = CUI_PX(28), .height = CUI_PX(28), .radius = 9, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
-                cui_icon(ui, CUI_ICON_SPARKLES, 15, CUI_COLOR_ACCENT_FOREGROUND);
+                cui_text(ui, "M", .font = CUI_FONT_DISPLAY, .size = 16, .color = CUI_COLOR_ACCENT_FOREGROUND, .line_height = 1.0f);
             }
             cui_text(ui, "Muse", .font = CUI_FONT_MEDIUM, .size = 15, .width = CUI_FILL, .nowrap = true);
             if (cui_icon_button(ui, CUI_ICON_SQUARE_PEN, .size = CUI_SIZE_SM, .tooltip = "New chat")) { s->asked_once = false; s->started = -1; s->draft[0] = 0; }
@@ -150,7 +150,7 @@ static void conversation(cui_ctx *ui, app_state *s) {
                     s->file_count--;
                 }
                 if (ev & CUI_COMPOSER_ATTACH) cui_toast(ui, "Drop files on the window to attach them");
-                cui_text(ui, "Muse can make mistakes. Check important facts.", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .align = CUI_TEXT_CENTER, .width = CUI_FILL);
+                cui_text(ui, "Answers can be wrong. Each one links the sources it used.", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .align = CUI_TEXT_CENTER, .width = CUI_FILL);
             }
         }
     }
@@ -207,5 +207,5 @@ int main(void) {
     static app_state s = { .started = -1, .files = { "quarterly-report.pdf", "metrics.csv" }, .file_count = 2, .removed = -1,
                            .draft = "Now compare these numbers with last quarter." };
     return cui_app_run(&(cui_app_desc){ .title = "Muse", .width = 1440, .height = 900,
-                                        .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_VIOLET }, frame, &s);
+                                        .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_NEUTRAL }, frame, &s);
 }

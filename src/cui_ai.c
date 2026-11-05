@@ -84,7 +84,6 @@ bool cui_reasoning_begin(cui_ctx *ui, const char *id_str, const cui_reasoning_op
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__open(ui, head);
     cui_color fg = cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), st->f.hover);
-    cui__icon_node(ui, CUI_ICON_SPARKLES, 15, o->thinking ? cui__ai_accent(ui) : fg);
     const char *title;
     if (o->title) title = o->title;
     else if (o->thinking) title = o->seconds >= 1 ? cui__frame_printf(ui, "Thinking for %.0fs", (double)o->seconds) : "Thinking";
@@ -1017,7 +1016,7 @@ static void cui__paint_orb(cui_ctx *ui, cui_node *n, void *data) {
     /* glow */
     float gr = R * 1.05f * pulse;
     cui_draw_shadow(ui, (cui_rect){ c.x - gr, c.y - gr, gr * 2, gr * 2 }, CUI_CORNERS(gr), R * 0.55f, 0, (cui_vec2){ 0, 0 },
-                    cui_alpha(p->a, 0.4f + 0.15f * p->hover + 0.2f * p->level * (listen + speak)));
+                    cui_alpha(p->a, 0.14f + 0.1f * p->hover + 0.3f * p->level * (listen + speak)));   /* the glow reports the level */
     float rr = R * breath * pulse;
     /* one silhouette; the color inside drifts in swirls that fade out before they reach the edge */
     cui__orb_blob(ui, c, rr, amp, p->t, 0.0f, p->b, cui_mix(p->a, cui__rgba(0, 0, 0, 255), 0.08f), true);
@@ -1025,7 +1024,7 @@ static void cui__paint_orb(cui_ctx *ui, cui_node *n, void *data) {
     cui__orb_blob(ui, (cui_vec2){ c.x + cosf(sa) * R * 0.2f, c.y + sinf(sa) * R * 0.2f }, rr * 0.56f, amp * 1.6f, p->t * 1.2f, 2.1f,
                   cui_alpha(p->c, 0.85f), cui_alpha(p->c, 0), false);
     cui__orb_blob(ui, (cui_vec2){ c.x + cosf(sb) * R * 0.22f, c.y + sinf(sb) * R * 0.22f }, rr * 0.5f, amp * 1.4f, p->t * 0.9f, 4.2f,
-                  cui_alpha(cui_mix(p->b, cui__rgba(0xec, 0x48, 0x99, 255), 0.35f), 0.7f), cui_alpha(p->b, 0), false);
+                  cui_alpha(cui_mix(p->a, cui__rgba(0, 0, 0, 255), 0.18f), 0.55f), cui_alpha(p->a, 0), false);
     cui__orb_blob(ui, (cui_vec2){ c.x - R * 0.08f, c.y - R * 0.1f }, rr * 0.62f, amp, p->t * 0.8f, 5.3f,
                   cui_alpha(cui__rgba(255, 255, 255, 255), 0.42f), cui_alpha(cui__rgba(255, 255, 255, 255), 0), false);
     /* a soft specular light, upper left, like glass catching a lamp */
@@ -1064,8 +1063,9 @@ bool cui_voice_orb_ex(cui_ctx *ui, const char *id_str, cui_voice_state state, fl
     for (int k = 0; k < 4; k++) p->w[k] = st->state_t[k];
     cui_color base = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? cui__rgba(0x4f, 0x7c, 0xf6, 255) : CUI_C(ui, ACCENT));
     p->a = base;
-    p->b = cui_mix(base, cui__rgba(0xa8, 0x55, 0xf7, 255), 0.45f);
-    p->c = cui_mix(base, cui__rgba(0x22, 0xd3, 0xee, 255), 0.5f);
+    /* every tone comes from the accent: a lighter core and a deeper edge, no borrowed hues */
+    p->b = cui_mix(base, cui__rgba(255, 255, 255, 255), 0.28f);
+    p->c = cui_mix(base, cui__rgba(255, 255, 255, 255), 0.5f);
     p->hover = r.hovered ? 1.0f : 0.0f;
     nd->paint = cui__paint_orb;
     nd->paint_data = p;

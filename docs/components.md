@@ -395,8 +395,8 @@ cui_gauge(ui, "CPU", 0.42f, 130);
 ```c
 cui_badge(ui, "Active", .tone = CUI_TONE_SUCCESS, .dot = true);
 cui_badge(ui, "New", .tone = CUI_TONE_INFO, .solid = true);
-cui_avatar(ui, "Grace Hopper", .size = 40, .status = "online");   /* online, away, busy, offline */
-cui_avatar(ui, "Ada", .image = texture);
+cui_avatar(ui, "Jonas Berg", .size = 40, .status = "online");   /* online, away, busy, offline */
+cui_avatar(ui, "Maya", .image = texture);
 cui_avatar_group(ui, names, count, 4, 32);
 cui_kbd(ui, "Ctrl Shift P");
 ```
@@ -411,7 +411,10 @@ Avatars without an image show initials on a color picked from the name, so the s
 cui_card(ui, .gap = 12) { ... }
 if (cui_card(ui, .id = "project", .hoverable = true)) { ... }   /* lifts on hover, returns clicks */
 cui_metric(ui, "Revenue", "$48,210", .delta = 12.4f, .spark = values, .spark_count = 12, .icon = CUI_ICON_DOLLAR_SIGN);
+cui_metric(ui, "Median build", "3m 42s", .delta = -17.6f, .lower_is_better = true);   /* a fall, in green */
 ```
+
+The arrow follows the sign of `delta`; the color says whether that is good. Set `lower_is_better` for times, errors and costs.
 
 Cards rest on a hairline border with no shadow. Card options: `pad` (24), `pad_x`, `pad_y`, `gap`, `dir`, `align`, `width`, `height`, `hoverable`, `muted`, `selected`.
 
@@ -456,7 +459,7 @@ Cells hold any components. Clicking a sortable header updates `sort` (column and
 ![Tree and list](images/components/tree-list.png)
 
 ```c
-if (cui_list_item(ui, "Design review", .avatar = "Grace Hopper", .subtitle = "Tomorrow at 10:00", .trailing = "45m")) open();
+if (cui_list_item(ui, "Design review", .avatar = "Jonas Berg", .subtitle = "Tomorrow at 10:00", .trailing = "45m")) open();
 
 static bool src_open = true;
 if (cui_tree_begin(ui, "src", &src_open, NULL)) {

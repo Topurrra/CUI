@@ -15,18 +15,18 @@ typedef struct {
 } message;
 
 static message messages[] = {
-    { "Grace Hopper", "grace@navy.mil", "Compiler review on Thursday", "Can we walk through the new optimizer passes before the release?", "9:41",
-      "Hi,\n\nCan we walk through the new optimizer passes before the release? I would like to understand the inlining heuristics and how they interact with the register allocator.\n\nThursday at 10 works for me.\n\nGrace", 0, true, true, CUI_TONE_INFO },
-    { "Alan Turing", "alan@bletchley.uk", "Re: Halting problem", "I have a proof, but this margin is too small to contain it.", "8:15",
-      "I have a proof, but this margin is too small to contain it. Let us talk tomorrow.\n\nAlan", 0, true, false, -1 },
-    { "Katherine Johnson", "katherine@nasa.gov", "Trajectory numbers", "Checked the figures twice. Attached the corrected tables.", "Yesterday",
-      "Checked the figures twice. The corrected tables are attached. The re-entry window is narrower than we thought, so please double check the burn timing.\n\nKatherine", 0, false, true, CUI_TONE_WARNING },
-    { "Linus Torvalds", "linus@kernel.org", "Patch series v3", "Looks fine. Merged into the next branch.", "Yesterday",
-      "Looks fine. Merged into the next branch. Please keep the commit messages this clear.\n\nLinus", 0, false, false, CUI_TONE_SUCCESS },
-    { "Hedy Lamarr", "hedy@spread.io", "Frequency hopping idea", "What if the receiver and transmitter change channels in sync?", "Mon",
-      "What if the receiver and transmitter change channels in sync, like a player piano roll? Nobody could jam it.\n\nHedy", 0, false, false, CUI_TONE_VIOLET },
-    { "Margaret Hamilton", "margaret@mit.edu", "Priority scheduling", "The guidance computer will drop low priority jobs under load.", "Mon",
-      "The guidance computer will drop low priority jobs when it is overloaded, so the landing can continue. I added a display for the alarms.\n\nMargaret", 3, false, true, -1 },
+    { "Jonas Berg", "jonas@northlight.io", "Review of the onboarding flow", "I went through all six screens on a small laptop. Notes inline.", "9:41",
+      "Hi Maya,\n\nI went through all six screens on a 13 inch laptop. Step three scrolls before the button is visible, and the skip link reads like an error.\n\nCould we look at it together on Thursday at 10?\n\nJonas", 0, true, true, CUI_TONE_INFO },
+    { "Priya Nair", "priya@harbor.dev", "Invoice 2024-118", "The October invoice is attached. Payment terms are 30 days as usual.", "8:15",
+      "Hi,\n\nThe October invoice is attached. Payment terms are 30 days as usual. Let me know if the purchase order number needs to change.\n\nPriya", 0, true, false, -1 },
+    { "Tomas Rivera", "tomas@kiln.app", "Export is slow for large projects", "A 900 file project takes about four minutes to export on my machine.", "Yesterday",
+      "A 900 file project takes about four minutes to export on my machine, most of it in the thumbnail step. I attached a trace.\n\nTomas", 0, false, true, CUI_TONE_WARNING },
+    { "Lena Fischer", "lena@fischer.dev", "Re: Release notes draft", "Looks good. I tightened the second paragraph and fixed two links.", "Yesterday",
+      "Looks good. I tightened the second paragraph and fixed two links that pointed at the old docs.\n\nLena", 0, false, false, CUI_TONE_SUCCESS },
+    { "Aiko Tanaka", "aiko@tanaka.design", "Icons for the settings page", "Here are the twelve icons at 16 and 20 px, outline only.", "Mon",
+      "Here are the twelve icons at 16 and 20 px, outline only, on the same 1.5 px stroke as the rest of the set.\n\nAiko", 0, false, false, CUI_TONE_VIOLET },
+    { "Sam Whitfield", "sam@whitfield.co", "Office closed on Friday", "The building is closed for maintenance. Work from home if you can.", "Mon",
+      "The building is closed for maintenance on Friday. Work from home if you can; the server room stays reachable over the VPN.\n\nSam", 3, false, true, -1 },
 };
 #define MESSAGE_COUNT ((int)(sizeof messages / sizeof messages[0]))
 
@@ -59,10 +59,10 @@ static void folders(cui_ctx *ui, mail_app *a) {
     static const char *icons[] = { CUI_ICON_INBOX, CUI_ICON_STAR, CUI_ICON_SEND, CUI_ICON_ARCHIVE };
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
         cui_row(ui, .pad_x = 6, .pad_bottom = 12, .gap = 10) {
-            cui_avatar(ui, "Ada Lovelace", .size = 28);
+            cui_avatar(ui, "Maya Okafor", .size = 28);
             cui_column(ui, .gap = 0, .width = CUI_FILL) {
-                cui_text(ui, "Ada Lovelace", .font = CUI_FONT_MEDIUM, .nowrap = true);
-                cui_text(ui, "ada@engine.org", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
+                cui_text(ui, "Maya Okafor", .font = CUI_FONT_MEDIUM, .nowrap = true);
+                cui_text(ui, "maya@fieldwork.studio", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
             }
         }
         if (cui_button(ui, "Compose", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_SQUARE_PEN, .full_width = true)) a->compose = true;
@@ -83,7 +83,7 @@ static void folders(cui_ctx *ui, mail_app *a) {
         static const int tones[] = { CUI_TONE_INFO, CUI_TONE_VIOLET, CUI_TONE_WARNING };
         for (int l = 0; l < 3; l++) {
             cui_row(ui, .gap = 10, .pad_x = 10, .pad_y = 6) {
-                cui_badge(ui, labels[l], .tone = (cui_tone)tones[l], .dot = true);
+                cui_badge(ui, labels[l], .tone = (cui_tone)tones[l]);
             }
         }
     }
@@ -159,7 +159,7 @@ static void reading_pane(cui_ctx *ui, mail_app *a) {
                     cui_text(ui, m->email, .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
                 }
                 if (m->label >= 0) cui_badge(ui, m->label == CUI_TONE_INFO ? "Work" : m->label == CUI_TONE_VIOLET ? "Personal" : m->label == CUI_TONE_WARNING ? "Urgent" : "Merged",
-                                             .tone = (cui_tone)m->label, .dot = true);
+                                             .tone = (cui_tone)m->label);
                 cui_text(ui, m->time, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
             }
             cui_text(ui, m->body, .line_height = 1.6f);

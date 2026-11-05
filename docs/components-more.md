@@ -86,7 +86,7 @@ Light and dark are applied for you. For "system" (mode 2), read the OS setting (
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/user-menu-dark.png"><img src="images/components/user-menu.png" alt="User menu"></picture>
 
 ```c
-cui_user_menu(ui, "Ada Lovelace", .detail = "ada@analytical.engine", .status = "online") {
+cui_user_menu(ui, "Maya Okafor", .detail = "maya@fieldwork.studio", .status = "online") {
     cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER);
     cui_menu_item(ui, "Log out", .icon = CUI_ICON_LOG_OUT);
 }
@@ -243,7 +243,7 @@ If you use your own window layer, feed drops with `cui_input_file_drop(ui, paths
 
 ```c
 static cui_texture photo;
-if (cui_avatar_upload(ui, "photo", "Ada Lovelace", &photo, 88) < 0) browse_for_photo();
+if (cui_avatar_upload(ui, "photo", "Maya Okafor", &photo, 88) < 0) browse_for_photo();
 ```
 
 Drop an image on the avatar to replace it (the previous texture is destroyed). Hover shows a camera; the pencil badge marks it as editable.
@@ -265,10 +265,10 @@ Stroke width follows speed, so signatures look inked rather than drawn with a fi
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hover-card-dark.png"><img src="images/components/hover-card.png" alt="Hover card"></picture>
 
 ```c
-cui_link(ui, "@grace");
+cui_link(ui, "@jonas");
 cui_hover_card(ui, "grace", .width = 300) {
-    cui_avatar(ui, "Grace Hopper", .size = 44);
-    cui_text(ui, "Compilers, Cobol and very small nanoseconds.");
+    cui_avatar(ui, "Jonas Berg", .size = 44);
+    cui_text(ui, "Design lead on the mobile app.");
 }
 ```
 
@@ -420,10 +420,10 @@ A collapsible tree with typed colors. Collapsed objects and arrays show their si
 
 ```c
 cui_chat_divider(ui, "Today");
-cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
-cui_chat_message(ui, "Virtualized and sortable.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+cui_chat_message(ui, "Did the grid ship?", .author = "Jonas Berg", .time = "9:41", .last_in_group = false);
+cui_chat_message(ui, "Virtualized and sortable.", .author = "Jonas Berg", .grouped = true, .last_in_group = true);
 cui_chat_message(ui, "It did!", .mine = true, .status = "Read", .time = "9:43");
-cui_typing_indicator(ui, "Grace");
+cui_typing_indicator(ui, "Jonas");
 ```
 
 Grouped messages stack tightly with the avatar on the last bubble and tighter inner corners. Your own messages sit on the right in the primary color. The typing dots bounce in sequence.
@@ -434,9 +434,9 @@ Grouped messages stack tightly with the avatar on the last bubble and tighter in
 
 ```c
 static int likes = 12; static bool liked = true;
-int act = cui_comment(ui, "c1", "Katherine Johnson", text, .time = "2h", .likes = &likes, .liked = &liked, .badge = "Author");
+int act = cui_comment(ui, "c1", "Tomas Rivera", text, .time = "2h", .likes = &likes, .liked = &liked, .badge = "Author");
 if (act & CUI_COMMENT_REPLY) open_reply_box();
-cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .depth = 1);
+cui_comment(ui, "c2", "Priya Nair", "Agreed, one more run.", .time = "1h", .depth = 1);
 ```
 
 `depth` indents replies under a thread line. The like button toggles `liked` and keeps `likes` in step.
@@ -530,8 +530,8 @@ Drag an event to move it (it snaps to 15 minutes and keeps its length) or pull i
 ```c
 static cui_gantt_task tasks[] = {
     /* name, owner, start day, end day, progress, tone, depends on, milestone */
-    { "Research", "Ada Lovelace", 0, 5, 1.0f, CUI_TONE_VIOLET, -1, false },
-    { "Core engine", "Grace Hopper", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
+    { "Research", "Maya Okafor", 0, 5, 1.0f, CUI_TONE_VIOLET, -1, false },
+    { "Core engine", "Jonas Berg", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
     { "Beta", NULL, 21, 21, 0, CUI_TONE_WARNING, 1, true },
 };
 int clicked = cui_gantt(ui, "plan", tasks, 3, start_date, 28, .today = 10);
@@ -637,8 +637,8 @@ Text effects, loaders and the playful pieces. With reduced motion, text effects 
 ```c
 cui_shimmer_text(ui, "Thinking about your question...");
 bool done = cui_typewriter(ui, "answer", streamed_text, .caret = true);
-cui_text_reveal(ui, "hero", "Calm by default. Motion with purpose.", .font = CUI_FONT_DISPLAY, .size = 20);
-static const char *words[] = { "native.", "fast.", "calm." };
+cui_text_reveal(ui, "done", "The release build finished in 3 minutes 42 seconds.", .font = CUI_FONT_DISPLAY, .size = 20);
+static const char *words[] = { "staging.", "eu-west.", "all regions." };
 cui_word_rotate(ui, "rot", words, 3, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26);
 ```
 
@@ -649,15 +649,14 @@ The shimmer sweeps a soft highlight across muted text. The typewriter lays out t
 ![Gradient text and spotlight cards](images/showcase/hero-effects-dark.png)
 
 ```c
-cui_gradient_text(ui, "Ship interfaces people love", .font = CUI_FONT_DISPLAY, .size = 38,
-                  .from = CUI_RGB(0x8b5cf6), .to = CUI_RGB(0xec4899));
-cui_spotlight(ui, "pro", .width = CUI_PX(270), .beam = true) {
-    cui_text(ui, "Pro", .font = CUI_FONT_MEDIUM);
+cui_gradient_text(ui, "Kiln 2.4", .font = CUI_FONT_DISPLAY, .size = 38);   /* a tonal blend of the accent */
+cui_spotlight(ui, "gl", .width = CUI_PX(270)) {
+    cui_text(ui, "OpenGL 3.3", .font = CUI_FONT_MEDIUM);
     /* ... */
 }
 ```
 
-Gradient text blends from one color to the other across its width; with `animate` the blend drifts slowly back and forth. A spotlight card is a card whose surface catches a soft light under the pointer, and the stretch of its border nearest the pointer lights up. With `beam`, a light also travels around the edge, which suits a featured plan or a call to action.
+Gradient text blends across its width, by default between two tones of the accent; pass `from` and `to` for other colors, and `animate` to let the blend drift. Keep it for a single brand moment: headings and numbers read better in one solid color. A spotlight card catches a soft light under the pointer, and the stretch of its border nearest the pointer lights up. With `beam`, a light also travels around the edge. Use it for the one card that is live, such as a running deploy, never for a whole row.
 
 ### Loaders
 
@@ -701,7 +700,7 @@ Big toggles for quick settings, which fill their grid cell. They switch with a c
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/player-dark.png"><img src="images/components/player.png" alt="Now playing, waveform and tab bar"></picture>
 
 ```c
-static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", art, { 0 }, 76, 222, true };
+static cui_now_playing np = { "Low Tide", "Marlow Avenue", art, { 0 }, 76, 222, true };
 int ev = cui_now_playing(ui, "player", &np);
 if (ev & CUI_PLAYER_NEXT) next_track();
 if (ev & CUI_PLAYER_SEEK) seek(np.position);

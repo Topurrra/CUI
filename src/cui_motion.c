@@ -253,7 +253,8 @@ void cui_gradient_text_ex(cui_ctx *ui, const char *text, const cui_gradient_text
     cui__grad_fx *p = cui__frame_alloc(ui, sizeof *p);
     p->node = i;
     p->a = cui__color_set(o->from) ? cui_color_of(ui, o->from) : cui__mo_accent(ui);
-    p->b = cui__color_set(o->to) ? cui_color_of(ui, o->to) : ui->theme.colors[CUI_TOKEN_SERIES_1 + 3];
+    /* by default a tonal blend within the accent, not a second hue */
+    p->b = cui__color_set(o->to) ? cui_color_of(ui, o->to) : cui_mix(p->a, CUI_C(ui, FOREGROUND), 0.6f);
     p->shift = 0;
     if (o->animate && !cui__still(ui)) { p->shift = (float)fmod(ui->time * 0.12, 1.0); ui->animating = true; }
     else p->shift = 0;
@@ -329,8 +330,7 @@ void cui_spotlight_begin(cui_ctx *ui, const char *id_str, const cui_spotlight_op
     nd->gap = o->gap > 0 ? o->gap : 10;
     nd->radius = CUI_CORNERS(ui->theme.radius_panel);
     nd->bg = CUI_C(ui, SURFACE);
-    nd->border = 1; nd->border_color = CUI_C(ui, BORDER);
-    nd->elevation = CUI_ELEVATION_RESTING; nd->elevation_alpha = 1;
+    nd->border = 1; nd->border_color = CUI_C(ui, BORDER);   /* rests on its edge, like any card: no shadow */
     cui__spot_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->hover = st->hover; p->mx = st->mx; p->my = st->my;
     p->c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT));

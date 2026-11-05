@@ -24,7 +24,7 @@ Windows, macOS and Linux from one C99 codebase. No dependencies. About 240 KB.
 
 <br>
 
-<img src="docs/images/showcase/hero-ai-dark.png" alt="An assistant window built with CUI: reasoning, tool calls, citations, a composer and a voice orb">
+<img src="docs/images/showcase/hero-ai-dark.png" alt="An assistant window built with CUI: reasoning, tool calls, citations and a composer, beside a task plan and a frame time chart">
 
 <sub>Every image on this page is drawn by CUI itself, from plain C.</sub>
 
@@ -34,68 +34,29 @@ Windows, macOS and Linux from one C99 codebase. No dependencies. About 240 KB.
 
 ## Why CUI
 
-C has excellent low level libraries and very few ways to build an interface that looks like it belongs in 2026. CUI is a complete component library, not a box of primitives: buttons, inputs, selects, date pickers, dialogs, toasts, tables and a command palette, plus the pieces usually sold separately: a data grid, kanban boards, calendars and gantt charts, a dozen kinds of chart, motion effects and a full set of AI interface components. All of it is designed together, good looking without any styling, and free.
+C has excellent low level libraries and very few ways to build an interface that looks current. CUI is a complete component library rather than a box of primitives. Buttons, inputs, selects, date pickers, dialogs, toasts and tables are all there, along with a command palette, a data grid, kanban boards, calendars and gantt charts, about a dozen kinds of chart and a set of AI chat components. They are designed together and look finished without any styling.
 
-<table>
-<tr>
-<td width="50%" valign="top">
+Your interface is plain C that runs every frame. Components are functions that draw themselves and return what happened, and your variables are the state. Behind them sits a flexbox style layout engine with rows, columns, grids, wrapping text, scroll areas and split views.
 
-**Looks right out of the box**<br>
-A neutral palette with one accent, hairline borders, layered shadows on floating surfaces only, concentric radii, Inter and Geist type. Light and dark themes, eight accents, animated when they change.
+The look is restrained on purpose: neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed (presses, gliding highlights, menus that open from their trigger). Every animation has a reduced motion path, and every component works from the keyboard. [Design principles](docs/design.md) has the rules, including the generic patterns CUI avoids.
 
-</td>
-<td width="50%" valign="top">
-
-**Moves with purpose**<br>
-Presses scale on a snappy spring, highlights glide between options, menus open from their trigger, sliders stretch like rubber past their ends. Every animation has a reduced motion path.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Keyboard first**<br>
-Tab and Shift+Tab move focus, Enter and Space activate, arrows drive menus, tabs, sliders and lists, Esc closes. The focus ring appears only for keyboard users.
-
-</td>
-<td valign="top">
-
-**Immediate mode, real layout**<br>
-Your UI is plain C that runs every frame. Behind it sits a flexbox style engine: rows, columns, grids, grow and shrink, wrapping text, scroll areas, split views.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Fast, small, frugal**<br>
-A full screen builds, lays out and paints in **0.1 to 0.25 ms**. A complete app is about **240 KB**. Idle apps sleep and use no CPU.
-
-</td>
-<td valign="top">
-
-**Portable and friendly**<br>
-Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software fallback, or plug in your own renderer: the core just emits vertices.
-
-</td>
-</tr>
-</table>
+A full screen builds, lays out and paints in 0.1 to 0.25 ms, idle apps use no CPU, and a complete app is about 240 KB. It runs on Win32, Cocoa and X11, or on SDL2 and GLFW, with OpenGL or a software renderer. You can also plug in your own renderer, because the core only emits triangles.
 
 ## Showcase
 
 <table>
 <tr>
-<td colspan="2"><img src="docs/images/showcase/hero-effects-dark.png" alt="Pricing cards with a pointer spotlight, a travelling border beam and gradient text"></td>
+<td colspan="2"><img src="docs/images/showcase/hero-data.png" alt="A data grid with a filter bar, two selected rows, team tags and score bars"></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><sub><b>Spotlight cards and gradient text</b>: a light follows the pointer, a beam runs along the featured card</sub></td>
+<td colspan="2" align="center"><sub><b>Data grid</b>: 2,000 virtualized rows, filters, sorting, resizable columns and spreadsheet style selection</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/showcase/hero-desk-dark.png" alt="Control tiles, a now playing card, a waveform and a magnifying dock"></td>
+<td width="50%"><img src="docs/images/showcase/hero-desk-dark.png" alt="Control tiles, a now playing card, a waveform and a dock"></td>
 <td width="50%"><img src="docs/images/showcase/hero-board.png" alt="A kanban board with a card being dragged between columns"></td>
 </tr>
 <tr>
-<td align="center"><sub><b>Dock, tiles and player</b>: icons that grow under the pointer, a seekable waveform</sub></td>
+<td align="center"><sub><b>Dock, tiles and player</b>: icons grow under the pointer, the waveform seeks on click</sub></td>
 <td align="center"><sub><b>Kanban</b>: the lifted card follows the pointer and the column opens a slot for it</sub></td>
 </tr>
 <tr>
@@ -106,19 +67,19 @@ Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software
 </tr>
 <tr>
 <td><img src="docs/images/showcase/hero-palette-dark.png" alt="A command palette with grouped commands and shortcuts"></td>
-<td><img src="docs/images/showcase/hero-charts.png" alt="A calendar heatmap, a sankey diagram, a radar chart and an agent plan"></td>
+<td><img src="docs/images/showcase/hero-charts.png" alt="A contribution heatmap, a sankey of test runs, a radar chart and a task plan"></td>
 </tr>
 <tr>
 <td align="center"><sub><b>Command palette</b>: fuzzy search, groups and shortcuts</sub></td>
-<td align="center"><sub><b>Charts</b>: calendar heatmap, sankey, radar, and a live plan</sub></td>
+<td align="center"><sub><b>Charts</b>: calendar heatmap, sankey and radar, with a live task plan</sub></td>
 </tr>
 <tr>
 <td><img src="docs/images/showcase/hero-social-dark.png" alt="Chat bubbles, threaded comments, a rolling counter and presence avatars"></td>
-<td><img src="docs/images/showcase/hero-data.png" alt="A data grid with a filter bar, selected rows, badges and progress cells"></td>
+<td><img src="docs/images/showcase/hero-effects-dark.png" alt="Three cards for choosing a renderer, one lit by the pointer"></td>
 </tr>
 <tr>
 <td align="center"><sub><b>Conversation</b>: grouped bubbles, threads, a rolling counter, presence</sub></td>
-<td align="center"><sub><b>Data grid</b>: virtualized rows, filters, sorting, spreadsheet style selection</sub></td>
+<td align="center"><sub><b>Spotlight cards</b>: the surface and edge nearest the pointer light up</sub></td>
 </tr>
 <tr>
 <td colspan="2"><img src="docs/images/showcase/hero-plan-dark.png" alt="A gantt chart with dependencies, progress and a today line"></td>

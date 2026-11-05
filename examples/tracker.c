@@ -18,16 +18,16 @@ typedef struct {
 } issue;
 
 static issue issues[] = {
-    { "ENG-214", "Text input drops the last character on fast typing", "Ada Lovelace", "Nov 6", ST_PROGRESS, PRI_URGENT, { "Bug", "Input" }, { CUI_TONE_DANGER, CUI_TONE_NEUTRAL } },
-    { "ENG-209", "Spring animations for popover placement flips", "Grace Hopper", "Nov 8", ST_PROGRESS, PRI_HIGH, { "Motion", NULL }, { CUI_TONE_VIOLET } },
-    { "ENG-205", "Software renderer: SIMD path for text quads", "Linus Torvalds", "Nov 12", ST_PROGRESS, PRI_MEDIUM, { "Perf", NULL }, { CUI_TONE_TEAL } },
-    { "ENG-198", "Keyboard navigation for the color picker", "Alan Turing", "Nov 7", ST_REVIEW, PRI_HIGH, { "A11y", "Input" }, { CUI_TONE_INFO, CUI_TONE_NEUTRAL } },
-    { "ENG-196", "Wayland backend through libdecor", "Katherine Johnson", "Nov 9", ST_REVIEW, PRI_MEDIUM, { "Platform", NULL }, { CUI_TONE_WARNING } },
-    { "ENG-221", "Inline IME composition on macOS", "Hedy Lamarr", "Nov 14", ST_TODO, PRI_HIGH, { "Platform", "Input" }, { CUI_TONE_WARNING, CUI_TONE_NEUTRAL } },
-    { "ENG-219", "Virtual table with sticky header", "Margaret Hamilton", "Nov 18", ST_TODO, PRI_MEDIUM, { "Data", NULL }, { CUI_TONE_TEAL } },
-    { "ENG-217", "Docs: theming cookbook", "Ada Lovelace", "Nov 20", ST_TODO, PRI_LOW, { "Docs", NULL }, { CUI_TONE_NEUTRAL } },
-    { "ENG-188", "Ship 1.0 release notes", "Grace Hopper", "Nov 1", ST_DONE, PRI_MEDIUM, { "Docs", NULL }, { CUI_TONE_NEUTRAL } },
-    { "ENG-185", "Gliding highlight in segmented controls", "Alan Turing", "Oct 30", ST_DONE, PRI_LOW, { "Motion", NULL }, { CUI_TONE_VIOLET } },
+    { "ENG-214", "Text input drops the last character on fast typing", "Maya Okafor", "Nov 6", ST_PROGRESS, PRI_URGENT, { "Bug", "Input" }, { CUI_TONE_DANGER, CUI_TONE_NEUTRAL } },
+    { "ENG-209", "Spring animations for popover placement flips", "Jonas Berg", "Nov 8", ST_PROGRESS, PRI_HIGH, { "Motion", NULL }, { CUI_TONE_VIOLET } },
+    { "ENG-205", "Software renderer: SIMD path for text quads", "Lena Fischer", "Nov 12", ST_PROGRESS, PRI_MEDIUM, { "Perf", NULL }, { CUI_TONE_TEAL } },
+    { "ENG-198", "Keyboard navigation for the color picker", "Priya Nair", "Nov 7", ST_REVIEW, PRI_HIGH, { "A11y", "Input" }, { CUI_TONE_INFO, CUI_TONE_NEUTRAL } },
+    { "ENG-196", "Wayland backend through libdecor", "Tomas Rivera", "Nov 9", ST_REVIEW, PRI_MEDIUM, { "Platform", NULL }, { CUI_TONE_WARNING } },
+    { "ENG-221", "Inline IME composition on macOS", "Aiko Tanaka", "Nov 14", ST_TODO, PRI_HIGH, { "Platform", "Input" }, { CUI_TONE_WARNING, CUI_TONE_NEUTRAL } },
+    { "ENG-219", "Virtual table with sticky header", "Sam Whitfield", "Nov 18", ST_TODO, PRI_MEDIUM, { "Data", NULL }, { CUI_TONE_TEAL } },
+    { "ENG-217", "Docs: theming cookbook", "Maya Okafor", "Nov 20", ST_TODO, PRI_LOW, { "Docs", NULL }, { CUI_TONE_NEUTRAL } },
+    { "ENG-188", "Ship 1.0 release notes", "Jonas Berg", "Nov 1", ST_DONE, PRI_MEDIUM, { "Docs", NULL }, { CUI_TONE_NEUTRAL } },
+    { "ENG-185", "Gliding highlight in segmented controls", "Priya Nair", "Oct 30", ST_DONE, PRI_LOW, { "Motion", NULL }, { CUI_TONE_VIOLET } },
 };
 #define ISSUE_COUNT ((int)(sizeof issues / sizeof issues[0]))
 
@@ -186,10 +186,10 @@ static void sidebar(cui_ctx *ui, app_state *s) {
         }
         cui_box(ui, .height = CUI_PX(8)) {}
         cui_row(ui, .gap = 10, .pad_x = 6, .pad_y = 4, .align = CUI_ALIGN_CENTER) {
-            cui_avatar(ui, "Ada Lovelace", .size = 28, .status = "online");
+            cui_avatar(ui, "Maya Okafor", .size = 28, .status = "online");
             cui_column(ui, .gap = 0, .width = CUI_FILL) {
-                cui_text(ui, "Ada Lovelace", .font = CUI_FONT_MEDIUM, .size = 13, .nowrap = true);
-                cui_text(ui, "ada@orbit.dev", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
+                cui_text(ui, "Maya Okafor", .font = CUI_FONT_MEDIUM, .size = 13, .nowrap = true);
+                cui_text(ui, "maya@orbit.dev", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
             }
             cui_icon_button(ui, CUI_ICON_SETTINGS, .size = CUI_SIZE_SM, .tooltip = "Settings");
         }
@@ -207,7 +207,7 @@ static void issue_row(cui_ctx *ui, app_state *s, int i) {
             status_icon(ui, "status", it->status);
             cui_text(ui, it->title, .width = CUI_FILL, .nowrap = true);
             for (int l = 0; l < 2; l++)
-                if (it->labels[l]) cui_badge(ui, it->labels[l], .tone = it->label_tones[l], .dot = true);
+                if (it->labels[l]) cui_badge(ui, it->labels[l], .tone = it->label_tones[l]);
             cui_text(ui, it->date, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(46), .align = CUI_TEXT_RIGHT, .nowrap = true);
             cui_avatar(ui, it->assignee, .size = 22);
         }
@@ -229,7 +229,7 @@ static void issue_list(cui_ctx *ui, app_state *s) {
             static const char *tabs[] = { "All issues", "Active", "Backlog" };
             cui_tabs(ui, "views", tabs, 3, &s->tab, .variant = CUI_TABS_PILL);
             cui_spacer(ui);
-            static const char *people[] = { "Ada Lovelace", "Grace Hopper", "Alan Turing", "Linus Torvalds", "Hedy Lamarr" };
+            static const char *people[] = { "Maya Okafor", "Jonas Berg", "Priya Nair", "Lena Fischer", "Aiko Tanaka" };
             cui_avatar_group(ui, people, 5, 4, 24);
         }
         cui_separator(ui);
@@ -301,7 +301,7 @@ static void detail(cui_ctx *ui, app_state *s) {
                 cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER) {
                     property(ui, "Labels");
                     for (int l = 0; l < 2; l++)
-                        if (it->labels[l]) cui_badge(ui, it->labels[l], .tone = it->label_tones[l], .dot = true);
+                        if (it->labels[l]) cui_badge(ui, it->labels[l], .tone = it->label_tones[l]);
                 }
                 cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
                     property(ui, "Cycle");
@@ -317,10 +317,10 @@ static void detail(cui_ctx *ui, app_state *s) {
             cui_separator(ui);
             cui_label(ui, "Activity");
             cui_column(ui, .gap = 0, .width = CUI_FILL) {
-                cui_timeline_item(ui, "Ada moved to In Progress", .time = "2h ago", .icon = CUI_ICON_ARROW_RIGHT, .tone = CUI_TONE_WARNING);
-                cui_timeline_item(ui, "Grace linked a pull request", .time = "5h ago", .icon = CUI_ICON_GIT_BRANCH, .tone = CUI_TONE_ACCENT,
+                cui_timeline_item(ui, "Maya moved to In Progress", .time = "2h ago", .icon = CUI_ICON_ARROW_RIGHT, .tone = CUI_TONE_WARNING);
+                cui_timeline_item(ui, "Jonas linked a pull request", .time = "5h ago", .icon = CUI_ICON_GIT_BRANCH, .tone = CUI_TONE_ACCENT,
                                   .description = "Keep pending text across focus changes");
-                cui_timeline_item(ui, "Alan set priority to Urgent", .time = "Yesterday", .icon = CUI_ICON_TRIANGLE_ALERT, .tone = CUI_TONE_DANGER);
+                cui_timeline_item(ui, "Priya set priority to Urgent", .time = "Yesterday", .icon = CUI_ICON_TRIANGLE_ALERT, .tone = CUI_TONE_DANGER);
                 cui_timeline_item(ui, "Issue created", .time = "Nov 2", .icon = CUI_ICON_PLUS, .last = true);
             }
         }
@@ -356,5 +356,5 @@ static void frame(cui_ctx *ui, void *user) {
 int main(void) {
     static app_state s = { .nav = 6 };
     return cui_app_run(&(cui_app_desc){ .title = "Orbit", .width = 1440, .height = 900,
-                                        .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_VIOLET }, frame, &s);
+                                        .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_NEUTRAL }, frame, &s);
 }

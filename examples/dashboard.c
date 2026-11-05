@@ -19,12 +19,12 @@ typedef struct {
 typedef struct { const char *id, *customer, *email, *date, *status; int tone; float amount; } order;
 
 static const order orders[] = {
-    { "#3021", "Olivia Martin", "olivia@lumen.io", "Nov 5", "Paid", CUI_TONE_SUCCESS, 1999.00f },
-    { "#3020", "Jackson Lee", "jackson@orbit.dev", "Nov 5", "Pending", CUI_TONE_WARNING, 39.00f },
-    { "#3019", "Isabella Nguyen", "isabella@north.co", "Nov 4", "Paid", CUI_TONE_SUCCESS, 299.00f },
-    { "#3018", "William Kim", "will@kim.studio", "Nov 4", "Refunded", CUI_TONE_DANGER, 99.00f },
-    { "#3017", "Sofia Davis", "sofia@davis.app", "Nov 3", "Paid", CUI_TONE_SUCCESS, 450.00f },
-    { "#3016", "Liam Patel", "liam@patel.tech", "Nov 3", "Paid", CUI_TONE_SUCCESS, 1250.00f },
+    { "#3021", "Nora Lindqvist", "nora@lindqvist.se", "Nov 5", "Paid", CUI_TONE_SUCCESS, 184.20f },
+    { "#3020", "Kwame Asante", "kwame@asante.co", "Nov 5", "Pending", CUI_TONE_WARNING, 42.75f },
+    { "#3019", "Hana Novak", "hana@novak.cz", "Nov 4", "Paid", CUI_TONE_SUCCESS, 318.40f },
+    { "#3018", "Felix Moreau", "felix@moreau.fr", "Nov 4", "Refunded", CUI_TONE_DANGER, 96.00f },
+    { "#3017", "Iris Coleman", "iris@coleman.org", "Nov 3", "Paid", CUI_TONE_SUCCESS, 471.15f },
+    { "#3016", "Ravi Shah", "ravi@shah.in", "Nov 3", "Paid", CUI_TONE_SUCCESS, 1236.80f },
 };
 
 static void sidebar(cui_ctx *ui, app_state *s) {
@@ -44,9 +44,9 @@ static void sidebar(cui_ctx *ui, app_state *s) {
             if (cui_nav_item(ui, items[i], .icon = icons[i], .selected = s->nav == i, .badge = badges[i])) s->nav = i;
         cui_spacer(ui);
         cui_card(ui, .pad = 16, .gap = 10) {
-            cui_text(ui, "Upgrade to Pro", .font = CUI_FONT_MEDIUM);
-            cui_text(ui, "Unlock forecasts and unlimited reports.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
-            cui_button(ui, "Upgrade", .variant = CUI_BUTTON_PRIMARY, .size = CUI_SIZE_SM, .full_width = true);
+            cui_text(ui, "Next payout", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_text(ui, "$4,812.30", .font = CUI_FONT_DISPLAY, .size = 20, .tabular = true);
+            cui_text(ui, "To the account ending 4417 on Nov 8.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
         }
     }
 }
@@ -61,7 +61,7 @@ static void topbar(cui_ctx *ui, app_state *s) {
         }
         cui_icon_button(ui, CUI_ICON_BELL, .tooltip = "Notifications");
         cui_menu(ui, "Account", .icon = CUI_ICON_CIRCLE_USER, .variant = CUI_BUTTON_GHOST, .placement = CUI_PLACE_BOTTOM_END) {
-            cui_menu_label(ui, "olivia@northwind.co");
+            cui_menu_label(ui, "nora@northwind.co");
             cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER);
             cui_menu_item(ui, "Billing", .icon = CUI_ICON_CREDIT_CARD);
             cui_menu_item(ui, "Keyboard shortcuts", .icon = CUI_ICON_KEYBOARD, .shortcut = "?");
@@ -80,7 +80,7 @@ static void content(cui_ctx *ui, app_state *s) {
 
     cui_row(ui, .gap = 12) {
         cui_column(ui, .gap = 4, .width = CUI_FILL) {
-            cui_heading(ui, "Good morning, Olivia", 2);
+            cui_heading(ui, "Good morning, Nora", 2);
             cui_secondary(ui, "Here is what happened in your store this month.");
         }
         const char *ranges[] = { "7 days", "30 days", "12 months" };
@@ -91,7 +91,7 @@ static void content(cui_ctx *ui, app_state *s) {
         cui_metric(ui, "Revenue", "$64,210", .delta = 12.4f, .spark = rev, .spark_count = 12, .icon = CUI_ICON_DOLLAR_SIGN);
         cui_metric(ui, "Customers", "2,040", .delta = 7.3f, .spark = users, .spark_count = 12, .icon = CUI_ICON_USERS);
         cui_metric(ui, "Conversion", "4.1%", .delta = 0.4f, .delta_label = "+0.4 pts", .spark = conv, .spark_count = 12, .icon = CUI_ICON_TARGET);
-        cui_metric(ui, "Churn", "1.7%", .delta = -0.6f, .delta_label = "-0.6 pts", .spark = churn, .spark_count = 12, .icon = CUI_ICON_TRENDING_DOWN);
+        cui_metric(ui, "Churn", "1.7%", .delta = -0.6f, .delta_label = "-0.6 pts", .lower_is_better = true, .spark = churn, .spark_count = 12, .icon = CUI_ICON_TRENDING_DOWN);
     }
     cui_row(ui, .gap = 16, .align = CUI_ALIGN_STRETCH) {
         cui_card(ui, .gap = 16, .width = CUI_GROW(2)) {
@@ -180,5 +180,5 @@ static void frame(cui_ctx *ui, void *user) {
 
 int main(void) {
     static app_state s = { .sort = { 0, true }, .selected = 0, .range = 1 };
-    return cui_app_run(&(cui_app_desc){ .title = "Northwind Dashboard", .width = 1360, .height = 900, .accent = CUI_ACCENT_VIOLET }, frame, &s);
+    return cui_app_run(&(cui_app_desc){ .title = "Northwind Dashboard", .width = 1360, .height = 900, .accent = CUI_ACCENT_BLUE }, frame, &s);
 }

@@ -376,16 +376,10 @@ int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int c
 /* ------------------------------------------------------------------------ */
 
 typedef struct { cui_spring t; float h; bool init; } cui__banner_state;
-typedef struct { cui_color c, glow; } cui__line_paint;
+typedef struct { cui_color c; } cui__line_paint;
 static void cui__paint_bottom_line(cui_ctx *ui, cui_node *n, void *data) {
     cui__line_paint *p = data;
     cui_rect r = n->rect;
-    /* a soft pool of the tone's light behind the message, so the strip reads as lit rather than flat */
-    if (p->glow.a) {
-        float gw = CUI_MIN(r.w * 0.55f, 640.0f), gh = r.h * 0.5f;
-        cui_draw_shadow(ui, (cui_rect){ r.x + (r.w - gw) * 0.5f, r.y + (r.h - gh) * 0.5f, gw, gh }, CUI_CORNERS(gh * 0.5f), r.h * 1.1f, 0,
-                        (cui_vec2){ 0, 0 }, p->glow);
-    }
     cui_draw_rect(ui, (cui_rect){ r.x, r.y + r.h - 1, r.w, 1 }, CUI_CORNERS(0), p->c);
 }
 
@@ -421,14 +415,12 @@ bool cui_banner_ex(cui_ctx *ui, const char *text, bool *open, const cui_banner_o
     rn->opacity = CUI_MAX(0.001f, t);
     cui__line_paint *lp = cui__frame_alloc(ui, sizeof *lp);
     lp->c = cui_mix(CUI_C(ui, BORDER), tc, 0.25f);
-    bool dark = ui->mode == CUI_THEME_DARK;
-    lp->glow = cui_alpha(tc, neutral ? (dark ? 0.08f : 0.05f) : (dark ? 0.28f : 0.18f));
     rn->paint = cui__paint_bottom_line;
     rn->paint_data = lp;
     cui__open(ui, row);
     cui_spacer(ui);
     cui_color fg = cui_mix(CUI_C(ui, FOREGROUND), tc, ui->mode == CUI_THEME_DARK ? 0.25f : 0.35f);
-    cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_SPARKLES, 15, tc);
+    if (o->icon) cui__icon_node(ui, o->icon, 15, tc);
     int tt = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, false);
     ui->nodes[tt].line_height = 1.35f;
     bool action = false;

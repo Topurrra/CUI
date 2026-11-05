@@ -784,9 +784,9 @@ static void build_disclosure(cui_ctx *ui, void *u) {
         cui_column(ui, .width = CUI_PX(420), .gap = 14) {
             cui_banner(ui, "Update ready", &a->banner, .dismissible = true);
             a->banner_id = cui_make_id(ui, "Update ready") ^ 0xBA22u;
-            cui_link(ui, "@grace");
+            cui_link(ui, "@jonas");
             a->link_id = cui_last_id(ui);
-            cui_hover_card(ui, "card") { a->card_built = true; cui_text(ui, "Grace Hopper"); }
+            cui_hover_card(ui, "card") { a->card_built = true; cui_text(ui, "Jonas Berg"); }
             if (cui_button(ui, "Delete")) cui_popover_open(ui, "confirm");
             a->del_id = cui_last_id(ui);
             if (cui_confirm_popover(ui, "confirm", .title = "Sure?")) a->confirmed = true;
@@ -1573,7 +1573,7 @@ static void test_planning(void) {
 
     /* gantt */
     a.mode = 2;
-    a.tasks[0] = (cui_gantt_task){ "Build", "Ada", 2, 6, 0.5f, CUI_TONE_INFO, -1, false };
+    a.tasks[0] = (cui_gantt_task){ "Build", "Maya", 2, 6, 0.5f, CUI_TONE_INFO, -1, false };
     a.tasks[1] = (cui_gantt_task){ "Ship", NULL, 10, 10, 0, CUI_TONE_SUCCESS, 0, true };
     a.task_clicked = -1;
     run(ui, build_plan, &a, 3);
@@ -1614,8 +1614,8 @@ typedef struct {
 static void build_media(cui_ctx *ui, void *u) {
     media_ctx *a = u;
     cui_column(ui, .pad = 16, .gap = 16, .width = CUI_FILL) {
-        a->flags |= cui_comment(ui, "c", "Ada Lovelace", "Looks good to me.", .likes = &a->likes, .liked = &a->liked);
-        cui_chat_message(ui, "Hello", .author = "Grace");
+        a->flags |= cui_comment(ui, "c", "Maya Okafor", "Looks good to me.", .likes = &a->likes, .liked = &a->liked);
+        cui_chat_message(ui, "Hello", .author = "Jonas");
         cui_chat_message(ui, "Hi!", .mine = true, .status = "Read");
         cui_carousel(ui, "car", 3, &a->slide, .height = 120) {
             for (int k = 0; k < 3; k++) cui_carousel_slide(ui) { cui_text(ui, "Slide"); }

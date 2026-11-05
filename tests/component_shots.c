@@ -13,7 +13,7 @@ typedef void (*scene_fn)(cui_ctx *ui, int frame);
 static bool b_on = true, b_off = false, b_check = true, b_check2 = false;
 static float f_vol = 62, f_lo = 25, f_hi = 70;
 static int i_seg = 1, i_tab = 0, i_radio = 1, i_rating = 4, i_sel = 2, i_page = 2;
-static char s_name[64] = "Ada Lovelace", s_email[64] = "", s_pw[32] = "secret", s_search[32] = "", s_bio[256] = "Writing software that feels calm.";
+static char s_name[64] = "Maya Okafor", s_email[64] = "", s_pw[32] = "secret", s_search[32] = "", s_bio[256] = "Writing software that feels calm.";
 static double d_qty = 4;
 static cui_date d_date = { 2026, 11, 14 };
 static bool open_true = true;
@@ -204,9 +204,9 @@ SCENE(badges) {
             cui_badge(ui, "Beta", .tone = CUI_TONE_INFO, .solid = true);
         }
         cui_row(ui, .gap = 14) {
-            cui_avatar(ui, "Grace Hopper", .size = 40, .status = "online");
-            cui_avatar(ui, "Alan Turing", .size = 40);
-            static const char *team[] = { "Ken T", "Barbara L", "Donald K", "Frances A", "John B", "Edsger D" };
+            cui_avatar(ui, "Jonas Berg", .size = 40, .status = "online");
+            cui_avatar(ui, "Priya Nair", .size = 40);
+            static const char *team[] = { "Ken T", "Rosa L", "Donald K", "Elif A", "John B", "Omar D" };
             cui_avatar_group(ui, team, 6, 4, 32);
             cui_kbd(ui, "Ctrl Shift P");
         }
@@ -231,7 +231,7 @@ SCENE(table) {
     cui_table_column cols[] = { { "Name", CUI_FILL, CUI_TEXT_LEFT, true }, { "Role", CUI_PX(100), CUI_TEXT_LEFT, false },
                                 { "Status", CUI_PX(110), CUI_TEXT_LEFT, false }, { "Amount", CUI_PX(100), CUI_TEXT_RIGHT, false } };
     static cui_table_sort sort = { 0, false };
-    static const char *names[] = { "Grace Hopper", "Alan Turing", "Hedy Lamarr" };
+    static const char *names[] = { "Jonas Berg", "Priya Nair", "Aiko Tanaka" };
     static const char *roles[] = { "Owner", "Admin", "Editor" };
     static const char *st[] = { "Active", "Active", "Invited" };
     static const char *am[] = { "$12,400", "$9,850", "$1,975" };
@@ -264,8 +264,8 @@ SCENE(tree) {
             }
         }
         cui_card(ui, .pad = 8, .gap = 2, .width = CUI_PX(320)) {
-            cui_list_item(ui, "Design review", .avatar = "Grace Hopper", .subtitle = "Tomorrow at 10:00", .trailing = "45m");
-            cui_list_item(ui, "Release 1.0", .avatar = "Alan Turing", .subtitle = "Ship it", .trailing = "2h", .selected = true);
+            cui_list_item(ui, "Design review", .avatar = "Jonas Berg", .subtitle = "Tomorrow at 10:00", .trailing = "45m");
+            cui_list_item(ui, "Release 1.0", .avatar = "Priya Nair", .subtitle = "Ship it", .trailing = "2h", .selected = true);
         }
     }
 }
@@ -418,7 +418,7 @@ static void scene_morph(cui_ctx *ui, int f) {
 }
 static void body_user_menu(cui_ctx *ui) {
     cui_box(ui, .width = CUI_PX(270)) {
-        cui_user_menu(ui, "Ada Lovelace", .detail = "ada@analytical.engine", .status = "online", .placement = CUI_PLACE_BOTTOM_START) {
+        cui_user_menu(ui, "Maya Okafor", .detail = "maya@fieldwork.studio", .status = "online", .placement = CUI_PLACE_BOTTOM_START) {
             cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER, .shortcut = "Ctrl P");
             cui_menu_item(ui, "Billing", .icon = CUI_ICON_CREDIT_CARD);
             cui_menu_item(ui, "Settings", .icon = CUI_ICON_SETTINGS, .shortcut = "Ctrl ,");
@@ -428,11 +428,11 @@ static void body_user_menu(cui_ctx *ui) {
     }
 }
 static void scene_user_menu(cui_ctx *ui, int f) {
-    if (f < 0) { click_id(ui, cui_make_id(ui, "Ada Lovelace") ^ 0x05E4u, -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 600, 20); return; }
+    if (f < 0) { click_id(ui, cui_make_id(ui, "Maya Okafor") ^ 0x05E4u, -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 600, 20); return; }
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_user_menu(ui); }
 }
 static void body_inline_edit(cui_ctx *ui) {
-    static char title[64] = "Q3 roadmap", owner[64] = "Grace Hopper", due[64] = "End of September";
+    static char title[64] = "Q3 roadmap", owner[64] = "Jonas Berg", due[64] = "End of September";
     cui_column(ui, .gap = 10, .width = CUI_FILL) {
         cui_inline_edit(ui, "t", title, sizeof title, .font = CUI_FONT_DISPLAY, .size = 26);
         cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER) {
@@ -537,7 +537,7 @@ static void body_capture(cui_ctx *ui) {
         cui_column(ui, .width = CUI_GROW(1), .gap = 16) {
             cui_signature_pad(ui, "sig", .height = 140);
             cui_row(ui, .gap = 16, .align = CUI_ALIGN_CENTER) {
-                cui_avatar_upload(ui, "avatar", "Ada Lovelace", &avatar, 56);
+                cui_avatar_upload(ui, "avatar", "Maya Okafor", &avatar, 56);
                 cui_column(ui, .gap = 2) { cui_label(ui, "Profile photo"); cui_muted(ui, "Drop an image on the avatar"); }
             }
         }
@@ -566,13 +566,13 @@ static void scene_capture(cui_ctx *ui, int f) {
 static void body_hover_card(cui_ctx *ui) {
     cui_row(ui, .gap = 6) {
         cui_text(ui, "Assigned to");
-        cui_link(ui, "@grace");
+        cui_link(ui, "@jonas");
         cui_hover_card(ui, "grace-card", .width = 300) {
             cui_row(ui, .gap = 12, .align = CUI_ALIGN_START) {
-                cui_avatar(ui, "Grace Hopper", .size = 44, .status = "online");
+                cui_avatar(ui, "Jonas Berg", .size = 44, .status = "online");
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
-                    cui_text(ui, "Grace Hopper", .font = CUI_FONT_MEDIUM);
-                    cui_text(ui, "Compilers, Cobol and very small nanoseconds.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
+                    cui_text(ui, "Design lead on the mobile app.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                     cui_row(ui, .gap = 6, .pad_top = 4) {
                         cui_icon(ui, CUI_ICON_CLOCK, 13, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
@@ -584,7 +584,7 @@ static void body_hover_card(cui_ctx *ui) {
     }
 }
 static void scene_hover_card(cui_ctx *ui, int f) {
-    if (f < 0) { cui_rect r = cui_get_rect(ui, cui_make_id(ui, "@grace") ^ 0x11AC0009u); if (-f - 1 == 5) cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2); return; }
+    if (f < 0) { cui_rect r = cui_get_rect(ui, cui_make_id(ui, "@jonas") ^ 0x11AC0009u); if (-f - 1 == 5) cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2); return; }
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_hover_card(ui); }
 }
 static void body_confirm_pop(cui_ctx *ui) {
@@ -674,7 +674,7 @@ SCENE(data_grid) {
     cui_filter_bar(ui, "filters", fields, 2, filt, search, sizeof search);
     static const cui_grid_column cols[] = { { "Name", 210, CUI_TEXT_LEFT, true }, { "Team", 120, CUI_TEXT_LEFT, true },
                                             { "Commits", 100, CUI_TEXT_RIGHT, true }, { "Score", 150, CUI_TEXT_RIGHT, true } };
-    static const char *names[] = { "Grace Hopper", "Ada Lovelace", "Linus Torvalds", "Margaret Hamilton", "Dennis Ritchie", "Barbara Liskov" };
+    static const char *names[] = { "Jonas Berg", "Maya Okafor", "Lena Fischer", "Sam Whitfield", "Daniel Mensah", "Rosa Delgado" };
     static const char *tm[] = { "Engine", "Design", "Platform", "Engine", "Platform", "Docs" };
     static const int commits[] = { 884, 812, 640, 597, 431, 309 };
     static const float score[] = { 97.2f, 93.5f, 88.1f, 84.0f, 71.9f, 66.4f };
@@ -689,7 +689,7 @@ SCENE(data_grid) {
             cui_avatar(ui, names[r], .size = 24);
             cui_text(ui, names[r], .size = 13.5f);
             cui_data_grid_cell(ui);
-            cui_badge(ui, tm[r], .dot = true, .tone = (cui_tone)(1 + (tm[r][0] % 7)));
+            cui_badge(ui, tm[r]);
             snprintf(b1, sizeof b1, "%d", commits[r]);
             cui_data_grid_cell_text(ui, b1);
             cui_data_grid_cell(ui);
@@ -718,34 +718,34 @@ SCENE(json_view) {
         "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
         " \"platforms\": [\"windows\", \"macos\", \"linux\"],\n"
         " \"renderer\": {\"backend\": \"opengl\", \"fallback\": \"software\", \"vsync\": true, \"msaa\": null},\n"
-        " \"authors\": [{\"name\": \"Ada\", \"commits\": 412}, {\"name\": \"Grace\", \"commits\": 388}]}",
+        " \"authors\": [{\"name\": \"Maya\", \"commits\": 412}, {\"name\": \"Jonas\", \"commits\": 388}]}",
         .expand_depth = 1);
 }
 SCENE(chat) {
     cui_card(ui, .gap = 0, .pad = 16, .width = CUI_FILL) {
         cui_chat_divider(ui, "Today");
-        cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
-        cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+        cui_chat_message(ui, "Did the grid ship?", .author = "Jonas Berg", .time = "9:41", .last_in_group = false);
+        cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Jonas Berg", .grouped = true, .last_in_group = true);
         cui_chat_message(ui, "It did! Keyboard selection too.", .mine = true);
         cui_chat_message(ui, "Shift and Ctrl clicks work like a spreadsheet.", .mine = true, .grouped = true, .last_in_group = true, .status = "Read", .time = "9:43");
-        cui_typing_indicator(ui, "Grace");
+        cui_typing_indicator(ui, "Jonas");
     }
 }
 SCENE(comments) {
     static int likes[3] = { 12, 3, 0 };
     static bool liked[3] = { true, false, false };
     cui_card(ui, .gap = 4, .pad = 14, .width = CUI_FILL) {
-        cui_comment(ui, "c1", "Katherine Johnson", "The trajectory numbers check out. I would still run the sim once more before launch.", .time = "2h", .likes = &likes[0], .liked = &liked[0], .badge = "Author");
-        cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .depth = 1, .likes = &likes[1], .liked = &liked[1]);
-        cui_comment(ui, "c3", "Ada Lovelace", "Scheduled it for 3 pm.", .time = "40m", .depth = 1, .likes = &likes[2], .liked = &liked[2], .edited = true);
+        cui_comment(ui, "c1", "Tomas Rivera", "The new numbers match the staging run. I would still test the import on a large file before Friday.", .time = "2h", .likes = &likes[0], .liked = &liked[0], .badge = "Author");
+        cui_comment(ui, "c2", "Priya Nair", "Agreed. I have a 2 GB export we can use.", .time = "1h", .depth = 1, .likes = &likes[1], .liked = &liked[1]);
+        cui_comment(ui, "c3", "Maya Okafor", "Scheduled it for 3 pm.", .time = "40m", .depth = 1, .likes = &likes[2], .liked = &liked[2], .edited = true);
     }
 }
 SCENE(presence_ticker) {
     static const cui_presence_user who[] = {
-        { "Ada Lovelace", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Grace Hopper", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
-        { "Alan Turing", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Linus Torvalds", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
-        { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
-        { "Barbara Liskov", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
+        { "Maya Okafor", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Jonas Berg", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
+        { "Priya Nair", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Lena Fischer", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
+        { "Aiko Tanaka", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Daniel Mensah", { 0x10, 0xb9, 0x81, 255 }, 0, false },
+        { "Rosa Delgado", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
     };
     static const cui_ticker_item tick[] = {
         { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f }, { "Latency", "182 ms", -8.4f },
@@ -759,11 +759,11 @@ SCENE(presence_ticker) {
 }
 SCENE(carousel) {
     static int slide = 1;
-    static const char *titles[] = { "Calm by default", "Motion with purpose", "Keyboard first" };
-    static const char *descs[] = { "One accent, hairline borders, layered shadows only where things float.",
-                                   "Springs for presses, highlights that glide, overlays that open from their trigger.",
-                                   "Tab, arrows, Enter and Esc work everywhere, with a ring only for the keyboard." };
-    static const unsigned tops[] = { 0x3b1d5e, 0x0f3d3e, 0x1d2a5e };
+    static const char *titles[] = { "Faster exports", "ARM64 runners", "Shortcuts everywhere" };
+    static const char *descs[] = { "A 900 file project now exports in 40 seconds, down from four minutes.",
+                                   "Linux and macOS jobs can run on ARM64 machines in every plan.",
+                                   "Every action in the editor has a key, listed under Help, Shortcuts." };
+    static const unsigned tops[] = { 0x1f2a37, 0x0f3d3e, 0x3a2e22 };
     cui_carousel(ui, "tour", 3, &slide, .height = 200) {
         for (int k = 0; k < 3; k++) cui_carousel_slide(ui) {
             cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(tops[k]), .radius = 16, .pad = 28, .gap = 8, .justify = CUI_JUSTIFY_END) {
@@ -838,7 +838,7 @@ static void body_kanban(cui_ctx *ui) {
                                         { "Spring presets", NULL, NULL } };
     static const char *tags[3][3] = { { "Design", "Perf", "Docs" }, { "A11y", "Platform", NULL }, { "Motion", NULL, NULL } };
     static const cui_tone tones[3][3] = { { CUI_TONE_VIOLET, CUI_TONE_TEAL, CUI_TONE_ROSE }, { CUI_TONE_INFO, CUI_TONE_WARNING }, { CUI_TONE_VIOLET } };
-    static const char *who[3][3] = { { "Ada Lovelace", "Grace Hopper", "Hedy Lamarr" }, { "Alan Turing", "Dennis Ritchie" }, { "Barbara Liskov" } };
+    static const char *who[3][3] = { { "Maya Okafor", "Jonas Berg", "Aiko Tanaka" }, { "Priya Nair", "Daniel Mensah" }, { "Rosa Delgado" } };
     static const int lens[3] = { 3, 2, 1 };
     cui_kanban_begin(ui, "board");
     for (int c = 0; c < 3; c++) {
@@ -864,8 +864,8 @@ static void body_kanban(cui_ctx *ui) {
 SCENE(week_calendar) {
     static cui_cal_event events[] = {
         { "Standup", "Zoom", 0, 9.5f, 9.75f, CUI_TONE_INFO }, { "Design review", "Room 2", 0, 11, 12.5f, CUI_TONE_VIOLET },
-        { "Lunch with Ada", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
-        { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Grace", NULL, 2, 10.5f, 11.5f, CUI_TONE_ROSE },
+        { "Lunch with Maya", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
+        { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Jonas", NULL, 2, 10.5f, 11.5f, CUI_TONE_ROSE },
         { "Focus time", "No meetings", 2, 13.5f, 16, CUI_TONE_TEAL }, { "Standup", "Zoom", 3, 9.5f, 9.75f, CUI_TONE_INFO },
         { "Customer call", "Acme", 3, 14, 15, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 15, 16.5f, CUI_TONE_VIOLET },
         { "Gym", NULL, 5, 10, 11.5f, CUI_TONE_SUCCESS },
@@ -877,12 +877,12 @@ static void body_gantt(cui_ctx *ui);
 static void scene_gantt(cui_ctx *ui, int f) { if (f < 0) return; frame_wrap(ui, body_gantt); }
 static void body_gantt(cui_ctx *ui) {
     static cui_gantt_task tasks[] = {
-        { "Research", "Ada Lovelace", 0, 5, 1, CUI_TONE_VIOLET, -1, false },
-        { "Wireframes", "Hedy Lamarr", 4, 10, 1, CUI_TONE_ROSE, 0, false },
-        { "Design system", "Barbara Liskov", 8, 16, 0.7f, CUI_TONE_VIOLET, 1, false },
-        { "Core engine", "Grace Hopper", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
+        { "Research", "Maya Okafor", 0, 5, 1, CUI_TONE_TEAL, -1, false },
+        { "Wireframes", "Aiko Tanaka", 4, 10, 1, CUI_TONE_TEAL, 0, false },
+        { "Design system", "Rosa Delgado", 8, 16, 0.7f, CUI_TONE_TEAL, 1, false },
+        { "Core engine", "Jonas Berg", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
         { "Beta", NULL, 21, 21, 0, CUI_TONE_WARNING, 3, true },
-        { "Launch", "Alan Turing", 22, 27, 0, CUI_TONE_SUCCESS, 4, false },
+        { "Launch", "Priya Nair", 22, 27, 0, CUI_TONE_SUCCESS, 4, false },
     };
     cui_date org = { 2026, 10, 26 };
     cui_gantt(ui, "plan", tasks, 6, org, 28, .day_width = 26, .today = 10);
@@ -981,8 +981,8 @@ SCENE(text_effects) {
     }
     cui_typewriter(ui, "tw", "CUI draws a full frame in a fraction of a millisecond, so text can stream in as fast as it arrives.", .caret = true, .size = 15);
     cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
-        cui_text(ui, "Interfaces that feel", .font = CUI_FONT_DISPLAY, .size = 26);
-        static const char *words[] = { "native.", "fast.", "calm." };
+        cui_text(ui, "Deploying to", .font = CUI_FONT_DISPLAY, .size = 26);
+        static const char *words[] = { "staging.", "eu-west.", "all regions." };
         cui_word_rotate(ui, "rot", words, 3, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26);
     }
 }
@@ -1020,7 +1020,7 @@ SCENE(tiles) {
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
         cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Home");
         cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
-        cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm", .color = CUI_RGB(0x6366f1));
+        cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm");
         cui_control_tile(ui, "AirShare", &share, .icon = CUI_ICON_SHARE_2, .detail = "Contacts only");
     }
     cui_control_tile(ui, "Dark appearance", &dark, .icon = CUI_ICON_SUN, .wide = true, .width = CUI_PX(300));
@@ -1028,7 +1028,7 @@ SCENE(tiles) {
 SCENE(player) {
     static float peaks[96], progress = 0.36f;
     static int tab = 0;
-    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
     for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
     static const cui_tab_bar_item tabs[] = { { CUI_ICON_HOUSE, "Home", 0 }, { CUI_ICON_SEARCH, "Search", 0 }, { CUI_ICON_INBOX, "Inbox", 4 }, { CUI_ICON_USER, "Profile", 0 } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_START) {
@@ -1105,9 +1105,9 @@ static void scene_sources(cui_ctx *ui, int f) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28, .gap = 12, .justify = CUI_JUSTIFY_END) { body_sources(ui); }
 }
 static const cui_model shot_models[] = {
-    { "Atlas", "Our most capable model for complex work", "New", CUI_ICON_SPARKLES },
-    { "Atlas Fast", "Quick answers for everyday tasks", NULL, CUI_ICON_ZAP },
-    { "Atlas Mini", "Lightweight and economical", NULL, CUI_ICON_BOX },
+    { "Atlas", "Longer answers, reads files and code", "New", CUI_ICON_LAYERS },
+    { "Atlas Fast", "Short answers in about a second", NULL, CUI_ICON_ZAP },
+    { "Atlas Mini", "Runs on your own machine", NULL, CUI_ICON_BOX },
 };
 static void body_composer(cui_ctx *ui) {
     static char draft[256] = "Summarize the report and compare it with last quarter.";
@@ -1155,40 +1155,30 @@ SCENE(suggestions) {
     }
 }
 
-/* A mosaic of real components in cards, for the README. */
+/* A mosaic of real components in cards, for the README. One product, a
+ * build service called Kiln, so the cards read as parts of one screen. */
 static void mosaic_signup(cui_ctx *ui) {
-    static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
+    static char name[64] = "linux-arm64-02", host[64] = "10.0.4.17", token[48] = "kiln_rt_7f3a9c21e0b84d55";
+    static int os = 0;
     cui_card(ui, .gap = 16, .width = CUI_FILL) {
         cui_column(ui, .gap = 4) {
-            cui_text(ui, "Create an account", .font = CUI_FONT_DISPLAY, .size = 20);
-            cui_text(ui, "Enter your email below to create your account.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_text(ui, "Add a runner", .font = CUI_FONT_DISPLAY, .size = 20);
+            cui_text(ui, "Runners pick up jobs for the platforms you choose.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
         }
-        cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_FILL) {
-            cui_button(ui, "GitHub", .icon = CUI_ICON_GIT_BRANCH, .variant = CUI_BUTTON_OUTLINE, .full_width = true);
-            cui_button(ui, "Google", .icon = CUI_ICON_GLOBE, .variant = CUI_BUTTON_OUTLINE, .full_width = true);
-        }
-        cui_row(ui, .gap = 10, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
-            cui_box(ui, .width = CUI_FILL) { cui_separator(ui); }
-            cui_text(ui, "OR CONTINUE WITH", .size = 11, .color = CUI_COLOR_TEXT_MUTED);
-            cui_box(ui, .width = CUI_FILL) { cui_separator(ui); }
-        }
-        cui_input(ui, "m-email", email, sizeof email, .label = "Email", .icon = CUI_ICON_MAIL);
-        cui_column(ui, .gap = 8, .width = CUI_FILL) {
-            cui_input(ui, "m-pw", pw, sizeof pw, .label = "Password", .password = true);
-            cui_password_strength(ui, pw);
-        }
-        cui_button(ui, "Create account", .variant = CUI_BUTTON_PRIMARY, .full_width = true);
+        static const char *oses[] = { "Linux", "macOS", "Windows" };
+        cui_segmented(ui, "m-os", oses, 3, &os, .full_width = true);
+        cui_input(ui, "m-name", name, sizeof name, .label = "Name");
+        cui_input(ui, "m-host", host, sizeof host, .label = "Address", .prefix = "ssh://", .suffix = ":22");
+        cui_input(ui, "m-token", token, sizeof token, .label = "Registration token", .password = true, .hint = "Shown once. Store it with the runner.");
+        cui_button(ui, "Add runner", .variant = CUI_BUTTON_PRIMARY, .full_width = true);
     }
 }
 static void mosaic_notifications(cui_ctx *ui) {
     static bool a = true, b = false, c = true;
     cui_card(ui, .gap = 16, .width = CUI_FILL) {
-        cui_column(ui, .gap = 4) {
-            cui_label(ui, "Notifications");
-            cui_text(ui, "Choose what you want to hear about.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
-        }
-        const char *titles[] = { "Mentions", "Weekly digest", "Security alerts" };
-        const char *descs[] = { "When someone @mentions you", "A summary every Monday", "Sign-ins from new devices" };
+        cui_label(ui, "Email me when");
+        const char *titles[] = { "A build fails", "A build recovers", "The nightly report is ready" };
+        const char *descs[] = { "Only for branches you pushed to", "After at least one failure", "Every weekday at 07:00" };
         bool *vals[] = { &a, &b, &c };
         for (int i = 0; i < 3; i++) {
             cui_push_id_int(ui, i);
@@ -1204,22 +1194,22 @@ static void mosaic_notifications(cui_ctx *ui) {
     }
 }
 static void mosaic_metrics(cui_ctx *ui) {
-    static const float s1[] = { 3, 5, 4, 7, 6, 9, 8, 11, 10, 13 };
-    static const float s2[] = { 9, 8, 9, 7, 8, 6, 7, 5, 6, 4 };
+    static const float s1[] = { 268, 255, 262, 249, 251, 240, 236, 229, 231, 222 };
+    static const float s2[] = { 3, 4, 3, 5, 4, 6, 5, 6, 7, 7 };
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 20, .width = CUI_FILL) {
-        cui_metric(ui, "Revenue", "$15,231", .delta = 20.1f, .spark = s1, .spark_count = 10, .icon = CUI_ICON_DOLLAR_SIGN);
-        cui_metric(ui, "Latency", "182 ms", .delta = -8.4f, .delta_label = "-8.4% faster", .spark = s2, .spark_count = 10, .icon = CUI_ICON_ZAP);
+        cui_metric(ui, "Median build", "3m 42s", .delta = -17.6f, .delta_label = "-17.6%", .lower_is_better = true, .spark = s1, .spark_count = 10, .icon = CUI_ICON_CLOCK);
+        cui_metric(ui, "Flaky tests", "7", .delta = 2, .delta_label = "+2 this week", .lower_is_better = true, .spark = s2, .spark_count = 10, .icon = CUI_ICON_TRIANGLE_ALERT);
     }
 }
 static void mosaic_calendar(cui_ctx *ui) {
-    static cui_date d = { 2026, 11, 14 };
-    static const char *slots[] = { "09:00", "10:30", "13:00", "15:30" };
+    static cui_date d = { 2026, 11, 17 };
+    static const char *slots[] = { "09:00", "11:30", "14:00", "16:30" };
     static int slot = 1;
     cui_card(ui, .dir = CUI_ROW, .gap = 20, .width = CUI_FILL) {
         cui_calendar(ui, "m-cal", &d);
         cui_column(ui, .gap = 10, .width = CUI_FILL) {
-            cui_label(ui, "Book a call");
-            cui_text(ui, "30 minutes with the design team.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_label(ui, "Release 2.4");
+            cui_text(ui, "Pick a window while the on-call team is in.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
             cui_box(ui, .height = CUI_PX(4)) {}
             for (int i = 0; i < 4; i++) {
                 cui_push_id_int(ui, i);
@@ -1231,31 +1221,25 @@ static void mosaic_calendar(cui_ctx *ui) {
 }
 static void mosaic_chart(cui_ctx *ui) {
     static const char *days[] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-    static const float a[] = { 42, 51, 38, 64, 58, 71, 66 };
-    static const float b[] = { 30, 34, 29, 41, 38, 44, 52 };
+    static const float a[] = { 412, 488, 365, 530, 471, 96, 74 };
+    static const float b[] = { 236, 301, 254, 322, 289, 41, 38 };
     cui_card(ui, .gap = 14, .width = CUI_FILL) {
-        cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_START) {
-            cui_column(ui, .gap = 2, .width = CUI_FILL) {
-                cui_label(ui, "Active users");
-                cui_text(ui, "Desktop and web, last 7 days", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
-            }
-            cui_badge(ui, "+12.5%", .tone = CUI_TONE_SUCCESS, .icon = CUI_ICON_TRENDING_UP);
+        cui_column(ui, .gap = 2, .width = CUI_FILL) {
+            cui_label(ui, "Build minutes");
+            cui_text(ui, "Linux and Windows runners, last 7 days", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
         }
-        cui_series series[2] = { { "Desktop", a, 7, { 0 } }, { "Web", b, 7, { 0 } } };
-        cui_bar_chart(ui, "m-bars", series, 2, .labels = days, .label_count = 7, .height = 190, .no_legend = true);
+        cui_series series[2] = { { "Linux", a, 7, { 0 } }, { "Windows", b, 7, { 0 } } };
+        cui_bar_chart(ui, "m-bars", series, 2, .labels = days, .label_count = 7, .height = 190);
     }
 }
 static void mosaic_team(cui_ctx *ui) {
-    static const char *names[] = { "Grace Hopper", "Alan Turing", "Katherine Johnson" };
-    static const char *mails[] = { "grace@navy.mil", "alan@bletchley.uk", "katherine@nasa.gov" };
-    static const char *roles[] = { "Owner", "Editor", "Viewer" };
+    static const char *names[] = { "Jonas Berg", "Priya Nair", "Tomas Rivera" };
+    static const char *mails[] = { "jonas@northlight.io", "priya@harbor.dev", "tomas@kiln.app" };
+    static const char *roles[] = { "Required", "Required", "Optional" };
     cui_card(ui, .gap = 16, .width = CUI_FILL) {
-        cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_START) {
-            cui_column(ui, .gap = 2, .width = CUI_FILL) {
-                cui_label(ui, "Team members");
-                cui_text(ui, "Invite people to collaborate.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
-            }
-            cui_button(ui, "Invite", .icon = CUI_ICON_USER_PLUS, .size = CUI_SIZE_SM);
+        cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+            cui_box(ui, .width = CUI_FILL) { cui_label(ui, "Reviewers"); }
+            cui_button(ui, "Add", .icon = CUI_ICON_USER_PLUS, .size = CUI_SIZE_SM);
         }
         for (int i = 0; i < 3; i++) {
             cui_push_id_int(ui, i);
@@ -1272,49 +1256,49 @@ static void mosaic_team(cui_ctx *ui) {
     }
 }
 static void mosaic_share(cui_ctx *ui) {
-    static char link[96] = "https://orbit.dev/doc/q3-roadmap";
+    static char link[96] = "https://kiln.app/r/2.4.0-rc.2";
     static int access = 1;
     cui_card(ui, .gap = 14, .width = CUI_FILL) {
         cui_column(ui, .gap = 2) {
-            cui_label(ui, "Share this document");
-            cui_text(ui, "Anyone with the link can view.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_label(ui, "Release candidate");
+            cui_text(ui, "Builds for all three platforms, signed.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
         }
         cui_row(ui, .width = CUI_FILL, .gap = 8, .align = CUI_ALIGN_CENTER) {
             cui_input(ui, "m-link", link, sizeof link, .read_only = true, .width = CUI_FILL);
             cui_copy_button(ui, "m-copy", link);
         }
-        const char *opts[] = { "Can edit", "Can view" };
+        const char *opts[] = { "Public", "Team only" };
         cui_segmented(ui, "m-access", opts, 2, &access, .full_width = true);
     }
 }
 static void mosaic_progress(cui_ctx *ui) {
-    static float goal = 350;
+    static float goal = 80;
     cui_card(ui, .gap = 16, .width = CUI_FILL) {
         cui_row(ui, .width = CUI_FILL, .gap = 18, .align = CUI_ALIGN_CENTER) {
-            cui_progress_ring(ui, "##m-ring", 0.72f, 84);
+            cui_progress_ring(ui, "##m-ring", 0.763f, 84);
             cui_column(ui, .gap = 4, .width = CUI_FILL) {
-                cui_label(ui, "Move goal");
-                cui_text(ui, "Set your daily activity goal.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_label(ui, "Line coverage");
+                cui_text(ui, "76.3% on main, 3,912 of 5,127 lines.", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
             }
         }
-        cui_slider(ui, "Calories", &goal, 100, 600, .step = 10, .show_value = true, .format = "%.0f kcal");
+        cui_slider(ui, "Fail below", &goal, 50, 100, .step = 1, .show_value = true, .format = "%.0f%%");
     }
 }
 static void mosaic_storage(cui_ctx *ui) {
     cui_card(ui, .gap = 12, .width = CUI_FILL) {
         cui_row(ui, .width = CUI_FILL, .gap = 10, .align = CUI_ALIGN_CENTER) {
             cui_icon(ui, CUI_ICON_DATABASE, 16, CUI_COLOR_TEXT_SECONDARY);
-            cui_text(ui, "Storage", .font = CUI_FONT_MEDIUM, .width = CUI_FILL);
-            cui_button(ui, "Upgrade", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST, .icon_right = CUI_ICON_ARROW_UP_RIGHT);
+            cui_text(ui, "Build cache", .font = CUI_FONT_MEDIUM, .width = CUI_FILL);
+            cui_button(ui, "Clear", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST);
         }
         cui_meter(ui, "Used", 68.4f, 100, "GB");
     }
 }
 static void mosaic_topics(cui_ctx *ui) {
-    static bool sel[6] = { true, false, true, false, false, true };
-    static const char *names[] = { "Design", "C99", "Motion", "Rendering", "Docs", "Native" };
+    static bool sel[6] = { true, false, true, true, false, false };
+    static const char *names[] = { "x86-64", "ARM64", "Debug", "Release", "ASan", "MinGW" };
     cui_card(ui, .gap = 12, .width = CUI_FILL) {
-        cui_label(ui, "Topics you follow");
+        cui_label(ui, "Build matrix");
         for (int r = 0; r < 2; r++)
             cui_row(ui, .gap = 8) {
                 for (int i = r * 3; i < r * 3 + 3; i++) { cui_push_id_int(ui, i); cui_chip(ui, names[i], &sel[i]); cui_pop_id(ui); }
@@ -1353,7 +1337,7 @@ static void pro_board(cui_ctx *ui) {
     static const char *titles[] = { "Keyboard navigation in the date range picker", "Spring presets for menus" };
     static const char *tags[] = { "A11y", "Motion" };
     static const cui_tone tones[] = { CUI_TONE_INFO, CUI_TONE_VIOLET };
-    static const char *who[] = { "Alan Turing", "Barbara Liskov" };
+    static const char *who[] = { "Priya Nair", "Rosa Delgado" };
     cui_kanban_begin(ui, "pro-board");
     cui_kanban_column_begin(ui, "In progress", 2, .dot = CUI_RGB(0x8b5cf6), .limit = 3, .width = 460);
     for (int k = 0; k < 2; k++) {
@@ -1387,15 +1371,15 @@ static void pro_activity(cui_ctx *ui) {
     }
 }
 static void pro_flow(cui_ctx *ui) {
-    static const char *nodes[] = { "Search", "Social", "Direct", "Sign up", "Bounced", "Paid" };
-    static const cui_sankey_link links[] = { { 0, 3, 420 }, { 1, 3, 260 }, { 2, 3, 180 }, { 0, 4, 300 }, { 1, 4, 140 }, { 3, 5, 520 }, { 3, 4, 340 } };
+    static const char *nodes[] = { "Linux", "Windows", "macOS", "Test runs", "Passed", "Retried" };
+    static const cui_sankey_link links[] = { { 0, 3, 712 }, { 1, 3, 408 }, { 2, 3, 231 }, { 3, 4, 1263 }, { 3, 5, 88 } };
     cui_card(ui, .gap = 12, .width = CUI_FILL) {
-        cui_text(ui, "Where sign ups come from", .font = CUI_FONT_MEDIUM, .size = 15);
+        cui_text(ui, "Test runs this week", .font = CUI_FONT_MEDIUM, .size = 15);
         cui_sankey(ui, "flow", nodes, 6, links, 7, .height = 190);
     }
 }
 static void pro_player(cui_ctx *ui) {
-    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0x7c, 0x3a, 0xed, 255 }, 96, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x7c, 0x3a, 0xed, 255 }, 96, 222, true };
     cui_now_playing(ui, "np", &np, .width = CUI_FILL);
 }
 static void pro_plan(cui_ctx *ui) {
@@ -1432,26 +1416,16 @@ SCENE(mosaic_pro) {
     }
 }
 
-/* ---- README heroes: components on a lit stage ---- */
-typedef struct { unsigned a, b; float ax, ay, bx, by; } stage_look;
+/* ---- README heroes: components on a plain stage ----
+ * A flat surface one step off the page color, like a desk under a window.
+ * No glows, gradients or dot grids: the components are the picture. */
+typedef struct { int unused; } stage_look;
 
 static void paint_stage(cui_ctx *ui, cui_rect r, void *user) {
-    const stage_look *l = user;
+    (void)user;
     bool dark = cui_get_theme_mode(ui) == CUI_THEME_DARK;
-    cui_draw_rect(ui, r, CUI_CORNERS(0), cui_token_color(ui, CUI_TOKEN_BACKGROUND));
-    /* two soft lights */
-    float R = r.w * 0.34f;
-    cui_color ca = CUI_RGB(l->a), cb = CUI_RGB(l->b);
-    ca.a = dark ? 70 : 46; cb.a = dark ? 56 : 38;
-    cui_rect ga = { r.x + r.w * l->ax - R, r.y + r.h * l->ay - R, R * 2, R * 2 };
-    cui_rect gb = { r.x + r.w * l->bx - R * 0.8f, r.y + r.h * l->by - R * 0.8f, R * 1.6f, R * 1.6f };
-    cui_draw_shadow(ui, ga, CUI_CORNERS(R), R * 0.9f, 0, (cui_vec2){ 0, 0 }, ca);
-    cui_draw_shadow(ui, gb, CUI_CORNERS(R * 0.8f), R * 0.8f, 0, (cui_vec2){ 0, 0 }, cb);
-    /* a faint dot grid gives the stage some tooth */
-    cui_color dot = cui_token_color(ui, CUI_TOKEN_FOREGROUND);
-    dot.a = dark ? 16 : 20;
-    for (float y = r.y + 12; y < r.y + r.h; y += 24)
-        for (float x = r.x + 12; x < r.x + r.w; x += 24) cui_draw_circle(ui, (cui_vec2){ x, y }, 0.9f, dot);
+    cui_color bg = cui_token_color(ui, CUI_TOKEN_BACKGROUND), fg = cui_token_color(ui, CUI_TOKEN_FOREGROUND);
+    cui_draw_rect(ui, r, CUI_CORNERS(0), cui_mix(bg, fg, dark ? 0.0f : 0.045f));
 }
 
 static void stage(cui_ctx *ui, const stage_look *look, void (*body)(cui_ctx *ui)) {
@@ -1475,15 +1449,12 @@ static void window_begin(cui_ctx *ui, const char *title, float w) {
 }
 static void window_end(cui_ctx *ui) { cui_box_end(ui); }
 
-static const stage_look look_violet = { 0x7c3aed, 0x2563eb, 0.18f, 0.12f, 0.86f, 0.9f };
-static const stage_look look_teal = { 0x0d9488, 0x6366f1, 0.82f, 0.1f, 0.12f, 0.9f };
-static const stage_look look_rose = { 0xdb2777, 0x7c3aed, 0.85f, 0.85f, 0.15f, 0.15f };
-static const stage_look look_amber = { 0xd97706, 0xdb2777, 0.15f, 0.85f, 0.85f, 0.15f };
+static const stage_look look_plain = { 0 };
 
 static void hero_board_body(cui_ctx *ui) { cui_box(ui, .width = CUI_PX(860)) { body_kanban(ui); } }
 static void scene_hero_board(cui_ctx *ui, int f) {
     if (f < 0) { scene_kanban(ui, f); return; }
-    stage(ui, &look_violet, hero_board_body);
+    stage(ui, &look_plain, hero_board_body);
 }
 
 static void hero_ai_body(cui_ctx *ui) {
@@ -1512,10 +1483,7 @@ static void hero_ai_body(cui_ctx *ui) {
             cui_chat_composer(ui, "composer", draft, sizeof draft, .models = shot_models, .model_count = 3, .model = &model);
         }
         window_end(ui);
-        cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 14, .width = CUI_PX(290)) {
-            cui_voice_orb(ui, "orb", CUI_VOICE_LISTENING, 0.65f, .size = 170);
-            cui_agent_status(ui, "Listening", .status = CUI_TASK_RUNNING, .seconds = 7);
-            cui_gap(ui, 6);
+        cui_column(ui, .gap = 16, .width = CUI_PX(300)) {
             static const cui_plan_step steps[] = {
                 { "Profile the frame", "0.24 ms", CUI_TASK_DONE },
                 { "Cache glyphs in an atlas", NULL, CUI_TASK_DONE },
@@ -1523,24 +1491,35 @@ static void hero_ai_body(cui_ctx *ui) {
                 { "Write it up", NULL, CUI_TASK_PENDING },
             };
             cui_box(ui, .width = CUI_FILL) { cui_agent_plan(ui, "plan", steps, 4, .title = "Speed up rendering"); }
+            /* the evidence the answer rests on, as a chart rather than a claim */
+            static const float ft[] = { 1.02f, 0.98f, 1.05f, 0.97f, 0.61f, 0.44f, 0.31f, 0.27f, 0.26f, 0.25f };
+            static const char *builds[] = { "1.0", "", "", "", "1.1", "", "", "", "", "1.2" };
+            cui_card(ui, .gap = 10, .pad = 18, .width = CUI_FILL) {
+                cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_END) {
+                    cui_box(ui, .width = CUI_FILL) { cui_label(ui, "Frame time"); }
+                    cui_text(ui, "0.25 ms", .font = CUI_FONT_MEDIUM, .size = 13, .tabular = true);
+                }
+                cui_series fs = { "Frame time (ms)", ft, 10, { 0 } };
+                cui_line_chart(ui, "ft", &fs, 1, .labels = builds, .label_count = 10, .height = 120, .area = true, .no_legend = true, .format = "%.1f", .min = 0, .max = 1.2f);
+            }
         }
     }
 }
 static void scene_hero_ai(cui_ctx *ui, int f) {
     if (f < 0) return;
-    stage(ui, &look_violet, hero_ai_body);
+    stage(ui, &look_plain, hero_ai_body);
 }
 
 static void hero_desk_body(cui_ctx *ui) {
     static bool wifi = true, focus = true, bt = false, dark = true;
-    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0xdb, 0x27, 0x77, 255 }, 96, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0xdb, 0x27, 0x77, 255 }, 96, 222, true };
     static float peaks[64], progress = 0.42f;
     for (int k = 0; k < 64; k++) peaks[k] = 0.2f + 0.78f * fabsf(sinf(k * 0.41f) * sinf(k * 0.13f + 1.1f));
     cui_column(ui, .gap = 64, .align = CUI_ALIGN_CENTER) {
         cui_row(ui, .gap = 20, .align = CUI_ALIGN_START) {
             cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
                 cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Studio");
-                cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm", .color = CUI_RGB(0x6366f1));
+                cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm");
                 cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
                 cui_control_tile(ui, "Dark mode", &dark, .icon = CUI_ICON_SUN);
             }
@@ -1564,7 +1543,7 @@ static void scene_hero_desk(cui_ctx *ui, int f) {
         if (-f - 1 == 15) cui_input_mouse_move(ui, r.x + r.w * 0.47f, r.y + r.h * 0.5f);
         return;
     }
-    stage(ui, &look_rose, hero_desk_body);
+    stage(ui, &look_plain, hero_desk_body);
 }
 
 static void hero_pick_body(cui_ctx *ui) {
@@ -1588,7 +1567,7 @@ static void hero_pick_body(cui_ctx *ui) {
 }
 static void scene_hero_pick(cui_ctx *ui, int f) {
     if (f < 0) { scene_range(ui, f); return; }
-    stage(ui, &look_teal, hero_pick_body);
+    stage(ui, &look_plain, hero_pick_body);
 }
 
 static void hero_palette_body(cui_ctx *ui) {
@@ -1596,7 +1575,7 @@ static void hero_palette_body(cui_ctx *ui) {
 }
 static void scene_hero_palette(cui_ctx *ui, int f) {
     if (f < 0) return;
-    stage(ui, &look_amber, hero_palette_body);
+    stage(ui, &look_plain, hero_palette_body);
     static bool open = true;
     static const cui_command cmds[] = {
         { "New project", CUI_ICON_PLUS, "Actions", "Ctrl N" }, { "Invite teammate", CUI_ICON_USER_PLUS, "Actions", NULL },
@@ -1613,7 +1592,7 @@ static void hero_plan_body(cui_ctx *ui) {
 }
 static void scene_hero_plan(cui_ctx *ui, int f) {
     if (f < 0) return;
-    stage(ui, &look_teal, hero_plan_body);
+    stage(ui, &look_plain, hero_plan_body);
 }
 
 static void hero_charts_body(cui_ctx *ui) {
@@ -1624,7 +1603,7 @@ static void hero_charts_body(cui_ctx *ui) {
 }
 static void scene_hero_charts(cui_ctx *ui, int f) {
     if (f < 0) return;
-    stage(ui, &look_violet, hero_charts_body);
+    stage(ui, &look_plain, hero_charts_body);
 }
 
 static void hero_social_body(cui_ctx *ui) {
@@ -1632,19 +1611,19 @@ static void hero_social_body(cui_ctx *ui) {
         window_begin(ui, "Messages", 520);
         cui_column(ui, .width = CUI_FILL, .pad = 20, .gap = 0) {
             cui_chat_divider(ui, "Today");
-            cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
-            cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+            cui_chat_message(ui, "Did the grid ship?", .author = "Jonas Berg", .time = "9:41", .last_in_group = false);
+            cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Jonas Berg", .grouped = true, .last_in_group = true);
             cui_chat_message(ui, "It did! Keyboard selection too.", .mine = true);
             cui_chat_message(ui, "Shift and Ctrl clicks work like a spreadsheet.", .mine = true, .grouped = true, .last_in_group = true, .status = "Read", .time = "9:43");
-            cui_typing_indicator(ui, "Grace");
+            cui_typing_indicator(ui, "Jonas");
         }
         window_end(ui);
         cui_column(ui, .width = CUI_PX(420), .gap = 18) {
             cui_box(ui, .width = CUI_FILL) { body_comments(ui); }
             static const cui_presence_user who[] = {
-                { "Ada Lovelace", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Grace Hopper", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
-                { "Alan Turing", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Linus Torvalds", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
-                { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
+                { "Maya Okafor", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Jonas Berg", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
+                { "Priya Nair", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Lena Fischer", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
+                { "Aiko Tanaka", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Daniel Mensah", { 0x10, 0xb9, 0x81, 255 }, 0, false },
             };
             cui_card(ui, .pad = 18, .gap = 10, .width = CUI_FILL) {
                 cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
@@ -1660,7 +1639,7 @@ static void hero_social_body(cui_ctx *ui) {
 }
 static void scene_hero_social(cui_ctx *ui, int f) {
     if (f < 0) return;
-    stage(ui, &look_teal, hero_social_body);
+    stage(ui, &look_plain, hero_social_body);
 }
 static void hero_data_body(cui_ctx *ui) {
     window_begin(ui, "People", 860);
@@ -1669,53 +1648,50 @@ static void hero_data_body(cui_ctx *ui) {
 }
 static void scene_hero_data(cui_ctx *ui, int f) {
     if (f < 0) return;
-    stage(ui, &look_amber, hero_data_body);
+    stage(ui, &look_plain, hero_data_body);
 }
 
-static void plan_card(cui_ctx *ui, const char *id, const char *name, const char *price, const char *blurb, const char *const *feats, int nf, bool featured) {
-    cui_spotlight(ui, id, .width = CUI_PX(270), .pad = 22, .gap = 14, .beam = featured) {
+/* Spotlight cards used for a real choice, not a pricing template. */
+static void renderer_card(cui_ctx *ui, const char *id, const char *name, const char *blurb, const char *const *facts, int nf,
+                          const char *action, bool current) {
+    cui_spotlight(ui, id, .width = CUI_PX(270), .pad = 22, .gap = 14) {
         cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
             cui_text(ui, name, .font = CUI_FONT_MEDIUM, .size = 15, .width = CUI_FILL);
-            if (featured) cui_badge(ui, "Popular", .tone = CUI_TONE_ACCENT, .size = CUI_SIZE_SM);
-        }
-        cui_row(ui, .gap = 4, .align = CUI_ALIGN_END) {
-            cui_text(ui, price, .font = CUI_FONT_DISPLAY, .size = 36, .line_height = 1.0f);
-            cui_text(ui, "/ month", .size = 13, .color = CUI_COLOR_TEXT_MUTED);
+            if (current) cui_text(ui, "In use", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
         }
         cui_text(ui, blurb, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
         cui_separator(ui);
         for (int k = 0; k < nf; k++) cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
-            cui_icon(ui, CUI_ICON_CHECK, 15, featured ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_SECONDARY);
-            cui_text(ui, feats[k], .size = 13.5f);
+            cui_icon(ui, CUI_ICON_CHECK, 15, CUI_COLOR_TEXT_SECONDARY);
+            cui_text(ui, facts[k], .size = 13.5f);
         }
         cui_spacer(ui);
-        cui_button(ui, featured ? "Start free trial" : "Get started", .variant = featured ? CUI_BUTTON_PRIMARY : CUI_BUTTON_SECONDARY, .full_width = true);
+        cui_button(ui, action, .variant = current ? CUI_BUTTON_SECONDARY : CUI_BUTTON_OUTLINE, .full_width = true, .disabled = current);
     }
 }
 static void hero_effects_body(cui_ctx *ui) {
-    static const char *f1[] = { "3 projects", "Community support", "Light and dark themes" };
-    static const char *f2[] = { "Unlimited projects", "Every component", "Priority support", "Figma kit" };
-    static const char *f3[] = { "Everything in Pro", "SSO and audit logs", "A dedicated engineer" };
-    cui_column(ui, .gap = 26, .align = CUI_ALIGN_CENTER) {
-        cui_column(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
-            cui_badge(ui, "Pricing", .tone = CUI_TONE_ACCENT, .icon = CUI_ICON_SPARKLES);
-            cui_gradient_text(ui, "Ship interfaces people love", .font = CUI_FONT_DISPLAY, .size = 38, .from = CUI_RGB(0x8b5cf6), .to = CUI_RGB(0xec4899));
-            cui_text(ui, "Every component, every platform, one small C library.", .size = 15, .color = CUI_COLOR_TEXT_SECONDARY);
+    static const char *f1[] = { "No GPU or driver needed", "Same pixels as OpenGL", "Used for tests and screenshots" };
+    static const char *f2[] = { "One draw call per texture", "Multisampling and vsync", "Windows, macOS and Linux" };
+    static const char *f3[] = { "Vulkan, Metal or Direct3D", "Vertices, indices, one atlas", "About 200 lines of glue" };
+    cui_column(ui, .gap = 22, .align = CUI_ALIGN_START) {
+        cui_column(ui, .gap = 6) {
+            cui_text(ui, "Choose a renderer", .font = CUI_FONT_DISPLAY, .size = 30);
+            cui_text(ui, "All three draw the same frame. Pick by where the app runs.", .size = 15, .color = CUI_COLOR_TEXT_SECONDARY);
         }
         cui_row(ui, .gap = 18, .align = CUI_ALIGN_STRETCH) {
-            plan_card(ui, "free", "Hobby", "$0", "For side projects and learning.", f1, 3, false);
-            plan_card(ui, "pro", "Pro", "$19", "For teams shipping every week.", f2, 4, true);
-            plan_card(ui, "team", "Enterprise", "$49", "For companies with many apps.", f3, 3, false);
+            renderer_card(ui, "sw", "Software", "Plain C into a pixel buffer. A full HD frame in about 2 ms.", f1, 3, "Use software", false);
+            renderer_card(ui, "gl", "OpenGL 3.3", "The default on desktop, with a software fallback.", f2, 3, "Current renderer", true);
+            renderer_card(ui, "own", "Your own", "The core only emits triangles, so any GPU API works.", f3, 3, "Read the guide", false);
         }
     }
 }
 static void scene_hero_effects(cui_ctx *ui, int f) {
     if (f < 0) {
-        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "team"));
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "own"));
         if (-f - 1 == 10) cui_input_mouse_move(ui, r.x + r.w * 0.3f, r.y + r.h * 0.25f);
         return;
     }
-    stage(ui, &look_violet, hero_effects_body);
+    stage(ui, &look_plain, hero_effects_body);
 }
 
 static void mosaic_body(cui_ctx *ui) {
@@ -1725,7 +1701,7 @@ static void mosaic_body(cui_ctx *ui) {
         cui_column(ui, .width = CUI_GROW(1), .gap = 20) { mosaic_team(ui); mosaic_share(ui); mosaic_progress(ui); mosaic_topics(ui); }
     }
 }
-static void scene_stage_mosaic(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_violet, mosaic_body); }
+static void scene_stage_mosaic(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_plain, mosaic_body); }
 static void mosaic_pro_body(cui_ctx *ui) {
     cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_START) {
         cui_column(ui, .width = CUI_GROW(1.15f), .gap = 20) { pro_assistant(ui); pro_board(ui); }
@@ -1733,7 +1709,7 @@ static void mosaic_pro_body(cui_ctx *ui) {
         cui_column(ui, .width = CUI_GROW(1), .gap = 20) { pro_plan(ui); pro_tiles(ui); pro_radar(ui); }
     }
 }
-static void scene_stage_mosaic_pro(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_rose, mosaic_pro_body); }
+static void scene_stage_mosaic_pro(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_plain, mosaic_pro_body); }
 /* one small panel of controls, rendered once per accent and put side by side */
 static void accent_body(cui_ctx *ui) {
     static bool on = true, chk = true;
@@ -1741,8 +1717,8 @@ static void accent_body(cui_ctx *ui) {
     static int seg = 1;
     cui_card(ui, .pad = 18, .gap = 14, .width = CUI_PX(250)) {
         cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
-            cui_button(ui, "Upgrade", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_SPARKLES);
-            cui_badge(ui, "New", .tone = CUI_TONE_ACCENT);
+            cui_button(ui, "Publish", .variant = CUI_BUTTON_PRIMARY);
+            cui_badge(ui, "Draft", .tone = CUI_TONE_ACCENT);
         }
         static const char *items[] = { "Day", "Week", "Month" };
         cui_segmented(ui, "seg", items, 3, &seg, .size = CUI_SIZE_SM);
@@ -1796,19 +1772,19 @@ int main(int argc, char **argv) {
         { "radio-cards", scene_radio_cards, 780, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },
-        { "mosaic-pro", scene_mosaic_pro, 1440, 900, true, true, CUI_ACCENT_VIOLET },
-        { "hero-board", scene_hero_board, 1000, 600, true, false, CUI_ACCENT_VIOLET },
-        { "hero-ai", scene_hero_ai, 1080, 760, true, false, CUI_ACCENT_VIOLET },
-        { "hero-desk", scene_hero_desk, 1000, 600, true, false, CUI_ACCENT_ROSE },
-        { "hero-pick", scene_hero_pick, 1160, 560, true, false, CUI_ACCENT_GREEN },
-        { "hero-palette", scene_hero_palette, 900, 520, true, false, CUI_ACCENT_AMBER },
-        { "hero-plan", scene_hero_plan, 1100, 520, true, false, CUI_ACCENT_GREEN },
-        { "hero-charts", scene_hero_charts, 1000, 700, true, false, CUI_ACCENT_VIOLET },
-        { "hero-social", scene_hero_social, 1080, 620, true, false, CUI_ACCENT_GREEN },
-        { "hero-data", scene_hero_data, 1000, 560, true, false, CUI_ACCENT_AMBER },
-        { "hero-effects", scene_hero_effects, 1000, 700, true, false, CUI_ACCENT_VIOLET },
-        { "stage-mosaic", scene_stage_mosaic, 1440, 980, true, false, CUI_ACCENT_BLUE },
-        { "stage-mosaic-pro", scene_stage_mosaic_pro, 1440, 980, true, false, CUI_ACCENT_VIOLET },
+        { "mosaic-pro", scene_mosaic_pro, 1440, 900, true, true, CUI_ACCENT_GREEN },
+        { "hero-board", scene_hero_board, 1000, 600, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-ai", scene_hero_ai, 1080, 760, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-desk", scene_hero_desk, 1000, 600, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-pick", scene_hero_pick, 1160, 560, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-palette", scene_hero_palette, 900, 520, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-plan", scene_hero_plan, 1100, 520, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-charts", scene_hero_charts, 1000, 700, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-social", scene_hero_social, 1080, 620, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-data", scene_hero_data, 1000, 560, true, false, CUI_ACCENT_NEUTRAL },
+        { "hero-effects", scene_hero_effects, 1000, 560, true, false, CUI_ACCENT_NEUTRAL },
+        { "stage-mosaic", scene_stage_mosaic, 1440, 980, true, false, CUI_ACCENT_NEUTRAL },
+        { "stage-mosaic-pro", scene_stage_mosaic_pro, 1440, 980, true, false, CUI_ACCENT_NEUTRAL },
         { "accent-neutral", scene_accent, 290, 252, true, false, CUI_ACCENT_NEUTRAL }, { "accent-violet", scene_accent, 290, 252, true, false, CUI_ACCENT_VIOLET },
         { "accent-blue", scene_accent, 290, 252, true, false, CUI_ACCENT_BLUE }, { "accent-green", scene_accent, 290, 252, true, false, CUI_ACCENT_GREEN },
         { "accent-amber", scene_accent, 290, 252, true, false, CUI_ACCENT_AMBER }, { "accent-orange", scene_accent, 290, 252, true, false, CUI_ACCENT_ORANGE },
@@ -1821,7 +1797,7 @@ int main(int argc, char **argv) {
         { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },
         { "ruler-histogram", scene_rulers, 860, 224, true }, { "capture", scene_capture, 900, 300, true },
         { "hover-card", scene_hover_card, 460, 220, true }, { "confirm-popover", scene_confirm_pop, 420, 260, true },
-        { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true, false, CUI_ACCENT_VIOLET },
+        { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 390, true }, { "code-block", scene_code_block, 720, 300, true },

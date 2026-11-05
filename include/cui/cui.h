@@ -731,7 +731,10 @@ typedef struct cui_empty_opts { int _; const char *icon; const char *description
 /* Empty state. Returns true when its action button is clicked. */
 CUI_API bool cui_empty_state_ex(cui_ctx *ui, const char *title, const cui_empty_opts *opts);
 
-typedef struct cui_metric_opts { int _; float delta; const char *delta_label; const float *spark; int spark_count; const char *icon; cui_size width; } cui_metric_opts;
+typedef struct cui_metric_opts {
+    int _; float delta; const char *delta_label; const float *spark; int spark_count; const char *icon; cui_size width;
+    bool lower_is_better;       /* build times, errors, latency: a fall is good news, shown in green */
+} cui_metric_opts;
 CUI_API void cui_metric_ex(cui_ctx *ui, const char *label, const char *value, const cui_metric_opts *opts);
 
 CUI_API void cui_meter(cui_ctx *ui, const char *label, float used, float total, const char *unit);

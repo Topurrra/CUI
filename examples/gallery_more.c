@@ -73,7 +73,7 @@ static void page_actions(cui_ctx *ui) {
 
     section(ui, "User menu", "Account trigger for sidebars and headers.");
     cui_box(ui, .width = CUI_PX(260)) {
-        cui_user_menu(ui, "Ada Lovelace", .detail = "ada@analytical.engine", .status = "online", .placement = CUI_PLACE_BOTTOM_START) {
+        cui_user_menu(ui, "Maya Okafor", .detail = "maya@fieldwork.studio", .status = "online", .placement = CUI_PLACE_BOTTOM_START) {
             cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER, .shortcut = "Ctrl P");
             cui_menu_item(ui, "Billing", .icon = CUI_ICON_CREDIT_CARD);
             cui_menu_item(ui, "Settings", .icon = CUI_ICON_SETTINGS, .shortcut = "Ctrl ,");
@@ -86,7 +86,7 @@ static void page_actions(cui_ctx *ui) {
     cui_card(ui, .pad = 6, .gap = 6) {
         static const cui_swipe_action left[] = { { CUI_ICON_CHECK, "Done", CUI_TONE_SUCCESS } };
         static const cui_swipe_action right[] = { { CUI_ICON_ARCHIVE, "Archive", CUI_TONE_INFO }, { CUI_ICON_TRASH_2, "Delete", CUI_TONE_DANGER } };
-        static const char *titles[] = { "Review the design tokens", "Reply to Grace about the release", "Book the offsite venue" };
+        static const char *titles[] = { "Review the design tokens", "Reply to Jonas about the release", "Book the offsite venue" };
         for (int i = 0; i < 3; i++) {
             cui_push_id_int(ui, i);
             cui_swipe_item_begin(ui, "row", left, 1, right, 2);
@@ -112,7 +112,7 @@ static void page_actions(cui_ctx *ui) {
 
 static void page_inputs(cui_ctx *ui) {
     static char title[128] = "Q3 roadmap";
-    static char owner[64] = "Grace Hopper";
+    static char owner[64] = "Jonas Berg";
     static float opacity = 80, radius = 12, blur = 24;
     static double amount = 1249.5, salary = 98000;
     static cui_key_combo combo = { CUI_MOD_PRIMARY | CUI_MOD_SHIFT, CUI_KEY_P };
@@ -228,7 +228,7 @@ static void page_capture(cui_ctx *ui) {
 
     section(ui, "Avatar upload", "Drop an image on the avatar.");
     cui_row(ui, .gap = 20, .align = CUI_ALIGN_CENTER) {
-        cui_avatar_upload(ui, "avatar", "Ada Lovelace", &avatar, 88);
+        cui_avatar_upload(ui, "avatar", "Maya Okafor", &avatar, 88);
         cui_column(ui, .gap = 4) {
             cui_label(ui, "Profile photo");
             cui_secondary(ui, "At least 256 by 256 pixels.");
@@ -259,13 +259,13 @@ static void page_disclosure(cui_ctx *ui) {
     section(ui, "Hover card", "Rest the pointer on a name.");
     cui_row(ui, .gap = 6) {
         cui_text(ui, "Assigned to");
-        cui_link(ui, "@grace");
+        cui_link(ui, "@jonas");
         cui_hover_card(ui, "grace-card", .width = 300) {
             cui_row(ui, .gap = 12, .align = CUI_ALIGN_START) {
-                cui_avatar(ui, "Grace Hopper", .size = 44, .status = "online");
+                cui_avatar(ui, "Jonas Berg", .size = 44, .status = "online");
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
-                    cui_text(ui, "Grace Hopper", .font = CUI_FONT_MEDIUM);
-                    cui_text(ui, "Compilers, Cobol and very small nanoseconds. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
+                    cui_text(ui, "Design lead on the mobile app. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                     cui_row(ui, .gap = 6, .pad_top = 4) {
                         cui_icon(ui, CUI_ICON_CALENDAR, 13, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
@@ -376,10 +376,10 @@ static int cmp_people(const void *a, const void *b) {
 static void page_grid(cui_ctx *ui) {
     static bool init;
     static cui_table_sort last_sort = { -1, false };
-    static const char *first[] = { "Ada", "Alan", "Grace", "Linus", "Margaret", "Katherine", "Hedy", "Dennis",
-                                    "Barbara", "Edsger", "Frances", "John", "Radia", "Ken", "Sophie", "Niklaus" };
-    static const char *last[] = { "Lovelace", "Turing", "Hopper", "Torvalds", "Hamilton", "Johnson", "Lamarr", "Ritchie",
-                                   "Liskov", "Dijkstra", "Allen", "Backus", "Perlman", "Thompson", "Wilson", "Wirth" };
+    static const char *first[] = { "Maya", "Priya", "Jonas", "Lena", "Sam", "Tomas", "Aiko", "Daniel",
+                                    "Rosa", "Omar", "Elif", "Ben", "Nora", "Kwame", "Hana", "Felix" };
+    static const char *last[] = { "Okafor", "Nair", "Berg", "Fischer", "Whitfield", "Rivera", "Tanaka", "Mensah",
+                                   "Delgado", "Haddad", "Kaya", "Carter", "Lindqvist", "Asante", "Novak", "Moreau" };
     static const char *teams[] = { "Engine", "Design", "Platform", "Docs", "Growth" };
     if (!init) {
         for (int k = 0; k < PEOPLE; k++) {
@@ -432,7 +432,7 @@ static void page_grid(cui_ctx *ui) {
             cui_data_grid_edit(ui, p->name, sizeof p->name);
             cui_data_grid_cell_text(ui, p->email);
             cui_data_grid_cell(ui);
-            cui_badge(ui, p->team, .dot = true, .tone = (cui_tone)(1 + (p->team[0] % 7)));
+            cui_badge(ui, p->team);
             {
                 char buf[16];
                 snprintf(buf, sizeof buf, "%d", p->commits);
@@ -507,7 +507,7 @@ static void page_code(cui_ctx *ui) {
         "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
         " \"platforms\": [\"windows\", \"macos\", \"linux\"],\n"
         " \"renderer\": {\"backend\": \"opengl\", \"fallback\": \"software\", \"vsync\": true, \"msaa\": null},\n"
-        " \"authors\": [{\"name\": \"Ada\", \"commits\": 412}, {\"name\": \"Grace\", \"commits\": 388}]}",
+        " \"authors\": [{\"name\": \"Maya\", \"commits\": 412}, {\"name\": \"Jonas\", \"commits\": 388}]}",
         .expand_depth = 2);
     cui_json_view(ui, "broken", "{\"ok\": true, \"oops\": [1, 2,}");
 }
@@ -542,10 +542,10 @@ static void page_social(cui_ctx *ui) {
     static int deck = 0;
     static double revenue = 48210;
     static const cui_presence_user who[] = {
-        { "Ada Lovelace", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Grace Hopper", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
-        { "Alan Turing", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Linus Torvalds", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
-        { "Hedy Lamarr", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Dennis Ritchie", { 0x10, 0xb9, 0x81, 255 }, 0, false },
-        { "Barbara Liskov", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
+        { "Maya Okafor", { 0x7c, 0x5c, 0xff, 255 }, 0, false }, { "Jonas Berg", { 0x22, 0xc5, 0x8b, 255 }, 0, false },
+        { "Priya Nair", { 0xf5, 0x9e, 0x0b, 255 }, 0, false }, { "Lena Fischer", { 0x38, 0xbd, 0xf8, 255 }, 0, true },
+        { "Aiko Tanaka", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Daniel Mensah", { 0x10, 0xb9, 0x81, 255 }, 0, false },
+        { "Rosa Delgado", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
     };
     /* textures belong to one context: a flag in its state store says whether this one has them */
     bool *made = cui_state(ui, cui_make_id(ui, "cmp-textures"), sizeof *made);
@@ -562,19 +562,19 @@ static void page_social(cui_ctx *ui) {
             section(ui, "Chat", "Grouped bubbles, read receipts and a typing indicator.");
             cui_card(ui, .gap = 0, .pad = 16) {
                 cui_chat_divider(ui, "Today");
-                cui_chat_message(ui, "Did the grid ship?", .author = "Grace Hopper", .time = "9:41", .last_in_group = false);
-                cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Grace Hopper", .grouped = true, .last_in_group = true);
+                cui_chat_message(ui, "Did the grid ship?", .author = "Jonas Berg", .time = "9:41", .last_in_group = false);
+                cui_chat_message(ui, "Virtualized, sortable, editable. 2,000 rows scroll at 60 fps.", .author = "Jonas Berg", .grouped = true, .last_in_group = true);
                 cui_chat_message(ui, "It did! Keyboard selection too.", .mine = true);
                 cui_chat_message(ui, "Shift and Ctrl clicks work like a spreadsheet.", .mine = true, .grouped = true, .last_in_group = true, .status = "Read", .time = "9:43");
-                cui_typing_indicator(ui, "Grace");
+                cui_typing_indicator(ui, "Jonas");
             }
         }
         cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
             section(ui, "Comments", "Threads with replies, likes and badges.");
             cui_card(ui, .gap = 4, .pad = 14) {
-                cui_comment(ui, "c1", "Katherine Johnson", "The trajectory numbers check out. I would still run the sim once more before launch.", .time = "2h", .likes = &likes[0], .liked = &liked[0], .badge = "Author");
-                cui_comment(ui, "c2", "Alan Turing", "Agreed, one more run.", .time = "1h", .depth = 1, .likes = &likes[1], .liked = &liked[1]);
-                cui_comment(ui, "c3", "Ada Lovelace", "Scheduled it for 3 pm.", .time = "40m", .depth = 1, .likes = &likes[2], .liked = &liked[2], .edited = true);
+                cui_comment(ui, "c1", "Tomas Rivera", "The new numbers match the staging run. I would still test the import on a large file before Friday.", .time = "2h", .likes = &likes[0], .liked = &liked[0], .badge = "Author");
+                cui_comment(ui, "c2", "Priya Nair", "Agreed. I have a 2 GB export we can use.", .time = "1h", .depth = 1, .likes = &likes[1], .liked = &liked[1]);
+                cui_comment(ui, "c3", "Maya Okafor", "Scheduled it for 3 pm.", .time = "40m", .depth = 1, .likes = &likes[2], .liked = &liked[2], .edited = true);
             }
         }
     }
@@ -594,12 +594,12 @@ static void page_social(cui_ctx *ui) {
 
     section(ui, "Carousel", "Drag, flick, scroll sideways or use the arrows and dots.");
     cui_carousel(ui, "tour", 4, &slide, .height = 200, .auto_advance = 6) {
-        static const char *titles[] = { "Calm by default", "Motion with purpose", "Keyboard first", "Fast and small" };
-        static const char *descs[] = { "One accent, hairline borders, layered shadows only where things float.",
-                                       "Springs for presses, highlights that glide, overlays that open from their trigger.",
-                                       "Tab, arrows, Enter and Esc work everywhere, with a ring only for the keyboard.",
-                                       "A full frame in a quarter of a millisecond, and about 240 KB for a whole app." };
-        static const unsigned tops[] = { 0x3b1d5e, 0x0f3d3e, 0x1d2a5e, 0x5e2a1d };
+        static const char *titles[] = { "Faster exports", "ARM64 runners", "Shortcuts everywhere", "Smaller downloads" };
+        static const char *descs[] = { "A 900 file project now exports in 40 seconds, down from four minutes.",
+                                       "Linux and macOS jobs can run on ARM64 machines in every plan.",
+                                       "Every action in the editor has a key, listed under Help, Shortcuts.",
+                                       "The desktop app is 38 MB lighter after dropping the bundled browser." };
+        static const unsigned tops[] = { 0x1f2a37, 0x0f3d3e, 0x3a2e22, 0x2b2f3a };
         for (int k = 0; k < 4; k++) cui_carousel_slide(ui) {
             cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(tops[k]), .radius = 16, .pad = 28, .gap = 8, .justify = CUI_JUSTIFY_END) {
                 cui_text(ui, titles[k], .font = CUI_FONT_DISPLAY, .size = 24, .color = CUI_RGB(0xffffff));
@@ -638,14 +638,14 @@ static void page_social(cui_ctx *ui) {
 typedef struct { int id; const char *title, *tag, *who; cui_tone tone; int comments, files; float progress; } kb_card;
 
 static kb_card kb_cards[] = {
-    { 1, "Audit the color tokens for contrast", "Design", "Ada Lovelace", CUI_TONE_VIOLET, 3, 0, 0 },
-    { 2, "Virtualize the activity feed", "Perf", "Grace Hopper", CUI_TONE_TEAL, 1, 2, 0 },
-    { 3, "Dark mode screenshots for docs", "Docs", "Hedy Lamarr", CUI_TONE_ROSE, 0, 4, 0 },
-    { 4, "Keyboard nav in the date range picker", "A11y", "Alan Turing", CUI_TONE_INFO, 5, 0, 0.6f },
-    { 5, "IME composition on Windows", "Platform", "Dennis Ritchie", CUI_TONE_WARNING, 2, 1, 0.3f },
-    { 6, "Spring presets", "Motion", "Barbara Liskov", CUI_TONE_VIOLET, 4, 0, 1 },
-    { 7, "Glyph atlas eviction", "Perf", "Linus Torvalds", CUI_TONE_TEAL, 0, 0, 1 },
-    { 8, "Retina screenshots", "Docs", "Hedy Lamarr", CUI_TONE_ROSE, 1, 3, 1 },
+    { 1, "Audit the color tokens for contrast", "Design", "Maya Okafor", CUI_TONE_VIOLET, 3, 0, 0 },
+    { 2, "Virtualize the activity feed", "Perf", "Jonas Berg", CUI_TONE_TEAL, 1, 2, 0 },
+    { 3, "Dark mode screenshots for docs", "Docs", "Aiko Tanaka", CUI_TONE_ROSE, 0, 4, 0 },
+    { 4, "Keyboard nav in the date range picker", "A11y", "Priya Nair", CUI_TONE_INFO, 5, 0, 0.6f },
+    { 5, "IME composition on Windows", "Platform", "Daniel Mensah", CUI_TONE_WARNING, 2, 1, 0.3f },
+    { 6, "Spring presets", "Motion", "Rosa Delgado", CUI_TONE_VIOLET, 4, 0, 1 },
+    { 7, "Glyph atlas eviction", "Perf", "Lena Fischer", CUI_TONE_TEAL, 0, 0, 1 },
+    { 8, "Retina screenshots", "Docs", "Aiko Tanaka", CUI_TONE_ROSE, 1, 3, 1 },
 };
 static int kb_cols[4][8] = { { 1, 2, 3 }, { 4, 5 }, { 6 }, { 7, 8 } };
 static int kb_len[4] = { 3, 2, 1, 2 };
@@ -701,8 +701,8 @@ static void page_planning(cui_ctx *ui) {
     section(ui, "Week calendar", "Drag events to move them in 15 minute steps, or pull the bottom edge to resize.");
     static cui_cal_event events[] = {
         { "Standup", "Zoom", 0, 9.5f, 9.75f, CUI_TONE_INFO }, { "Design review", "Room 2", 0, 11, 12.5f, CUI_TONE_VIOLET },
-        { "Lunch with Ada", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
-        { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Grace", NULL, 2, 10.5f, 11, CUI_TONE_ROSE },
+        { "Lunch with Maya", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
+        { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Jonas", NULL, 2, 10.5f, 11, CUI_TONE_ROSE },
         { "Focus time", "No meetings", 2, 14, 17, CUI_TONE_TEAL }, { "Standup", "Zoom", 3, 9.5f, 9.75f, CUI_TONE_INFO },
         { "Customer call", "Acme", 3, 15, 16, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 16, 17.5f, CUI_TONE_VIOLET },
         { "Gym", NULL, 5, 10, 11.5f, CUI_TONE_SUCCESS },
@@ -715,13 +715,13 @@ static void page_planning(cui_ctx *ui) {
 
     section(ui, "Gantt", "Drag bars to reschedule, pull either end to change the length. Arrows follow dependencies.");
     static cui_gantt_task tasks[] = {
-        { "Research", "Ada Lovelace", 0, 5, 1, CUI_TONE_VIOLET, -1, false },
-        { "Wireframes", "Hedy Lamarr", 4, 10, 1, CUI_TONE_ROSE, 0, false },
-        { "Design system", "Barbara Liskov", 8, 17, 0.7f, CUI_TONE_VIOLET, 1, false },
-        { "Core engine", "Grace Hopper", 6, 20, 0.55f, CUI_TONE_INFO, 0, false },
-        { "Platform backends", "Dennis Ritchie", 14, 26, 0.2f, CUI_TONE_TEAL, 3, false },
+        { "Research", "Maya Okafor", 0, 5, 1, CUI_TONE_TEAL, -1, false },
+        { "Wireframes", "Aiko Tanaka", 4, 10, 1, CUI_TONE_TEAL, 0, false },
+        { "Design system", "Rosa Delgado", 8, 17, 0.7f, CUI_TONE_TEAL, 1, false },
+        { "Core engine", "Jonas Berg", 6, 20, 0.55f, CUI_TONE_INFO, 0, false },
+        { "Platform backends", "Daniel Mensah", 14, 26, 0.2f, CUI_TONE_TEAL, 3, false },
         { "Beta", NULL, 27, 27, 0, CUI_TONE_WARNING, 4, true },
-        { "Docs and launch", "Alan Turing", 28, 36, 0, CUI_TONE_SUCCESS, 5, false },
+        { "Docs and launch", "Priya Nair", 28, 36, 0, CUI_TONE_SUCCESS, 5, false },
     };
     cui_date origin = cui_date_from_days(monday - 7);
     int tk = cui_gantt(ui, "plan", tasks, (int)(sizeof tasks / sizeof tasks[0]), origin, 42, .today = 7 + (td - monday));
@@ -851,7 +851,7 @@ static void page_motion(cui_ctx *ui) {
     static float progress = 0.36f;
     static bool wifi = true, bt = false, focus = true, airdrop = false, dark_tile = true;
     static int tab = 0;
-    static cui_now_playing np = { "Midnight Compiler", "Neon Arcs", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
     if (!peaks[0]) for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
     section(ui, "Text effects", "A shimmer for pending work, a typewriter for streamed text, words that settle into place.");
     cui_card(ui, .gap = 18, .pad = 20, .width = CUI_FILL) {
@@ -861,26 +861,25 @@ static void page_motion(cui_ctx *ui) {
         }
         cui_push_id_int(ui, replay);
         cui_typewriter(ui, "tw", "CUI draws a full frame in a fraction of a millisecond, so text can stream in as fast as it arrives.", .caret = true, .size = 15);
-        cui_text_reveal(ui, "rv", "Calm by default. Motion with purpose. Keyboard first. Fast and small.", .size = 20, .font = CUI_FONT_DISPLAY);
+        cui_text_reveal(ui, "rv", "The release build finished in 3 minutes 42 seconds.", .size = 20, .font = CUI_FONT_DISPLAY);
         cui_pop_id(ui);
         cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
-            cui_text(ui, "Interfaces that feel", .font = CUI_FONT_DISPLAY, .size = 26);
-            static const char *words[] = { "native.", "fast.", "calm.", "small." };
+            cui_text(ui, "Deploying to", .font = CUI_FONT_DISPLAY, .size = 26);
+            static const char *words[] = { "staging.", "eu-west.", "us-east.", "all regions." };
             cui_word_rotate(ui, "rot", words, 4, 2.2f, .font = CUI_FONT_DISPLAY, .size = 26);
         }
         if (cui_button(ui, "Replay", .size = CUI_SIZE_SM, .icon = CUI_ICON_ROTATE_CCW, .variant = CUI_BUTTON_OUTLINE)) replay++;
     }
-    section(ui, "Gradient text and spotlight cards", "A light follows the pointer across a card and along its edge; one sends a beam around its border.");
-    cui_gradient_text(ui, "Ship interfaces people love", .font = CUI_FONT_DISPLAY, .size = 34, .from = CUI_RGB(0x8b5cf6), .to = CUI_RGB(0xec4899), .animate = true);
+    section(ui, "Gradient text and spotlight cards", "A light follows the pointer across a card and along its edge. A beam marks the one card that is live.");
+    cui_gradient_text(ui, "Kiln 2.4", .font = CUI_FONT_DISPLAY, .size = 34, .animate = true);
     cui_row(ui, .gap = 14, .align = CUI_ALIGN_STRETCH, .width = CUI_FILL) {
-        static const char *titles[] = { "Calm by default", "Motion with purpose", "Keyboard first" };
-        static const char *icons[] = { CUI_ICON_SUN, CUI_ICON_ZAP, CUI_ICON_KEYBOARD };
+        static const char *titles[] = { "Software", "OpenGL 3.3", "Your own" };
+        static const char *blurbs[] = { "Plain C into a pixel buffer. No GPU needed.", "The default on desktop. Deploying now.", "The core emits triangles; bring any GPU API." };
         for (int k = 0; k < 3; k++) {
             cui_push_id_int(ui, k);
             cui_spotlight(ui, "spot", .width = CUI_GROW(1), .beam = k == 1) {
-                cui_icon(ui, icons[k], 20, CUI_COLOR_ACCENT);
                 cui_text(ui, titles[k], .font = CUI_FONT_MEDIUM, .size = 15);
-                cui_text(ui, "Move the pointer over the card.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_text(ui, blurbs[k], .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
             }
             cui_pop_id(ui);
         }
@@ -909,7 +908,7 @@ static void page_motion(cui_ctx *ui) {
             cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
                 cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = wifi ? "Home" : "Off");
                 cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
-                cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = focus ? "Until 6 pm" : "Off", .color = CUI_RGB(0x6366f1));
+                cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = focus ? "Until 6 pm" : "Off");
                 cui_control_tile(ui, "AirShare", &airdrop, .icon = CUI_ICON_SHARE_2, .detail = airdrop ? "Everyone" : "Contacts only");
             }
             cui_control_tile(ui, "Dark appearance", &dark_tile, .icon = CUI_ICON_SUN, .wide = true, .width = CUI_PX(300));
@@ -944,9 +943,9 @@ static void page_ai(cui_ctx *ui) {
     static const char *files[] = { "quarterly-report.pdf", "metrics.csv" };
     static int file_count = 2;
     static const cui_model models[] = {
-        { "Atlas", "Our most capable model for complex work", "New", CUI_ICON_SPARKLES },
-        { "Atlas Fast", "Quick answers for everyday tasks", NULL, CUI_ICON_ZAP },
-        { "Atlas Mini", "Lightweight and economical", NULL, CUI_ICON_BOX },
+        { "Atlas", "Longer answers, reads files and code", "New", CUI_ICON_LAYERS },
+        { "Atlas Fast", "Short answers in about a second", NULL, CUI_ICON_ZAP },
+        { "Atlas Mini", "Runs on your own machine", NULL, CUI_ICON_BOX },
     };
     static const cui_source sources[] = {
         { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
@@ -1030,7 +1029,7 @@ static void page_ai(cui_ctx *ui) {
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
 
 static const more_page pages[] = {
-    { "Actions", CUI_ICON_SPARKLES, page_actions },
+    { "Actions", CUI_ICON_COMMAND, page_actions },
     { "Smart inputs", CUI_ICON_SQUARE_PEN, page_inputs },
     { "Pickers", CUI_ICON_CALENDAR, page_pickers },
     { "Capture", CUI_ICON_UPLOAD, page_capture },
@@ -1041,7 +1040,7 @@ static const more_page pages[] = {
     { "Social and media", CUI_ICON_MESSAGE_SQUARE, page_social },
     { "Planning", CUI_ICON_LIST_CHECKS, page_planning },
     { "More charts", CUI_ICON_CHART_PIE, page_viz },
-    { "Motion", CUI_ICON_SPARKLES, page_motion },
+    { "Motion", CUI_ICON_ACTIVITY, page_motion },
     { "AI", CUI_ICON_MESSAGE_SQUARE, page_ai },
 };
 

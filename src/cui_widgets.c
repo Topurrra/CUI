@@ -862,7 +862,8 @@ void cui_metric_ex(cui_ctx *ui, const char *label, const char *value, const cui_
     ui->nodes[vt].flags |= CUI_NF_TABULAR;
     if (o->delta != 0 || o->delta_label) {
         bool up = o->delta >= 0;
-        cui_color tc = up ? CUI_C(ui, SUCCESS) : CUI_C(ui, DANGER);
+        bool good = o->lower_is_better ? o->delta <= 0 : o->delta >= 0;   /* the arrow shows direction, the color shows meaning */
+        cui_color tc = good ? CUI_C(ui, SUCCESS) : CUI_C(ui, DANGER);
         int dr = cui__node_new(ui, 0);
         ui->nodes[dr].dir = CUI_ROW; ui->nodes[dr].gap = 3; ui->nodes[dr].pad[2] = 4;
         cui__open(ui, dr);
@@ -876,7 +877,7 @@ void cui_metric_ex(cui_ctx *ui, const char *label, const char *value, const cui_
     cui__close(ui);
     if (o->spark && o->spark_count > 1) {
         cui_gap(ui, 2);
-        cui_sparkline(ui, o->spark, o->spark_count, CUI_FILL, 36, (o->delta < 0) ? CUI_COLOR_DANGER : CUI_COLOR_SERIES(0));
+        cui_sparkline(ui, o->spark, o->spark_count, CUI_FILL, 36, ((o->lower_is_better ? o->delta > 0 : o->delta < 0)) ? CUI_COLOR_DANGER : CUI_COLOR_SERIES(0));
     }
     cui_card_end(ui);
 }

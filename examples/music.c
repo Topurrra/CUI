@@ -10,44 +10,67 @@
 typedef struct { const char *title, *artist, *album; int seconds; int art; } track;
 
 static const track tracks[] = {
-    { "Midnight Compiler", "Neon Arcs", "Night Shift", 222, 0 },
+    { "Low Tide", "Marlow Avenue", "Night Shift", 222, 0 },
     { "Static Bloom", "Velvet Circuit", "Soft Machines", 247, 1 },
     { "Low Orbit", "Kaito Mori", "Satellites", 198, 2 },
     { "Paper Lanterns", "The Quiet Hours", "Ember", 263, 3 },
     { "Glass Harbor", "Ilse Varga", "Tidal", 231, 4 },
-    { "After Hours", "Neon Arcs", "Night Shift", 214, 0 },
+    { "After Hours", "Hollis & Grey", "Night Shift", 214, 0 },
     { "Signal / Noise", "Pale Static", "Frequencies", 276, 5 },
 };
 #define TRACK_COUNT ((int)(sizeof tracks / sizeof tracks[0]))
 
-/* Cover art: a gradient with two soft glows, generated from a palette index. */
-typedef struct { unsigned top, bottom, glow1, glow2; } palette;
+/* Cover art: flat shapes in a few printed colors, like a screen printed
+ * sleeve. Each index picks a palette and a composition. */
+typedef struct { unsigned bg, a, b; } palette;
 static const palette palettes[] = {
-    { 0x3b1d5e, 0x12091f, 0xff4d8d, 0x7c5cff },
-    { 0x0f3d3e, 0x061617, 0x3ee6b5, 0x2b7fff },
-    { 0x1d2a5e, 0x0a0f24, 0x58a6ff, 0xb388ff },
-    { 0x5e2a1d, 0x1f0d09, 0xffb547, 0xff5c5c },
-    { 0x1d4a5e, 0x09161f, 0x7ce0ff, 0x4dffb8 },
-    { 0x4a1d5e, 0x170920, 0xd16bff, 0xff7aa8 },
+    { 0xc8553d, 0xf2e8cf, 0x2d3047 },   /* terracotta, cream, ink */
+    { 0x2d3047, 0xe0a458, 0xf2e8cf },   /* ink, ochre, cream */
+    { 0x5b8e7d, 0xf2e8cf, 0x2d3047 },   /* sage */
+    { 0xe0a458, 0x2d3047, 0xc8553d },   /* ochre */
+    { 0x1f3a5f, 0x8fb8de, 0xf2e8cf },   /* navy, sky */
+    { 0xf2e8cf, 0xc8553d, 0x2d3047 },   /* cream */
 };
 
 typedef struct { int art; float radius; bool icon; } art_paint;
+
 static void paint_art(cui_ctx *ui, cui_rect r, void *user) {
     art_paint *a = user;
     const palette *p = &palettes[a->art % 6];
-    cui_draw_rect_gradient(ui, r, CUI_CORNERS(a->radius), CUI_RGB(p->top), CUI_RGB(p->bottom));
+    cui_color bg = CUI_RGB(p->bg), ca = CUI_RGB(p->a), cb = CUI_RGB(p->b);
     float s = r.w;
+    cui_draw_rect(ui, r, CUI_CORNERS(a->radius), bg);
     cui_push_clip(ui, r);
-    cui_rect g1 = { r.x + s * 0.18f, r.y + s * 0.22f, s * 0.30f, s * 0.30f };
-    cui_rect g2 = { r.x + s * 0.55f, r.y + s * 0.50f, s * 0.22f, s * 0.22f };
-    cui_draw_shadow(ui, g1, CUI_CORNERS(s * 0.15f), s * 0.28f, 0, (cui_vec2){ 0, 0 }, cui_alpha(CUI_RGB(p->glow1), 0.75f));
-    cui_draw_shadow(ui, g2, CUI_CORNERS(s * 0.11f), s * 0.22f, 0, (cui_vec2){ 0, 0 }, cui_alpha(CUI_RGB(p->glow2), 0.7f));
-    /* a thin ring, like a record */
-    cui_draw_arc(ui, (cui_vec2){ r.x + s * 0.62f, r.y + s * 0.38f }, s * 0.2f, 0, 6.2831853f, s * 0.012f + 0.5f,
-                 cui_alpha(CUI_RGB(0xffffff), 0.18f));
+    switch (a->art % 6) {
+    case 0:   /* a low sun and a small moon */
+        cui_draw_circle(ui, (cui_vec2){ r.x + s * 0.62f, r.y + s * 0.70f }, s * 0.36f, ca);
+        cui_draw_circle(ui, (cui_vec2){ r.x + s * 0.24f, r.y + s * 0.26f }, s * 0.09f, cb);
+        break;
+    case 1:   /* three bands */
+        for (int k = 0; k < 3; k++)
+            cui_draw_rect(ui, (cui_rect){ r.x, r.y + s * (0.22f + k * 0.2f), s, s * 0.09f }, CUI_CORNERS(0), k == 1 ? cb : ca);
+        break;
+    case 2:   /* a quarter disc in the corner, a bar across */
+        cui_draw_circle(ui, (cui_vec2){ r.x, r.y + s }, s * 0.62f, ca);
+        cui_draw_rect(ui, (cui_rect){ r.x + s * 0.5f, r.y + s * 0.18f, s * 0.34f, s * 0.08f }, CUI_CORNERS(0), cb);
+        break;
+    case 3:   /* rings */
+        for (int k = 3; k >= 1; k--)
+            cui_draw_arc(ui, (cui_vec2){ r.x + s * 0.5f, r.y + s * 0.5f }, s * 0.12f * (float)k, 0, 6.2831853f, s * 0.035f, k == 2 ? cb : ca);
+        break;
+    case 4:   /* a grid of dots, one out of place */
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++)
+                cui_draw_circle(ui, (cui_vec2){ r.x + s * (0.2f + x * 0.2f), r.y + s * (0.2f + y * 0.2f) }, s * 0.045f, (x == 2 && y == 1) ? cb : ca);
+        break;
+    default:  /* half a disc on a line */
+        cui_draw_circle(ui, (cui_vec2){ r.x + s * 0.5f, r.y + s * 0.58f }, s * 0.3f, ca);
+        cui_draw_rect(ui, (cui_rect){ r.x, r.y + s * 0.58f, s, s * 0.42f }, CUI_CORNERS(0), bg);
+        cui_draw_rect(ui, (cui_rect){ r.x + s * 0.1f, r.y + s * 0.58f, s * 0.8f, s * 0.025f }, CUI_CORNERS(0), cb);
+        break;
+    }
     cui_pop_clip(ui);
-    cui_draw_rect_border(ui, r, CUI_CORNERS(a->radius), CUI_TRANSPARENT, cui_alpha(CUI_RGB(0xffffff), 0.08f), 1);
-    if (a->icon) cui_draw_icon(ui, CUI_ICON_MUSIC, r, s * 0.3f, cui_alpha(CUI_RGB(0xffffff), 0.85f));
+    if (a->icon) cui_draw_icon(ui, CUI_ICON_MUSIC, r, s * 0.3f, cui_alpha(cb, 0.9f));
 }
 static void cover(cui_ctx *ui, const char *id, int art, float size, float radius) {
     art_paint a = { art, radius, false };
@@ -106,7 +129,7 @@ static void sidebar(cui_ctx *ui, app_state *s) {
             cui_box(ui, .width = CUI_FILL) { cui_nav_section(ui, "Your library"); }
             cui_icon_button(ui, CUI_ICON_PLUS, .size = CUI_SIZE_SM, .tooltip = "New playlist");
         }
-        static const char *lists[] = { "Late Night Coding", "Deep Focus", "Synthwave Drive", "Morning Coffee", "Rainy Afternoons" };
+        static const char *lists[] = { "Late Night Coding", "Deep Focus", "Long Drive", "Morning Coffee", "Rainy Afternoons" };
         static const char *counts[] = { "48 songs", "112 songs", "64 songs", "37 songs", "29 songs" };
         cui_push_id(ui, "library");
         for (int i = 0; i < 5; i++) {
@@ -132,7 +155,7 @@ static void hero(cui_ctx *ui, app_state *s) {
         art_paint a = { 0, 16, false };
         cui_canvas(ui, "hero-art", CUI_PX(196), CUI_PX(196), paint_art, &a, sizeof a);
         cui_column(ui, .gap = 10, .width = CUI_FILL) {
-            cui_badge(ui, "Playlist", .tone = CUI_TONE_ACCENT, .icon = CUI_ICON_SPARKLES);
+            cui_text(ui, "Playlist", .size = 12, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY);
             cui_text(ui, "Late Night Coding", .font = CUI_FONT_DISPLAY, .size = 44, .line_height = 1.1f, .nowrap = true);
             cui_text(ui, "Warm synths and steady beats for the hours after everyone has logged off.",
                      .color = CUI_COLOR_TEXT_SECONDARY);
@@ -213,7 +236,7 @@ static void track_list(cui_ctx *ui, app_state *s) {
 
 static void made_for_you(cui_ctx *ui) {
     static const char *names[] = { "Daily Mix 1", "Focus Flow", "Discover Weekly", "Release Radar" };
-    static const char *desc[] = { "Neon Arcs, Kaito Mori and more", "Instrumental, no lyrics", "New music picked for you", "Fresh from artists you follow" };
+    static const char *desc[] = { "Hollis & Grey, Kaito Mori and more", "Instrumental, no lyrics", "New music picked for you", "Fresh from artists you follow" };
     cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
         cui_text(ui, "Made for you", .font = CUI_FONT_DISPLAY, .size = 20, .width = CUI_FILL);
         cui_button(ui, "Show all", .variant = CUI_BUTTON_GHOST, .size = CUI_SIZE_SM, .icon_right = CUI_ICON_ARROW_RIGHT);
@@ -316,5 +339,5 @@ static void frame(cui_ctx *ui, void *user) {
 int main(void) {
     static app_state s = { .position = 74, .volume = 70, .liked = { true, false, true } };
     return cui_app_run(&(cui_app_desc){ .title = "Tempo", .width = 1440, .height = 940,
-                                        .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_ROSE }, frame, &s);
+                                        .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_CORAL }, frame, &s);
 }

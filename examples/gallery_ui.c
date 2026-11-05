@@ -19,8 +19,8 @@ int gallery_page_total(void) { return PAGE_COUNT + gallery_more_count(); }
 void gallery_init(gallery *g) {
     memset(g, 0, sizeof *g);
     g->page = PAGE_OVERVIEW;
-    snprintf(g->name, sizeof g->name, "Ada Lovelace");
-    snprintf(g->email, sizeof g->email, "ada@analytical.engine");
+    snprintf(g->name, sizeof g->name, "Maya Okafor");
+    snprintf(g->email, sizeof g->email, "maya@fieldwork.studio");
     snprintf(g->bio, sizeof g->bio, "Mathematician and writer. I like engines that compute and interfaces that stay out of the way.");
     g->quantity = 3;
     g->date = (cui_date){ 2026, 11, 14 };
@@ -71,7 +71,7 @@ static void sidebar(cui_ctx *ui, gallery *g) {
         cui_row(ui, .gap = 10, .pad_x = 8, .pad_top = 6, .pad_bottom = 18) {
             cui_box(ui, .width = CUI_PX(28), .height = CUI_PX(28), .radius = 9, .bg = CUI_COLOR_FOREGROUND,
                     .dir = CUI_STACK, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
-                cui_icon(ui, CUI_ICON_SPARKLES, 15, CUI_COLOR_BACKGROUND);
+                cui_text(ui, "C", .font = CUI_FONT_DISPLAY, .size = 16, .color = CUI_COLOR_BACKGROUND, .line_height = 1.0f);
             }
             cui_text(ui, "CUI", .font = CUI_FONT_MEDIUM, .size = 15, .nowrap = true);
             cui_spacer(ui);
@@ -121,9 +121,8 @@ static void sidebar(cui_ctx *ui, gallery *g) {
 
 static void page_overview(cui_ctx *ui, gallery *g) {
     cui_column(ui, .gap = 14, .pad_bottom = 8) {
-        cui_badge(ui, "New: planning, 11 more charts and AI components", .tone = CUI_TONE_ACCENT, .icon = CUI_ICON_SPARKLES);
-        cui_heading(ui, "Native interfaces that feel modern", 1);
-        cui_text(ui, "CUI is a component library for C. Calm design, spring motion and keyboard support, on Windows, macOS and Linux, with no dependencies.",
+        cui_heading(ui, "Components for C", 1);
+        cui_text(ui, "Forms, tables, charts, planning boards and chat pieces that draw themselves the same way on Windows, macOS and Linux. Every one works from the keyboard.",
                  .color = CUI_COLOR_TEXT_SECONDARY, .size = 15);
         cui_row(ui, .gap = 8, .pad_top = 6) {
             if (cui_button(ui, "Browse components", .variant = CUI_BUTTON_PRIMARY, .icon_right = CUI_ICON_ARROW_RIGHT)) g->page = PAGE_BUTTONS;
@@ -131,36 +130,34 @@ static void page_overview(cui_ctx *ui, gallery *g) {
         }
     }
     cui_box(ui, .dir = CUI_GRID, .columns = 3, .gap = 16) {
-        static const float s1[] = { 4, 6, 5, 8, 7, 9, 12, 11, 14 };
         static const float s2[] = { 9, 7, 8, 6, 5, 6, 4, 4, 3 };
-        static const float s3[] = { 2, 3, 3, 5, 4, 6, 7, 7, 9 };
-        cui_metric(ui, "Components", "150", .delta = 104.0f, .spark = s1, .spark_count = 9, .icon = CUI_ICON_BOX);
-        cui_metric(ui, "Frame time", "0.4 ms", .delta = 18.0f, .delta_label = "18% faster", .spark = s2, .spark_count = 9, .icon = CUI_ICON_ZAP);
-        cui_metric(ui, "Dependencies", "0", .delta = 0.1f, .delta_label = "Pure C99", .spark = s3, .spark_count = 9, .icon = CUI_ICON_PACKAGE);
+        cui_metric(ui, "Components", "150", .icon = CUI_ICON_BOX);
+        cui_metric(ui, "Frame time", "0.4 ms", .delta = -18.0f, .delta_label = "-18%", .lower_is_better = true, .spark = s2, .spark_count = 9, .icon = CUI_ICON_ZAP);
+        cui_metric(ui, "Dependencies", "0", .icon = CUI_ICON_PACKAGE);
     }
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
         cui_card(ui, .gap = 16) {
             cui_column(ui, .gap = 4) {
-                cui_heading(ui, "Create your account", 4);
-                cui_secondary(ui, "Start a free trial. No card required.");
+                cui_heading(ui, "Create a workspace", 4);
+                cui_secondary(ui, "You can invite people once it exists.");
             }
             cui_input(ui, "ov-name", g->name, sizeof g->name, .label = "Name", .placeholder = "Your name");
             cui_input(ui, "ov-email", g->email, sizeof g->email, .label = "Email", .icon = CUI_ICON_MAIL, .placeholder = "you@company.com");
-            cui_checkbox(ui, "I agree to the terms and privacy policy", &g->terms);
-            if (cui_button(ui, "Create account", .variant = CUI_BUTTON_PRIMARY, .full_width = true, .disabled = !g->terms))
-                cui_toast(ui, "Account created", .description = "Check your inbox to confirm your email.", .tone = CUI_TONE_SUCCESS);
+            cui_checkbox(ui, "Email me a weekly summary", &g->terms);
+            if (cui_button(ui, "Create workspace", .variant = CUI_BUTTON_PRIMARY, .full_width = true))
+                cui_toast(ui, "Workspace created", .description = "It is empty for now. Start with a project.", .tone = CUI_TONE_SUCCESS);
         }
         cui_card(ui, .gap = 12) {
             cui_row(ui) {
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
                     cui_heading(ui, "Team", 4);
-                    cui_secondary(ui, "Invite people to collaborate.");
+                    cui_secondary(ui, "Four people, one owner.");
                 }
                 cui_button(ui, "Invite", .icon = CUI_ICON_USER_PLUS, .size = CUI_SIZE_SM);
             }
             static const char *people[4][3] = {
-                { "Grace Hopper", "grace@navy.mil", "Owner" }, { "Alan Turing", "alan@bletchley.uk", "Admin" },
-                { "Katherine Johnson", "katherine@nasa.gov", "Editor" }, { "Linus Torvalds", "linus@kernel.org", "Viewer" },
+                { "Jonas Berg", "jonas@northlight.io", "Owner" }, { "Priya Nair", "priya@harbor.dev", "Admin" },
+                { "Tomas Rivera", "tomas@kiln.app", "Editor" }, { "Lena Fischer", "lena@fischer.dev", "Viewer" },
             };
             for (int i = 0; i < 4; i++) {
                 cui_row(ui, .gap = 12, .pad_y = 4) {
@@ -260,7 +257,7 @@ static void page_inputs(cui_ctx *ui, gallery *g) {
     section(ui, "Text fields", "Labels above, hints and errors below.");
     cui_card(ui, .gap = 16) {
         cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
-            cui_input(ui, "name", g->name, sizeof g->name, .label = "Full name", .placeholder = "Ada Lovelace");
+            cui_input(ui, "name", g->name, sizeof g->name, .label = "Full name", .placeholder = "Maya Okafor");
             cui_input(ui, "email", g->email, sizeof g->email, .label = "Email", .icon = CUI_ICON_AT_SIGN, .hint = "We never share your email.");
             cui_input(ui, "password", g->password, sizeof g->password, .label = "Password", .password = true, .placeholder = "At least 8 characters",
                       .error = (g->password[0] && strlen(g->password) < 8) ? "Use 8 or more characters." : NULL);
@@ -479,7 +476,7 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
         cui_card(ui, .gap = 14) {
             cui_heading(ui, "Activity", 4);
             cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description = "Release 1.0.3 is live in all regions.", .icon = CUI_ICON_ROCKET, .tone = CUI_TONE_SUCCESS);
-            cui_timeline_item(ui, "Review requested", .time = "1h ago", .description = "Grace asked you to review the theming changes.", .icon = CUI_ICON_MESSAGE_SQUARE, .tone = CUI_TONE_INFO);
+            cui_timeline_item(ui, "Review requested", .time = "1h ago", .description = "Jonas asked you to review the theming changes.", .icon = CUI_ICON_MESSAGE_SQUARE, .tone = CUI_TONE_INFO);
             cui_timeline_item(ui, "Build failed", .time = "3h ago", .icon = CUI_ICON_CIRCLE_ALERT, .tone = CUI_TONE_DANGER, .last = true);
         }
         cui_card(ui, .gap = 14) {
@@ -502,10 +499,10 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_badge(ui, "New", .tone = CUI_TONE_INFO, .solid = true);
         }
         cui_row(ui, .gap = 16) {
-            cui_avatar(ui, "Margaret Hamilton", .size = 40, .status = "online");
-            cui_avatar(ui, "Dennis Ritchie", .size = 40, .status = "busy");
-            cui_avatar(ui, "Barbara Liskov", .size = 40, .square = true);
-            static const char *team[] = { "Ken Thompson", "Brian Kernighan", "Frances Allen", "John Backus", "Edsger Dijkstra", "Donald Knuth", "Leslie Lamport" };
+            cui_avatar(ui, "Sam Whitfield", .size = 40, .status = "online");
+            cui_avatar(ui, "Daniel Mensah", .size = 40, .status = "busy");
+            cui_avatar(ui, "Rosa Delgado", .size = 40, .square = true);
+            static const char *team[] = { "Kwame Asante", "Hana Novak", "Elif Kaya", "Ben Carter", "Omar Haddad", "Felix Moreau", "Iris Coleman" };
             cui_avatar_group(ui, team, 7, 4, 32);
         }
     }
@@ -521,11 +518,11 @@ typedef struct { const char *name, *email, *role, *status; int status_tone; cons
 static void page_data(cui_ctx *ui, gallery *g) {
     section(ui, "Table", "Sortable columns, row selection and components in cells.");
     static person_row rows[] = {
-        { "Grace Hopper", "grace@navy.mil", "Owner", "Active", CUI_TONE_SUCCESS, "$12,400" },
-        { "Alan Turing", "alan@bletchley.uk", "Admin", "Active", CUI_TONE_SUCCESS, "$9,850" },
-        { "Katherine Johnson", "katherine@nasa.gov", "Editor", "Invited", CUI_TONE_WARNING, "$7,200" },
-        { "Linus Torvalds", "linus@kernel.org", "Viewer", "Active", CUI_TONE_SUCCESS, "$3,100" },
-        { "Hedy Lamarr", "hedy@spread.io", "Editor", "Suspended", CUI_TONE_DANGER, "$1,975" },
+        { "Jonas Berg", "jonas@northlight.io", "Owner", "Active", CUI_TONE_SUCCESS, "$12,400" },
+        { "Priya Nair", "priya@harbor.dev", "Admin", "Active", CUI_TONE_SUCCESS, "$9,850" },
+        { "Tomas Rivera", "tomas@kiln.app", "Editor", "Invited", CUI_TONE_WARNING, "$7,200" },
+        { "Lena Fischer", "lena@fischer.dev", "Viewer", "Active", CUI_TONE_SUCCESS, "$3,100" },
+        { "Aiko Tanaka", "aiko@tanaka.design", "Editor", "Suspended", CUI_TONE_DANGER, "$1,975" },
     };
     int order[5] = { 0, 1, 2, 3, 4 };
     for (int i = 1; i < 5; i++) {
@@ -593,9 +590,9 @@ static void page_data(cui_ctx *ui, gallery *g) {
         cui_column(ui, .gap = 12) {
             section(ui, "List", NULL);
             cui_card(ui, .pad = 8, .gap = 2) {
-                cui_list_item(ui, "Design review", .avatar = "Grace Hopper", .subtitle = "Tomorrow at 10:00", .trailing = "45m");
-                cui_list_item(ui, "Release 1.0", .avatar = "Alan Turing", .subtitle = "Ship it", .trailing = "2h", .selected = true);
-                cui_list_item(ui, "Planning", .avatar = "Katherine Johnson", .subtitle = "Q1 roadmap", .trailing = "1h");
+                cui_list_item(ui, "Design review", .avatar = "Jonas Berg", .subtitle = "Tomorrow at 10:00", .trailing = "45m");
+                cui_list_item(ui, "Release 1.0", .avatar = "Priya Nair", .subtitle = "Ship it", .trailing = "2h", .selected = true);
+                cui_list_item(ui, "Planning", .avatar = "Tomas Rivera", .subtitle = "Q1 roadmap", .trailing = "1h");
             }
         }
     }
@@ -720,8 +717,8 @@ static void dialogs(cui_ctx *ui, gallery *g) {
         cui_switch(ui, "Weekly digest", &g->bluetooth, .description = "A summary every Monday.");
         cui_separator(ui);
         cui_label(ui, "Recent");
-        cui_list_item(ui, "Grace commented on Release 1.0", .avatar = "Grace Hopper", .subtitle = "2 minutes ago");
-        cui_list_item(ui, "Alan invited you to Engines", .avatar = "Alan Turing", .subtitle = "1 hour ago");
+        cui_list_item(ui, "Jonas commented on Release 1.0", .avatar = "Jonas Berg", .subtitle = "2 minutes ago");
+        cui_list_item(ui, "Priya invited you to Engines", .avatar = "Priya Nair", .subtitle = "1 hour ago");
     }
     static const cui_command commands[] = {
         { "Go to Overview", CUI_ICON_LAYOUT_DASHBOARD, "Navigation", NULL },
