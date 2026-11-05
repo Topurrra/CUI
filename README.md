@@ -24,9 +24,9 @@ Windows, macOS and Linux from one C99 codebase. No dependencies. About 230 KB.
 
 <br>
 
-<img src="docs/images/showcase/tracker.png" alt="An issue tracker built with CUI, in dark mode">
+<img src="docs/images/showcase/hero-ai-dark.png" alt="An assistant window built with CUI: reasoning, tool calls, citations, a composer and a voice orb">
 
-<sub>An issue tracker in 360 lines of C: <a href="examples/tracker.c"><code>examples/tracker.c</code></a></sub>
+<sub>Every image on this page is drawn by CUI itself, from plain C.</sub>
 
 </div>
 
@@ -81,6 +81,39 @@ Native Win32, Cocoa and X11, plus SDL2 and GLFW backends. OpenGL with a software
 </tr>
 </table>
 
+## Showcase
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/showcase/hero-desk-dark.png" alt="Control tiles, a now playing card, a waveform and a magnifying dock"></td>
+<td width="50%"><img src="docs/images/showcase/hero-board.png" alt="A kanban board with a card being dragged between columns"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Dock, tiles and player</b>: icons that grow under the pointer, a seekable waveform</sub></td>
+<td align="center"><sub><b>Kanban</b>: the lifted card follows the pointer and the column opens a slot for it</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/hero-pick-dark.png" alt="A date range picker with presets and two months, and a wheel time picker"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Pickers</b>: a date range with presets over two months, and wheels that spin with momentum</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/showcase/hero-palette-dark.png" alt="A command palette with grouped commands and shortcuts"></td>
+<td><img src="docs/images/showcase/hero-charts.png" alt="A calendar heatmap, a sankey diagram, a radar chart and an agent plan"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Command palette</b>: fuzzy search, groups and shortcuts</sub></td>
+<td align="center"><sub><b>Charts</b>: calendar heatmap, sankey, radar, and a live plan</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/hero-plan-dark.png" alt="A gantt chart with dependencies, progress and a today line"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Gantt</b>: drag to reschedule, pull the ends to resize, arrows follow dependencies</sub></td>
+</tr>
+</table>
+
 ## Built with CUI
 
 Every screenshot here is a real app from [`examples/`](examples), rendered by CUI itself.
@@ -91,6 +124,12 @@ Every screenshot here is a real app from [`examples/`](examples), rendered by CU
 </tr>
 <tr>
 <td colspan="2" align="center"><sub><b>Muse</b>: reasoning, tool calls, sources, a plan and a composer with a model picker · <a href="examples/assistant.c">assistant.c</a></sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/tracker.png" alt="An issue tracker built with CUI, in dark mode"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Orbit</b>: an issue tracker with grouped lists, custom glyphs and an activity pane · <a href="examples/tracker.c">tracker.c</a></sub></td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/images/showcase/music.png" alt="Music player"></td>

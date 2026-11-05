@@ -121,7 +121,7 @@ static void sidebar(cui_ctx *ui, gallery *g) {
 
 static void page_overview(cui_ctx *ui, gallery *g) {
     cui_column(ui, .gap = 14, .pad_bottom = 8) {
-        cui_badge(ui, "New in 1.0: charts and command palette", .tone = CUI_TONE_ACCENT, .icon = CUI_ICON_SPARKLES);
+        cui_badge(ui, "New: planning, 11 more charts and AI components", .tone = CUI_TONE_ACCENT, .icon = CUI_ICON_SPARKLES);
         cui_heading(ui, "Native interfaces that feel modern", 1);
         cui_text(ui, "CUI is a component library for C. Calm design, spring motion and keyboard support, on Windows, macOS and Linux, with no dependencies.",
                  .color = CUI_COLOR_TEXT_SECONDARY, .size = 15);
@@ -134,7 +134,7 @@ static void page_overview(cui_ctx *ui, gallery *g) {
         static const float s1[] = { 4, 6, 5, 8, 7, 9, 12, 11, 14 };
         static const float s2[] = { 9, 7, 8, 6, 5, 6, 4, 4, 3 };
         static const float s3[] = { 2, 3, 3, 5, 4, 6, 7, 7, 9 };
-        cui_metric(ui, "Components", "64", .delta = 12.0f, .spark = s1, .spark_count = 9, .icon = CUI_ICON_BOX);
+        cui_metric(ui, "Components", "150", .delta = 104.0f, .spark = s1, .spark_count = 9, .icon = CUI_ICON_BOX);
         cui_metric(ui, "Frame time", "0.4 ms", .delta = 18.0f, .delta_label = "18% faster", .spark = s2, .spark_count = 9, .icon = CUI_ICON_ZAP);
         cui_metric(ui, "Dependencies", "0", .delta = 0.1f, .delta_label = "Pure C99", .spark = s3, .spark_count = 9, .icon = CUI_ICON_PACKAGE);
     }

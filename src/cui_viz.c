@@ -906,7 +906,7 @@ static void cui__paint_sankey(cui_ctx *ui, cui_node *n, void *data) {
         float nmw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, nm, -1, false);
         if (right) {
             float vw = cui__text_width(ui, CUI_FONT_BODY, fs, val, -1, true);
-            if (g.col[i] < g.maxcol) cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 9, nmw + vw + 14, 18 }, CUI_CORNERS(6), cui_alpha(CUI_C(ui, SURFACE), 0.72f));
+            if (g.col[i] < g.maxcol) cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 9, nmw + vw + 14, 18 }, CUI_CORNERS(6), cui_alpha(CUI_C(ui, SURFACE), ui->mode == CUI_THEME_DARK ? 0.5f : 0.7f));
             cui__text_at(ui, CUI_FONT_MEDIUM, fs, lx, ly, 0, CUI_C(ui, FOREGROUND), nm, false);
             cui__text_at(ui, CUI_FONT_BODY, fs, lx + nmw + 6, ly, 0, CUI_C(ui, TEXT_MUTED), val, true);
         } else {

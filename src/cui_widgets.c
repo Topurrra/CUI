@@ -352,7 +352,9 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     if (col.border.a) { n->border = 1; n->border_color = col.border; }
     n->scale = st->press.x;
     n->opacity = disabled ? 0.45f : 1.0f;
-    if (v == CUI_BUTTON_PRIMARY || v == CUI_BUTTON_DANGER) {
+    if (disabled) {
+        /* flat while disabled */
+    } else if (v == CUI_BUTTON_PRIMARY || v == CUI_BUTTON_DANGER) {
         /* solid buttons: a little light from above, and a soft lift */
         float *k = cui__frame_alloc(ui, sizeof *k);
         *k = r.pressed ? 0.45f : 1.0f;

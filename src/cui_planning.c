@@ -487,7 +487,7 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         cui_color fg = cui_mix(CUI_C(ui, FOREGROUND), tone, ui->mode == CUI_THEME_DARK ? 0.2f : 0.45f);
         int t = cui__text_node(ui, e->title, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs + 0.5f), fg, false);
         ui->nodes[t].line_height = 1.3f;
-        if (h > 34) {
+        if (h > 34 && lane_w > 78) {   /* narrow lanes keep just the title */
             int sh = (int)e->start, sm = (int)roundf((e->start - sh) * 60), eh = (int)e->end, em = (int)roundf((e->end - eh) * 60);
             const char *tm = cui__frame_printf(ui, "%d:%02d \xe2\x80\x93 %d:%02d%s%s", sh, sm, eh, em, e->detail ? "  \xc2\xb7  " : "", e->detail ? e->detail : "");
             int tt = cui__text_node(ui, tm, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_xs), cui_alpha(fg, 0.75f), false);
