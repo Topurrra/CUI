@@ -46,6 +46,8 @@ void *cui__plat_native(cui_app *app);
 const char *cui__plat_name(void);
 double cui__plat_now(void);
 int cui__plat_system_dark(void);                      /* -1 unknown, 0 light, 1 dark */
+bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap);
+bool cui__plat_open_url(const char *url);
 
 /* Shared helpers for backends. */
 void cui__app_render(cui_app *app);                   /* end frame (if open), render, present */

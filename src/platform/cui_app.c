@@ -2,6 +2,7 @@
  * sleeping and screenshots. Backends supply windows and events. */
 #include "cui_platform.h"
 
+static cui_app *cui__current_app;
 static void cui__app_set_clip(void *user, const char *utf8);
 static const char *cui__app_get_clip(void *user);
 
@@ -75,11 +76,13 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
         d->continuous = true;
     }
     if (!d->hidden) cui__plat_show(app);
+    cui__current_app = app;
     return app;
 }
 
 void cui_app_destroy(cui_app *app) {
     if (!app) return;
+    if (cui__current_app == app) cui__current_app = NULL;
     if (app->in_frame) { cui_end_frame(app->ui); app->in_frame = false; }
     /* release textures while the GL context still exists */
     cui_set_renderer(app->ui, NULL);
@@ -246,3 +249,22 @@ bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height) {
     }
     return true;
 }
+
+bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap) {
+    cui_file_dialog_opts d;
+    memset(&d, 0, sizeof d);
+    if (!opts) opts = &d;
+    if (!app) app = cui__current_app;
+    if (!out || cap == 0 || !app) return false;
+    out[0] = 0;
+    bool ok = cui__plat_file_dialog(app, opts, out, cap);
+    /* the dialog ran its own loop: input state is stale, and time jumped */
+    cui_input_focus(app->ui, true);
+    cui_input_mouse_leave(app->ui);
+    app->last_time = cui__plat_now();
+    cui_request_redraw(app->ui);
+    return ok && out[0];
+}
+
+bool cui_app_open_url(const char *url) { return url && *url && cui__plat_open_url(url); }
+

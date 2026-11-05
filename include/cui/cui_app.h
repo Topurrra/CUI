@@ -76,6 +76,23 @@ CUI_API void *cui_app_native_window(cui_app *app);
 /* Name of the active backend: "win32", "cocoa", "x11", "sdl2", "glfw". */
 CUI_API const char *cui_app_backend(cui_app *app);
 
+/* Native file dialogs. Blocking; returns true and writes the chosen path
+ * (UTF-8) to out when the user confirms. On Linux this uses zenity or
+ * kdialog when installed. Pass NULL as app to use the current app (handy in
+ * cui_app_run callbacks). */
+typedef enum cui_file_dialog_kind { CUI_FILE_OPEN = 0, CUI_FILE_SAVE, CUI_FILE_FOLDER } cui_file_dialog_kind;
+typedef struct cui_file_dialog_opts {
+    cui_file_dialog_kind kind;
+    const char *title;
+    const char *filter_name;    /* e.g. "Images" */
+    const char *filter;         /* extensions separated by ';', e.g. "png;jpg" */
+    const char *default_name;   /* save dialogs */
+} cui_file_dialog_opts;
+CUI_API bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap);
+
+/* Opens a URL or file with the system's default handler. */
+CUI_API bool cui_app_open_url(const char *url);
+
 /* Renders the current UI into an RGBA buffer (any backend). Handy for
  * screenshots and tests. Returns false when the buffer is too small. */
 CUI_API bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height);

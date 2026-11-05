@@ -180,7 +180,19 @@ if (!cui_wants_keyboard(ui)) {                          /* skip while the user t
 }
 ```
 
-## 7. Screenshots and tests
+## 7. Files and links
+
+```c
+char path[1024];
+if (cui_app_file_dialog(app, &(cui_file_dialog_opts){ .kind = CUI_FILE_OPEN, .filter_name = "Images", .filter = "png;jpg" },
+                        path, sizeof path))
+    open_image(path);
+cui_app_open_url("https://example.com");
+```
+
+Native dialogs on Windows and macOS; on Linux `zenity` or `kdialog` when installed. Kinds: `CUI_FILE_OPEN`, `CUI_FILE_SAVE`, `CUI_FILE_FOLDER`. Inside a `cui_app_run` callback, pass `NULL` for the app.
+
+## 8. Screenshots and tests
 
 Any CUI app can save a screenshot and exit, which is handy for docs and visual tests:
 

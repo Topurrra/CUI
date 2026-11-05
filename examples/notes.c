@@ -115,6 +115,18 @@ static void editor_pane(cui_ctx *ui, notes_app *a) {
                 for (int t = 0; t < 3; t++)
                     if (cui_menu_item(ui, tags[t], .icon = CUI_ICON_TAG, .checked = n->tag == t)) n->tag = t;
                 cui_menu_separator(ui);
+                if (cui_menu_item(ui, "Export as text", .icon = CUI_ICON_DOWNLOAD)) {
+                    char path[1024], name[128];
+                    snprintf(name, sizeof name, "%s.txt", n->title[0] ? n->title : "note");
+                    if (cui_app_file_dialog(NULL, &(cui_file_dialog_opts){ .kind = CUI_FILE_SAVE, .title = "Export note",
+                                                                         .filter_name = "Text", .filter = "txt", .default_name = name },
+                                            path, sizeof path)) {
+                        FILE *f = fopen(path, "wb");
+                        if (f) { fprintf(f, "%s\n\n%s\n", n->title, n->body); fclose(f); cui_toast(ui, "Note exported", .description = path, .tone = CUI_TONE_SUCCESS); }
+                        else cui_toast(ui, "Could not write the file", .tone = CUI_TONE_DANGER);
+                    }
+                }
+                cui_menu_separator(ui);
                 if (cui_menu_item(ui, "Delete note", .icon = CUI_ICON_TRASH_2, .danger = true, .shortcut = "Del")) a->confirm_delete = true;
             }
         }
