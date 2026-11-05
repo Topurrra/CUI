@@ -295,9 +295,10 @@ static void page_disclosure(cui_ctx *ui) {
     section(ui, "Expandable cards", "A header that opens a body with a spring.");
     cui_column(ui, .gap = 10) {
         cui_expandable_card(ui, "Billing", &card1, .description = "Pro plan, renews on December 1", .icon = CUI_ICON_CREDIT_CARD, .badge = "Active", .badge_tone = CUI_TONE_SUCCESS) {
-            cui_row(ui, .gap = 16) {
-                cui_metric(ui, "This month", "$84.00", .width = CUI_FILL);
-                cui_metric(ui, "Seats", "7 of 10", .width = CUI_FILL);
+            /* plain label and value pairs: a card inside the card would only add edges */
+            cui_row(ui, .gap = 40) {
+                cui_column(ui, .gap = 2) { cui_muted(ui, "This month"); cui_text(ui, "$84.00", .font = CUI_FONT_DISPLAY, .size = 22, .tabular = true); }
+                cui_column(ui, .gap = 2) { cui_muted(ui, "Seats"); cui_text(ui, "7 of 10", .font = CUI_FONT_DISPLAY, .size = 22, .tabular = true); }
             }
             cui_row(ui, .gap = 8) { cui_button(ui, "Change plan", .size = CUI_SIZE_SM); cui_button(ui, "Invoices", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST); }
         }
