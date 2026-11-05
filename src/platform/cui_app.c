@@ -259,6 +259,7 @@ bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *o
     out[0] = 0;
     bool ok = cui__plat_file_dialog(app, opts, out, cap);
     /* the dialog ran its own loop: input state is stale, and time jumped */
+    cui_input_focus(app->ui, false);   /* releases keys, buttons and modifiers */
     cui_input_focus(app->ui, true);
     cui_input_mouse_leave(app->ui);
     app->last_time = cui__plat_now();

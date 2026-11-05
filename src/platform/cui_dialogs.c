@@ -12,7 +12,23 @@
 #include <shlobj.h>
 #include <shellapi.h>
 
-static void cui__w(const char *s, WCHAR *out, int cap) { MultiByteToWideChar(CP_UTF8, 0, s ? s : "", -1, out, cap); }
+/* UTF-8 to UTF-16; always terminated, empty on failure. */
+static bool cui__w(const char *s, WCHAR *out, int cap) {
+    if (cap <= 0) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s ? s : "", -1, out, cap);
+    if (n <= 0) { out[0] = 0; return false; }
+    out[cap - 1] = 0;
+    return true;
+}
+
+/* Appends a NUL terminated UTF-16 string at *n; false when it does not fit. */
+static bool cui__w_append(WCHAR *buf, int cap, int *n, const char *s) {
+    if (*n >= cap) return false;
+    int k = MultiByteToWideChar(CP_UTF8, 0, s, -1, buf + *n, cap - *n);
+    if (k <= 0) return false;
+    *n += k;
+    return true;
+}
 
 bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap) {
     (void)app;
@@ -21,20 +37,26 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
     cui__w(o->title ? o->title : (o->kind == CUI_FILE_SAVE ? "Save" : "Open"), title, 256);
     WCHAR path[MAX_PATH * 4] = { 0 };
     if (o->kind == CUI_FILE_FOLDER) {
+        /* the new style folder dialog needs COM on this thread */
+        HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         BROWSEINFOW bi;
         memset(&bi, 0, sizeof bi);
         bi.hwndOwner = owner;
         bi.lpszTitle = title;
         bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
         LPITEMIDLIST pidl = SHBrowseForFolderW(&bi);
-        if (!pidl) return false;
-        BOOL ok = SHGetPathFromIDListW(pidl, path);
-        CoTaskMemFree(pidl);
+        BOOL ok = FALSE;
+        if (pidl) {
+            ok = SHGetPathFromIDListW(pidl, path);
+            CoTaskMemFree(pidl);
+        }
+        if (SUCCEEDED(com)) CoUninitialize();
         if (!ok) return false;
     } else {
         /* filter: "Images\0*.png;*.jpg\0All files\0*.*\0\0" */
         WCHAR filter[512];
         int n = 0;
+        bool fit = true;
         if (o->filter && *o->filter) {
             char spec[400];
             size_t k = 0;
@@ -44,12 +66,11 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
                 k += (size_t)snprintf(spec + k, sizeof spec - k, "%s*.%.*s", k ? ";" : "", (int)l, p);
                 p = e ? e + 1 : p + l;
             }
-            n += MultiByteToWideChar(CP_UTF8, 0, o->filter_name ? o->filter_name : "Files", -1, filter + n, 512 - n);
-            n += MultiByteToWideChar(CP_UTF8, 0, spec, -1, filter + n, 512 - n);
+            fit = cui__w_append(filter, 511, &n, o->filter_name ? o->filter_name : "Files") && cui__w_append(filter, 511, &n, spec);
         }
-        n += MultiByteToWideChar(CP_UTF8, 0, "All files", -1, filter + n, 512 - n);
-        n += MultiByteToWideChar(CP_UTF8, 0, "*.*", -1, filter + n, 512 - n);
-        filter[n] = 0;
+        if (!fit) n = 0;
+        if (!cui__w_append(filter, 511, &n, "All files") || !cui__w_append(filter, 511, &n, "*.*")) n = 0;
+        filter[n] = 0;   /* list ends with an empty string */
         if (o->default_name) cui__w(o->default_name, path, MAX_PATH * 4);
         OPENFILENAMEW ofn;
         memset(&ofn, 0, sizeof ofn);
@@ -67,14 +88,13 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
 }
 
 bool cui__plat_open_url(const char *url) {
-    WCHAR w[2048];
-    cui__w(url, w, 2048);
+    WCHAR w[4096];
+    if (!cui__w(url, w, 4096)) return false;
     return (INT_PTR)ShellExecuteW(NULL, L"open", w, NULL, NULL, SW_SHOWNORMAL) > 32;
 }
 
 #else
-#include <sys/wait.h>
-#include <unistd.h>
+#include <errno.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -89,11 +109,43 @@ static void cui__shell_quote(char *dst, size_t cap, const char *src) {
     dst[o] = 0;
 }
 
+/* Runs a command and reads the first line of its output (newline stripped). */
+static bool cui__run_line(const char *cmd, char *out, size_t cap) {
+    FILE *f = popen(cmd, "r");
+    if (!f) return false;
+    if (!fgets(out, (int)cap, f)) out[0] = 0;
+    int status = pclose(f);
+    size_t n = strlen(out);
+    while (n && (out[n - 1] == '\n' || out[n - 1] == '\r')) out[--n] = 0;
+    return status == 0 && n > 0;
+}
+
+/* Starts a program without waiting for it and without leaving a zombie:
+ * the intermediate child exits at once and the grandchild is reparented. */
+static bool cui__spawn_detached(const char *prog, const char *arg) {
+    pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        pid_t g = fork();
+        if (g == 0) { execlp(prog, prog, arg, (char *)NULL); _exit(127); }
+        _exit(g < 0 ? 1 : 0);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) { if (errno != EINTR) return false; }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 #if !defined(__APPLE__)
+/* 1 present, 0 missing, -1 unknown; looked up once per tool. */
 static bool cui__have(const char *tool) {
-    char cmd[256];
-    snprintf(cmd, sizeof cmd, "command -v %s >/dev/null 2>&1", tool);
-    return system(cmd) == 0;
+    static int zenity = -1, kdialog = -1, xdg = -1;
+    int *slot = strcmp(tool, "zenity") == 0 ? &zenity : strcmp(tool, "kdialog") == 0 ? &kdialog : &xdg;
+    if (*slot < 0) {
+        char cmd[256];
+        snprintf(cmd, sizeof cmd, "command -v %s >/dev/null 2>&1", tool);
+        *slot = system(cmd) == 0;
+    }
+    return *slot == 1;
 }
 #endif
 
@@ -114,24 +166,26 @@ static bool cui__posix_file_dialog(const cui_file_dialog_opts *o, char *out, siz
     cui__applescript_quote(name, sizeof name, o->default_name ? o->default_name : "Untitled");
     if (o->kind == CUI_FILE_FOLDER) snprintf(script, sizeof script, "POSIX path of (choose folder with prompt \"%s\")", title);
     else if (o->kind == CUI_FILE_SAVE) snprintf(script, sizeof script, "POSIX path of (choose file name with prompt \"%s\" default name \"%s\")", title, name);
-    else snprintf(script, sizeof script, "POSIX path of (choose file with prompt \"%s\")", title);
+    else {
+        char types[300] = "";
+        if (o->filter && *o->filter) {
+            size_t k = (size_t)snprintf(types, sizeof types, " of type {");
+            for (const char *p = o->filter; *p && k + 8 < sizeof types;) {
+                const char *e = strchr(p, ';');
+                size_t l = e ? (size_t)(e - p) : strlen(p);
+                k += (size_t)snprintf(types + k, sizeof types - k, "%s\"%.*s\"", p == o->filter ? "" : ", ", (int)l, p);
+                p = e ? e + 1 : p + l;
+            }
+            snprintf(types + k, sizeof types - k, "}");
+        }
+        snprintf(script, sizeof script, "POSIX path of (choose file with prompt \"%s\"%s)", title, types);
+    }
     cui__shell_quote(quoted, sizeof quoted, script);
     snprintf(cmd, sizeof cmd, "osascript -e %s 2>/dev/null", quoted);
-    FILE *f = popen(cmd, "r");
-    if (!f) return false;
-    if (!fgets(out, (int)cap, f)) out[0] = 0;
-    int status = pclose(f);
-    size_t n = strlen(out);
-    while (n && (out[n - 1] == '\n' || out[n - 1] == '\r')) out[--n] = 0;
-    return status == 0 && n > 0;
+    return cui__run_line(cmd, out, cap);
 }
 
-bool cui__plat_open_url(const char *url) {
-    pid_t pid = fork();
-    if (pid < 0) return false;
-    if (pid == 0) { execlp("open", "open", url, (char *)NULL); _exit(127); }
-    return true;
-}
+bool cui__plat_open_url(const char *url) { return cui__spawn_detached("open", url); }
 #else
 static bool cui__posix_file_dialog(const cui_file_dialog_opts *o, char *out, size_t cap) {
     char cmd[2048], title[300], name[600], filter[400];
@@ -158,28 +212,29 @@ static bool cui__posix_file_dialog(const cui_file_dialog_opts *o, char *out, siz
         snprintf(cmd + n, sizeof cmd - n, " 2>/dev/null");
     } else if (cui__have("kdialog")) {
         const char *mode = o->kind == CUI_FILE_SAVE ? "--getsavefilename" : o->kind == CUI_FILE_FOLDER ? "--getexistingdirectory" : "--getopenfilename";
-        snprintf(cmd, sizeof cmd, "kdialog %s %s --title %s 2>/dev/null", mode, o->default_name ? name : "''", title);
+        char spec[360] = "";
+        if (o->filter && *o->filter && o->kind != CUI_FILE_FOLDER) {
+            size_t k = 0;
+            for (const char *p = o->filter; *p && k + 8 < sizeof spec;) {
+                const char *e = strchr(p, ';');
+                size_t l = e ? (size_t)(e - p) : strlen(p);
+                k += (size_t)snprintf(spec + k, sizeof spec - k, "%s*.%.*s", k ? " " : "", (int)l, p);
+                p = e ? e + 1 : p + l;
+            }
+            snprintf(spec + k, sizeof spec - k, "|%s", o->filter_name ? o->filter_name : "Files");
+            cui__shell_quote(filter, sizeof filter, spec);
+        }
+        snprintf(cmd, sizeof cmd, "kdialog %s %s %s --title %s 2>/dev/null", mode, o->default_name ? name : "'.'", filter, title);
     } else {
         fprintf(stderr, "cui: install zenity or kdialog for file dialogs\n");
         return false;
     }
-    FILE *f = popen(cmd, "r");
-    if (!f) return false;
-    if (!fgets(out, (int)cap, f)) out[0] = 0;
-    int status = pclose(f);
-    size_t n = strlen(out);
-    while (n && (out[n - 1] == '\n' || out[n - 1] == '\r')) out[--n] = 0;
-    return status == 0 && n > 0;
+    return cui__run_line(cmd, out, cap);
 }
 
 bool cui__plat_open_url(const char *url) {
-    pid_t pid = fork();
-    if (pid < 0) return false;
-    if (pid == 0) {
-        execlp("xdg-open", "xdg-open", url, (char *)NULL);
-        _exit(127);
-    }
-    return true;
+    if (!cui__have("xdg-open")) return false;
+    return cui__spawn_detached("xdg-open", url);
 }
 
 #endif

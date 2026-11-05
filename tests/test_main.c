@@ -534,6 +534,23 @@ static void test_reorder(void) {
     /* a click without movement does not reorder */
     click_at(ui, build_reorder, &r, 150, 40);
     CHECK(r.changed == 1);
+    /* a small upward drag that does not pass the row above keeps the order */
+    cui_input_mouse_move(ui, 150, 130);
+    run(ui, build_reorder, &r, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_reorder, &r, 1);
+    for (int y = 130; y >= 120; y -= 2) { cui_input_mouse_move(ui, 150, (float)y); run(ui, build_reorder, &r, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_reorder, &r, 3);
+    CHECK(r.changed == 1);
+    cui_destroy(ui);
+
+    /* a list that first appears under the pointer does not reorder itself */
+    ui = new_ctx();
+    reorder_ctx r2 = { { 0, 1, 2, 3 }, 0, 0 };
+    cui_input_mouse_move(ui, 150, 190);
+    run(ui, build_reorder, &r2, 5);
+    CHECK(r2.changed == 0 && r2.order[0] == 0 && r2.order[3] == 3);
     cui_destroy(ui);
 }
 

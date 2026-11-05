@@ -626,6 +626,7 @@ typedef struct {
     bool pending;           /* pressed, waiting to cross the drag threshold */
     int press_pos;
     cui_spring lift;        /* 0..1 dragged look */
+    bool init;
 } cui__reorder_state;
 
 typedef struct { cui_spring y; } cui__reorder_item_state;
@@ -653,6 +654,7 @@ void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
     b->prev = ui->reorder;
     ui->reorder = b;
     cui__reorder_state *st = b->st;
+    if (!st->init) { st->from = -1; st->init = true; }   /* state memory starts zeroed */
     if (st->from >= b->count) st->from = -1;
     /* slot geometry from last frame */
     b->have_rects = true;
@@ -671,11 +673,12 @@ void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
     }
     if (!ui->mdown[0]) st->pending = false;
     if (st->from >= 0 && b->have_rects) {
-        /* drop position: the slot whose middle the dragged row's middle passed */
+        /* drop position: moving down, the last row whose middle we passed;
+         * moving up, the first row whose middle we are above */
         float mid = ui->my - st->grab + b->slot_h[st->from] * 0.5f;
-        int to = 0;
-        for (int k = 0; k < b->count; k++) if (mid > b->slot_top[k] + b->slot_h[k] * 0.5f) to = k;
-        if (mid < b->slot_top[0] + b->slot_h[0] * 0.5f) to = 0;
+        int to = st->from;
+        for (int k = st->from + 1; k < b->count; k++) if (mid > b->slot_top[k] + b->slot_h[k] * 0.5f) to = k;
+        for (int k = st->from - 1; k >= 0; k--) if (mid < b->slot_top[k] + b->slot_h[k] * 0.5f) to = k;
         st->to = to;
         if (!ui->mdown[0]) {
             /* commit: move the item, then let every row glide from where it was drawn */
@@ -701,6 +704,7 @@ void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
             st->from = -1;
         }
     }
+    if (st->from >= 0 && !ui->mdown[0]) st->from = -1;   /* released without layout: just end the drag */
     cui__spring(ui, &st->lift, st->from >= 0 ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
     int col = cui__node_new(ui, b->id);
     ui->nodes[col].gap = 6;
@@ -711,7 +715,14 @@ void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
 
 void cui_reorder_item_begin(cui_ctx *ui, int pos) {
     struct cui_reorder_build *b = ui->reorder;
-    if (!b || pos < 0 || pos >= b->count) { int n = cui__node_new(ui, 0); cui__open(ui, n); return; }
+    if (!b || pos < 0 || pos >= b->count) {
+        /* outside a list or past its capacity: a plain row, kept balanced with item_end */
+        int n = cui__node_new(ui, 0);
+        ui->nodes[n].dir = CUI_ROW;
+        cui__open(ui, n);
+        cui_push_id_int(ui, pos);
+        return;
+    }
     cui__reorder_state *st = b->st;
     int item = b->order[pos];
     cui_id iid = cui__reorder_item_id(b, item);
