@@ -425,6 +425,8 @@ typedef struct cui_scroll_opts {
     cui_size width, height;
     bool horizontal;            /* also scroll horizontally */
     float pad, gap;
+    bool fade_edges;            /* content fades out at an edge with more to scroll */
+    cui_color fade_color;       /* what it fades into: the backdrop (default CUI_COLOR_BACKGROUND) */
 } cui_scroll_opts;
 CUI_API void cui_scroll_begin(cui_ctx *ui, const cui_scroll_opts *opts);
 CUI_API void cui_scroll_end(cui_ctx *ui);

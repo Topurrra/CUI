@@ -614,7 +614,7 @@ SCENE(toc) {
         { "First window", "window", 0 }, { "Next steps", "next", 0 },
     };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
-        cui_scroll(ui, .id = "reader", .height = CUI_PX(260), .width = CUI_FILL, .gap = 10) {
+        cui_scroll(ui, .id = "reader", .height = CUI_PX(260), .width = CUI_FILL, .gap = 10, .fade_edges = true) {
             for (int k = 0; k < 6; k++) {
                 cui_toc_anchor(ui, toc[k].anchor);
                 cui_heading(ui, toc[k].title, toc[k].level ? 4 : 3);

@@ -253,6 +253,7 @@ typedef struct cui_scroll_state {
     bool drag_y, drag_x;
     float drag_grab;
     bool hover_bar;
+    cui_color fade;             /* edge fade color, alpha 0 for none */
 } cui_scroll_state;
 
 int cui__node_new(cui_ctx *ui, cui_id id);

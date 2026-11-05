@@ -1037,6 +1037,15 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
     cui_scroll_state *st = cui_state(ui, n->id, sizeof *st);
     cui_rect r = n->rect;
     float max_y = st->content_h - r.h;
+    if (st->fade.a > 0 && max_y > 0.5f) {
+        /* each edge fades in as content moves past it */
+        float fh = CUI_MIN(36.0f, r.h * 0.2f);
+        float top = cui__clampf(st->y / fh, 0, 1), bot = cui__clampf((max_y - st->y) / fh, 0, 1);
+        cui_color clear = st->fade; clear.a = 0;
+        cui_corners rc = n->radius;
+        if (top > 0) cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y, r.w, fh }, (cui_corners){ rc.tl, rc.tr, 0, 0 }, cui_alpha(st->fade, top), clear);
+        if (bot > 0) cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y + r.h - fh, r.w, fh }, (cui_corners){ 0, 0, rc.br, rc.bl }, clear, cui_alpha(st->fade, bot));
+    }
     if (max_y > 0.5f) {
         cui_rect zone = { r.x + r.w - CUI__BAR_ZONE, r.y, CUI__BAR_ZONE, r.h };
         cui__paint_add_hit(ui, n->id ^ 0x5C5C5C5Cu, cui__rect_intersect(zone, clip), CUI_NF_INTERACTIVE);
@@ -1072,6 +1081,8 @@ void cui_scroll_begin(cui_ctx *ui, const cui_scroll_opts *o) {
     b.height = o->height.kind == CUI_SIZE_FIT ? CUI_FILL : o->height;
     b.pad = o->pad;
     b.gap = o->gap;
+    cui_scroll_state *st = cui_state(ui, id, sizeof *st);
+    st->fade = o->fade_edges ? (cui__color_set(o->fade_color) ? cui_color_of(ui, o->fade_color) : CUI_C(ui, BACKGROUND)) : cui__rgba(0, 0, 0, 0);
     cui__scroll_begin_ex(ui, id, &b, o->horizontal);
 }
 

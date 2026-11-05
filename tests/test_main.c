@@ -1345,6 +1345,35 @@ static void test_atlas_pressure(void) {
     cui_destroy(ui);
 }
 
+/* scroll edge fades ------------------------------------------------------ */
+
+typedef struct { bool fade; int rows; } fade_ctx;
+static void build_fade(cui_ctx *ui, void *u) {
+    fade_ctx *f = u;
+    cui_scroll(ui, .id = "f", .height = CUI_PX(120), .width = CUI_PX(200), .fade_edges = f->fade) {
+        for (int i = 0; i < f->rows; i++) { cui_push_id_int(ui, i); cui_text(ui, "Row"); cui_pop_id(ui); }
+    }
+}
+
+static void test_scroll_fade(void) {
+    printf("scroll: edge fades only where there is more to scroll\n");
+    cui_ctx *ui = new_ctx();
+    fade_ctx f = { false, 30 };
+    run(ui, build_fade, &f, 3);
+    int plain = cui_get_draw_data(ui)->vertex_count;
+    f.fade = true;
+    run(ui, build_fade, &f, 3);
+    int faded = cui_get_draw_data(ui)->vertex_count;
+    CHECK(faded > plain);              /* a bottom fade, none at the top yet */
+    f.rows = 2;
+    run(ui, build_fade, &f, 3);
+    int short_fade = cui_get_draw_data(ui)->vertex_count;
+    f.fade = false;
+    run(ui, build_fade, &f, 3);
+    CHECK(cui_get_draw_data(ui)->vertex_count == short_fade);   /* nothing to scroll, nothing drawn */
+    cui_destroy(ui);
+}
+
 /* stress ---------------------------------------------------------------- */
 
 typedef struct { int n; } stress_ctx;
@@ -2038,6 +2067,7 @@ int main(void) {
     test_virtual_list();
     test_theme();
     test_renderer();
+    test_scroll_fade();
     test_stress();
     test_atlas_pressure();
     cui_sw_destroy(g_sw);

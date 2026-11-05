@@ -336,7 +336,7 @@ static void page_reader(cui_ctx *ui) {
     static const char *para = "Components are functions. They draw themselves, handle input and return what happened. Your variables are the "
                               "source of truth, so there is nothing to keep in sync, and conditional interface is just an if statement. ";
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
-        cui_scroll(ui, .id = "reader", .height = CUI_PX(560), .width = CUI_FILL, .gap = 14) {
+        cui_scroll(ui, .id = "reader", .height = CUI_PX(560), .width = CUI_FILL, .gap = 14, .fade_edges = true) {
             for (int k = 0; k < 8; k++) {
                 cui_toc_anchor(ui, toc[k].anchor);
                 cui_heading(ui, toc[k].title, toc[k].level ? 4 : 3);
