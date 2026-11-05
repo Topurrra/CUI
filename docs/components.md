@@ -497,7 +497,7 @@ The content animates its height on a smooth spring and the chevron rotates.
 cui_series s[] = { { "Revenue", revenue, 12 }, { "Costs", costs, 12 } };
 cui_line_chart(ui, "revenue", s, 2, .labels = months, .label_count = 12, .area = true, .smooth = true, .format = "$%.0fk");
 cui_bar_chart(ui, "visits", s, 2, .labels = months, .label_count = 6);
-cui_bar_chart(ui, "plans", s, 3, .labels = weeks, .label_count = 8, .stacked = true);
+cui_bar_chart(ui, "runs", runs, 3, .labels = weeks, .label_count = 8, .stacked = true);   /* passed, retried, failed */
 cui_donut_chart(ui, "share", values, labels, 4, .format = "%.0f%%");
 cui_sparkline(ui, values, 12, CUI_PX(120), 32, CUI_COLOR_SERIES(0));
 ```

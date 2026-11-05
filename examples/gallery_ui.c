@@ -680,12 +680,12 @@ static void page_charts(cui_ctx *ui, gallery *g) {
     section(ui, "Stacked bars and gauges", NULL);
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
         cui_card(ui) {
-            static const float x[8] = { 12, 14, 18, 16, 20, 24, 22, 27 };
-            static const float y[8] = { 6, 8, 7, 9, 11, 10, 13, 12 };
-            static const float z[8] = { 3, 4, 5, 4, 6, 7, 6, 8 };
-            cui_series s[3] = { { "Free", x, 8, { 0 } }, { "Pro", y, 8, { 0 } }, { "Team", z, 8, { 0 } } };
+            static const float x[8] = { 112, 124, 131, 128, 140, 152, 149, 161 };   /* test runs per week */
+            static const float y[8] = { 9, 11, 8, 12, 10, 9, 13, 8 };
+            static const float z[8] = { 4, 6, 3, 5, 7, 4, 6, 3 };
+            cui_series s[3] = { { "Passed", x, 8, { 0 } }, { "Retried", y, 8, { 0 } }, { "Failed", z, 8, { 0 } } };
             static const char *weeks[8] = { "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8" };
-            cui_bar_chart(ui, "plans", s, 3, .labels = weeks, .label_count = 8, .stacked = true, .height = 200);
+            cui_bar_chart(ui, "runs", s, 3, .labels = weeks, .label_count = 8, .stacked = true, .height = 200);
         }
         cui_card(ui, .dir = CUI_ROW, .gap = 24, .align = CUI_ALIGN_CENTER) {
             cui_gauge(ui, "CPU", 0.42f, 130);
