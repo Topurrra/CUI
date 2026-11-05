@@ -64,7 +64,7 @@ cui_icon(ui, CUI_ICON_ZAP, 16, CUI_COLOR_ACCENT);
 
 `cui_text` options: `font` (`CUI_FONT_BODY`, `MEDIUM`, `DISPLAY`, `MONO`), `size`, `color`, `align`, `nowrap` (one line with an ellipsis), `tabular` (aligned digits), `width`, `line_height`.
 
-Wrapped text breaks like a careful typesetter: when a paragraph would end on a single word under a full line, the lines are rebalanced so at least two words share the last line. The number of lines never changes, so layout does not move.
+Wrapped text breaks like a careful typesetter: when a paragraph would end on a single word under a full line, the lines are rebalanced so at least two words share the last line. The number of lines never changes, so layout does not move. A `nowrap` line that is cut short with an ellipsis shows its whole text in a tooltip when the pointer rests on it; the text stays non-interactive, so the row or card around it keeps its clicks.
 
 Hierarchy comes from size and color, not weight: CUI uses regular and medium only.
 

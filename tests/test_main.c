@@ -1379,6 +1379,50 @@ static void test_pretty_wrap(void) {
     cui_destroy(ui);
 }
 
+/* truncated labels -------------------------------------------------------- */
+
+typedef struct { float w; int clicks; } trunc_ctx;
+static void build_trunc(cui_ctx *ui, void *u) {
+    trunc_ctx *t = u;
+    cui_column(ui, .pad = 20) {
+        if (cui_card_begin(ui, &(cui_card_opts){ .id = "row", .pad = 8, .hoverable = true, .width = CUI_PX(t->w) })) t->clicks++;
+        cui_text(ui, "A rather long file name that will not fit.pdf", .nowrap = true, .width = CUI_FILL);
+        cui_card_end(ui);
+    }
+}
+
+static void test_truncated_tooltip(void) {
+    printf("text: a truncated label shows its whole text on hover, and its row still clicks\n");
+    cui_ctx *ui = new_ctx();
+    trunc_ctx t = { 600, 0 };
+    cui_input_mouse_move(ui, 60, 36);
+    run(ui, build_trunc, &t, 70);
+    int wide = cui_get_draw_data(ui)->vertex_count;
+    t.w = 140;
+    run(ui, build_trunc, &t, 3);
+    int before = cui_get_draw_data(ui)->vertex_count;
+    run(ui, build_trunc, &t, 70);
+    int after = cui_get_draw_data(ui)->vertex_count;
+    CHECK(after > before);      /* the tooltip appeared */
+    (void)wide;
+    /* the row under the label keeps its click */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_trunc, &t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_trunc, &t, 1);
+    CHECK(t.clicks == 1);
+    /* a label that fits gets no tooltip */
+    t.w = 600;
+    cui_input_mouse_move(ui, 400, 400);
+    run(ui, build_trunc, &t, 30);
+    cui_input_mouse_move(ui, 60, 36);
+    run(ui, build_trunc, &t, 3);
+    int fit0 = cui_get_draw_data(ui)->vertex_count;
+    run(ui, build_trunc, &t, 70);
+    CHECK(cui_get_draw_data(ui)->vertex_count == fit0);
+    cui_destroy(ui);
+}
+
 /* scroll edge fades ------------------------------------------------------ */
 
 typedef struct { bool fade; int rows; } fade_ctx;
@@ -2103,6 +2147,7 @@ int main(void) {
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();
+    test_truncated_tooltip();
     test_stress();
     test_atlas_pressure();
     cui_sw_destroy(g_sw);

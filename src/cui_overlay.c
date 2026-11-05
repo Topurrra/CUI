@@ -442,7 +442,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 /* Tooltip                                                                  */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { char text[256]; cui_id anchor; cui_spring t; double last_shown; bool visible; } cui__tooltip_state;
+typedef struct { char text[256]; cui_id anchor; cui_spring t; double last_shown; bool visible, passive; } cui__tooltip_state;
 static cui__tooltip_state *cui__tip(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
 void cui_tooltip(cui_ctx *ui, const char *text) {
@@ -461,6 +461,7 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
             snprintf(tt->text, sizeof tt->text, "%s", text);
             tt->anchor = anchor;
             tt->visible = true;
+            tt->passive = false;
         } else {
             cui__wakeup_after(ui, (float)(delay - (ui->time - ui->hover_start)) + 0.01f);
         }
@@ -469,12 +470,32 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
     }
 }
 
+/* Like cui_tooltip, for a rect that is not interactive (a truncated label). A
+ * widget's own tooltip wins if both ask in the same frame. */
+void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
+    cui__tooltip_state *tt = cui__tip(ui);
+    if (tt->visible && !tt->passive) return;
+    if (ui->active != 0) return;
+    if (ui->tooltip_id != anchor) { ui->tooltip_id = anchor; ui->hover_start = ui->time; }
+    bool warm = ui->time - tt->last_shown < 0.4;
+    float delay = warm ? 0.0f : 0.7f;
+    if (ui->time - ui->hover_start >= delay) {
+        snprintf(tt->text, sizeof tt->text, "%s", text);
+        tt->anchor = anchor;
+        tt->visible = true;
+        tt->passive = true;
+    } else {
+        cui__wakeup_after(ui, (float)(delay - (ui->time - ui->hover_start)) + 0.01f);
+    }
+}
+
 static void cui__tooltip_render(cui_ctx *ui) {
     cui__tooltip_state *tt = cui__tip(ui);
-    bool show = tt->visible && ui->hot == tt->anchor;
+    bool show = tt->visible && (tt->passive || ui->hot == tt->anchor);
     cui__spring(ui, &tt->t, show ? 1.0f : 0.0f, show ? 0.2f : 0.12f, 0.0f);
     if (show) tt->last_shown = ui->time;
     tt->visible = false;
+    if (!show) tt->passive = false;
     if (tt->t.x <= 0.01f || !tt->anchor) return;
     float t = cui__clampf(tt->t.x, 0, 1);
     int root = cui__float_begin(ui, 0x7001718u, 0x7FFFFFF0, tt->anchor, CUI_PLACE_TOP, 6);

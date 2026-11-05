@@ -514,6 +514,7 @@ cui_color cui__tone_color(cui_ctx *ui, cui_tone tone);
 /* ---- widgets internal ---- */
 void cui__widgets_begin_frame(cui_ctx *ui);
 void cui__widgets_end_frame(cui_ctx *ui);   /* toasts, tooltips */
+void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text);   /* hover by rect, for things that are not interactive */
 void cui__overlay_end_frame(cui_ctx *ui);
 float cui__control_height(cui_ctx *ui, cui_control_size s);
 cui_popup *cui__popup_get(cui_ctx *ui, cui_id id, bool create);
