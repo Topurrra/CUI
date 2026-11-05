@@ -1833,6 +1833,126 @@ static void test_motion(void) {
     cui_destroy(ui);
 }
 
+typedef struct {
+    bool thinking, body; char draft[128]; int flags; bool busy; int removed; int model; int vote; int resp;
+    int plan_hit, sugg_hit; bool orb, cite; bool picked;
+    cui_id think_id, tool_id, plan_id, comp_id, sugg_id, orb_id, cite_id, picker_id;
+    const char *files[2]; int file_count;
+} ai_ctx;
+
+static const cui_model ai_models[] = { { "Atlas", "Big", NULL, NULL }, { "Atlas Fast", "Quick", NULL, NULL } };
+
+static void build_ai(cui_ctx *ui, void *u) {
+    ai_ctx *a = u;
+    static const cui_plan_step steps[] = { { "One", NULL, CUI_TASK_DONE }, { "Two", "detail", CUI_TASK_RUNNING }, { "Three", NULL, CUI_TASK_PENDING } };
+    static const cui_prompt_suggestion sugg[] = { { CUI_ICON_CODE, "Explain", "code" }, { CUI_ICON_BUG, "Debug", "error" } };
+    static const cui_source src = { "Title", "https://www.example.com/a", "Snippet" };
+    a->body = false;
+    cui_column(ui, .pad = 20, .gap = 10, .width = CUI_PX(600)) {
+        cui_reasoning(ui, "think", .thinking = a->thinking, .seconds = 3) { a->body = true; cui_text(ui, "thoughts"); }
+        a->think_id = cui_make_id(ui, "think");
+        cui_tool_call(ui, "tool", "web_search", .status = CUI_TASK_DONE, .input = "{\"q\": 1}", .output = "{\"r\": 2}");
+        a->tool_id = cui_last_id(ui);
+        int ph = cui_agent_plan(ui, "plan", steps, 3);
+        if (ph >= 0) a->plan_hit = ph;
+        a->plan_id = cui_last_id(ui);
+        cui_agent_status(ui, "Working", .status = CUI_TASK_RUNNING, .seconds = 75);
+        if (cui_citation(ui, 1, &src)) a->cite = true;
+        a->cite_id = cui_last_id(ui);
+        cui_context_meter(ui, "ctx", 90, 100);
+        a->resp |= cui_response_actions(ui, "resp", .copy_text = "x", .vote = &a->vote);
+        int sg = cui_prompt_suggestions(ui, "sugg", sugg, 2);
+        if (sg >= 0) a->sugg_hit = sg;
+        a->sugg_id = cui_last_id(ui);
+        if (cui_model_picker(ui, "picker", ai_models, 2, &a->model, .placement = CUI_PLACE_BOTTOM_START)) a->picked = true;
+        a->picker_id = cui_last_id(ui);
+        a->flags |= cui_chat_composer(ui, "comp", a->draft, sizeof a->draft, .busy = a->busy, .attachments = a->files, .attachment_count = a->file_count, .removed = &a->removed);
+        a->comp_id = cui_last_id(ui);
+        if (cui_voice_orb(ui, "orb", CUI_VOICE_LISTENING, 0.5f, .size = 80)) a->orb = true;
+        a->orb_id = cui_last_id(ui);
+    }
+}
+
+static void test_ai(void) {
+    printf("ai: reasoning folds, tool call opens, plan, citation, actions, suggestions, model picker, composer, orb\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 700, 1600, 1);
+    ai_ctx a;
+    memset(&a, 0, sizeof a);
+    a.thinking = true; a.plan_hit = a.sugg_hit = -1; a.removed = -1;
+    a.files[0] = "a.pdf"; a.files[1] = "b.csv"; a.file_count = 2;
+    run(ui, build_ai, &a, 3);
+    CHECK(a.body);                /* open while thinking */
+    a.thinking = false;
+    run(ui, build_ai, &a, 3);
+    CHECK(!a.body);               /* folds away when done */
+    cui_rect hr = rect_of(ui, a.think_id);
+    click_at(ui, build_ai, &a, hr.x + 10, hr.y + hr.h / 2);
+    run(ui, build_ai, &a, 2);
+    CHECK(a.body);                /* and opens on request */
+    a.thinking = true; run(ui, build_ai, &a, 2); a.thinking = false; run(ui, build_ai, &a, 2);
+    CHECK(a.body);                /* a choice the user made sticks */
+    /* tool call opens to show its payloads */
+    cui_rect tr = rect_of(ui, a.tool_id);
+    float plan_y = rect_of(ui, a.plan_id).y;
+    click_at(ui, build_ai, &a, tr.x + tr.w / 2, tr.y + tr.h / 2);
+    run(ui, build_ai, &a, 3);
+    CHECK(rect_of(ui, a.plan_id).y > plan_y + 100);   /* the payloads pushed the plan down */
+    /* plan: clicking a step reports it */
+    cui_rect pr = rect_of(ui, a.plan_id);
+    click_at(ui, build_ai, &a, pr.x + 80, pr.y + 50 + 38 + 10);
+    CHECK(a.plan_hit == 1);
+    /* citation */
+    cui_rect cr = rect_of(ui, a.cite_id);
+    click_at(ui, build_ai, &a, cr.x + cr.w / 2, cr.y + cr.h / 2);
+    CHECK(a.cite);
+    /* suggestions */
+    cui_rect sr = rect_of(ui, a.sugg_id);
+    click_at(ui, build_ai, &a, sr.x + sr.w * 0.75f, sr.y + 20);
+    CHECK(a.sugg_hit == 1);
+    /* model picker: open, choose the second */
+    cui_rect mr = rect_of(ui, a.picker_id);
+    click_at(ui, build_ai, &a, mr.x + mr.w / 2, mr.y + mr.h / 2);
+    run(ui, build_ai, &a, 2);
+    key(ui, build_ai, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_ai, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_ai, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.picked && a.model == 1);
+    /* composer: type, Shift+Enter adds a line, Enter sends */
+    cui_rect qr = rect_of(ui, a.comp_id);
+    click_at(ui, build_ai, &a, qr.x + 60, qr.y + 10 + 34 + 4 + 14);
+    type(ui, build_ai, &a, "hello");
+    CHECK(strcmp(a.draft, "hello") == 0);
+    key(ui, build_ai, &a, CUI_KEY_ENTER, CUI_MOD_SHIFT);
+    CHECK(strcmp(a.draft, "hello\n") == 0 && !(a.flags & CUI_COMPOSER_SEND));
+    type(ui, build_ai, &a, "there");
+    key(ui, build_ai, &a, CUI_KEY_ENTER, 0);
+    CHECK((a.flags & CUI_COMPOSER_SEND) && strcmp(a.draft, "hello\nthere") == 0);
+    /* empty drafts do not send */
+    a.flags = 0; a.draft[0] = 0;
+    key(ui, build_ai, &a, CUI_KEY_ENTER, 0);
+    CHECK(!(a.flags & CUI_COMPOSER_SEND));
+    /* busy: the button stops */
+    a.busy = true; a.flags = 0;
+    run(ui, build_ai, &a, 2);
+    qr = rect_of(ui, a.comp_id);
+    click_at(ui, build_ai, &a, qr.x + qr.w - 10 - 16, qr.y + qr.h - 10 - 16);
+    CHECK(a.flags & CUI_COMPOSER_STOP);
+    /* removing an attachment reports which */
+    a.flags = 0;
+    bool removed = false;
+    for (float x = qr.x + 60; x < qr.x + 200 && !removed; x += 3) {
+        click_at(ui, build_ai, &a, x, qr.y + 10 + 2 + 18);
+        if (a.flags & CUI_COMPOSER_REMOVE) removed = true;
+    }
+    CHECK(removed && a.removed == 0);
+    /* orb */
+    cui_rect orr = rect_of(ui, a.orb_id);
+    click_at(ui, build_ai, &a, orr.x + orr.w / 2, orr.y + orr.h / 2);
+    CHECK(a.orb);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -1857,6 +1977,7 @@ int main(void) {
     test_media();
     test_viz();
     test_motion();
+    test_ai();
     test_text_capacity();
     test_dialog();
     test_menu();

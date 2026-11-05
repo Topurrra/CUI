@@ -1028,6 +1028,112 @@ SCENE(player) {
     }
 }
 
+/* ---- AI ---- */
+static void body_reasoning_tools(cui_ctx *ui) {
+    cui_reasoning(ui, "think", .thinking = true, .seconds = 6) {
+        cui_text(ui, "The question is about perceived speed: how little work a frame does, and how fast input reaches the screen.", .size = 13.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+        cui_text(ui, "Look for sources on retained and immediate mode, text rendering and motion.", .size = 13.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+    }
+    cui_tool_call(ui, "search", "web_search", .icon = CUI_ICON_GLOBE, .detail = "immediate mode gui performance", .status = CUI_TASK_DONE, .seconds = 1.4f,
+                  .input = "{\"query\": \"immediate mode gui performance\", \"limit\": 5}",
+                  .output = "{\"results\": [{\"title\": \"Immediate mode GUIs\", \"url\": \"https://example.com\"}], \"took_ms\": 1380}");
+    cui_tool_call(ui, "read", "read_file", .icon = CUI_ICON_FILE_TEXT, .detail = "quarterly-report.pdf", .status = CUI_TASK_RUNNING, .seconds = 3.2f);
+    cui_tool_call(ui, "run", "run_tests", .icon = CUI_ICON_SQUARE_TERMINAL, .detail = "ctest --output-on-failure", .status = CUI_TASK_FAILED, .seconds = 12.0f);
+}
+static void scene_reasoning_tools(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "search"), -f - 1, 10); if (-f - 1 == 14) cui_input_mouse_move(ui, 900, 5); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28, .gap = 10) { body_reasoning_tools(ui); }
+}
+SCENE(agent_plan) {
+    static const cui_plan_step steps[] = {
+        { "Search for sources", "3 results", CUI_TASK_DONE },
+        { "Read the attached report", "Page 12 of 40", CUI_TASK_RUNNING },
+        { "Compare the numbers with last quarter", NULL, CUI_TASK_PENDING },
+        { "Draft the summary", NULL, CUI_TASK_PENDING },
+        { "Check the citations", "Two links timed out", CUI_TASK_FAILED },
+    };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_PX(380)) { cui_agent_plan(ui, "plan", steps, 5, .title = "Research plan"); }
+        cui_column(ui, .gap = 10) {
+            cui_agent_status(ui, "Reading quarterly-report.pdf", .status = CUI_TASK_RUNNING, .seconds = 14);
+            cui_agent_status(ui, "Searched 12 sites", .status = CUI_TASK_DONE, .seconds = 9);
+            cui_agent_status(ui, "Could not reach the API", .status = CUI_TASK_FAILED);
+        }
+    }
+}
+static const cui_source shot_sources[] = {
+    { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
+    { "Text rendering hates you", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
+    { "Springs, not curves", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
+};
+static void body_sources(cui_ctx *ui) {
+    cui_text(ui, "They do very little work per frame: the interface is rebuilt from your data, laid out once and drawn in a handful of batches.", .size = 15);
+    cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER) {
+        cui_text(ui, "Sources", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+        for (int k = 0; k < 3; k++) cui_citation(ui, k + 1, &shot_sources[k]);
+    }
+    cui_gap(ui, 120);
+    cui_source_list(ui, "sources", shot_sources, 3);
+}
+static void scene_sources(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "cite2"));
+        if (-f - 1 == 10) cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2);
+        return;
+    }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28, .gap = 12, .justify = CUI_JUSTIFY_END) { body_sources(ui); }
+}
+static const cui_model shot_models[] = {
+    { "Atlas", "Our most capable model for complex work", "New", CUI_ICON_SPARKLES },
+    { "Atlas Fast", "Quick answers for everyday tasks", NULL, CUI_ICON_ZAP },
+    { "Atlas Mini", "Lightweight and economical", NULL, CUI_ICON_BOX },
+};
+static void body_composer(cui_ctx *ui) {
+    static char draft[256] = "Summarize the report and compare it with last quarter.";
+    static const char *files[] = { "quarterly-report.pdf", "metrics.csv" };
+    static int model = 0;
+    cui_chat_composer(ui, "composer", draft, sizeof draft, .attachments = files, .attachment_count = 2, .models = shot_models, .model_count = 3, .model = &model);
+}
+static void scene_composer(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_composer(ui); }
+}
+static void body_model_picker(cui_ctx *ui) {
+    static int model = 0;
+    cui_model_picker(ui, "picker", shot_models, 3, &model, .placement = CUI_PLACE_BOTTOM_START);
+}
+static void scene_model_picker(cui_ctx *ui, int f) {
+    if (f < 0) { click_id(ui, cui_make_id(ui, "picker"), -f - 1, 10); if (-f - 1 == 14) cui_input_mouse_move(ui, 600, 5); return; }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 28) { body_model_picker(ui); }
+}
+SCENE(voice_orb) {
+    static const char *names[] = { "Idle", "Listening", "Thinking", "Speaking" };
+    cui_row(ui, .gap = 18, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL) {
+        for (int k = 0; k < 4; k++) cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 6) {
+            cui_push_id_int(ui, k);
+            cui_voice_orb(ui, "orb", (cui_voice_state)k, k == 1 ? 0.7f : k == 3 ? 0.5f : 0.2f, .size = 150);
+            cui_pop_id(ui);
+            cui_text(ui, names[k], .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+    }
+}
+SCENE(suggestions) {
+    static const cui_prompt_suggestion sugg[] = {
+        { CUI_ICON_CODE, "Explain this code", "Walk through what it does" },
+        { CUI_ICON_CHART_BAR, "Analyze a dataset", "Find trends and outliers" },
+        { CUI_ICON_PENCIL, "Draft an email", "Clear and friendly" },
+        { CUI_ICON_BUG, "Debug an error", "Paste the stack trace" },
+    };
+    static int vote = 1;
+    static const cui_viz_item parts[] = { { "System", 3200 }, { "Files", 41800 }, { "Messages", 68400 } };
+    cui_prompt_suggestions(ui, "sugg", sugg, 4);
+    cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_response_actions(ui, "actions", .copy_text = "x", .vote = &vote);
+        cui_spacer(ui);
+        cui_context_meter(ui, "ctx", 113400, 200000, .parts = parts, .part_count = 3);
+    }
+}
+
 /* A mosaic of real components in cards, for the README. */
 static void mosaic_signup(cui_ctx *ui) {
     static char email[64] = "ada@analytical.engine", pw[32] = "correct horse battery";
@@ -1266,6 +1372,9 @@ int main(int argc, char **argv) {
         { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
         { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },
         { "player", scene_player, 820, 300, true },
+        { "reasoning-tools", scene_reasoning_tools, 680, 640, true }, { "agent-plan", scene_agent_plan, 820, 340, true },
+        { "sources", scene_sources, 680, 380, true }, { "composer", scene_composer, 640, 190, true }, { "model-picker", scene_model_picker, 380, 300, true },
+        { "voice-orb", scene_voice_orb, 760, 230, true }, { "suggestions", scene_suggestions, 640, 260, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {

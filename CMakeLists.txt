@@ -49,6 +49,7 @@ set(CUI_CORE_SOURCES
     src/cui_planning.c
     src/cui_viz.c
     src/cui_motion.c
+    src/cui_ai.c
     src/cui_image.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)

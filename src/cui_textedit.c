@@ -219,7 +219,7 @@ static int cui__insert(char *buf, int *len, size_t cap, int pos, const char *s, 
 }
 
 /* Lines for a multi-line layout at the given width. */
-static int cui__edit_lines(cui_ctx *ui, cui_font f, float size, const char *buf, int len, float width, cui_text_layout_line **out) {
+int cui__edit_lines(cui_ctx *ui, cui_font f, float size, const char *buf, int len, float width, cui_text_layout_line **out) {
     if (width <= 0) width = 1;
     int n = cui__text_wrap(ui, f, size, buf, len, width, NULL, 0);
     if (n < 1) n = 1;

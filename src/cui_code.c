@@ -202,6 +202,11 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
+static void cui__paint_block_border(cui_ctx *ui, cui_node *n, void *data) {
+    (void)data;
+    cui_draw_rect_border(ui, n->rect, n->radius, cui__rgba(0, 0, 0, 0), CUI_C(ui, BORDER), 1);
+}
+
 void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o) {
     cui_code_opts d;
     memset(&d, 0, sizeof d);
@@ -235,17 +240,19 @@ void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const 
     cui_node *on = &ui->nodes[outer];
     on->w = CUI_FILL;
     on->radius = CUI_CORNERS(ui->theme.radius_control);
-    on->border = 1; on->border_color = CUI_C(ui, BORDER);
     on->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    on->flags |= CUI_NF_CLIP;
+    on->flags |= CUI_NF_CLIP | CUI_NF_PAINT_AFTER;
+    on->paint = cui__paint_block_border;   /* over the title bar, so the outline stays whole */
+    on->paint_data = NULL;
     cui__open(ui, outer);
-    if (o->title || o->lang) {
+    if ((o->title || o->lang) && !o->no_header) {
         int head = cui__node_new(ui, 0);
         cui_node *hn = &ui->nodes[head];
         hn->dir = CUI_ROW; hn->align = CUI_ALIGN_CENTER; hn->gap = 8;
         hn->w = CUI_FILL; hn->h = CUI_PX(40);
         hn->pad[1] = 6; hn->pad[3] = 14;
         hn->bg = CUI_C(ui, SURFACE);
+        hn->radius = (cui_corners){ ui->theme.radius_control, ui->theme.radius_control, 0, 0 };
         cui__open(ui, head);
         cui__icon_node(ui, o->title ? CUI_ICON_FILE_TEXT : CUI_ICON_CODE, 14, CUI_C(ui, TEXT_MUTED));
         int t = cui__text_node(ui, o->title ? o->title : o->lang, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_SECONDARY), false);
@@ -476,9 +483,10 @@ bool cui_json_view_ex(cui_ctx *ui, const char *id_str, const char *json, const c
     cui_node *on = &ui->nodes[outer];
     on->w = CUI_FILL;
     on->radius = CUI_CORNERS(ui->theme.radius_control);
-    on->border = 1; on->border_color = CUI_C(ui, BORDER);
     on->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    on->flags |= CUI_NF_CLIP;
+    on->flags |= CUI_NF_CLIP | CUI_NF_PAINT_AFTER;
+    on->paint = cui__paint_block_border;   /* over the title bar, so the outline stays whole */
+    on->paint_data = NULL;
     cui__open(ui, outer);
     cui_box sb;
     memset(&sb, 0, sizeof sb);

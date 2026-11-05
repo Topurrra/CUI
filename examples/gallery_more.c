@@ -912,6 +912,97 @@ static void page_motion(cui_ctx *ui) {
     }
 }
 
+/* ---- AI ------------------------------------------------------------------ */
+
+static void page_ai(cui_ctx *ui) {
+    static char draft[512] = "";
+    static int model = 0, vote = 0, orb_state = 1, removed = -1;
+    static bool busy = false;
+    static double started = -1;
+    static const char *files[] = { "quarterly-report.pdf", "metrics.csv" };
+    static int file_count = 2;
+    static const cui_model models[] = {
+        { "Atlas", "Our most capable model for complex work", "New", CUI_ICON_SPARKLES },
+        { "Atlas Fast", "Quick answers for everyday tasks", NULL, CUI_ICON_ZAP },
+        { "Atlas Mini", "Lightweight and economical", NULL, CUI_ICON_BOX },
+    };
+    static const cui_source sources[] = {
+        { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
+        { "Text rendering hates you", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
+        { "Springs, not curves", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
+    };
+    double now = cui_time(ui);
+    if (busy && started < 0) started = now;
+    if (!busy) started = -1;
+    float elapsed = busy ? (float)(now - started) : 0;
+    if (busy && elapsed > 9) busy = false;
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_column(ui, .width = CUI_GROW(1.6f), .gap = 14) {
+            section(ui, "Conversation", "Reasoning, tool calls, an answer with sources, and the composer.");
+            cui_chat_message(ui, "Why do immediate mode toolkits feel so fast? Cite a few sources.", .mine = true);
+            cui_reasoning(ui, "think", .thinking = busy, .seconds = busy ? elapsed : 8) {
+                cui_text(ui, "The question is about perceived speed. Two parts: how little work a frame does, and how quickly input shows up on screen.", .size = 13.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_text(ui, "Look for sources on retained versus immediate mode, text rendering cost and motion.", .size = 13.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+            }
+            cui_tool_call(ui, "search", "web_search", .icon = CUI_ICON_GLOBE, .detail = "immediate mode gui performance", .status = CUI_TASK_DONE, .seconds = 1.4f,
+                          .input = "{\"query\": \"immediate mode gui performance\", \"limit\": 5}",
+                          .output = "{\"results\": [{\"title\": \"Immediate mode GUIs\", \"url\": \"https://example.com\"}], \"took_ms\": 1380}");
+            cui_tool_call(ui, "read", "read_file", .icon = CUI_ICON_FILE_TEXT, .detail = "quarterly-report.pdf", .status = busy ? CUI_TASK_RUNNING : CUI_TASK_DONE, .seconds = busy ? elapsed : 2.1f);
+            if (busy) cui_agent_status(ui, "Reading quarterly-report.pdf", .status = CUI_TASK_RUNNING, .seconds = elapsed);
+            cui_typewriter(ui, "answer", "They do very little work per frame: the interface is rebuilt from your data, laid out once and drawn in a handful of batches, so there is no tree of objects to keep in sync. Text is the expensive part, which is why glyphs are cached in an atlas, and motion feels quick when it is driven by springs instead of fixed curves.", .size = 15);
+            cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER) {
+                cui_text(ui, "Sources", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+                for (int k = 0; k < 3; k++) cui_citation(ui, k + 1, &sources[k]);
+            }
+            cui_source_list(ui, "sources", sources, 3);
+            cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                int ra = cui_response_actions(ui, "actions", .copy_text = "They do very little work per frame.", .vote = &vote);
+                if (ra & CUI_RESPONSE_REGENERATE) busy = true;
+                cui_spacer(ui);
+                static const cui_viz_item parts[] = { { "System", 3200 }, { "Files", 41800 }, { "Messages", 68400 } };
+                cui_context_meter(ui, "ctx", 113400, 200000, .parts = parts, .part_count = 3);
+            }
+            int ev = cui_chat_composer(ui, "composer", draft, sizeof draft, .placeholder = "Ask a follow up", .busy = busy,
+                                       .attachments = files, .attachment_count = file_count, .removed = &removed,
+                                       .models = models, .model_count = 3, .model = &model);
+            if (ev & CUI_COMPOSER_SEND) { draft[0] = 0; busy = true; }
+            if (ev & CUI_COMPOSER_STOP) busy = false;
+            if ((ev & CUI_COMPOSER_REMOVE) && removed >= 0 && removed < file_count) {
+                for (int k = removed; k < file_count - 1; k++) files[k] = files[k + 1];
+                file_count--;
+            }
+            if (ev & CUI_COMPOSER_ATTACH) cui_toast(ui, "Attach files", .description = "Drop files on the window, too.");
+        }
+        cui_column(ui, .width = CUI_GROW(1), .gap = 14) {
+            section(ui, "Agent plan", "Steps and their status.");
+            cui_plan_step steps[] = {
+                { "Search for sources", "3 results", CUI_TASK_DONE },
+                { "Read the attached report", busy ? "Page 12 of 40" : "40 pages", busy ? CUI_TASK_RUNNING : CUI_TASK_DONE },
+                { "Compare the numbers with last quarter", NULL, busy ? CUI_TASK_PENDING : CUI_TASK_DONE },
+                { "Draft the summary", NULL, busy ? CUI_TASK_PENDING : CUI_TASK_RUNNING },
+                { "Check the citations", NULL, CUI_TASK_PENDING },
+            };
+            cui_agent_plan(ui, "plan", steps, 5, .title = "Research plan");
+            section(ui, "Voice", "Idle, listening, thinking and speaking.");
+            cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 12, .width = CUI_FILL) {
+                float lvl = 0.35f + 0.35f * sinf((float)now * 5.1f) * sinf((float)now * 1.7f);
+                if (cui_voice_orb(ui, "orb", (cui_voice_state)orb_state, lvl, .size = 170)) orb_state = orb_state == 1 ? 0 : 1;
+                static const char *states[] = { "Idle", "Listening", "Thinking", "Speaking" };
+                cui_segmented(ui, "orb-state", states, 4, &orb_state, .size = CUI_SIZE_SM);
+            }
+            section(ui, "Suggestions", "Ways to start.");
+            static const cui_prompt_suggestion sugg[] = {
+                { CUI_ICON_CODE, "Explain this code", "Walk through what it does" },
+                { CUI_ICON_CHART_BAR, "Analyze a dataset", "Find trends and outliers" },
+                { CUI_ICON_PENCIL, "Draft an email", "Clear and friendly" },
+                { CUI_ICON_BUG, "Debug an error", "Paste the stack trace" },
+            };
+            int sg = cui_prompt_suggestions(ui, "sugg", sugg, 4, .columns = 1);
+            if (sg >= 0) snprintf(draft, sizeof draft, "%s: ", sugg[sg].title);
+        }
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -929,6 +1020,7 @@ static const more_page pages[] = {
     { "Planning", CUI_ICON_LIST_CHECKS, page_planning },
     { "More charts", CUI_ICON_CHART_PIE, page_viz },
     { "Motion", CUI_ICON_SPARKLES, page_motion },
+    { "AI", CUI_ICON_MESSAGE_SQUARE, page_ai },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

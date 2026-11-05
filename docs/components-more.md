@@ -699,3 +699,92 @@ cui_tab_bar(ui, "tabs", tabs, 4, &tab);
 ```
 
 The player shows artwork (a texture, or `art_color`), a play button that morphs between play and pause, and a scrubber that thickens and shows its knob under the pointer. The time on the right counts down. The waveform resamples its peaks to fit its width; the played part takes the accent color and a ghost shows where a click would seek. The tab bar's pill glides to the selection, and arrow keys move it.
+
+## AI interfaces
+
+The pieces of an assistant: thinking, tools, plans, sources and the composer. See the *AI* page in the gallery for them working together.
+
+### Reasoning and tool calls
+
+![Reasoning and tool calls](images/components/reasoning-tools.png)
+
+```c
+cui_reasoning(ui, "think", .thinking = streaming, .seconds = elapsed) {
+    cui_text(ui, thoughts, .size = 13.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+}
+cui_tool_call(ui, "search", "web_search", .icon = CUI_ICON_GLOBE, .detail = query, .status = CUI_TASK_DONE, .seconds = 1.4f,
+              .input = request_json, .output = response_json);
+cui_tool_call(ui, "read", "read_file", .detail = "quarterly-report.pdf", .status = CUI_TASK_RUNNING);
+```
+
+While `thinking`, the reasoning header shimmers and counts up; when it ends, the block folds to "Thought for 8s". Clicking the header opens or closes it, and from then on your choice sticks. A tool call shows its status as a ring, a spinner, a check or a cross, with the time. Clicking it opens the input and output, which are highlighted as JSON when they look like JSON.
+
+### Agent plan and status
+
+![Agent plan and status](images/components/agent-plan.png)
+
+```c
+cui_plan_step steps[] = {
+    { "Search for sources", "3 results", CUI_TASK_DONE },
+    { "Read the attached report", "Page 12 of 40", CUI_TASK_RUNNING },
+    { "Draft the summary", NULL, CUI_TASK_PENDING },
+};
+int step = cui_agent_plan(ui, "plan", steps, 3, .title = "Research plan");
+cui_agent_status(ui, "Reading quarterly-report.pdf", .status = CUI_TASK_RUNNING, .seconds = elapsed);
+```
+
+The rail fills up to the step in progress, the running step shimmers, and the header counts finished steps with a progress bar. The status pill shows loader dots while running and a check or a cross when done.
+
+### Sources and citations
+
+![Sources and citations](images/components/sources.png)
+
+```c
+static const cui_source sources[] = { { "Text rendering hates you", "https://docs.example.org/text", "Shaping, hinting and..." } /* ... */ };
+for (int k = 0; k < n; k++) cui_citation(ui, k + 1, &sources[k]);   /* a chip; hover for a card */
+int open = cui_source_list(ui, "sources", sources, n);              /* cards that scroll sideways */
+```
+
+Citations show the source's domain and open a card with the title and snippet when hovered. Source cards get a colored initial (always the same for a domain), the title and the source's number.
+
+### Composer and model picker
+
+![Composer](images/components/composer.png)
+
+![Model picker](images/components/model-picker.png)
+
+```c
+static char draft[4096];
+static int model;
+int ev = cui_chat_composer(ui, "composer", draft, sizeof draft, .placeholder = "Ask anything", .busy = generating,
+                           .attachments = files, .attachment_count = n, .removed = &removed,
+                           .models = models, .model_count = 3, .model = &model);
+if (ev & CUI_COMPOSER_SEND) send(draft);
+if (ev & CUI_COMPOSER_STOP) stop();
+if (ev & CUI_COMPOSER_REMOVE) remove_file(removed);
+```
+
+The text area grows with its content up to `max_lines`, then scrolls. Enter sends and Shift+Enter starts a new line. Send stays disabled while the draft is empty, and while `busy` it becomes a stop button. The model picker can also be used alone: `cui_model_picker(ui, "model", models, n, &model)`.
+
+### Suggestions, response actions and the context meter
+
+![Suggestions, actions and context](images/components/suggestions.png)
+
+```c
+int pick = cui_prompt_suggestions(ui, "start", suggestions, 4);           /* .columns = 1 for a sidebar */
+int act = cui_response_actions(ui, "actions", .copy_text = answer, .vote = &vote);
+if (act & CUI_RESPONSE_REGENERATE) regenerate();
+cui_context_meter(ui, "ctx", used_tokens, 200000, .parts = parts, .part_count = 3);
+```
+
+The response actions copy (the icon turns into a check), regenerate, vote and share. The context meter's ring turns amber past 80% and red past 95%; hovering it shows a split of what fills the context.
+
+### Voice orb
+
+![Voice orb](images/components/voice-orb.png)
+
+```c
+if (cui_voice_orb(ui, "voice", listening ? CUI_VOICE_LISTENING : CUI_VOICE_IDLE, mic_level)) toggle_listening();
+```
+
+A living shape for voice modes. It breathes when idle, ripples with the level while listening, sends a ring of dots around while thinking and swells with the voice while speaking. It moves between states smoothly.

@@ -493,6 +493,7 @@ struct cui_ctx {
     void *card_stack;              /* card stack being built */
     void *kanban;                  /* kanban board being built */
     void *dock;                    /* dock being built */
+    void *reasoning;               /* reasoning block being built */
     cui__text_fx_fn text_fx;       /* set while a node with a text effect paints */
     void *text_fx_data;
     int text_fx_base;              /* byte offset of the line being drawn */
@@ -524,6 +525,7 @@ void cui__icon_swap(cui_ctx *ui, cui_id state_id, const char *icon, float size, 
 cui_id cui__position_id(cui_ctx *ui, uint32_t salt);
 void cui__chevron_node(cui_ctx *ui, float angle, float size, cui_color color);   /* 0 points down */   /* stable id from the parent and child index */   /* keyboard focus ring painted after the node */
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *trailing_icon_default);
+int cui__edit_lines(cui_ctx *ui, cui_font f, float size, const char *buf, int len, float width, cui_text_layout_line **out);   /* wrapped lines of an edit buffer */
 static inline float cui__fsz(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color);
 void cui__icon_node(cui_ctx *ui, const char *icon, float size, cui_color color);

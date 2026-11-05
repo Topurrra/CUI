@@ -1040,6 +1040,7 @@ typedef struct cui_code_opts {
     int highlight_from, highlight_to;   /* 1 based line range to emphasize */
     float max_height;          /* scrolls beyond this, default none */
     float size;                /* font size, default 13 */
+    bool no_header;            /* no title bar, even with a lang */
 } cui_code_opts;
 CUI_API void cui_code_block_ex(cui_ctx *ui, const char *id, const char *code, const cui_code_opts *opts);
 
@@ -1251,6 +1252,84 @@ typedef struct cui_now_playing { const char *title, *artist; cui_texture art; cu
 typedef struct cui_now_playing_opts { int _; cui_size width; bool compact; } cui_now_playing_opts;
 enum { CUI_PLAYER_TOGGLE = 1, CUI_PLAYER_PREV = 2, CUI_PLAYER_NEXT = 4, CUI_PLAYER_SEEK = 8 };
 CUI_API int cui_now_playing_ex(cui_ctx *ui, const char *id, cui_now_playing *np, const cui_now_playing_opts *opts);
+
+/* ------------------------------------------------------------------------ */
+/* AI interfaces                                                            */
+/* ------------------------------------------------------------------------ */
+
+/* Reasoning: a model's thinking. While thinking, the header shimmers and
+ * counts the seconds; afterwards it reads "Thought for 12s" and the body
+ * folds away. Click the header to open or close it. Put text inside. */
+typedef struct cui_reasoning_opts { int _; bool thinking; float seconds; const char *title; } cui_reasoning_opts;
+CUI_API bool cui_reasoning_begin(cui_ctx *ui, const char *id, const cui_reasoning_opts *opts);
+CUI_API void cui_reasoning_end(cui_ctx *ui);
+
+/* Tool call: a compact row with the tool, a detail and its status; opens to
+ * show the input and the output (shown as JSON when they parse). */
+typedef enum cui_task_status { CUI_TASK_PENDING = 0, CUI_TASK_RUNNING, CUI_TASK_DONE, CUI_TASK_FAILED, CUI_TASK_SKIPPED } cui_task_status;
+typedef struct cui_tool_call_opts { int _; cui_task_status status; const char *icon; const char *detail; const char *input; const char *output; float seconds; } cui_tool_call_opts;
+CUI_API void cui_tool_call_ex(cui_ctx *ui, const char *id, const char *name, const cui_tool_call_opts *opts);
+
+/* Agent plan: steps with their status on a connected rail, and progress. */
+typedef struct cui_plan_step { const char *title; const char *detail; cui_task_status status; } cui_plan_step;
+typedef struct cui_agent_plan_opts { int _; const char *title; } cui_agent_plan_opts;
+CUI_API int cui_agent_plan_ex(cui_ctx *ui, const char *id, const cui_plan_step *steps, int count, const cui_agent_plan_opts *opts);
+
+/* Agent status pill: what the agent is doing right now and for how long. */
+typedef struct cui_agent_status_opts { int _; cui_task_status status; float seconds; const char *icon; } cui_agent_status_opts;
+CUI_API void cui_agent_status_ex(cui_ctx *ui, const char *text, const cui_agent_status_opts *opts);
+
+/* Sources: cards for the documents an answer used, and inline citations
+ * that show a card on hover. Both return true / the index when clicked. */
+typedef struct cui_source { const char *title; const char *url; const char *snippet; } cui_source;
+CUI_API int cui_source_list(cui_ctx *ui, const char *id, const cui_source *sources, int count);
+CUI_API bool cui_citation(cui_ctx *ui, int number, const cui_source *source);
+
+/* Context meter: a small ring of how full the context is; hover for a
+ * breakdown. It turns amber past 80% and red past 95%. */
+typedef struct cui_context_opts { int _; const cui_viz_item *parts; int part_count; const char *unit; } cui_context_opts;
+CUI_API void cui_context_meter_ex(cui_ctx *ui, const char *id, float used, float limit, const cui_context_opts *opts);
+
+/* Response actions: copy, regenerate, vote and share under an answer. */
+enum { CUI_RESPONSE_COPY = 1, CUI_RESPONSE_REGENERATE = 2, CUI_RESPONSE_UP = 4, CUI_RESPONSE_DOWN = 8, CUI_RESPONSE_SHARE = 16 };
+typedef struct cui_response_actions_opts { int _; const char *copy_text; int *vote; bool no_regenerate, no_share; } cui_response_actions_opts;
+CUI_API int cui_response_actions_ex(cui_ctx *ui, const char *id, const cui_response_actions_opts *opts);
+
+/* Prompt suggestions: cards to start a conversation with. */
+typedef struct cui_prompt_suggestion { const char *icon; const char *title; const char *detail; } cui_prompt_suggestion;
+typedef struct cui_prompt_suggestions_opts { int _; int columns; } cui_prompt_suggestions_opts;
+CUI_API int cui_prompt_suggestions_ex(cui_ctx *ui, const char *id, const cui_prompt_suggestion *items, int count, const cui_prompt_suggestions_opts *opts);
+
+/* Model picker: the current model on a button; a list with details opens. */
+typedef struct cui_model { const char *name; const char *detail; const char *badge; const char *icon; } cui_model;
+typedef struct cui_model_picker_opts { int _; bool ghost; cui_placement placement; } cui_model_picker_opts;
+CUI_API bool cui_model_picker_ex(cui_ctx *ui, const char *id, const cui_model *models, int count, int *selected, const cui_model_picker_opts *opts);
+
+/* Chat composer: a growing text area with attachments, a model picker and a
+ * send button that turns into stop while busy. Enter sends, Shift+Enter adds
+ * a line. Returns CUI_COMPOSER_* flags; *removed is the attachment whose x
+ * was clicked. */
+enum { CUI_COMPOSER_SEND = 1, CUI_COMPOSER_STOP = 2, CUI_COMPOSER_ATTACH = 4, CUI_COMPOSER_REMOVE = 8, CUI_COMPOSER_MODEL = 16 };
+typedef struct cui_composer_opts {
+    int _;
+    const char *placeholder;
+    bool busy;
+    const char *const *attachments;
+    int attachment_count;
+    int *removed;
+    const cui_model *models;
+    int model_count;
+    int *model;
+    int max_lines;             /* default 8 */
+    cui_size width;
+} cui_composer_opts;
+CUI_API int cui_chat_composer_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_composer_opts *opts);
+
+/* Voice orb: a living shape for voice modes. level is the input or output
+ * loudness (0..1). Returns true when clicked. */
+typedef enum cui_voice_state { CUI_VOICE_IDLE = 0, CUI_VOICE_LISTENING, CUI_VOICE_THINKING, CUI_VOICE_SPEAKING } cui_voice_state;
+typedef struct cui_voice_orb_opts { int _; float size; cui_color color; } cui_voice_orb_opts;
+CUI_API bool cui_voice_orb_ex(cui_ctx *ui, const char *id, cui_voice_state state, float level, const cui_voice_orb_opts *opts);
 
 /* ------------------------------------------------------------------------ */
 /* Planning                                                                 */
@@ -1622,6 +1701,16 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_kanban_column_begin(ui, title, count, ...) cui_kanban_column_begin_ex((ui), (title), (count), CUI__OPTS(cui_kanban_column_opts, __VA_ARGS__))
 #define cui_week_calendar(ui, id, week, events, count, ...) cui_week_calendar_ex((ui), (id), (week), (events), (count), CUI__OPTS(cui_week_opts, __VA_ARGS__))
 #define cui_gantt(ui, id, tasks, count, origin, days, ...) cui_gantt_ex((ui), (id), (tasks), (count), (origin), (days), CUI__OPTS(cui_gantt_opts, __VA_ARGS__))
+#define cui_reasoning(ui, id, ...)          CUI__SCOPE_IF(cui_reasoning_begin((ui), (id), CUI__OPTS(cui_reasoning_opts, __VA_ARGS__)), cui_reasoning_end(ui))
+#define cui_tool_call(ui, id, name, ...)    cui_tool_call_ex((ui), (id), (name), CUI__OPTS(cui_tool_call_opts, __VA_ARGS__))
+#define cui_agent_plan(ui, id, steps, n, ...) cui_agent_plan_ex((ui), (id), (steps), (n), CUI__OPTS(cui_agent_plan_opts, __VA_ARGS__))
+#define cui_agent_status(ui, text, ...)     cui_agent_status_ex((ui), (text), CUI__OPTS(cui_agent_status_opts, __VA_ARGS__))
+#define cui_context_meter(ui, id, used, limit, ...) cui_context_meter_ex((ui), (id), (used), (limit), CUI__OPTS(cui_context_opts, __VA_ARGS__))
+#define cui_response_actions(ui, id, ...)   cui_response_actions_ex((ui), (id), CUI__OPTS(cui_response_actions_opts, __VA_ARGS__))
+#define cui_prompt_suggestions(ui, id, items, n, ...) cui_prompt_suggestions_ex((ui), (id), (items), (n), CUI__OPTS(cui_prompt_suggestions_opts, __VA_ARGS__))
+#define cui_model_picker(ui, id, models, n, sel, ...) cui_model_picker_ex((ui), (id), (models), (n), (sel), CUI__OPTS(cui_model_picker_opts, __VA_ARGS__))
+#define cui_chat_composer(ui, id, buf, cap, ...) cui_chat_composer_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_composer_opts, __VA_ARGS__))
+#define cui_voice_orb(ui, id, state, level, ...) cui_voice_orb_ex((ui), (id), (state), (level), CUI__OPTS(cui_voice_orb_opts, __VA_ARGS__))
 #define cui_shimmer_text(ui, text, ...)    cui_shimmer_text_ex((ui), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_typewriter(ui, id, text, ...)   cui_typewriter_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_text_reveal(ui, id, text, ...)  cui_text_reveal_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))

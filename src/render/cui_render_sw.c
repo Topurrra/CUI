@@ -217,6 +217,15 @@ static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const c
     int y0 = CUI_MAX(cy0, (int)floorf(miny)), y1 = CUI_MIN(cy1, (int)ceilf(maxy));
     if (x0 >= x1 || y0 >= y1) return;
     float inv = 1.0f / area;
+    /* top-left fill rule: a pixel on an edge shared by two triangles is
+     * drawn by exactly one of them, so translucent meshes have no seams */
+    float sgn = area > 0 ? 1.0f : -1.0f;
+    const cui_vertex *ev[3][2] = { { b, c }, { c, a }, { a, b } };
+    bool tl[3];
+    for (int e = 0; e < 3; e++) {
+        float dx = (ev[e][1]->x - ev[e][0]->x) * sgn, dy = (ev[e][1]->y - ev[e][0]->y) * sgn;
+        tl[e] = dy < 0 || (dy == 0 && dx > 0);
+    }
     int mode = (int)(a->mode + 0.5f);
     bool bgra = job->fmt == CUI_SW_BGRA;
     /* flat attributes come from the first vertex */
@@ -241,11 +250,12 @@ static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const c
         int rx0 = CUI_MAX(x0, (int)floorf(sx0) - 1), rx1 = CUI_MIN(x1, (int)ceilf(sx1) + 1);
         for (int x = rx0; x < rx1; x++) {
             float px = (float)x + 0.5f;
-            float w0 = ((b->x - px) * (c->y - py) - (b->y - py) * (c->x - px)) * inv;
-            float w1 = ((c->x - px) * (a->y - py) - (c->y - py) * (a->x - px)) * inv;
-            float w2 = 1.0f - w0 - w1;
-            /* top-left style fill rule with a tiny epsilon to avoid seams */
-            if (w0 < -1e-5f || w1 < -1e-5f || w2 < -1e-5f) continue;
+            float e0 = (b->x - px) * (c->y - py) - (b->y - py) * (c->x - px);
+            float e1 = (c->x - px) * (a->y - py) - (c->y - py) * (a->x - px);
+            float e2 = (a->x - px) * (b->y - py) - (a->y - py) * (b->x - px);
+            float w0 = e0 * inv, w1 = e1 * inv, w2 = e2 * inv;
+            if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+            if ((w0 == 0 && !tl[0]) || (w1 == 0 && !tl[1]) || (w2 == 0 && !tl[2])) continue;
             float cr, cg, cb, ca;
             if (flat_color) {
                 cr = a->color.r / 255.0f; cg = a->color.g / 255.0f; cb = a->color.b / 255.0f; ca = a->color.a / 255.0f;
