@@ -252,7 +252,7 @@ static void frame(cui_ctx *ui, void *user) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND) {
         topbar(ui, s);
         cui_separator(ui);
-        cui_scroll(ui, .id = "main", .pad = 32, .gap = 20) {
+        cui_scroll(ui, .id = "main", .pad = 32, .gap = 20, .fade_edges = true) {
             cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_END) {
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
                     cui_text(ui, "Good evening, Mara", .font = CUI_FONT_DISPLAY, .size = 28);

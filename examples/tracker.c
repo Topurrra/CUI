@@ -233,7 +233,7 @@ static void issue_list(cui_ctx *ui, app_state *s) {
             cui_avatar_group(ui, people, 5, 4, 24);
         }
         cui_separator(ui);
-        cui_scroll(ui, .id = "issues", .pad = 12, .gap = 2) {
+        cui_scroll(ui, .id = "issues", .pad = 12, .gap = 2, .fade_edges = true) {
             static const int order[] = { ST_PROGRESS, ST_REVIEW, ST_TODO, ST_DONE };
             for (int g = 0; g < 4; g++) {
                 int st = order[g], count = 0;
@@ -277,7 +277,7 @@ static void detail(cui_ctx *ui, app_state *s) {
             }
         }
         cui_separator(ui);
-        cui_scroll(ui, .id = "detail", .pad = 20, .gap = 18) {
+        cui_scroll(ui, .id = "detail", .pad = 20, .gap = 18, .fade_edges = true) {
             cui_text(ui, it->title, .font = CUI_FONT_DISPLAY, .size = 20, .line_height = 1.3f);
             cui_text(ui, "Typing quickly into a focused field sometimes loses the final keystroke when the frame "
                          "that receives it also changes focus. Repro: type and press Tab in the same frame.",

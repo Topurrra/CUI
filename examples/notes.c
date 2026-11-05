@@ -67,7 +67,7 @@ static void list_pane(cui_ctx *ui, notes_app *a) {
         cui_search(ui, "q", a->query, sizeof a->query, .placeholder = "Search notes", .size = CUI_SIZE_SM);
         const char *filters[] = { "All", "Personal", "Work", "Ideas" };
         cui_segmented(ui, "filter", filters, 4, &a->filter, .size = CUI_SIZE_SM, .full_width = true);
-        cui_scroll(ui, .id = "list", .gap = 2) {
+        cui_scroll(ui, .id = "list", .gap = 2, .fade_edges = true) {
             int shown = 0;
             for (int pass = 0; pass < 2; pass++) {
                 for (int i = 0; i < a->count; i++) {

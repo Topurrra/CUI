@@ -163,7 +163,7 @@ static void frame(cui_ctx *ui, void *user) {
         cui_column(ui, .width = CUI_FILL) {
             topbar(ui, s);
             cui_separator(ui);
-            cui_scroll(ui, .id = "content", .pad = 32, .gap = 24) {
+            cui_scroll(ui, .id = "content", .pad = 32, .gap = 24, .fade_edges = true) {
                 content(ui, s);
             }
         }

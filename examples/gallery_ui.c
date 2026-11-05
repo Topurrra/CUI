@@ -757,7 +757,7 @@ void gallery_frame(cui_ctx *ui, gallery *g) {
     cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_STRETCH, .bg = CUI_COLOR_BACKGROUND) {
         sidebar(ui, g);
         cui_separator(ui);
-        cui_scroll(ui, .id = "main", .width = CUI_FILL) {
+        cui_scroll(ui, .id = "main", .width = CUI_FILL, .fade_edges = true) {
             cui_row(ui, .justify = CUI_JUSTIFY_CENTER, .align = CUI_ALIGN_START) {
                 cui_column(ui, .width = CUI_FILL, .max_width = 920, .pad_x = 40, .pad_top = 36, .pad_bottom = 64, .gap = 20) {
                     if (g->page != PAGE_OVERVIEW) {

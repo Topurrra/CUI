@@ -148,7 +148,7 @@ static void frame(cui_ctx *ui, void *user) {
     static const char *sections[] = { "Profile", "Notifications", "Appearance", "Account" };
     static const char *icons[] = { CUI_ICON_USER, CUI_ICON_BELL, CUI_ICON_PALETTE, CUI_ICON_SHIELD };
     static const char *descs[] = { "How others see you.", "Choose what you hear about.", "Make it yours.", "Security and data." };
-    cui_scroll(ui, .id = "page", .width = CUI_FILL) {
+    cui_scroll(ui, .id = "page", .width = CUI_FILL, .fade_edges = true) {
         cui_row(ui, .justify = CUI_JUSTIFY_CENTER, .align = CUI_ALIGN_START) {
             cui_column(ui, .width = CUI_FILL, .max_width = 1040, .pad_x = 40, .pad_top = 40, .pad_bottom = 80, .gap = 28) {
                 cui_column(ui, .gap = 6) {

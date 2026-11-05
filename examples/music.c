@@ -301,7 +301,7 @@ static void frame(cui_ctx *ui, void *user) {
                     cui_icon_button(ui, CUI_ICON_BELL, .tooltip = "What's new");
                     cui_avatar(ui, "Mara Quinn", .size = 30);
                 }
-                cui_scroll(ui, .id = "main", .pad = 32, .gap = 28) {
+                cui_scroll(ui, .id = "main", .pad = 32, .gap = 28, .fade_edges = true) {
                     hero(ui, s);
                     track_list(ui, s);
                     made_for_you(ui);

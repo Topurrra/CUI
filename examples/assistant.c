@@ -119,7 +119,7 @@ static void conversation(cui_ctx *ui, app_state *s) {
             cui_button(ui, "Share", .icon = CUI_ICON_SHARE_2, .variant = CUI_BUTTON_OUTLINE, .size = CUI_SIZE_SM);
         }
         cui_separator(ui);
-        cui_scroll(ui, .id = "chat", .width = CUI_FILL, .height = CUI_FILL) {
+        cui_scroll(ui, .id = "chat", .width = CUI_FILL, .height = CUI_FILL, .fade_edges = true) {
             cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .pad_x = 24, .pad_y = 24) {
                 cui_column(ui, .width = CUI_FILL, .max_width = 760, .gap = 14) {
                     cui_chat_message(ui, "Why do immediate mode toolkits feel so fast? Cite a few sources.", .mine = true);

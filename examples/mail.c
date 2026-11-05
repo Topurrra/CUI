@@ -96,7 +96,7 @@ static void message_list(cui_ctx *ui, mail_app *a) {
             cui_heading(ui, names[a->folder], 4);
         }
         cui_search(ui, "search", a->query, sizeof a->query, .placeholder = "Search mail", .size = CUI_SIZE_SM);
-        cui_scroll(ui, .id = "list", .gap = 2) {
+        cui_scroll(ui, .id = "list", .gap = 2, .fade_edges = true) {
             int shown = 0;
             for (int i = 0; i < MESSAGE_COUNT; i++) {
                 message *m = &messages[i];
@@ -150,7 +150,7 @@ static void reading_pane(cui_ctx *ui, mail_app *a) {
         }
         cui_separator(ui);
         if (a->selected < 0) return;
-        cui_scroll(ui, .id = "reader", .pad = 28, .gap = 18) {
+        cui_scroll(ui, .id = "reader", .pad = 28, .gap = 18, .fade_edges = true) {
             cui_heading(ui, m->subject, 3);
             cui_row(ui, .gap = 12) {
                 cui_avatar(ui, m->from, .size = 36);
