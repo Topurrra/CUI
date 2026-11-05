@@ -334,12 +334,12 @@ static void scene_icons(cui_ctx *ui, int f) {
 
 SCENE(radio_cards) {
     static int sel = 1;
-    static const cui_choice plans[] = {
-        { "Hobby", "Side projects. Free forever.", CUI_ICON_ROCKET, NULL },
-        { "Pro", "For people who ship weekly.", CUI_ICON_ZAP, "Popular" },
-        { "Team", "Roles and audit logs.", CUI_ICON_USERS, NULL },
+    static const cui_choice places[] = {
+        { "This computer", "Nothing leaves the machine.", CUI_ICON_MONITOR, NULL },
+        { "Team server", "Synced every few minutes.", CUI_ICON_SERVER, "Default" },
+        { "Both", "Local, plus a nightly upload.", CUI_ICON_LAYERS, NULL },
     };
-    cui_box(ui, .width = CUI_PX(720)) { cui_radio_cards(ui, "plans", plans, 3, &sel); }
+    cui_box(ui, .width = CUI_PX(720)) { cui_radio_cards(ui, "places", places, 3, &sel); }
 }
 SCENE(tag_otp) {
     static char tags[128] = "design, c99, native";

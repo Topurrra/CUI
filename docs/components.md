@@ -120,7 +120,7 @@ cui_checkbox(ui, "Email notifications", &email, .description = "Product news, mo
 cui_switch(ui, "Wi-Fi", &wifi);
 cui_radio(ui, "Monthly", &billing, 0);
 cui_radio(ui, "Yearly", &billing, 1);
-cui_radio_group(ui, "plan", (const char *[]){ "Hobby", "Pro", "Team" }, 3, &plan);
+cui_radio_group(ui, "autosave", (const char *[]){ "Every change", "Every 5 minutes", "Only when I save" }, 3, &autosave);
 ```
 
 Each returns true when it changes the value. The whole row, label included, is clickable. A switch applies immediately; a checkbox is for choices confirmed later with a button. Options: `description`, `disabled`, `indeterminate` (checkbox). Keyboard: Space toggles.
@@ -519,12 +519,12 @@ PNG and JPEG are decoded out of the box. Configure with `-DCUI_IMAGE_ALL_FORMATS
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/radio-cards-dark.png"><img src="images/components/radio-cards.png" alt="Radio cards"></picture>
 
 ```c
-static const cui_choice plans[] = {
-    { "Hobby", "Side projects. Free forever.", CUI_ICON_ROCKET, NULL },     /* title, description, icon, badge */
-    { "Pro", "For people who ship weekly.", CUI_ICON_ZAP, "Popular" },
-    { "Team", "Roles and audit logs.", CUI_ICON_USERS, NULL },
+static const cui_choice places[] = {
+    { "This computer", "Nothing leaves the machine.", CUI_ICON_MONITOR, NULL },     /* title, description, icon, badge */
+    { "Team server", "Synced every few minutes.", CUI_ICON_SERVER, "Default" },
+    { "Both", "Local, plus a nightly upload.", CUI_ICON_LAYERS, NULL },
 };
-cui_radio_cards(ui, "plan", plans, 3, &plan, .columns = 3);
+cui_radio_cards(ui, "place", places, 3, &place, .columns = 3);
 ```
 
 Bigger targets for choices that need a sentence of explanation. Keyboard: arrows move the selection.

@@ -32,7 +32,7 @@ static void ui_frame(cui_ctx *ui) {
             cui_progress(ui, 0.62f, .label = "Storage", .show_value = true);
             cui_skeleton(ui, CUI_PX(220), 12);
         }
-        cui_alert(ui, "Your trial ends in 3 days", .description = "Upgrade to keep your projects.", .tone = CUI_TONE_WARNING, .dismissible = true);
+        cui_alert(ui, "Disk almost full", .description = "Builds stop when less than 2 GB is left.", .tone = CUI_TONE_WARNING, .dismissible = true);
     }
 }
 

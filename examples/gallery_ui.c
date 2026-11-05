@@ -315,18 +315,18 @@ static void page_selection(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Radio group", NULL);
     cui_card(ui, .gap = 12) {
-        cui_radio(ui, "Hobby", &g->plan, 0, .description = "For side projects. Free forever.");
-        cui_radio(ui, "Pro", &g->plan, 1, .description = "For professionals. $12 per month.");
-        cui_radio(ui, "Team", &g->plan, 2, .description = "For growing teams. $49 per month.");
+        cui_radio(ui, "Every change", &g->plan, 0, .description = "Save as you type. Uses the most disk.");
+        cui_radio(ui, "Every 5 minutes", &g->plan, 1, .description = "A good balance for most projects.");
+        cui_radio(ui, "Only when I save", &g->plan, 2, .description = "Nothing is written until you press Ctrl S.");
     }
     section(ui, "Radio cards", "For choices that need a sentence of explanation.");
     {
-        static const cui_choice plans[] = {
-            { "Hobby", "Side projects and experiments. Free forever.", CUI_ICON_ROCKET, NULL },
-            { "Pro", "For professionals who ship every week.", CUI_ICON_ZAP, "Popular" },
-            { "Team", "Shared workspaces, roles and audit logs.", CUI_ICON_USERS, NULL },
+        static const cui_choice places[] = {
+            { "This computer", "Saved next to the project. Nothing leaves the machine.", CUI_ICON_MONITOR, NULL },
+            { "Team server", "Synced to your company server every few minutes.", CUI_ICON_SERVER, "Default" },
+            { "Both", "A local copy, uploaded to the server every night.", CUI_ICON_LAYERS, NULL },
         };
-        cui_radio_cards(ui, "plans", plans, 3, &g->plan_card);
+        cui_radio_cards(ui, "places", places, 3, &g->plan_card);
     }
     section(ui, "Sliders", "Drag past either end: the track stretches like rubber.");
     cui_card(ui, .gap = 20) {

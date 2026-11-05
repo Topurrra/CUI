@@ -253,11 +253,11 @@ All of them are in [docs/components-more.md](docs/components-more.md), with scre
 
 | | |
 |---|---|
-| ![Overview in light](docs/images/overview-light.png) | ![Overview in dark with violet](docs/images/overview-violet-dark.png) |
+| ![Overview in light](docs/images/overview-light.png) | ![Overview in dark with the green accent](docs/images/overview-green-dark.png) |
 
 ```c
 cui_set_theme(ui, CUI_THEME_DARK);      /* animates */
-cui_set_accent(ui, CUI_ACCENT_VIOLET);  /* neutral, violet, blue, green, amber, orange, coral, rose */
+cui_set_accent(ui, CUI_ACCENT_BLUE);    /* neutral, violet, blue, green, amber, orange, coral, rose */
 ```
 
 All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`, `CUI_COLOR_ACCENT`...), so your own boxes follow the theme too. Try any app in the other theme with `CUI_THEME=dark` or `CUI_THEME=light`. See [Theming](docs/theming.md).

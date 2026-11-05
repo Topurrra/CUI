@@ -89,8 +89,8 @@ int main(int argc, char **argv) {
         fails += shoot(path, PAGE_OVERLAYS, false, 1, 1240, 800, 90, open_sheet);
         snprintf(path, sizeof path, "%s/toasts-light.png", dir);
         fails += shoot(path, PAGE_FEEDBACK, false, 0, 1240, 800, 60, toasts);
-        snprintf(path, sizeof path, "%s/overview-violet-dark.png", dir);
-        fails += shoot(path, PAGE_OVERVIEW, true, 1, 1240, 1000, 90, NULL);
+        snprintf(path, sizeof path, "%s/overview-green-dark.png", dir);
+        fails += shoot(path, PAGE_OVERVIEW, true, CUI_ACCENT_GREEN, 1240, 1000, 90, NULL);
         snprintf(path, sizeof path, "%s/selection-blue-light.png", dir);
         fails += shoot(path, PAGE_SELECTION, false, 2, 1240, 1000, 90, NULL);
     }

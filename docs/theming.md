@@ -12,13 +12,13 @@ cui_set_accent(ui, CUI_ACCENT_BLUE);        /* NEUTRAL, VIOLET, BLUE, GREEN, AMB
 Both changes animate: every color blends over about 300 ms in OKLab, so the whole interface fades from one theme to the other instead of flashing. You can also pick them up front:
 
 ```c
-cui_app_create(&(cui_app_desc){ .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_VIOLET });
+cui_app_create(&(cui_app_desc){ .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_GREEN });
 cui_app_create(&(cui_app_desc){ .follow_system_theme = true });   /* Windows and macOS */
 ```
 
-| Neutral, light | Violet, dark |
+| Neutral, light | Green, dark |
 |---|---|
-| ![](images/overview-light.png) | ![](images/overview-violet-dark.png) |
+| ![](images/overview-light.png) | ![](images/overview-green-dark.png) |
 
 The neutral accent is near black in light mode and near white in dark mode. The colored accents are tuned per mode so text and controls keep their contrast.
 
