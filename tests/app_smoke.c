@@ -10,6 +10,7 @@
 
 int main(int argc, char **argv) {
     const char *out = argc > 1 ? argv[1] : "app_smoke.png";
+    setvbuf(stdout, NULL, _IONBF, 0);
     cui_app *app = cui_app_create(&(cui_app_desc){ .title = "CUI smoke test", .width = 1000, .height = 700, .continuous = true });
     if (!app) { fprintf(stderr, "could not create app\n"); return 1; }
     printf("backend=%s renderer=%s\n", cui_app_backend(app), cui_app_is_software(app) ? "software" : "opengl");
@@ -27,6 +28,7 @@ int main(int argc, char **argv) {
         bool before = g.bluetooth;
         gallery_frame(ui, &g);
         if (g.bluetooth != before) switched = true;
+        if (frame % 20 == 0) printf("frame %d\n", frame);
         if (++frame >= 80) break;
     }
     cui_vec2 sz = cui_app_size(app);
