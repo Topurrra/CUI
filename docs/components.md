@@ -153,7 +153,7 @@ cui_rating(ui, "stars", &stars, 5);         /* click the current value again to 
 ```c
 static char email[128];
 int r = cui_input(ui, "email", email, sizeof email, .label = "Email", .icon = CUI_ICON_MAIL,
-                  .placeholder = "you@company.com", .hint = "We never share it.");
+                  .placeholder = "you@company.com", .hint = "Used to sign in and for receipts.");
 if (r & CUI_CHANGED) validate();
 if (r & CUI_SUBMITTED) submit();          /* Enter */
 

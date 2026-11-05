@@ -67,7 +67,7 @@ SCENE(slider) {
 SCENE(inputs) {
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16, .width = CUI_PX(620)) {
         cui_input(ui, "name", s_name, sizeof s_name, .label = "Name");
-        cui_input(ui, "email", s_email, sizeof s_email, .label = "Email", .icon = CUI_ICON_MAIL, .placeholder = "you@company.com", .hint = "We never share it.");
+        cui_input(ui, "email", s_email, sizeof s_email, .label = "Email", .icon = CUI_ICON_MAIL, .placeholder = "you@company.com", .hint = "Used to sign in and for receipts.");
         cui_input(ui, "pw", s_pw, sizeof s_pw, .label = "Password", .password = true, .error = "Use 8 or more characters.");
         cui_search(ui, "q", s_search, sizeof s_search, .label = "Search");
     }
@@ -867,7 +867,7 @@ SCENE(week_calendar) {
         { "Lunch with Maya", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
         { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Jonas", NULL, 2, 10.5f, 11.5f, CUI_TONE_ROSE },
         { "Focus time", "No meetings", 2, 13.5f, 16, CUI_TONE_TEAL }, { "Standup", "Zoom", 3, 9.5f, 9.75f, CUI_TONE_INFO },
-        { "Customer call", "Acme", 3, 14, 15, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 15, 16.5f, CUI_TONE_VIOLET },
+        { "Customer call", "Northlight", 3, 14, 15, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 15, 16.5f, CUI_TONE_VIOLET },
         { "Gym", NULL, 5, 10, 11.5f, CUI_TONE_SUCCESS },
     };
     cui_date wk = { 2026, 11, 2 };

@@ -705,7 +705,7 @@ static void page_planning(cui_ctx *ui) {
         { "Lunch with Maya", NULL, 1, 12.5f, 13.5f, CUI_TONE_SUCCESS }, { "Standup", "Zoom", 1, 9.5f, 9.75f, CUI_TONE_INFO },
         { "Release planning", "Room 1", 2, 10, 11.5f, CUI_TONE_WARNING }, { "1:1 Jonas", NULL, 2, 10.5f, 11, CUI_TONE_ROSE },
         { "Focus time", "No meetings", 2, 14, 17, CUI_TONE_TEAL }, { "Standup", "Zoom", 3, 9.5f, 9.75f, CUI_TONE_INFO },
-        { "Customer call", "Acme", 3, 15, 16, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 16, 17.5f, CUI_TONE_VIOLET },
+        { "Customer call", "Northlight", 3, 15, 16, CUI_TONE_DANGER }, { "Demo day", "All hands", 4, 16, 17.5f, CUI_TONE_VIOLET },
         { "Gym", NULL, 5, 10, 11.5f, CUI_TONE_SUCCESS },
     };
     cui_date today = cui_date_today();
