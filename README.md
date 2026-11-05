@@ -2,17 +2,10 @@
 
 # CUI
 
-### Modern native UI components for C
+### Native UI components for C
 
 About 150 components with spring motion and full keyboard support.<br>
-Windows, macOS and Linux from one C99 codebase. No dependencies. About 240 KB.
-
-<p>
-<img src="https://img.shields.io/badge/C99-pure-3b82f6?style=flat-square" alt="C99">
-<img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-8b5cf6?style=flat-square" alt="Platforms">
-<img src="https://img.shields.io/badge/dependencies-none-10b981?style=flat-square" alt="No dependencies">
-<img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT license">
-</p>
+Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB, MIT licensed.
 
 [Getting started](docs/getting-started.md) &nbsp;·&nbsp;
 [Components](docs/components.md) &nbsp;·&nbsp;
