@@ -444,7 +444,7 @@ void cui_badge_ex(cui_ctx *ui, const char *text, const cui_badge_opts *o) {
         n->bg = neutral ? CUI_C(ui, ACTIVE) : cui_mix(surf, tone, ui->mode == CUI_THEME_DARK ? 0.14f : 0.10f);
         n->border = 1;
         n->border_color = neutral ? CUI_C(ui, BORDER) : cui_mix(CUI_C(ui, BORDER), tone, ui->mode == CUI_THEME_DARK ? 0.22f : 0.18f);   /* every badge has the same edge */
-        fg = neutral ? CUI_C(ui, TEXT_SECONDARY) : cui_mix(CUI_C(ui, FOREGROUND), tone, ui->mode == CUI_THEME_DARK ? 0.80f : 0.88f);
+        fg = neutral ? CUI_C(ui, TEXT_SECONDARY) : cui__legible(cui_mix(CUI_C(ui, FOREGROUND), tone, ui->mode == CUI_THEME_DARK ? 0.80f : 0.88f), n->bg, 4.5f);
     }
     cui__open(ui, i);
     if (o->dot) {

@@ -550,4 +550,6 @@ void cui__paint_sheen(cui_ctx *ui, cui_node *n, void *data);   /* data: float st
 /* paint data helpers */
 #define CUI_PAINT_DATA(ui, type) ((type *)cui__frame_alloc((ui), sizeof(type)))
 
+cui_color cui__legible(cui_color fg, cui_color bg, float ratio);
+
 #endif /* CUI_INTERNAL_H */

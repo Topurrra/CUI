@@ -68,6 +68,26 @@ cui_color cui_mix(cui_color a, cui_color b, float t) {
     return cui__from_oklab(o, alpha);
 }
 
+static float cui__rel_lum(cui_color c) {
+    return 0.2126f * cui__srgb_to_linear(c.r / 255.0f) + 0.7152f * cui__srgb_to_linear(c.g / 255.0f) + 0.0722f * cui__srgb_to_linear(c.b / 255.0f);
+}
+
+/* fg, stepped in OKLab lightness away from bg until it reaches the WCAG ratio: tinted text keeps its hue and stays readable */
+cui_color cui__legible(cui_color fg, cui_color bg, float ratio) {
+    float lb = cui__rel_lum(bg);
+    bool darken = lb > 0.18f;
+    cui__lab o = cui__to_oklab(fg);
+    for (int k = 0; k < 24; k++) {
+        float lf = cui__rel_lum(fg);
+        float cr = (CUI_MAX(lf, lb) + 0.05f) / (CUI_MIN(lf, lb) + 0.05f);
+        if (cr >= ratio) break;
+        o.L = cui__clampf(o.L + (darken ? -0.025f : 0.025f), 0, 1);
+        o.a *= 0.97f; o.b *= 0.97f;
+        fg = cui__from_oklab(o, fg.a / 255.0f);
+    }
+    return fg;
+}
+
 cui_color cui_alpha(cui_color c, float m) {
     c.a = (uint8_t)cui__clampf(c.a * m + 0.5f, 0, 255);
     return c;
@@ -89,11 +109,11 @@ static const cui__accent_def cui__accents[CUI_ACCENT_COUNT] = {
     { "neutral", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     { "violet", 0x7747ff, 0x5528ce, 0x21, 0xffffff, 0xa78bff, 0xc7b7ff, 0x38, 0x15102b, 0x7747ff, 0xffffff, 0x8a66ff, 0xffffff },
     { "blue",   0x0562ef, 0x074db7, 0x1f, 0xffffff, 0x6ba3ff, 0xa4c7ff, 0x38, 0x0b1526, 0x0562ef, 0xffffff, 0x3b82f6, 0xffffff },
-    { "green",  0x0db879, 0x087c54, 0x21, 0x102016, 0x53dca6, 0x93efd0, 0x33, 0x102016, 0x10a870, 0xffffff, 0x1fae78, 0xffffff },
+    { "green",  0x00864b, 0x006c36, 0x21, 0xffffff, 0x53dca6, 0x93efd0, 0x33, 0x102016, 0x00864b, 0xffffff, 0x1fae78, 0xffffff },
     { "amber",  0xf3ad20, 0x9c6300, 0x29, 0x20190d, 0xffcb62, 0xffe0a1, 0x33, 0x20190d, 0xeda11a, 0x2a1c03, 0xe8a52a, 0x241803 },
-    { "orange", 0xf48120, 0xaa4700, 0x21, 0x17130f, 0xffad5e, 0xffd0a0, 0x33, 0x17130f, 0xf07818, 0xffffff, 0xef873a, 0xffffff },
-    { "coral",  0xf15f55, 0xb92c27, 0x24, 0x21110f, 0xff9386, 0xffc1ba, 0x33, 0x21110f, 0xec564b, 0xffffff, 0xec6a60, 0xffffff },
-    { "rose",   0xed4e9d, 0xae2570, 0x24, 0x250f1b, 0xff8bc5, 0xffc0df, 0x33, 0x250f1b, 0xe64494, 0xffffff, 0xe457a0, 0xffffff },
+    { "orange", 0xc25300, 0xa43d00, 0x21, 0xffffff, 0xffad5e, 0xffd0a0, 0x33, 0x17130f, 0xc25300, 0xffffff, 0xef873a, 0xffffff },
+    { "coral",  0xd1403a, 0xb12926, 0x24, 0xffffff, 0xff9386, 0xffc1ba, 0x33, 0x21110f, 0xd1403a, 0xffffff, 0xec6a60, 0xffffff },
+    { "rose",   0xd23286, 0xb2186e, 0x24, 0xffffff, 0xff8bc5, 0xffc0df, 0x33, 0x250f1b, 0xd23286, 0xffffff, 0xe457a0, 0xffffff },
 };
 
 const char *cui_accent_name(cui_accent a) { return (a >= 0 && a < CUI_ACCENT_COUNT) ? cui__accents[a].name : "neutral"; }

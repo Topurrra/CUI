@@ -529,6 +529,8 @@ void cui_timeline_item_ex(cui_ctx *ui, const char *title, const cui_timeline_opt
     int rail = cui__node_new(ui, 0);
     cui_node *ra = &ui->nodes[rail];
     ra->w = CUI_PX(28); ra->align = CUI_ALIGN_CENTER;
+    /* the connector stops short of both dots so each event reads as its own mark */
+    ra->gap = 4; ra->pad[2] = o->last ? 0 : 4;
     cui__open(ui, rail);
     int dot = cui__node_new(ui, 0);
     cui_node *dn = &ui->nodes[dot];
@@ -541,7 +543,7 @@ void cui_timeline_item_ex(cui_ctx *ui, const char *title, const cui_timeline_opt
     cui__close(ui);
     if (!o->last) {
         int line = cui__leaf(ui, 0, CUI_PX(1), CUI_FILL);
-        ui->nodes[line].bg = CUI_C(ui, BORDER);
+        ui->nodes[line].bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), 0.45f) : CUI_C(ui, BORDER);
         ui->nodes[line].min_h = 12;
         ui->nodes[line].self_align = CUI_ALIGN_CENTER;
     }

@@ -70,7 +70,7 @@ static cui_color cui__fx_typewriter(cui_ctx *ui, void *data, int byte, float x, 
         p->caret_drawn = true;
         float fh = cui__font_line_height(ui, p->font, p->size);
         float lh = p->size * 1.45f;
-        cui_draw_rect(ui, (cui_rect){ x + 0.5f, line_y + (lh - fh) * 0.5f + fh * 0.12f, 2, fh * 0.76f }, CUI_CORNERS(1), p->caret_c);
+        cui_draw_rect(ui, (cui_rect){ x + 2.0f, line_y + (lh - fh) * 0.5f + fh * 0.12f, 2, fh * 0.76f }, CUI_CORNERS(1), p->caret_c);
     }
     c.a = 0;
     return c;

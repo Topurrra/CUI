@@ -98,6 +98,7 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
             float a = blink > 0.35f ? 1.0f : 0.0f;
             if (p->caret_phase < 0.5) a = 1;
             float cx = x + cui__x_at(ui, p, p->buf, p->len, p->cursor);
+            if (p->cursor == 0) cx -= 1.0f;   /* stand clear of the first glyph or the placeholder */
             cui_rect cr = { roundf(cx * ui->scale) / ui->scale - 0.5f, r.y + (r.h - fh) * 0.5f, 1.5f, fh };
             cui_draw_rect(ui, cr, CUI_CORNERS(0.75f), cui_alpha(p->caret, a));
         }

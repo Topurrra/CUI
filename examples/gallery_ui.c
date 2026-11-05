@@ -105,7 +105,7 @@ static void sidebar(cui_ctx *ui, gallery *g) {
             }
             cui_row(ui, .justify = CUI_JUSTIFY_BETWEEN) {
                 for (int a = 0; a < CUI_ACCENT_COUNT; a++) {
-                    static const unsigned hex[CUI_ACCENT_COUNT] = { 0x555555, 0x7747ff, 0x0562ef, 0x0db879, 0xf3ad20, 0xf48120, 0xf15f55, 0xed4e9d };
+                    static const unsigned hex[CUI_ACCENT_COUNT] = { 0x555555, 0x7747ff, 0x0562ef, 0x00864b, 0xf3ad20, 0xc25300, 0xd1403a, 0xd23286 };
                     swatch_data d = { CUI_RGB(hex[a]), g->accent == a };
                     char id[32];
                     snprintf(id, sizeof id, "accent-%d", a);

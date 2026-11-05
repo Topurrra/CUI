@@ -514,7 +514,8 @@ static void cui__tooltip_render(cui_ctx *ui) {
     const char *sep = strstr(tt->text, "  \xc2\xb7  ");
     if (sep) {
         n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
-        n->pad[1] = 6;
+        /* the caps sit as far from the right edge as from the top and bottom */
+        n->pad[1] = 5; n->pad[3] = 8;
         int tx = cui__text_node(ui, tt->text, (int)(sep - tt->text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, false);
         ui->nodes[tx].line_height = 1.35f;
         const char *keys = sep + 6;
@@ -528,7 +529,7 @@ static void cui__tooltip_render(cui_ctx *ui) {
                 int k = cui__node_new(ui, 0);
                 cui_node *kn = &ui->nodes[k];
                 kn->pad[1] = kn->pad[3] = 5; kn->pad[0] = kn->pad[2] = 1;
-                kn->radius = CUI_CORNERS(5);
+                kn->radius = CUI_CORNERS(4);
                 kn->bg = cui_alpha(fg, 0.14f);
                 kn->min_w = 18;
                 kn->dir = CUI_ROW; kn->justify = CUI_JUSTIFY_CENTER;
@@ -889,6 +890,7 @@ static void cui__toasts_render(cui_ctx *ui) {
         cui_button_opts xo;
         memset(&xo, 0, sizeof xo);
         xo.size = CUI_SIZE_SM;
+        xo.color = CUI_COLOR_TEXT_MUTED;
         if (cui_icon_button_ex(ui, CUI_ICON_X, &xo)) t->dismissed = true;
         ui->nodes[ui->last_node].w = CUI_PX(24); ui->nodes[ui->last_node].h = CUI_PX(24);
         ui->nodes[ui->last_node].opacity = 0.35f + 0.65f * ts->hover;
@@ -1221,7 +1223,7 @@ bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
         *hp = st->h;
         ui->nodes[hn].paint = cui__paint_hue;
         ui->nodes[hn].paint_data = hp;
-        static const uint32_t presets[8] = { 0x111111, 0x7747ff, 0x0562ef, 0x0db879, 0xf3ad20, 0xf48120, 0xf15f55, 0xed4e9d };
+        static const uint32_t presets[8] = { 0x111111, 0x7747ff, 0x0562ef, 0x00864b, 0xf3ad20, 0xc25300, 0xd1403a, 0xd23286 };
         int row = cui__node_new(ui, 0);
         ui->nodes[row].dir = CUI_ROW; ui->nodes[row].justify = CUI_JUSTIFY_BETWEEN;
         cui__open(ui, row);

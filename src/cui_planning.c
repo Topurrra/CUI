@@ -97,7 +97,7 @@ void cui_kanban_begin(cui_ctx *ui, const char *id_str) {
 typedef struct { float hl; cui_color hl_c; } cui__kcol_paint;
 static void cui__paint_kanban_col(cui_ctx *ui, cui_node *n, void *data) {
     cui__kcol_paint *p = data;
-    if (p->hl > 0.01f) cui_draw_rect_border(ui, n->rect, n->radius, cui__rgba(0, 0, 0, 0), cui_alpha(p->hl_c, p->hl), 1.5f);
+    if (p->hl > 0.01f) cui_draw_rect_border(ui, n->rect, n->radius, cui__rgba(0, 0, 0, 0), cui_alpha(p->hl_c, p->hl), 1.0f);
 }
 
 bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, const cui_kanban_column_opts *o) {
@@ -129,7 +129,8 @@ bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, 
     cn->min_h = 120;
     if (st->drag_card >= 0 && st->from_col == c) cn->flags |= CUI_NF_ON_TOP;   /* the lifted card paints above other columns */
     cui__kcol_paint *cp = cui__frame_alloc(ui, sizeof *cp);
-    cp->hl = cs->hl; cp->hl_c = cui_alpha(cui__acc(ui), 0.5f);
+    bool neutral = ui->accent == CUI_ACCENT_NEUTRAL;
+    cp->hl = cs->hl; cp->hl_c = neutral ? CUI_C(ui, BORDER_STRONG) : cui_alpha(cui__acc(ui), 0.45f);
     cn->paint = cui__paint_kanban_col;
     cn->paint_data = cp;
     cn->flags |= CUI_NF_PAINT_AFTER;
@@ -281,9 +282,11 @@ void cui_kanban_column_end(cui_ctx *ui) {
             cui_rect cr = cui__prev_rect(ui, cid);
             h->fy = b->hole_y - cr.y;
             h->h = CUI_PX(st->drag_h);
-            h->bg = cui_alpha(cui__acc(ui), ui->mode == CUI_THEME_DARK ? 0.1f : 0.06f);
-            h->border = 1.5f;
-            h->border_color = cui_alpha(cui__acc(ui), 0.35f);
+            /* a flat, quiet slot: a hairline and the faintest fill, no tinted glow */
+            bool neutral = ui->accent == CUI_ACCENT_NEUTRAL;
+            h->bg = neutral ? cui_alpha(CUI_C(ui, FOREGROUND), 0.025f) : cui_alpha(cui__acc(ui), ui->mode == CUI_THEME_DARK ? 0.07f : 0.045f);
+            h->border = 1;
+            h->border_color = neutral ? CUI_C(ui, BORDER_STRONG) : cui_alpha(cui__acc(ui), 0.4f);
         }
     }
     cui__close(ui);
@@ -347,7 +350,8 @@ static void cui__paint_week_grid(cui_ctx *ui, cui_node *n, void *data) {
     float fs = cui__fs(ui, ui->theme.text_xs);
     for (int h = (int)p->h0; h <= (int)p->h1; h++) {
         float y = r.y + (h - p->h0) * p->hh;
-        cui_draw_rect(ui, (cui_rect){ r.x + p->gutter, y, r.w - p->gutter, 1 }, CUI_CORNERS(0), p->line);
+        /* the frame's own border closes the last hour, so its rounded corners stay clean */
+        if (h < (int)p->h1) cui_draw_rect(ui, (cui_rect){ r.x + p->gutter, y, r.w - p->gutter, 1 }, CUI_CORNERS(0), p->line);
         if (h < (int)p->h1) cui_draw_rect(ui, (cui_rect){ r.x + p->gutter, y + p->hh * 0.5f, r.w - p->gutter, 1 }, CUI_CORNERS(0), p->faint);
         if (h > (int)p->h0 && h < (int)p->h1) {
             const char *s = cui__frame_printf(ui, "%02d:00", h);
@@ -355,7 +359,7 @@ static void cui__paint_week_grid(cui_ctx *ui, cui_node *n, void *data) {
             cui__draw_text_line(ui, CUI_FONT_BODY, fs, r.x + p->gutter - 10 - w, y - cui__font_line_height(ui, CUI_FONT_BODY, fs) * 0.5f, p->label, s, -1, true);
         }
     }
-    for (int d = 0; d <= 7; d++) cui_draw_rect(ui, (cui_rect){ r.x + p->gutter + d * p->dw, r.y, 1, r.h }, CUI_CORNERS(0), p->line);
+    for (int d = 0; d < 7; d++) cui_draw_rect(ui, (cui_rect){ r.x + p->gutter + d * p->dw, r.y, 1, r.h }, CUI_CORNERS(0), p->line);
     if (p->today >= 0 && p->now >= p->h0 && p->now <= p->h1) {
         float y = r.y + (p->now - p->h0) * p->hh;
         float x = r.x + p->gutter + p->today * p->dw;
@@ -495,9 +499,16 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         }
         colk[k] = c;
     }
+    /* events that start together split the day into lanes; one that starts at least half an hour
+       into another cascades over it, so the earlier title stays readable */
+    bool *lanes = cui__frame_alloc(ui, sizeof(bool) * (size_t)CUI_MAX(1, count));
+    for (int k = 0; k < count; k++) { lanes[k] = false; ncol[k] = colk[k] + 1; }
     for (int k = 0; k < count; k++)
         for (int j = 0; j < count; j++)
-            if (ev[j].day == ev[k].day && ev[j].start < ev[k].end && ev[k].start < ev[j].end) ncol[k] = CUI_MAX(ncol[k], colk[j] + 1);
+            if (j != k && ev[j].day == ev[k].day && ev[j].start < ev[k].end && ev[k].start < ev[j].end) {
+                ncol[k] = CUI_MAX(ncol[k], colk[j] + 1);
+                if (fabsf(ev[j].start - ev[k].start) < 0.5f) lanes[k] = true;
+            }
     for (int k = 0; k < count; k++) {
         cui_cal_event *e = &ev[k];
         if (e->day < 0 || e->day > 6 || e->end <= h0 || e->start >= h1) continue;
@@ -522,10 +533,18 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
             st->mode = (!o->read_only && ui->my > er.y + er.h - 7) ? 2 : 1;
             st->grab = ui->my - er.y;
         }
-        float lane_w = (dw - 6) / ncol[k];
-        float x = gutter + e->day * dw + 3 + colk[k] * lane_w;
+        float lane_w = (dw - 6) / ncol[k], x;
+        bool cascade = !lanes[k] && ncol[k] > 1;
+        if (cascade) {
+            float indent = CUI_MIN(dw * 0.3f, 32.0f) * (float)colk[k];
+            x = gutter + e->day * dw + 3 + indent;
+            lane_w = dw - 6 - indent;
+        } else {
+            x = gutter + e->day * dw + 3 + colk[k] * lane_w;
+        }
         float y = (CUI_MAX(e->start, h0) - h0) * hh + 1;
         float h = (CUI_MIN(e->end, h1) - CUI_MAX(e->start, h0)) * hh - 2;
+        bool short_ev = h < 30;
         cui_color tone = cui__tone_color(ui, e->tone ? e->tone : CUI_TONE_ACCENT);
         bool active = st->drag == k + 1 && st->moved;
         int en = cui__absolute(ui, eid, x, y, lane_w - 2, CUI_MAX(18.0f, h));
@@ -535,6 +554,11 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         nd->pad[0] = 5; nd->pad[1] = 6; nd->pad[3] = 12; nd->pad[2] = 4;
         nd->gap = 1;
         nd->flags |= CUI_NF_CLIP;
+        if (short_ev) {   /* too short for two lines: title and start time on one centered line */
+            nd->pad[0] = nd->pad[2] = 0;
+            nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->gap = 6;
+        }
+        if (cascade && colk[k] > 0) { nd->border = 1.5f; nd->border_color = CUI_C(ui, SURFACE); }
         if (active) { nd->elevation = CUI_ELEVATION_FLOATING; nd->elevation_alpha = 1; nd->flags |= CUI_NF_ON_TOP; }
         cui__evbar_paint *bp = cui__frame_alloc(ui, sizeof *bp);
         bp->bar = tone;
@@ -546,11 +570,28 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         cui_color fg = cui_mix(CUI_C(ui, FOREGROUND), tone, ui->mode == CUI_THEME_DARK ? 0.2f : 0.45f);
         int t = cui__text_node(ui, e->title, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs + 0.5f), fg, false);
         ui->nodes[t].line_height = 1.3f;
-        if (h > 34 && lane_w > 78) {   /* narrow lanes keep just the title */
-            int sh = (int)e->start, sm = (int)roundf((e->start - sh) * 60), eh = (int)e->end, em = (int)roundf((e->end - eh) * 60);
-            const char *tm = cui__frame_printf(ui, "%d:%02d \xe2\x80\x93 %d:%02d%s%s", sh, sm, eh, em, e->detail ? "  \xc2\xb7  " : "", e->detail ? e->detail : "");
-            int tt = cui__text_node(ui, tm, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_xs), cui_alpha(fg, 0.75f), false);
+        int sh = (int)e->start, sm = (int)roundf((e->start - sh) * 60), eh = (int)e->end, em = (int)roundf((e->end - eh) * 60);
+        float meta_fs = cui__fs(ui, ui->theme.text_xs);
+        if (short_ev) {
+            const char *tm = cui__frame_printf(ui, "%d:%02d", sh, sm);
+            float tw = cui__text_width(ui, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs + 0.5f), e->title, -1, false)
+                     + cui__text_width(ui, CUI_FONT_BODY, meta_fs, tm, -1, true) + 6;
+            if (tw <= lane_w - 2 - 18) {   /* the time only when the title still fits whole */
+                int tt = cui__text_node(ui, tm, -1, CUI_FONT_BODY, meta_fs, cui_alpha(fg, 0.75f), false);
+                ui->nodes[tt].line_height = 1.3f;
+                ui->nodes[tt].flags |= CUI_NF_TABULAR;
+            }
+        } else if (h > 34 && lane_w > 78) {   /* narrow lanes keep just the title */
+            const char *tm = cui__frame_printf(ui, "%d:%02d \xe2\x80\x93 %d:%02d", sh, sm, eh, em);
+            if (cui__text_width(ui, CUI_FONT_BODY, meta_fs, tm, -1, true) > lane_w - 2 - 18) tm = cui__frame_printf(ui, "%d:%02d", sh, sm);
+            int tt = cui__text_node(ui, tm, -1, CUI_FONT_BODY, meta_fs, cui_alpha(fg, 0.75f), false);
             ui->nodes[tt].line_height = 1.3f;
+            ui->nodes[tt].flags |= CUI_NF_TABULAR;
+            /* the place gets its own line when there is room for it, never a dangling "·…" */
+            if (e->detail && h > 54) {
+                int dt = cui__text_node(ui, e->detail, -1, CUI_FONT_BODY, meta_fs, cui_alpha(fg, 0.75f), false);
+                ui->nodes[dt].line_height = 1.3f;
+            }
         }
         cui__close(ui);
         cui__focus_ring(ui, en, r.focus_visible ? 1.0f : 0.0f);

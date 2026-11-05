@@ -106,10 +106,11 @@ static void cui__paint_text_fade(cui_ctx *ui, cui_node *n, void *data) {
     cui__fade_paint *p = data;
     if (p->fade <= 0.01f) return;
     cui_rect r = n->rect;
-    float h = CUI_MIN(r.h, p->line_h * 1.6f);
+    /* the last line dims but stays legible, descenders included */
+    float h = CUI_MIN(r.h, p->line_h * 1.3f);
     cui_color clear = p->c;
     clear.a = 0;
-    cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y + r.h - h, r.w, h }, CUI_CORNERS(0), clear, cui_alpha(p->c, p->fade));
+    cui_draw_rect_gradient(ui, (cui_rect){ r.x, r.y + r.h - h, r.w, h }, CUI_CORNERS(0), clear, cui_alpha(p->c, p->fade * 0.82f));
 }
 
 bool cui_expandable_text_ex(cui_ctx *ui, const char *id_str, const char *text, const cui_expandable_text_opts *o) {
@@ -139,7 +140,7 @@ bool cui_expandable_text_ex(cui_ctx *ui, const char *id_str, const char *text, c
     cui_node *cn = &ui->nodes[clip];
     cn->w = CUI_FILL;
     cn->flags |= CUI_NF_CLIP | CUI_NF_PAINT_AFTER;
-    if (expandable || pr.w <= 0) cn->h = CUI_PX(CUI_MAX(lh, st->h.x));
+    if (expandable || pr.w <= 0) cn->h = CUI_PX(CUI_MAX(lh, st->h.x) + (expandable ? 2 * (1.0f - (st->open ? 1.0f : 0.0f)) : 0));
     cui__fade_paint *fp = cui__frame_alloc(ui, sizeof *fp);
     float openness = full_h > clamp_h ? cui__clampf((st->h.x - clamp_h) / (full_h - clamp_h), 0, 1) : 1;
     fp->fade = expandable ? 1.0f - openness : 0;
