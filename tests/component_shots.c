@@ -1813,7 +1813,7 @@ int main(int argc, char **argv) {
         { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },
         { "ruler-histogram", scene_rulers, 860, 224, true }, { "capture", scene_capture, 900, 300, true },
         { "hover-card", scene_hover_card, 460, 220, true }, { "confirm-popover", scene_confirm_pop, 420, 260, true },
-        { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
+        { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true, false, CUI_ACCENT_VIOLET },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 390, true }, { "code-block", scene_code_block, 720, 300, true },
