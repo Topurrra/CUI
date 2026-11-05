@@ -909,7 +909,7 @@ static void page_motion(cui_ctx *ui) {
             section(ui, "Control tiles", "Big toggles for quick settings.");
             cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
                 cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = wifi ? "Home" : "Off");
-                cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
+                cui_control_tile(ui, "Hotspot", &bt, .icon = CUI_ICON_RADIO);
                 cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = focus ? "Until 6 pm" : "Off");
                 cui_control_tile(ui, "AirShare", &airdrop, .icon = CUI_ICON_SHARE_2, .detail = airdrop ? "Everyone" : "Contacts only");
             }

@@ -677,6 +677,8 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     cui_color off_bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.08f + 0.04f * st->hover) : cui_mix(CUI_C(ui, SURFACE_MUTED), CUI_C(ui, FOREGROUND), 0.035f * st->hover);
     cui_color on_bg = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_ON) : CUI_C(ui, ACCENT));
     cui_color on_fg = cui__color_set(o->color) ? cui__rgba(255, 255, 255, 255) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_GLYPH) : CUI_C(ui, ACCENT_FOREGROUND));
+    /* a neutral tile in dark mode lights its icon, not the whole tile: a white slab glares on a dark page */
+    bool lamp = dark && ui->accent == CUI_ACCENT_NEUTRAL && !cui__color_set(o->color);
     int n = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[n];
     nd->dir = o->wide ? CUI_ROW : CUI_COLUMN;
@@ -686,11 +688,11 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     nd->w = o->width.kind ? o->width : CUI_FILL;
     nd->min_h = o->wide ? 64 : 112;
     nd->radius = CUI_CORNERS(22);
-    nd->bg = cui_mix(off_bg, on_bg, st->on);
+    nd->bg = lamp ? cui_mix(off_bg, cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.15f + 0.03f * st->hover), st->on) : cui_mix(off_bg, on_bg, st->on);
     /* off tiles in light mode keep a hairline so they do not melt into a white page */
     nd->border = 1;
     nd->border_color = cui_alpha(dark ? cui__rgba(255, 255, 255, 255) : CUI_C(ui, BORDER), dark ? 0.0f : (1.0f - st->on));
-    if (st->on > 0.01f) {
+    if (st->on > 0.01f && !lamp) {
         float *k = cui__frame_alloc(ui, sizeof *k);
         *k = 0.45f * st->on;
         nd->paint = cui__paint_sheen;
@@ -704,9 +706,11 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     cui_node *icn = &ui->nodes[ic];
     icn->w = CUI_PX(36); icn->h = CUI_PX(36); icn->radius = CUI_CORNERS(18);
     icn->dir = CUI_STACK; icn->align = CUI_ALIGN_CENTER; icn->justify = CUI_JUSTIFY_CENTER;
-    icn->bg = cui_mix(dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.14f) : CUI_C(ui, SURFACE), cui_alpha(on_fg, 0.2f), st->on);
+    cui_color icon_off = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.14f) : CUI_C(ui, SURFACE);
+    icn->bg = cui_mix(icon_off, lamp ? CUI_C(ui, CONTROL_ON) : cui_alpha(on_fg, 0.2f), st->on);
     cui__open(ui, ic);
-    cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_ZAP, 18, cui_mix(CUI_C(ui, FOREGROUND), on_fg, st->on));
+    cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_ZAP, 18, cui_mix(CUI_C(ui, FOREGROUND), lamp ? CUI_C(ui, CONTROL_GLYPH) : on_fg, st->on));
+    if (lamp) on_fg = CUI_C(ui, FOREGROUND);   /* the label keeps its usual ink */
     cui__close(ui);
     int col = cui__node_new(ui, 0);
     ui->nodes[col].gap = 1;

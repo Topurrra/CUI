@@ -460,7 +460,9 @@ void cui_badge_ex(cui_ctx *ui, const char *text, const cui_badge_opts *o) {
 
 static cui_color cui__name_tone(cui_ctx *ui, const char *name) {
     cui_theme *t = &ui->theme;
-    cui_color tones[7] = { t->tone_sky, t->tone_violet, t->tone_teal, t->tone_amber, t->tone_rose, t->tone_green, t->tone_orchid };
+    /* deep yellows turn to olive and brown, so dark mode trades amber for indigo */
+    cui_color fourth = ui->mode == CUI_THEME_DARK ? cui_mix(t->tone_sky, t->tone_violet, 0.5f) : t->tone_amber;
+    cui_color tones[7] = { t->tone_sky, t->tone_violet, t->tone_teal, fourth, t->tone_rose, t->tone_green, t->tone_orchid };
     uint32_t h = cui__hash_str(name ? name : "", 7);
     return tones[h % 7];
 }
@@ -512,15 +514,16 @@ void cui_avatar_ex(cui_ctx *ui, const char *name, const cui_avatar_opts *o) {
         n->paint = cui__paint_avatar_img;
         n->paint_data = p;
     } else {
-        n->bg = cui_mix(CUI_C(ui, SURFACE), tone, dark ? 0.3f : 0.16f);
+        /* dark discs are a deep, clean step of the hue rather than the hue mixed into gray */
+        n->bg = dark ? cui__shade(tone, 0.35f, 0.6f) : cui_mix(CUI_C(ui, SURFACE), tone, 0.16f);
         n->border = 1;   /* a fine rim of the same hue gives the disc an edge on any surface */
-        n->border_color = cui_alpha(tone, dark ? 0.4f : 0.28f);
+        n->border_color = dark ? cui__shade(tone, 0.45f, 0.6f) : cui_alpha(tone, 0.28f);
     }
     cui__open(ui, i);
     if (!o->image) {
         char ini[16];
         cui__initials(name, ini);
-        int t = cui__text_node(ui, ini, -1, CUI_FONT_MEDIUM, size * 0.38f, cui_mix(CUI_C(ui, FOREGROUND), tone, dark ? 0.55f : 0.78f), false);
+        int t = cui__text_node(ui, ini, -1, CUI_FONT_MEDIUM, size * 0.38f, dark ? cui__shade(tone, 0.88f, 0.7f) : cui_mix(CUI_C(ui, FOREGROUND), tone, 0.78f), false);
         ui->nodes[t].line_height = 1.0f;
     }
     if (o->status) {

@@ -551,5 +551,6 @@ void cui__paint_sheen(cui_ctx *ui, cui_node *n, void *data);   /* data: float st
 #define CUI_PAINT_DATA(ui, type) ((type *)cui__frame_alloc((ui), sizeof(type)))
 
 cui_color cui__legible(cui_color fg, cui_color bg, float ratio);
+cui_color cui__shade(cui_color c, float L, float chroma_mul);
 
 #endif /* CUI_INTERNAL_H */

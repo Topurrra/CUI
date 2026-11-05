@@ -1019,7 +1019,7 @@ SCENE(tiles) {
     static bool wifi = true, bt = false, focus = true, share = false, dark = true;
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
         cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Home");
-        cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
+        cui_control_tile(ui, "Hotspot", &bt, .icon = CUI_ICON_RADIO);
         cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm");
         cui_control_tile(ui, "AirShare", &share, .icon = CUI_ICON_SHARE_2, .detail = "Contacts only");
     }
@@ -1396,7 +1396,7 @@ static void pro_tiles(cui_ctx *ui) {
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_FILL) {
         cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Studio");
         cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON);
-        cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO, .detail = "2 devices");
+        cui_control_tile(ui, "Hotspot", &bt, .icon = CUI_ICON_RADIO, .detail = "2 devices");
         cui_control_tile(ui, "Dark mode", &dark, .icon = CUI_ICON_SUN);
     }
 }
@@ -1520,7 +1520,7 @@ static void hero_desk_body(cui_ctx *ui) {
             cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 10, .width = CUI_PX(300)) {
                 cui_control_tile(ui, "Wi-Fi", &wifi, .icon = CUI_ICON_WIFI, .detail = "Studio");
                 cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm");
-                cui_control_tile(ui, "Bluetooth", &bt, .icon = CUI_ICON_RADIO);
+                cui_control_tile(ui, "Hotspot", &bt, .icon = CUI_ICON_RADIO);
                 cui_control_tile(ui, "Dark mode", &dark, .icon = CUI_ICON_SUN);
             }
             cui_column(ui, .gap = 12, .width = CUI_PX(360)) {

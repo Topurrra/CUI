@@ -417,11 +417,12 @@ typedef struct { float t; cui_color c; } cui__hold_paint;
 
 static void cui__paint_hold(cui_ctx *ui, cui_node *n, void *data) {
     cui__hold_paint *p = data;
-    if (p->t <= 0.001f) return;
     cui_rect r = n->rect;
-    cui_push_clip(ui, r);
-    cui_rect f = { r.x, r.y, r.w * p->t, r.h };
-    cui_draw_rect(ui, f, CUI_CORNERS(0), p->c);
+    cui__draw_sheen(ui, r, n->radius, 1.0f);   /* the same light as every solid button */
+    if (p->t <= 0.001f) return;
+    /* the fill follows the button's own corners as it sweeps across */
+    cui_push_clip(ui, (cui_rect){ r.x, r.y, r.w * p->t, r.h });
+    cui_draw_rect(ui, r, n->radius, p->c);
     cui_pop_clip(ui);
 }
 

@@ -394,12 +394,12 @@ void cui__draw_top_light(cui_ctx *ui, cui_rect r, cui_corners rad, float alpha) 
 void cui__draw_sheen(cui_ctx *ui, cui_rect r, cui_corners rad, float k) {
     if (r.w < 2 || r.h < 2 || k <= 0) return;
     bool dark = ui->mode == CUI_THEME_DARK;
-    cui_draw_rect_gradient(ui, r, rad, cui__rgba(255, 255, 255, (int)(255 * 0.12f * k)), cui__rgba(0, 0, 0, (int)(255 * (dark ? 0.06f : 0.09f) * k)));
+    cui_draw_rect_gradient(ui, r, rad, cui__rgba(255, 255, 255, (int)(255 * 0.08f * k)), cui__rgba(0, 0, 0, (int)(255 * (dark ? 0.045f : 0.06f) * k)));
     /* the lit rim fades out down the sides instead of stopping at a line */
     enum { B = 8 };
     for (int i = 1; i <= B; i++) {
         cui_push_clip(ui, (cui_rect){ r.x - 1, r.y - 1, r.w + 2, r.h * 0.42f * (float)i / B + 1 });
-        cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui__rgba(255, 255, 255, (int)(255 * 0.2f * k / B + 0.5f)), 1);
+        cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui__rgba(255, 255, 255, (int)(255 * 0.16f * k / B + 0.5f)), 1);
         cui_pop_clip(ui);
     }
 }

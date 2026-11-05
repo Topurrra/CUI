@@ -88,6 +88,13 @@ cui_color cui__legible(cui_color fg, cui_color bg, float ratio) {
     return fg;
 }
 
+/* c at OKLab lightness L with its chroma scaled: clean deep or pale steps of one hue */
+cui_color cui__shade(cui_color c, float L, float chroma_mul) {
+    cui__lab o = cui__to_oklab(c);
+    o.L = L; o.a *= chroma_mul; o.b *= chroma_mul;
+    return cui__from_oklab(o, c.a / 255.0f);
+}
+
 cui_color cui_alpha(cui_color c, float m) {
     c.a = (uint8_t)cui__clampf(c.a * m + 0.5f, 0, 255);
     return c;
