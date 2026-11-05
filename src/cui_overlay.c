@@ -442,7 +442,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 /* Tooltip                                                                  */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { char text[256]; cui_id anchor; cui_spring t; double last_shown; bool visible, passive; } cui__tooltip_state;
+typedef struct { char text[256]; cui_id anchor, shown; cui_spring t, ox, oy; double last_shown; bool visible, passive; } cui__tooltip_state;
 static cui__tooltip_state *cui__tip(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
 void cui_tooltip(cui_ctx *ui, const char *text) {
@@ -496,7 +496,18 @@ static void cui__tooltip_render(cui_ctx *ui) {
     if (show) tt->last_shown = ui->time;
     tt->visible = false;
     if (!show) tt->passive = false;
-    if (tt->t.x <= 0.01f || !tt->anchor) return;
+    if (tt->t.x <= 0.01f || !tt->anchor) { tt->shown = 0; tt->ox.x = tt->oy.x = 0; return; }
+    /* moving to a neighbour while warm, the tooltip travels from where it was instead of popping again */
+    if (tt->anchor != tt->shown) {
+        if (tt->shown && tt->t.x > 0.3f && cui__has_prev_rect(ui, tt->shown) && cui__has_prev_rect(ui, tt->anchor)) {
+            cui_rect a = cui__prev_rect(ui, tt->shown), b = cui__prev_rect(ui, tt->anchor);
+            tt->ox.x += (a.x + a.w * 0.5f) - (b.x + b.w * 0.5f);
+            tt->oy.x += a.y - b.y;
+        }
+        tt->shown = tt->anchor;
+    }
+    cui__spring(ui, &tt->ox, 0, 0.32f, 0.08f);
+    cui__spring(ui, &tt->oy, 0, 0.32f, 0.08f);
     float t = cui__clampf(tt->t.x, 0, 1);
     int root = cui__float_begin(ui, 0x7001718u, 0x7FFFFFF0, tt->anchor, CUI_PLACE_TOP, 6);
     cui_node *n = &ui->nodes[root];
@@ -505,7 +516,8 @@ static void cui__tooltip_render(cui_ctx *ui) {
     n->pad[0] = n->pad[2] = 5; n->pad[1] = n->pad[3] = 9;
     n->opacity = t;
     n->scale = 0.97f + 0.03f * t;
-    n->ty = (1 - t) * 3;
+    n->tx = tt->ox.x;
+    n->ty = (1 - t) * 3 + tt->oy.x;
     n->max_w = 280;
     n->elevation = CUI_ELEVATION_RAISED;
     bool dark = ui->mode == CUI_THEME_DARK;
@@ -777,7 +789,9 @@ static void cui__toasts_render(cui_ctx *ui) {
         cui__spring(ui, &t->enter, t->dismissed ? 0.0f : 1.0f, t->dismissed ? 0.22f : 0.38f, 0.0f);
     }
     for (int i = 0; i < ui->toast_count;) {
-        if (ui->toasts[i].dismissed && ui->toasts[i].enter.x <= 0.01f) {
+        cui_toast_item *rt = &ui->toasts[i];
+        bool gone = rt->sx.x > 0.5f ? rt->sx.x >= W + 40 : rt->enter.x <= 0.01f;
+        if (rt->dismissed && gone) {
             memmove(&ui->toasts[i], &ui->toasts[i + 1], sizeof(cui_toast_item) * (size_t)(ui->toast_count - i - 1));
             ui->toast_count--;
         } else i++;
@@ -833,7 +847,33 @@ static void cui__toasts_render(cui_ctx *ui) {
         float sc = tsc[i], alpha = talpha[i];
         float e = cui__clampf(t->enter.x, 0, 1);
         cui_id tid = cui__hash(&t->handle, sizeof t->handle, root_id);
-        int tn = cui__absolute(ui, tid, 0, ty[i] + (1 - e) * 24, W, t->height);
+        /* swipe right to dismiss: the toast follows the pointer, resists to the left like rubber,
+           and a fling or a long drag carries its speed out of the screen */
+        if (!t->dismissed) {
+            cui_interact sr = cui__interact(ui, tid, CUI_IF_DRAG);
+            if (sr.pressed && !t->swiping && ui->mpressed[0]) { t->swiping = true; t->grab_x = ui->mx - t->sx.x; t->vel = 0; }
+            if (t->swiping) {
+                if (ui->mdown[0]) {
+                    float raw = ui->mx - t->grab_x;
+                    float dx = raw >= 0 ? raw : raw * W * 0.55f / (W + 0.55f * -raw) * 0.35f;
+                    if (ui->dt > 0) t->vel = cui__lerp(t->vel, (dx - t->sx.x) / ui->dt, 0.5f);
+                    t->sx.x = dx; t->sx.v = 0;
+                    if (fabsf(raw) > 3) cui__set_cursor(ui, CUI_CURSOR_MOVE);
+                    ui->animating = true;
+                } else {
+                    t->swiping = false;
+                    if (t->sx.x > W * 0.35f || t->vel > 600) { t->dismissed = true; t->sx.v = CUI_MIN(CUI_MAX(t->vel, 900.0f), 2400.0f); }
+                    else t->sx.v = CUI_CLAMP(t->vel, -1500.0f, 1500.0f);
+                }
+            }
+        }
+        if (!t->swiping) {
+            bool flung = t->dismissed && t->sx.x > 0.5f;
+            cui__spring(ui, &t->sx, flung ? W + 48 : 0.0f, flung ? 0.3f : 0.42f, flung ? 0.0f : 0.2f);
+        }
+        float swipe_fade = 1.0f - 0.7f * cui__clampf(t->sx.x / W, 0, 1);
+        int tn = cui__absolute(ui, tid, t->sx.x, ty[i] + (t->sx.x > 0.5f ? 0 : (1 - e) * 24), W, t->height);
+        cui__mark_interactive(ui, tn, 0);
         cui_node *n = &ui->nodes[tn];
         n->h = CUI_FIT;
         n->dir = CUI_ROW; n->gap = 12; n->align = CUI_ALIGN_START;
@@ -844,7 +884,7 @@ static void cui__toasts_render(cui_ctx *ui) {
         n->radius = CUI_CORNERS(ui->theme.radius_control);
         n->elevation = CUI_ELEVATION_FLOATING;
         n->elevation_alpha = 0.8f;
-        n->opacity = e * alpha;
+        n->opacity = (t->sx.x > 0.5f && t->dismissed ? 1.0f : e) * alpha * swipe_fade;
         n->scale = sc;
         if (t->show_timer && t->duration > 0) {
             /* a draining line: how long the action stays available */

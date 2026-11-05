@@ -334,6 +334,9 @@ typedef struct cui_toast_item {
     bool dismissed, action_clicked, hovered_pause, show_timer;
     cui_spring enter;          /* 0..1 appear */
     cui_spring y;              /* stacked position */
+    cui_spring sx;             /* swipe offset; right dismisses */
+    float grab_x, vel;         /* drag anchor and smoothed speed (points per second) */
+    bool swiping;
     float height;
 } cui_toast_item;
 

@@ -115,7 +115,7 @@ const char *icons[] = { CUI_ICON_LIST, CUI_ICON_LAYOUT_DASHBOARD, CUI_ICON_HISTO
 cui_segmented(ui, "view", items, 3, &view, .icons = icons);
 ```
 
-For switching between two to five views of the same content. The highlight glides between options on a morph spring. Options: `size`, `full_width`, `icons`. Keyboard: arrows move the selection.
+For switching between two to five views of the same content. The highlight's two edges have their own springs: the leading one runs ahead and the trailing one follows, so it stretches toward the new option and draws in as it lands. Options: `size`, `full_width`, `icons`. Keyboard: arrows move the selection.
 
 ## Checkbox, switch and radio
 
@@ -129,7 +129,7 @@ cui_radio(ui, "Yearly", &billing, 1);
 cui_radio_group(ui, "autosave", (const char *[]){ "Every change", "Every 5 minutes", "Only when I save" }, 3, &autosave);
 ```
 
-Each returns true when it changes the value. The whole row, label included, is clickable. A switch applies immediately; a checkbox is for choices confirmed later with a button. Options: `description`, `disabled`, `indeterminate` (checkbox). Keyboard: Space toggles.
+Each returns true when it changes the value. The whole row, label included, is clickable. A press dips the box; checking overshoots a touch and settles, while clearing and keyboard toggles stay plain. The switch thumb stretches with its speed in flight, keeping its volume, and rounds out as it lands. A switch applies immediately; a checkbox is for choices confirmed later with a button. Options: `description`, `disabled`, `indeterminate` (checkbox). Keyboard: Space toggles.
 
 ## Slider
 
@@ -316,7 +316,7 @@ cui_badge(ui, "Beta");
 cui_tooltip(ui, "Features in beta may change");   /* for the previous component */
 ```
 
-Appears after a short delay, then instantly while you move between tooltips.
+Appears after a short delay. Moving on to a neighbour while it is open, it glides there and changes its text instead of popping again.
 
 ## Dialog
 
@@ -353,7 +353,7 @@ int t = cui_toast(ui, "Message archived", .action = "Undo");
 if (cui_toast_action_clicked(ui, t)) undo();
 ```
 
-Toasts stack in the bottom right corner. Older toasts tuck behind the newest one; hovering expands the stack and pauses the timers. Options: `description`, `tone`, `duration` (seconds, default 4, negative to keep), `action`. Use toasts for background events; for the result of a button press, change the button instead.
+Toasts stack in the bottom right corner. Older toasts tuck behind the newest one; hovering expands the stack and pauses the timers. Drag a toast right to dismiss it: a fling or a long drag carries its speed off the screen, a short one springs back, and dragging left meets rubbery resistance. Options: `description`, `tone`, `duration` (seconds, default 4, negative to keep), `action`. Use toasts for background events; for the result of a button press, change the button instead.
 
 ## Command palette
 
