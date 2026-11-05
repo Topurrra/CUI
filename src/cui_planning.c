@@ -25,6 +25,11 @@ typedef struct {
     float settle_dx, settle_dy;
     bool settle_pending;
     float slot_x, slot_y;    /* the lifted card's own slot, for a release outside every column */
+    /* keyboard moves: Space lifts the focused card, arrows choose the slot, Enter drops */
+    bool kbd, kdrop;
+    int kcol, kidx, ncols;
+    float hole_x, hole_y;    /* last frame's slot, where a keyboard lifted card is shown */
+    cui_spring kx, ky;
     bool init;
 } cui__kb_state;
 
@@ -65,7 +70,15 @@ void cui_kanban_begin(cui_ctx *ui, const char *id_str) {
     }
     if (!ui->mdown[0]) st->pending = false;
     cui__spring(ui, &st->lift, st->drag_card >= 0 ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
-    if (st->drag_card >= 0) { ui->active = b->id; ui->animating = true; cui__set_cursor(ui, CUI_CURSOR_MOVE); }
+    if (st->kbd && st->drag_card >= 0) {
+        if (cui_key_pressed(ui, CUI_KEY_UP)) { st->kidx = CUI_MAX(0, st->kidx - 1); ui->kpressed[CUI_KEY_UP] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_DOWN)) { st->kidx++; ui->kpressed[CUI_KEY_DOWN] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_LEFT)) { st->kcol = CUI_MAX(0, st->kcol - 1); ui->kpressed[CUI_KEY_LEFT] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_RIGHT)) { st->kcol = CUI_MIN(CUI_MAX(0, st->ncols - 1), st->kcol + 1); ui->kpressed[CUI_KEY_RIGHT] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE)) { st->kdrop = true; ui->kpressed[CUI_KEY_ENTER] = ui->kpressed[CUI_KEY_SPACE] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) { st->drag_card = -1; st->kbd = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
+        ui->animating = true;
+    } else if (st->drag_card >= 0) { ui->active = b->id; ui->animating = true; cui__set_cursor(ui, CUI_CURSOR_MOVE); }
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
@@ -98,7 +111,8 @@ bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, 
     int c = b->col;
     cui_id cid = cui__hash(&c, sizeof c, b->id ^ 0xC01u);
     cui_rect cr = cui__prev_rect(ui, cid);
-    b->col_is_target = st->drag_card >= 0 && cui__has_prev_rect(ui, cid) && ui->mx >= cr.x - 7 && ui->mx < cr.x + cr.w + 7;
+    b->col_is_target = st->drag_card >= 0 && cui__has_prev_rect(ui, cid) &&
+                       (st->kbd ? c == st->kcol : (ui->mx >= cr.x - 7 && ui->mx < cr.x + cr.w + 7));
     if (b->col_is_target) { b->target_col = c; b->target_index = 0; b->hole_y = cr.y + CUI__KB_HEAD; b->hole_x = cr.x + 8; }
     cui__kb_col_state *cs = cui_state(ui, cid, sizeof *cs);
     if (cs->gen != st->gen) { cs->grow = 0; cs->gen = st->gen; }   /* the dropped card fills the room now */
@@ -168,6 +182,14 @@ bool cui_kanban_card_begin(cui_ctx *ui, int card_id) {
         cs->sx.x = st->settle_dx; cs->sy.x = st->settle_dy; cs->sx.v = cs->sy.v = 0;
         st->settle_pending = false;
     }
+    if (r.focus_visible && st->drag_card < 0 && cui_key_pressed(ui, CUI_KEY_SPACE)) {
+        ui->kpressed[CUI_KEY_SPACE] = 0;
+        st->drag_card = card_id; st->from_col = b->col; st->kbd = true; st->kdrop = false;
+        st->kcol = b->col; st->kidx = b->card_pos; st->drag_h = kr.h;
+        st->kx.x = kr.x; st->ky.x = kr.y; st->kx.v = st->ky.v = 0;
+        st->hole_x = kr.x; st->hole_y = kr.y;
+        st->settle_card = -1;
+    }
     if (r.hovered && ui->mpressed[0] && st->drag_card < 0) {
         st->pending = true; st->press_card = card_id; st->press_col = b->col;
         st->press_x = ui->mx; st->press_y = ui->my;
@@ -180,7 +202,8 @@ bool cui_kanban_card_begin(cui_ctx *ui, int card_id) {
         /* where the card shows with the lifted card's hole closed */
         float closed = (b->col == st->from_col && b->passed_drag) ? -step : 0;
         if (b->col_is_target) {
-            if (ui->my > kr.y + closed + kr.h * 0.5f) {
+            bool below = st->kbd ? b->card_pos < st->kidx : ui->my > kr.y + closed + kr.h * 0.5f;
+            if (below) {
                 b->target_index = b->card_pos + 1;
                 b->hole_y = kr.y + closed + kr.h + CUI__KB_GAP;
             } else {
@@ -207,7 +230,13 @@ bool cui_kanban_card_begin(cui_ctx *ui, int card_id) {
     cn->tx = cs->sx.x;
     cn->ty = cs->y.x + cs->sy.x - 1.5f * cs->hover;   /* a hovered card rises a little */
     if (cs->hover > 0.01f) { cn->elevation = CUI_ELEVATION_RAISED; cn->elevation_alpha = 0.4f + 0.6f * cs->hover; }
-    if (dragged && kr.w > 0) {
+    if (dragged && kr.w > 0 && st->kbd) {
+        cui__spring(ui, &st->kx, st->hole_x, CUI_SPRING_SMOOTH);
+        cui__spring(ui, &st->ky, st->hole_y, CUI_SPRING_SMOOTH);
+        st->slot_x = kr.x; st->slot_y = kr.y;
+        cn->tx = st->kx.x - kr.x;
+        cn->ty = st->ky.x - kr.y;
+    } else if (dragged && kr.w > 0) {
         st->slot_x = kr.x; st->slot_y = kr.y;
         cn->tx = ui->mx - st->grab_x - kr.x;
         cn->ty = ui->my - st->grab_y - kr.y;
@@ -266,7 +295,21 @@ bool cui_kanban_end(cui_ctx *ui, cui_kanban_move *move) {
     cui__scroll_end_ex(ui);
     cui__kb_state *st = b->st;
     bool dropped = false;
-    if (st->drag_card >= 0 && !ui->mdown[0]) {
+    st->ncols = b->col + 1;
+    if (st->kbd && st->drag_card >= 0) {
+        if (b->target_col >= 0) { st->kidx = b->target_index; st->hole_x = b->hole_x; st->hole_y = b->hole_y; }
+        if (st->kdrop && b->target_col >= 0) {
+            dropped = true;
+            if (move) { move->card = st->drag_card; move->from_column = st->from_col; move->to_column = b->target_col; move->to_index = b->target_index; }
+            st->settle_dx = st->kx.x - b->hole_x;
+            st->settle_dy = st->ky.x - b->hole_y;
+            st->settle_card = st->drag_card;
+            st->settle_pending = true;
+            st->gen++;
+            st->drag_card = -1;
+            st->kbd = st->kdrop = false;
+        }
+    } else if (st->drag_card >= 0 && !ui->mdown[0]) {
         if (b->target_col >= 0) {
             dropped = true;
             if (move) { move->card = st->drag_card; move->from_column = st->from_col; move->to_column = b->target_col; move->to_index = b->target_index; }

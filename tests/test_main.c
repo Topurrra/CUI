@@ -1481,6 +1481,25 @@ static void test_planning(void) {
     cui_rect c4b = rect_of(ui, a.card_ids[4]);
     click_at(ui, build_plan, &a, c4b.x + 30, c4b.y + 20);
     CHECK(a.clicked && !a.moved);
+    /* keyboard: Space lifts the focused card, arrows pick the slot, Enter drops */
+    a.moved = false; a.clicked = false;
+    key(ui, build_plan, &a, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    key(ui, build_plan, &a, CUI_KEY_TAB, 0);            /* card 4 again, now with a visible focus */
+    key(ui, build_plan, &a, CUI_KEY_SPACE, 0);
+    CHECK(!a.moved && !a.clicked);
+    key(ui, build_plan, &a, CUI_KEY_LEFT, 0);
+    key(ui, build_plan, &a, CUI_KEY_DOWN, 0);
+    run(ui, build_plan, &a, 2);
+    key(ui, build_plan, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.moved && a.mv.card == 4 && a.mv.from_column == 1 && a.mv.to_column == 0 && a.mv.to_index == 1);
+    CHECK(!a.clicked);
+    /* Escape puts a lifted card back */
+    a.moved = false;
+    key(ui, build_plan, &a, CUI_KEY_SPACE, 0);
+    key(ui, build_plan, &a, CUI_KEY_RIGHT, 0);
+    key(ui, build_plan, &a, CUI_KEY_ESCAPE, 0);
+    run(ui, build_plan, &a, 2);
+    CHECK(!a.moved);
 
     /* week calendar */
     a.mode = 1;
