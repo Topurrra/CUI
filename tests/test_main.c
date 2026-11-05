@@ -1763,7 +1763,7 @@ static void build_viz(cui_ctx *ui, void *u) {
     static const char *nodes[] = { "A", "B", "C", "D" };
     static const cui_sankey_link links[] = { { 0, 2, 10 }, { 1, 2, 5 }, { 2, 3, 12 }, { 3, 0, 1 } };   /* with a cycle */
     static float days[60];
-    static const cui_vec2 pts[] = { { 0, 0 }, { 5, 5 }, { 10, 10 } };
+    static const cui_vec2 pts[] = { { 1, 1 }, { 5, 5 }, { 9, 9 } };
     static const float rv[] = { 1, 2, 3, 4, 5 };
     static const char *axes[] = { "p", "q", "r", "s", "t" };
     for (int k = 0; k < 60; k++) days[k] = (float)(k % 5);
