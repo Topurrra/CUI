@@ -155,7 +155,6 @@ static void hero(cui_ctx *ui, app_state *s) {
         art_paint a = { 0, 16, false };
         cui_canvas(ui, "hero-art", CUI_PX(196), CUI_PX(196), paint_art, &a, sizeof a);
         cui_column(ui, .gap = 10, .width = CUI_FILL) {
-            cui_text(ui, "Playlist", .size = 12, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY);
             cui_text(ui, "Late Night Coding", .font = CUI_FONT_DISPLAY, .size = 44, .line_height = 1.1f, .nowrap = true);
             cui_text(ui, "Warm synths and steady beats for the hours after everyone has logged off.",
                      .color = CUI_COLOR_TEXT_SECONDARY);
@@ -219,7 +218,7 @@ static void track_list(cui_ctx *ui, app_state *s) {
                         }
                     }
                     cui_text(ui, t->album, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_PX(180), .nowrap = true);
-                    if (cui_icon_button(ui, CUI_ICON_HEART, .size = CUI_SIZE_SM, .selected = s->liked[i],
+                    if (cui_icon_button(ui, CUI_ICON_HEART, .size = CUI_SIZE_SM,
                                         .color = s->liked[i] ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_MUTED,
                                         .tooltip = s->liked[i] ? "Remove from liked" : "Like"))
                         s->liked[i] = !s->liked[i];
@@ -267,7 +266,7 @@ static void player_bar(cui_ctx *ui, app_state *s) {
                 cui_text(ui, t->artist, .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
             }
             bool liked = s->liked[s->playing];
-            if (cui_icon_button(ui, CUI_ICON_HEART, .size = CUI_SIZE_SM, .selected = liked, .color = liked ? CUI_COLOR_ACCENT : CUI_TRANSPARENT,
+            if (cui_icon_button(ui, CUI_ICON_HEART, .size = CUI_SIZE_SM, .color = liked ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_MUTED,
                                 .tooltip = liked ? "Remove from liked" : "Like"))
                 s->liked[s->playing] = !liked;
         }
@@ -338,6 +337,6 @@ static void frame(cui_ctx *ui, void *user) {
 
 int main(void) {
     static app_state s = { .position = 74, .volume = 70, .liked = { true, false, true } };
-    return cui_app_run(&(cui_app_desc){ .title = "Tempo", .width = 1440, .height = 940,
+    return cui_app_run(&(cui_app_desc){ .title = "Tempo", .width = 1440, .height = 1180,
                                         .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_CORAL }, frame, &s);
 }

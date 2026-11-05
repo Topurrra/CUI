@@ -292,7 +292,9 @@ static bool cui__iter_next(cui__glyph_iter *it) {
     if (gf < 0) return false;
     cui_font_data *fd = &ui->fonts[gf];
     float gs = cui__glyph_size(ui, it->font, gf, it->size);
-    if (it->prev_font == gf && it->prev_gi && gi) it->x += cui__kern_em(ui, fd, it->prev_cp, cp, it->prev_gi, gi) * gs;
+    /* tabular figures sit in fixed cells: no kerning against a digit, or "3:18" and "3:42" would differ in width */
+    bool tab_pair = it->tabular && ((cp >= '0' && cp <= '9') || (it->prev_cp >= '0' && it->prev_cp <= '9'));
+    if (it->prev_font == gf && it->prev_gi && gi && !tab_pair) it->x += cui__kern_em(ui, fd, it->prev_cp, cp, it->prev_gi, gi) * gs;
     float adv = cui__advance_em(fd, gi, cp) * gs;
     it->center_off = 0;
     if (it->tabular && cp >= '0' && cp <= '9' && fd->tab_adv > 0) {

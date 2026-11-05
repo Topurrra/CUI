@@ -24,6 +24,25 @@ void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo, float 
 const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v) {
     if (fmt) {
         char *s = cui__frame_printf(ui, fmt, (double)v);
+        /* money gets its thousands separators: "$3,220", not "$3220" */
+        if (s && (strchr(fmt, '$') || strstr(fmt, "\xe2\x82\xac") || strstr(fmt, "\xc2\xa3"))) {
+            char *d = s;
+            while (*d && (*d < '0' || *d > '9')) d++;
+            int run = 0;
+            while (d[run] >= '0' && d[run] <= '9') run++;
+            if (run >= 4) {
+                size_t n = strlen(s), commas = (size_t)(run - 1) / 3;
+                char *o = cui__frame_alloc(ui, n + commas + 1);
+                size_t pre = (size_t)(d - s), w = 0;
+                memcpy(o, s, pre); w = pre;
+                for (int i = 0; i < run; i++) {
+                    o[w++] = d[i];
+                    if ((run - 1 - i) % 3 == 0 && i < run - 1) o[w++] = ',';
+                }
+                memcpy(o + w, d + run, n - pre - (size_t)run + 1);
+                s = o;
+            }
+        }
         /* zero needs no magnitude: "$0k" reads as "$0" */
         if (v == 0 && s) {
             size_t n = strlen(s);

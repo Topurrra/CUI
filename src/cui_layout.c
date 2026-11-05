@@ -753,8 +753,10 @@ static void cui__paint_text_lines(cui_ctx *ui, cui_node *n) {
         for (int k = 0; k < n->text_lines; k++) {
             cui_text_layout_line *L = &n->lines[k];
             float x = n->rect.x;
-            if (n->text_align == CUI_TEXT_CENTER) x += (n->rect.w - L->width) * 0.5f;
-            else if (n->text_align == CUI_TEXT_RIGHT) x += n->rect.w - L->width;
+            /* line widths come from wrapping, which measures proportional figures */
+            float lw = tab && n->text_align != CUI_TEXT_LEFT ? cui__text_width(ui, n->font, n->font_size, n->text + L->start, L->end - L->start, true) : L->width;
+            if (n->text_align == CUI_TEXT_CENTER) x += (n->rect.w - lw) * 0.5f;
+            else if (n->text_align == CUI_TEXT_RIGHT) x += n->rect.w - lw;
             ui->text_fx_base = L->start;
             ui->text_fx_line_y = n->rect.y + lh * (float)k;
             cui__draw_text_line(ui, n->font, n->font_size, x, n->rect.y + top_pad + lh * (float)k, n->text_color,

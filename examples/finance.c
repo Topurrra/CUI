@@ -39,7 +39,7 @@ static void paint_card(cui_ctx *ui, cui_rect r, void *user) {
     cui_draw_rect_border(ui, r, rad, CUI_TRANSPARENT, CUI_RGBA(0xffffff22), 1);
 
     cui_color white = CUI_RGB(0xffffff), soft = CUI_RGBA(0xffffffb0);
-    cui_draw_text(ui, CUI_FONT_DISPLAY, 17, (cui_vec2){ r.x + 24, r.y + 22 }, white, "Vault", -1);
+    cui_draw_text(ui, CUI_FONT_DISPLAY, 17, (cui_vec2){ r.x + 24, r.y + 22 }, white, "Halden", -1);
     cui_draw_icon(ui, CUI_ICON_WIFI, (cui_rect){ r.x + r.w - 48, r.y + 16, 28, 28 }, 18, soft);
     /* chip */
     cui_rect chip = { r.x + 24, r.y + r.h * 0.40f, 40, 30 };
@@ -62,11 +62,11 @@ static void paint_card(cui_ctx *ui, cui_rect r, void *user) {
 static void topbar(cui_ctx *ui, app_state *s) {
     cui_row(ui, .width = CUI_FILL, .pad_x = 32, .pad_top = 14, .gap = 28, .align = CUI_ALIGN_CENTER) {
         cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
-            cui_box(ui, .width = CUI_PX(28), .height = CUI_PX(28), .radius = 9, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
+            cui_box(ui, .width = CUI_PX(26), .height = CUI_PX(26), .radius = 13, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
-                cui_icon(ui, CUI_ICON_WALLET, 15, CUI_COLOR_ACCENT_FOREGROUND);
+                cui_text(ui, "h", .font = CUI_FONT_DISPLAY, .size = 15, .color = CUI_COLOR_ACCENT_FOREGROUND);
             }
-            cui_text(ui, "Vault", .font = CUI_FONT_DISPLAY, .size = 17);
+            cui_text(ui, "Halden", .font = CUI_FONT_DISPLAY, .size = 17);
         }
         static const char *tabs[] = { "Overview", "Accounts", "Payments", "Cards", "Insights" };
         cui_tabs(ui, "nav", tabs, 5, &s->tab);
@@ -145,12 +145,12 @@ static void spending_card(cui_ctx *ui) {
 }
 
 static void budgets_card(cui_ctx *ui) {
-    typedef struct { const char *name, *icon; float used, total; cui_tone tone; } budget;
+    typedef struct { const char *name, *icon; float used, total; } budget;
     static const budget b[] = {
-        { "Groceries", CUI_ICON_SHOPPING_CART, 640, 800, CUI_TONE_NEUTRAL },
-        { "Dining out", CUI_ICON_GIFT, 420, 400, CUI_TONE_DANGER },
-        { "Transport", CUI_ICON_MAP_PIN, 96, 250, CUI_TONE_NEUTRAL },
-        { "Entertainment", CUI_ICON_MUSIC, 132, 200, CUI_TONE_WARNING },
+        { "Groceries", CUI_ICON_SHOPPING_CART, 640, 800 },
+        { "Dining out", CUI_ICON_GIFT, 420, 400 },
+        { "Transport", CUI_ICON_MAP_PIN, 96, 250 },
+        { "Entertainment", CUI_ICON_MUSIC, 186, 200 },
     };
     cui_card(ui, .gap = 16, .width = CUI_GROW(1)) {
         cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
@@ -171,8 +171,10 @@ static void budgets_card(cui_ctx *ui) {
                     cui_text(ui, t, .size = 12, .tabular = true,
                              .color = b[i].used > b[i].total ? CUI_COLOR_DANGER : CUI_COLOR_TEXT_SECONDARY);
                 }
+                /* one rule for every budget: over is red, the last tenth is amber, the rest is plain */
                 float v = b[i].used / b[i].total;
-                cui_progress(ui, v > 1 ? 1 : v, .height = 6, .tone = b[i].tone);
+                cui_tone tone = v > 1 ? CUI_TONE_DANGER : v >= 0.9f ? CUI_TONE_WARNING : CUI_TONE_NEUTRAL;
+                cui_progress(ui, v > 1 ? 1 : v, .height = 6, .tone = tone);
             }
             cui_pop_id(ui);
         }
@@ -253,8 +255,8 @@ static void frame(cui_ctx *ui, void *user) {
         cui_scroll(ui, .id = "main", .pad = 32, .gap = 20, .fade_edges = true) {
             cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_END) {
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
-                    cui_text(ui, "Good evening, Mara", .font = CUI_FONT_DISPLAY, .size = 28);
-                    cui_text(ui, "Your money at a glance. Everything is up to date.", .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_text(ui, "Overview", .font = CUI_FONT_DISPLAY, .size = 28);
+                    cui_text(ui, "Four accounts, synced at 6:42 pm", .color = CUI_COLOR_TEXT_SECONDARY);
                 }
                 cui_row(ui, .gap = 8) {
                     cui_button(ui, "Statements", .icon = CUI_ICON_FILE_TEXT, .variant = CUI_BUTTON_OUTLINE);
@@ -287,6 +289,6 @@ static void frame(cui_ctx *ui, void *user) {
 
 int main(void) {
     static app_state s = { .range = 2 };
-    return cui_app_run(&(cui_app_desc){ .title = "Vault", .width = 1440, .height = 940,
+    return cui_app_run(&(cui_app_desc){ .title = "Halden", .width = 1440, .height = 940,
                                         .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_GREEN }, frame, &s);
 }

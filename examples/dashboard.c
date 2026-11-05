@@ -34,11 +34,11 @@ static void sidebar(cui_ctx *ui, app_state *s) {
     static const char *badges[] = { NULL, "12", NULL, NULL, NULL, NULL };
     cui_column(ui, .width = CUI_PX(232), .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
         cui_row(ui, .gap = 10, .pad_x = 8, .pad_top = 6, .pad_bottom = 16) {
-            cui_box(ui, .width = CUI_PX(28), .height = CUI_PX(28), .radius = 9, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
+            cui_box(ui, .width = CUI_PX(26), .height = CUI_PX(26), .radius = 7, .bg = CUI_COLOR_FOREGROUND, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
-                cui_icon(ui, CUI_ICON_ZAP, 15, CUI_COLOR_ACCENT_FOREGROUND);
+                cui_text(ui, "L", .font = CUI_FONT_DISPLAY, .size = 14, .color = CUI_COLOR_BACKGROUND);
             }
-            cui_text(ui, "Northwind", .font = CUI_FONT_MEDIUM, .size = 15, .nowrap = true);
+            cui_text(ui, "Larkspur Supply", .font = CUI_FONT_MEDIUM, .size = 15, .nowrap = true);
         }
         for (int i = 0; i < 6; i++)
             if (cui_nav_item(ui, items[i], .icon = icons[i], .selected = s->nav == i, .badge = badges[i])) s->nav = i;
@@ -61,7 +61,7 @@ static void topbar(cui_ctx *ui, app_state *s) {
         }
         cui_icon_button(ui, CUI_ICON_BELL, .tooltip = "Notifications");
         cui_menu(ui, "Account", .icon = CUI_ICON_CIRCLE_USER, .variant = CUI_BUTTON_GHOST, .placement = CUI_PLACE_BOTTOM_END) {
-            cui_menu_label(ui, "nora@northwind.co");
+            cui_menu_label(ui, "nora@larkspur.co");
             cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER);
             cui_menu_item(ui, "Billing", .icon = CUI_ICON_CREDIT_CARD);
             cui_menu_item(ui, "Keyboard shortcuts", .icon = CUI_ICON_KEYBOARD, .shortcut = "?");
@@ -71,27 +71,36 @@ static void topbar(cui_ctx *ui, app_state *s) {
     }
 }
 
+static void kpi(cui_ctx *ui, const char *label, const char *value, const char *change, bool good) {
+    cui_column(ui, .width = CUI_GROW(1), .pad_x = 22, .gap = 6) {
+        cui_text(ui, label, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+        cui_text(ui, value, .font = CUI_FONT_DISPLAY, .size = 26, .tabular = true);
+        cui_text(ui, change, .size = 12, .color = good ? CUI_COLOR_SUCCESS : CUI_COLOR_DANGER);
+    }
+}
+
 static void content(cui_ctx *ui, app_state *s) {
     static const float rev[] = { 31, 34, 33, 38, 42, 40, 46, 52, 49, 55, 61, 64 };
-    static const float users[] = { 120, 132, 128, 140, 151, 149, 162, 170, 168, 181, 190, 204 };
-    static const float conv[] = { 3.1f, 3.0f, 3.2f, 3.4f, 3.3f, 3.5f, 3.6f, 3.4f, 3.7f, 3.8f, 3.9f, 4.1f };
-    static const float churn[] = { 2.4f, 2.3f, 2.5f, 2.2f, 2.1f, 2.2f, 2.0f, 1.9f, 2.0f, 1.8f, 1.8f, 1.7f };
     static const char *months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
     cui_row(ui, .gap = 12) {
         cui_column(ui, .gap = 4, .width = CUI_FILL) {
-            cui_heading(ui, "Good morning, Nora", 2);
-            cui_secondary(ui, "Here is what happened in your store this month.");
+            cui_heading(ui, "Overview", 2);
+            cui_secondary(ui, "November 1 to 30, all channels");
         }
         const char *ranges[] = { "7 days", "30 days", "12 months" };
         cui_segmented(ui, "range", ranges, 3, &s->range, .size = CUI_SIZE_SM);
         cui_button(ui, "Export", .icon = CUI_ICON_DOWNLOAD, .size = CUI_SIZE_SM);
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 4, .gap = 16) {
-        cui_metric(ui, "Revenue", "$64,210", .delta = 12.4f, .spark = rev, .spark_count = 12, .icon = CUI_ICON_DOLLAR_SIGN);
-        cui_metric(ui, "Customers", "2,040", .delta = 7.3f, .spark = users, .spark_count = 12, .icon = CUI_ICON_USERS);
-        cui_metric(ui, "Conversion", "4.1%", .delta = 0.4f, .delta_label = "+0.4 pts", .spark = conv, .spark_count = 12, .icon = CUI_ICON_TARGET);
-        cui_metric(ui, "Churn", "1.7%", .delta = -0.6f, .delta_label = "-0.6 pts", .lower_is_better = true, .spark = churn, .spark_count = 12, .icon = CUI_ICON_TRENDING_DOWN);
+    /* one strip of figures rather than four look-alike cards; the chart below carries the trend */
+    cui_card(ui, .dir = CUI_ROW, .gap = 0, .pad = 0) {
+        kpi(ui, "Revenue", "$64,210", "+12.4% on October", true);
+        cui_separator(ui);
+        kpi(ui, "Orders", "1,286", "+7.3% on October", true);
+        cui_separator(ui);
+        kpi(ui, "Conversion", "4.1%", "+0.4 pts", true);
+        cui_separator(ui);
+        kpi(ui, "Refund rate", "1.7%", "-0.6 pts, fewer returns", true);
     }
     cui_row(ui, .gap = 16, .align = CUI_ALIGN_STRETCH) {
         cui_card(ui, .gap = 16, .width = CUI_GROW(2)) {
@@ -107,18 +116,23 @@ static void content(cui_ctx *ui, app_state *s) {
             cui_line_chart(ui, "rev", series, 2, .labels = months, .label_count = 12, .area = true, .smooth = true,
                            .height = 230, .format = "$%.0fk");
         }
-        cui_card(ui, .gap = 24, .width = CUI_GROW(1)) {
-            cui_label(ui, "Traffic sources");
+        cui_card(ui, .gap = 16, .width = CUI_GROW(1)) {
+            cui_column(ui, .gap = 2) {
+                cui_label(ui, "Where orders come from");
+                cui_text(ui, "Share of November orders", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+            }
             static const float src[] = { 42, 26, 18, 14 };
             static const char *names[] = { "Search", "Direct", "Social", "Email" };
-            cui_donut_chart(ui, "src", src, names, 4, .height = 150, .format = "%.0f%%");
+            cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .justify = CUI_JUSTIFY_CENTER) {
+                cui_donut_chart(ui, "src", src, names, 4, .height = 170, .format = "%.0f%%");
+            }
         }
     }
     cui_card(ui, .gap = 14) {
         cui_row(ui) {
             cui_column(ui, .gap = 2, .width = CUI_FILL) {
                 cui_label(ui, "Recent orders");
-                cui_text(ui, "6 orders need your attention", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_text(ui, "Newest first", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
             }
             cui_button(ui, "View all", .variant = CUI_BUTTON_GHOST, .icon_right = CUI_ICON_ARROW_RIGHT, .size = CUI_SIZE_SM);
         }
@@ -148,8 +162,8 @@ static void content(cui_ctx *ui, app_state *s) {
             }
         }
         cui_row(ui) {
-            cui_text(ui, "Showing 1 to 6 of 128 orders", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_FILL);
-            cui_pagination(ui, "pages", &s->page, 22);
+            cui_text(ui, "Showing 1 to 6 of 1,286 orders", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_FILL);
+            cui_pagination(ui, "pages", &s->page, 215);
         }
     }
 }
@@ -180,5 +194,5 @@ static void frame(cui_ctx *ui, void *user) {
 
 int main(void) {
     static app_state s = { .sort = { 0, true }, .selected = 0, .range = 1 };
-    return cui_app_run(&(cui_app_desc){ .title = "Northwind Dashboard", .width = 1360, .height = 900, .accent = CUI_ACCENT_BLUE }, frame, &s);
+    return cui_app_run(&(cui_app_desc){ .title = "Larkspur Dashboard", .width = 1360, .height = 900, .accent = CUI_ACCENT_BLUE }, frame, &s);
 }

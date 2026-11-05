@@ -105,14 +105,14 @@ Every screenshot here is a real app from [`examples/`](examples), rendered by CU
 </tr>
 <tr>
 <td align="center"><sub><b>Tempo</b>: cover art drawn on a canvas, track list, transport bar · <a href="examples/music.c">music.c</a></sub></td>
-<td align="center"><sub><b>Vault</b>: balance chart, painted card, budgets, goals · <a href="examples/finance.c">finance.c</a></sub></td>
+<td align="center"><sub><b>Halden</b>: balance chart, painted card, budgets, goals · <a href="examples/finance.c">finance.c</a></sub></td>
 </tr>
 <tr>
 <td><img src="docs/images/showcase/dashboard-dark.png" alt="Analytics dashboard"></td>
 <td><img src="docs/images/showcase/mail-dark.png" alt="Mail client"></td>
 </tr>
 <tr>
-<td align="center"><sub><b>Northwind</b>: KPIs, charts, sortable table · <a href="examples/dashboard.c">dashboard.c</a></sub></td>
+<td align="center"><sub><b>Larkspur</b>: figures, charts, sortable table · <a href="examples/dashboard.c">dashboard.c</a></sub></td>
 <td align="center"><sub><b>Mail</b>: three pane inbox and compose dialog · <a href="examples/mail.c">mail.c</a></sub></td>
 </tr>
 <tr>
