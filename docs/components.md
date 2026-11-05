@@ -416,7 +416,7 @@ Avatars without an image show initials on a color picked from the name, so the s
 ```c
 cui_card(ui, .gap = 12) { ... }
 if (cui_card(ui, .id = "project", .hoverable = true)) { ... }   /* lifts on hover, returns clicks */
-cui_metric(ui, "Revenue", "$48,210", .delta = 12.4f, .spark = values, .spark_count = 12, .icon = CUI_ICON_DOLLAR_SIGN);
+cui_metric(ui, "Weekly installs", "3,912", .delta = 8.1f, .spark = values, .spark_count = 7, .icon = CUI_ICON_DOWNLOAD);
 cui_metric(ui, "Median build", "3m 42s", .delta = -17.6f, .lower_is_better = true);   /* a fall, in green */
 ```
 

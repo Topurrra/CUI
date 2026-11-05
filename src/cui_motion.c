@@ -272,11 +272,12 @@ typedef struct { float hover; float mx, my; bool init; } cui__spot_state;
 typedef struct { float hover, mx, my; cui_color c; bool beam; float t; } cui__spot_paint;
 
 static void cui__lit_border(cui_ctx *ui, cui_rect r, cui_corners rad, float cx, float cy, float reach, cui_color c) {
-    static const float k[3] = { 1.0f, 0.62f, 0.32f };
-    for (int i = 0; i < 3; i++) {
-        float s = reach * k[i];
+    /* nested bands, each a little brighter: the edge fades out smoothly instead of in three hard steps */
+    enum { B = 12 };
+    for (int i = 0; i < B; i++) {
+        float s = reach * (1.0f - (float)i / B);
         cui_push_clip(ui, (cui_rect){ cx - s, cy - s, s * 2, s * 2 });
-        cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui_alpha(c, 0.36f), 1.5f);
+        cui_draw_rect_border(ui, r, rad, cui__rgba(0, 0, 0, 0), cui_alpha(c, 1.0f / B), 1.5f);
         cui_pop_clip(ui);
     }
 }

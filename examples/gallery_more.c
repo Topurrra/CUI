@@ -625,7 +625,7 @@ static void page_social(cui_ctx *ui) {
                 cui_card_stack_item(ui, k) {
                     cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[idx]), .radius = 25, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
                         cui_text(ui, names[idx], .font = CUI_FONT_DISPLAY, .size = 22, .color = CUI_RGB(0xffffff));
-                        cui_text(ui, "Swipe right to save", .size = 13, .color = CUI_RGBA(0xffffffb0));
+                        cui_text(ui, "Swipe right to save", .size = 13, .font = CUI_FONT_MEDIUM, .color = CUI_RGBA(0xfffffff0));
                     }
                 }
             }

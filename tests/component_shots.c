@@ -215,10 +215,20 @@ SCENE(badges) {
 SCENE(cards) {
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16, .width = CUI_PX(640)) {
         static const float s1[] = { 3, 5, 4, 7, 6, 9, 11 };
-        cui_metric(ui, "Revenue", "$48,210", .delta = 12.4f, .spark = s1, .spark_count = 7, .icon = CUI_ICON_DOLLAR_SIGN);
-        cui_card(ui, .gap = 8) {
-            cui_label(ui, "Card");
-            cui_secondary(ui, "A bordered surface for a real boundary. Rests on a hairline, no shadow.");
+        cui_metric(ui, "Weekly installs", "3,912", .delta = 8.1f, .spark = s1, .spark_count = 7, .icon = CUI_ICON_DOWNLOAD);
+        cui_card(ui, .gap = 12) {
+            cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+                cui_column(ui, .gap = 2, .width = CUI_FILL) {
+                    cui_label(ui, "Team plan");
+                    cui_text(ui, "5 of 8 seats used", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
+                }
+                cui_badge(ui, "Renews Dec 1");
+            }
+            cui_progress(ui, 5.0f / 8, .height = 5);
+            cui_row(ui, .gap = 8) {
+                cui_button(ui, "Add seats", .size = CUI_SIZE_SM);
+                cui_button(ui, "Billing", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST);
+            }
         }
     }
 }
@@ -811,7 +821,7 @@ SCENE(compare_stack) {
         for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) {
             cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[k]), .radius = 25, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {
                 cui_text(ui, names[k], .font = CUI_FONT_DISPLAY, .size = 22, .color = CUI_RGB(0xffffff));
-                cui_text(ui, "Swipe right to save", .size = 13, .color = CUI_RGBA(0xffffffb0));
+                cui_text(ui, "Swipe right to save", .size = 13, .font = CUI_FONT_MEDIUM, .color = CUI_RGBA(0xfffffff0));
             }
         }
         cui_card_stack_end(ui);
@@ -886,7 +896,7 @@ static void body_gantt(cui_ctx *ui) {
         { "Launch", "Priya Nair", 22, 27, 0, CUI_TONE_SUCCESS, 4, false },
     };
     cui_date org = { 2026, 10, 26 };
-    cui_gantt(ui, "plan", tasks, 6, org, 28, .day_width = 26, .today = 10);
+    cui_gantt(ui, "plan", tasks, 6, org, 27, .day_width = 26.3f, .today = 10);   /* the range fits the frame: no date cut at the edge */
 }
 
 /* ---- more charts ---- */
@@ -1698,7 +1708,7 @@ static void hero_effects_body(cui_ctx *ui) {
 static void scene_hero_effects(cui_ctx *ui, int f) {
     if (f < 0) {
         cui_rect r = cui_get_rect(ui, cui_make_id(ui, "own"));
-        if (-f - 1 == 10) cui_input_mouse_move(ui, r.x + r.w * 0.3f, r.y + r.h * 0.25f);
+        if (-f - 1 == 10) cui_input_mouse_move(ui, r.x + r.w * 0.62f, r.y + r.h * 0.16f);
         return;
     }
     stage(ui, &look_plain, hero_effects_body);
