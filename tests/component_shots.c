@@ -1494,7 +1494,7 @@ static void hero_ai_body(cui_ctx *ui) {
         { "Batching draw calls", "https://docs.cui.dev/rendering", "One draw call per texture or clip change." },
     };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER) {
-        window_begin(ui, "Muse", 640);
+        window_begin(ui, "Muse", 620);
         cui_column(ui, .width = CUI_FILL, .pad = 22, .gap = 12) {
             cui_chat_message(ui, "Why does the new build feel so much faster?", .mine = true);
             cui_reasoning(ui, "think", .thinking = true, .seconds = 4) {
@@ -1512,9 +1512,17 @@ static void hero_ai_body(cui_ctx *ui) {
             cui_chat_composer(ui, "composer", draft, sizeof draft, .models = shot_models, .model_count = 3, .model = &model);
         }
         window_end(ui);
-        cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 14) {
-            cui_voice_orb(ui, "orb", CUI_VOICE_LISTENING, 0.65f, .size = 190);
+        cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 14, .width = CUI_PX(290)) {
+            cui_voice_orb(ui, "orb", CUI_VOICE_LISTENING, 0.65f, .size = 170);
             cui_agent_status(ui, "Listening", .status = CUI_TASK_RUNNING, .seconds = 7);
+            cui_gap(ui, 6);
+            static const cui_plan_step steps[] = {
+                { "Profile the frame", "0.24 ms", CUI_TASK_DONE },
+                { "Cache glyphs in an atlas", NULL, CUI_TASK_DONE },
+                { "Run the benchmark", "600 frames", CUI_TASK_RUNNING },
+                { "Write it up", NULL, CUI_TASK_PENDING },
+            };
+            cui_box(ui, .width = CUI_FILL) { cui_agent_plan(ui, "plan", steps, 4, .title = "Speed up rendering"); }
         }
     }
 }
