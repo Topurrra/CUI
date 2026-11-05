@@ -715,6 +715,8 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
+    cui_scroll_state *gss = cui_state(ui, id ^ 0x5C4u, sizeof *gss);
+    gss->fade = cui__backdrop(ui);   /* days past the edge fade out */
     cui__scroll_begin_ex(ui, id ^ 0x5C4u, &sb, true);
     ui->nodes[cui__current(ui)].h = CUI_FIT;
     ui->nodes[cui__current(ui)].min_h = 0;
@@ -818,7 +820,8 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
         cui__gbar_paint *bp = cui__frame_alloc(ui, sizeof *bp);
         bp->progress = t->progress;
         bp->fill = cui_mix(CUI_C(ui, SURFACE), tone, ui->mode == CUI_THEME_DARK ? (r.hovered ? 0.36f : 0.28f) : (r.hovered ? 0.3f : 0.22f));
-        bp->prog = tone;
+        /* in dark mode the tones are light, so the done part is deepened until white labels read on it */
+        bp->prog = ui->mode == CUI_THEME_DARK ? cui_mix(tone, CUI_C(ui, SURFACE), 0.5f) : tone;
         bp->milestone = t->milestone;
         nd->paint = cui__paint_gantt_bar;
         nd->paint_data = bp;

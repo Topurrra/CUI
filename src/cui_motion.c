@@ -687,6 +687,9 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     nd->min_h = o->wide ? 64 : 112;
     nd->radius = CUI_CORNERS(22);
     nd->bg = cui_mix(off_bg, on_bg, st->on);
+    /* off tiles in light mode keep a hairline so they do not melt into a white page */
+    nd->border = 1;
+    nd->border_color = cui_alpha(dark ? cui__rgba(255, 255, 255, 255) : CUI_C(ui, BORDER), dark ? 0.0f : (1.0f - st->on));
     if (st->on > 0.01f) {
         float *k = cui__frame_alloc(ui, sizeof *k);
         *k = 0.45f * st->on;

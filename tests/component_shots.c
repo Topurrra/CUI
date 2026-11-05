@@ -201,12 +201,12 @@ SCENE(badges) {
             cui_badge(ui, "Active", .tone = CUI_TONE_SUCCESS, .dot = true);
             cui_badge(ui, "Pending", .tone = CUI_TONE_WARNING, .dot = true);
             cui_badge(ui, "Failed", .tone = CUI_TONE_DANGER, .dot = true);
-            cui_badge(ui, "Beta", .tone = CUI_TONE_INFO, .solid = true);
+            cui_badge(ui, "Beta", .solid = true);
         }
         cui_row(ui, .gap = 14) {
             cui_avatar(ui, "Jonas Berg", .size = 40, .status = "online");
             cui_avatar(ui, "Priya Nair", .size = 40);
-            static const char *team[] = { "Ken T", "Rosa L", "Donald K", "Elif A", "John B", "Omar D" };
+            static const char *team[] = { "Kwame Asante", "Rosa Delgado", "Daniel Mensah", "Elif Kaya", "Ben Carter", "Omar Haddad" };
             cui_avatar_group(ui, team, 6, 4, 32);
             cui_kbd(ui, "Ctrl Shift P");
         }
@@ -1850,7 +1850,7 @@ int main(int argc, char **argv) {
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
-        { "data-grid", scene_data_grid, 760, 390, true }, { "code-block", scene_code_block, 720, 300, true },
+        { "data-grid", scene_data_grid, 760, 390, true }, { "code-block", scene_code_block, 720, 340, true },
         { "json-view", scene_json_view, 560, 330, true }, { "chat", scene_chat, 560, 440, true },
         { "comments", scene_comments, 600, 370, true }, { "presence-ticker", scene_presence_ticker, 640, 170, true },
         { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },

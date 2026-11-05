@@ -302,7 +302,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
     if (sel) bg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, ACTIVE) : cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, ACCENT), ui->mode == CUI_THEME_DARK ? 0.16f : 0.09f);
     rn->bg = bg;
     cui__grid_row_paint *rp = cui__frame_alloc(ui, sizeof *rp);
-    rp->line = CUI_C(ui, BORDER_SUBTLE);
+    rp->line = row == b->nrows - 1 ? cui__rgba(0, 0, 0, 0) : CUI_C(ui, BORDER_SUBTLE);   /* the grid's own edge closes the last row */
     rn->paint = cui__paint_grid_row;
     rn->paint_data = rp;
     rn->flags |= CUI_NF_PAINT_AFTER;

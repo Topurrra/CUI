@@ -443,7 +443,7 @@ void cui_badge_ex(cui_ctx *ui, const char *text, const cui_badge_opts *o) {
         cui_color surf = CUI_C(ui, SURFACE);
         n->bg = neutral ? CUI_C(ui, ACTIVE) : cui_mix(surf, tone, ui->mode == CUI_THEME_DARK ? 0.14f : 0.10f);
         n->border = 1;
-        n->border_color = neutral ? cui__rgba(0, 0, 0, 0) : cui_mix(CUI_C(ui, BORDER), tone, ui->mode == CUI_THEME_DARK ? 0.22f : 0.18f);
+        n->border_color = neutral ? CUI_C(ui, BORDER) : cui_mix(CUI_C(ui, BORDER), tone, ui->mode == CUI_THEME_DARK ? 0.22f : 0.18f);   /* every badge has the same edge */
         fg = neutral ? CUI_C(ui, TEXT_SECONDARY) : cui_mix(CUI_C(ui, FOREGROUND), tone, ui->mode == CUI_THEME_DARK ? 0.80f : 0.88f);
     }
     cui__open(ui, i);
@@ -540,7 +540,7 @@ void cui_avatar_group(cui_ctx *ui, const char *const *names, int count, int max_
     if (max_visible <= 0) max_visible = 4;
     int shown = count < max_visible ? count : max_visible;
     int extra = count - shown;
-    float overlap = size * 0.28f;
+    float overlap = size * 0.22f;   /* enough to read as a group, little enough that initials stay whole */
     int slots = shown + (extra > 0 ? 1 : 0);
     float total_w = slots * size - (slots - 1) * overlap;
     int row = cui__node_new(ui, 0);
@@ -1061,7 +1061,19 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
     }
     float max_x = st->content_w - r.w;
     if (st->fade.a > 0 && max_x > 0.5f && (n->flags & CUI_NF_SCROLL_X)) {
-        /* sideways: vertex colors make a smooth eased ramp */
+        /* sideways: vertex colors make a smooth eased ramp. Where the area
+         * meets the rounded corners of the box it sits in, the ramp stops short
+         * of them so it never paints outside the rounded outline. */
+        float in_top = 0, in_bot = 0;
+        for (int a = n->parent; a >= 0; a = ui->nodes[a].parent) {
+            cui_node *an = &ui->nodes[a];
+            if (!(an->flags & CUI_NF_CLIP) || an->radius.bl + an->radius.br + an->radius.tl + an->radius.tr <= 0) continue;
+            if (fabsf(an->rect.y + an->rect.h - (r.y + r.h)) < 2.0f) in_bot = CUI_MAX(an->radius.bl, an->radius.br);
+            if (fabsf(an->rect.y - r.y) < 2.0f) in_top = CUI_MAX(an->radius.tl, an->radius.tr);
+            break;
+        }
+        float fy0 = r.y + in_top, fy1 = r.y + r.h - in_bot;
+        if (fy1 <= fy0) { fy0 = r.y; fy1 = r.y + r.h; }
         float fw = CUI_MIN(36.0f, r.w * 0.15f);
         float lt = cui__clampf(st->x / fw, 0, 1), rt = cui__clampf((max_x - st->x) / fw, 0, 1);
         cui_color clear = st->fade; clear.a = 0;
@@ -1078,8 +1090,8 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
                 if (q == 0) x += side ? 1.0f : -1.0f;   /* past the edge pixel the clip rounds out to */
                 cui_color c = cui_alpha(st->fade, a * k);
                 if (c.a == 0) c = clear;
-                v[q * 2] = (cui_cvert){ x, r.y, c };
-                v[q * 2 + 1] = (cui_cvert){ x, r.y + r.h, c };
+                v[q * 2] = (cui_cvert){ x, fy0, c };
+                v[q * 2 + 1] = (cui_cvert){ x, fy1, c };
             }
             for (int q = 0; q < S; q++) {
                 uint32_t b = (uint32_t)(q * 2);

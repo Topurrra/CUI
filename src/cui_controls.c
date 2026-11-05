@@ -559,8 +559,9 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         int hl = cui__absolute(ui, 0, st->x.x, kind == 0 ? 3 : (kind == 2 ? 2 : 0), st->w.x, kind == 1 ? h : inner_h);
         cui__hl_paint *p = cui__frame_alloc(ui, sizeof *p);
         if (kind == 0) {
-            p->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE_RAISED), CUI_C(ui, FOREGROUND), 0.1f) : CUI_C(ui, SURFACE_RAISED);
-            p->ring = cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 0 : 16);
+            /* the selected segment has to stand off the track in both modes */
+            p->bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE_RAISED), CUI_C(ui, FOREGROUND), 0.17f) : CUI_C(ui, SURFACE_RAISED);
+            p->ring = ui->mode == CUI_THEME_DARK ? cui__rgba(255, 255, 255, 22) : cui__rgba(0, 0, 0, 16);
             p->radius = CUI_MIN(ui->theme.radius_control - 3, inner_h * 0.5f);
             p->shadow = true;
         } else if (kind == 1) {
@@ -606,15 +607,15 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         }
     }
     cui__close(ui);
-    if (kind == 1) {
-        /* baseline divider under the whole tab row */
-        int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-        ui->nodes[line].bg = CUI_C(ui, BORDER);
-        ui->nodes[line].self_align = CUI_ALIGN_STRETCH;
-        ui->nodes[line].ty = -1;
-    }
     ui->last_id = id;
     return *index != old;
+}
+
+/* the baseline under a tab row, painted before the tabs so the active
+ * indicator sits on top of it rather than above it */
+static void cui__paint_tab_baseline(cui_ctx *ui, cui_node *n, void *data) {
+    cui_color *c = data;
+    cui_draw_rect(ui, (cui_rect){ n->rect.x, n->rect.y + n->rect.h - 1, n->rect.w, 1 }, CUI_CORNERS(0), *c);
 }
 
 void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data) {
@@ -637,6 +638,10 @@ bool cui_tabs_ex(cui_ctx *ui, const char *id, const char *const *items, int coun
     int col = cui__node_new(ui, 0);
     ui->nodes[col].w = CUI_FILL;
     ui->nodes[col].self_align = CUI_ALIGN_STRETCH;
+    cui_color *bc = cui__frame_alloc(ui, sizeof *bc);
+    *bc = CUI_C(ui, BORDER);
+    ui->nodes[col].paint = cui__paint_tab_baseline;
+    ui->nodes[col].paint_data = bc;
     cui__open(ui, col);
     bool r = cui__segments(ui, id, items, o->icons, count, index, 1, CUI_SIZE_MD, o->full_width);
     cui__close(ui);

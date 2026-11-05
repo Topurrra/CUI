@@ -547,6 +547,7 @@ typedef struct { float hover; } cui__tp_state;
 static void cui__paint_column_fade(cui_ctx *ui, cui_node *n, void *data) {
     (void)data;
     cui_rect r = n->rect;
+    r.x += n->pad[3]; r.w -= n->pad[1] + n->pad[3]; r.y += n->pad[0]; r.h -= n->pad[0] + n->pad[2];   /* the content box */
     cui_color bg = CUI_C(ui, SURFACE_RAISED), clear = bg;
     clear.a = 0;
     float f = 34;
@@ -633,6 +634,8 @@ bool cui_time_picker_ex(cui_ctx *ui, const char *id_str, int *hour, int *minute,
         bool scroll_now = p && ui->frame - p->opened_frame <= 2;
         int row = cui__node_new(ui, 0);
         ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 4;
+        /* inset from the popover's rounded corners, so nothing pokes into them */
+        ui->nodes[row].pad[0] = ui->nodes[row].pad[2] = 6; ui->nodes[row].pad[1] = ui->nodes[row].pad[3] = 4;
         ui->nodes[row].paint = cui__paint_column_fade;   /* rows fade out at the top and bottom edges */
         ui->nodes[row].paint_data = NULL;
         ui->nodes[row].flags |= CUI_NF_PAINT_AFTER;
