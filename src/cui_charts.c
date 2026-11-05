@@ -22,7 +22,15 @@ void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo, float 
 }
 
 const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v) {
-    if (fmt) return cui__frame_printf(ui, fmt, (double)v);
+    if (fmt) {
+        char *s = cui__frame_printf(ui, fmt, (double)v);
+        /* zero needs no magnitude: "$0k" reads as "$0" */
+        if (v == 0 && s) {
+            size_t n = strlen(s);
+            if (n >= 2 && s[n - 2] == '0' && (s[n - 1] == 'k' || s[n - 1] == 'K' || s[n - 1] == 'M' || s[n - 1] == 'B')) s[n - 1] = 0;
+        }
+        return s;
+    }
     float a = fabsf(v);
     if (a >= 1e9f) return cui__frame_printf(ui, "%.1fB", (double)(v / 1e9f));
     if (a >= 1e6f) return cui__frame_printf(ui, "%.1fM", (double)(v / 1e6f));

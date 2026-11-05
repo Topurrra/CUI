@@ -296,8 +296,8 @@ SCENE(bar_chart) {
     static const float a[] = { 42, 51, 38, 64, 58, 71 }, b[] = { 28, 33, 30, 41, 46, 49 };
     static const char *m[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun" };
     cui_series s[2] = { { "Desktop", a, 6, { 0 } }, { "Mobile", b, 6, { 0 } } };
-    cui_row(ui, .gap = 16, .align = CUI_ALIGN_STRETCH) {
-        cui_card(ui, .width = CUI_PX(380)) { cui_bar_chart(ui, "b", s, 2, .labels = m, .label_count = 6, .height = 180); }
+    cui_row(ui, .gap = 16, .align = CUI_ALIGN_STRETCH, .width = CUI_FILL) {
+        cui_card(ui, .width = CUI_GROW(1)) { cui_bar_chart(ui, "b", s, 2, .labels = m, .label_count = 6, .height = 180); }
         cui_card(ui, .align = CUI_ALIGN_CENTER) {
             static const float v[] = { 46, 27, 17, 10 };
             static const char *l[] = { "Windows", "macOS", "Linux", "Other" };
@@ -1817,7 +1817,7 @@ int main(int argc, char **argv) {
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 300, true },
-        { "bar-donut", scene_bar_chart, 760, 290, true }, { "command-palette", scene_palette, 680, 460, true },
+        { "bar-donut", scene_bar_chart, 840, 290, true }, { "command-palette", scene_palette, 680, 460, true },
         { "icons", scene_icons, 1040, 1120, false },
         { "radio-cards", scene_radio_cards, 780, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
