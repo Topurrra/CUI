@@ -1345,6 +1345,40 @@ static void test_atlas_pressure(void) {
     cui_destroy(ui);
 }
 
+/* pretty wrapping -------------------------------------------------------- */
+
+/* the library's internal line record; same tag and members, so a compatible type */
+struct cui_text_layout_line { int start, end; float width; };
+int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int len, float width,
+                   struct cui_text_layout_line *lines, int max_lines);
+
+static int last_line_words(const char *t, struct cui_text_layout_line *l) {
+    int w = 1;
+    for (int i = l->start; i < l->end; i++) w += t[i] == ' ';
+    return w;
+}
+
+static void test_pretty_wrap(void) {
+    printf("text: wrapped paragraphs do not end on a lone word\n");
+    cui_ctx *ui = new_ctx();
+    run(ui, build_empty, NULL, 1);
+    const char *t = "Keyboard navigation in the date range picker";
+    float full = cui_measure_text(ui, CUI_FONT_MEDIUM, 14, t, -1).width;
+    struct cui_text_layout_line lines[8];
+    /* a width that greedily leaves only the last word on the second line */
+    float w = full - 4;
+    int n = cui__text_wrap(ui, CUI_FONT_MEDIUM, 14, t, (int)strlen(t), w, lines, 8);
+    CHECK(n == 2);
+    CHECK(last_line_words(t, &lines[n - 1]) >= 2);
+    /* the line count is kept: a width that needs three lines still gets three */
+    int n3 = cui__text_wrap(ui, CUI_FONT_MEDIUM, 14, t, (int)strlen(t), full * 0.4f, lines, 8);
+    CHECK(n3 >= 3);
+    CHECK(last_line_words(t, &lines[n3 - 1]) >= 2);
+    /* a single paragraph line is untouched */
+    CHECK(cui__text_wrap(ui, CUI_FONT_MEDIUM, 14, t, (int)strlen(t), full + 10, lines, 8) == 1);
+    cui_destroy(ui);
+}
+
 /* scroll edge fades ------------------------------------------------------ */
 
 typedef struct { bool fade; int rows; } fade_ctx;
@@ -2068,6 +2102,7 @@ int main(void) {
     test_theme();
     test_renderer();
     test_scroll_fade();
+    test_pretty_wrap();
     test_stress();
     test_atlas_pressure();
     cui_sw_destroy(g_sw);

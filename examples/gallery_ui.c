@@ -50,7 +50,8 @@ void gallery_init(gallery *g) {
 /* ---- small helpers ---- */
 
 static void section(cui_ctx *ui, const char *title, const char *desc) {
-    cui_column(ui, .gap = 4) {
+    /* more room above a heading than below it, so it reads as the start of what follows */
+    cui_column(ui, .gap = 4, .pad_top = 18) {
         cui_heading(ui, title, 4);
         if (desc) cui_secondary(ui, desc);
     }

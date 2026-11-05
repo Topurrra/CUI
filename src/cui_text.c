@@ -370,8 +370,8 @@ int cui__text_hit(cui_ctx *ui, cui_font font, float size, const char *text, int 
 
 static bool cui__is_space(uint32_t c) { return c == ' ' || c == '\t'; }
 
-int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int len, float width,
-                   cui_text_layout_line *lines, int max_lines) {
+static int cui__text_wrap_greedy(cui_ctx *ui, cui_font font, float size, const char *text, int len, float width,
+                                 cui_text_layout_line *lines, int max_lines) {
     font = cui__resolve_font(ui, font);
     if (font < 0) return 0;
     int count = 0;
@@ -421,6 +421,71 @@ int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int
     CUI__EMIT(line_start, e, cui__text_width_raw(ui, font, size, text + line_start, e - line_start, false));
 #undef CUI__EMIT
     return count;
+}
+
+static bool cui__span_has_space(const char *text, int s, int e) {
+    for (int i = s; i < e; i++) if (text[i] == ' ' || text[i] == '\t') return true;
+    return false;
+}
+static int cui__span_spaces(const char *text, int s, int e) {
+    int n = 0;
+    for (int i = s; i < e; i++) n += text[i] == ' ';
+    return n;
+}
+
+/* Greedy wrapping, then a "pretty" pass: when the last line would be a single
+ * word under a line of three or more, wrap a little narrower so a second word
+ * comes down with it. The line count never changes, so neither does the height. */
+int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int len, float width,
+                   cui_text_layout_line *lines, int max_lines) {
+    enum { CAP = 96 };
+    cui_text_layout_line tmp[CAP];
+    int n = cui__text_wrap_greedy(ui, font, size, text, len, width, tmp, CAP);
+    bool orphan = false;
+    if (n >= 2 && n <= CAP) {
+        const cui_text_layout_line *a = &tmp[n - 2], *b = &tmp[n - 1];
+        bool same_paragraph = true;
+        for (int i = a->end; i < b->start; i++) if (text[i] == '\n') { same_paragraph = false; break; }
+        orphan = same_paragraph && b->end > b->start && !cui__span_has_space(text, b->start, b->end) && cui__span_spaces(text, a->start, a->end) >= 2;
+    }
+    /* headings balance their lines: the narrowest width that keeps the same
+     * number of lines, so a title breaks into even halves, not a full line
+     * and a stub */
+    if (size >= 20 && n >= 2 && n <= 4) {
+        bool para = true;
+        for (int i = 0; i < len; i++) if (text[i] == '\n') { para = false; break; }
+        if (para) {
+            cui_text_layout_line alt[CAP];
+            float lo = width * 0.5f, hi = width, best = width;
+            for (int k = 0; k < 9; k++) {
+                float mid = (lo + hi) * 0.5f;
+                if (cui__text_wrap_greedy(ui, font, size, text, len, mid, alt, CAP) == n) { best = mid; hi = mid; }
+                else lo = mid;
+            }
+            if (best < width) {
+                int m = cui__text_wrap_greedy(ui, font, size, text, len, best + 0.5f, alt, CAP);
+                if (m == n) {
+                    if (lines) for (int i = 0; i < m && i < max_lines; i++) lines[i] = alt[i];
+                    return m;
+                }
+            }
+        }
+    }
+    if (orphan) {
+        cui_text_layout_line alt[CAP];
+        for (int k = 1; k <= 10; k++) {
+            float w = width * (1.0f - 0.03f * (float)k);
+            int m = cui__text_wrap_greedy(ui, font, size, text, len, w, alt, CAP);
+            if (m != n) break;   /* would add a line: keep the original */
+            if (cui__span_has_space(text, alt[m - 1].start, alt[m - 1].end)) {
+                if (lines) for (int i = 0; i < m && i < max_lines; i++) lines[i] = alt[i];
+                return m;
+            }
+        }
+    }
+    if (lines) for (int i = 0; i < n && i < max_lines && i < CAP; i++) lines[i] = tmp[i];
+    if (n > CAP && lines) return cui__text_wrap_greedy(ui, font, size, text, len, width, lines, max_lines);
+    return n;
 }
 
 float cui__text_min_width(cui_ctx *ui, cui_font font, float size, const char *text, int len) {
