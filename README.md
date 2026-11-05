@@ -4,7 +4,7 @@
 
 ### Modern native UI components for C
 
-Polished components, spring motion and full keyboard support.<br>
+About 150 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies. About 240 KB.
 
 <p>
@@ -111,7 +111,7 @@ Every screenshot here is a real app from [`examples/`](examples), rendered by CU
 <td width="50%"><img src="docs/images/showcase/finance.png" alt="Personal finance app"></td>
 </tr>
 <tr>
-<td align="center"><sub><b>Tempo</b>: generated cover art, track list, transport bar · <a href="examples/music.c">music.c</a></sub></td>
+<td align="center"><sub><b>Tempo</b>: cover art drawn on a canvas, track list, transport bar · <a href="examples/music.c">music.c</a></sub></td>
 <td align="center"><sub><b>Vault</b>: balance chart, painted card, budgets, goals · <a href="examples/finance.c">finance.c</a></sub></td>
 </tr>
 <tr>
@@ -279,7 +279,7 @@ The library is compiled for dead code stripping, so apps only carry what they us
 |---|---|
 | [`assistant`](examples/assistant.c) | AI assistant: reasoning, tool calls, sources, plan, composer with a model picker |
 | [`tracker`](examples/tracker.c) | Issue tracker: grouped list, custom status glyphs, detail pane, activity |
-| [`music`](examples/music.c) | Music player: generated cover art, track list, transport bar |
+| [`music`](examples/music.c) | Music player: cover art drawn on a canvas, track list, transport bar |
 | [`finance`](examples/finance.c) | Personal finance: top navigation, charts, painted card, budgets, goals |
 | [`dashboard`](examples/dashboard.c) | Sidebar, top bar, KPIs, charts and a sortable table |
 | [`mail`](examples/mail.c) | Three pane inbox, folders, reading pane, compose dialog |
