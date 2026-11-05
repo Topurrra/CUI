@@ -818,13 +818,10 @@ bool cui_empty_state_ex(cui_ctx *ui, const char *title, const cui_empty_opts *o)
     if (o->icon) {
         int ic = cui__node_new(ui, 0);
         cui_node *in = &ui->nodes[ic];
-        in->w = CUI_PX(44); in->h = CUI_PX(44);
-        in->radius = CUI_CORNERS(14);
-        in->bg = CUI_C(ui, SURFACE_MUTED);
-        in->border = 1; in->border_color = CUI_C(ui, BORDER);
+        in->w = CUI_PX(32); in->h = CUI_PX(32);   /* the icon alone, larger and quiet; no tile */
         in->dir = CUI_STACK; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, ic);
-        cui__icon_node(ui, o->icon, 20, CUI_C(ui, TEXT_SECONDARY));
+        cui__icon_node(ui, o->icon, 28, CUI_C(ui, TEXT_MUTED));
         cui__close(ui);
         cui_gap(ui, 8);
     }

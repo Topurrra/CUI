@@ -227,8 +227,7 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
     cui__open(ui, head);
     int ib = cui__node_new(ui, 0);
     cui_node *in = &ui->nodes[ib];
-    in->w = CUI_PX(24); in->h = CUI_PX(24); in->radius = CUI_CORNERS(7);
-    in->bg = CUI_C(ui, SURFACE_MUTED); in->border = 1; in->border_color = CUI_C(ui, BORDER_SUBTLE);
+    in->w = CUI_PX(16); in->h = CUI_PX(24);   /* a bare icon: no tile behind it */
     in->dir = CUI_STACK; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER;
     cui__open(ui, ib);
     cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_TERMINAL, 13, CUI_C(ui, TEXT_SECONDARY));
@@ -711,11 +710,10 @@ int cui_prompt_suggestions_ex(cui_ctx *ui, const char *id_str, const cui_prompt_
         if (items[k].icon) {
             int ib = cui__node_new(ui, 0);
             cui_node *in = &ui->nodes[ib];
-            in->w = CUI_PX(30); in->h = CUI_PX(30); in->radius = CUI_CORNERS(9);
-            in->bg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, SURFACE_MUTED) : CUI_C(ui, ACCENT_SUBTLE);
+            in->w = CUI_PX(18); in->h = CUI_PX(20);   /* a bare icon, aligned with the title's first line */
             in->dir = CUI_STACK; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER;
             cui__open(ui, ib);
-            cui__icon_node(ui, items[k].icon, 15, ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT));
+            cui__icon_node(ui, items[k].icon, 16, CUI_C(ui, TEXT_SECONDARY));
             cui__close(ui);
         }
         int col = cui__node_new(ui, 0);

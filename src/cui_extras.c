@@ -82,11 +82,10 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
         if (choices[k].icon) {
             int ib = cui__node_new(ui, 0);
             cui_node *in = &ui->nodes[ib];
-            in->w = CUI_PX(32); in->h = CUI_PX(32); in->radius = CUI_CORNERS(10);
-            in->bg = CUI_C(ui, SURFACE_MUTED); in->border = 1; in->border_color = CUI_C(ui, BORDER);
+            in->w = CUI_PX(20); in->h = CUI_PX(22);   /* a bare icon beside the title */
             in->dir = CUI_STACK; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER;
             cui__open(ui, ib);
-            cui__icon_node(ui, choices[k].icon, 16, sel ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
+            cui__icon_node(ui, choices[k].icon, 18, sel ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
             cui__close(ui);
         }
         int col = cui__node_new(ui, 0);

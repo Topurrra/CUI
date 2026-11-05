@@ -203,11 +203,10 @@ bool cui_expandable_card_begin(cui_ctx *ui, const char *title, bool *open, const
     if (o->icon) {
         int ib = cui__node_new(ui, 0);
         cui_node *in = &ui->nodes[ib];
-        in->w = CUI_PX(36); in->h = CUI_PX(36); in->radius = CUI_CORNERS(10);
-        in->bg = CUI_C(ui, SURFACE_MUTED); in->border = 1; in->border_color = CUI_C(ui, BORDER);
+        in->w = CUI_PX(20); in->h = CUI_PX(36);   /* a bare icon: no tile behind it */
         in->dir = CUI_STACK; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, ib);
-        cui__icon_node(ui, o->icon, 17, CUI_C(ui, FOREGROUND));
+        cui__icon_node(ui, o->icon, 18, CUI_C(ui, TEXT_SECONDARY));
         cui__close(ui);
     }
     int col = cui__node_new(ui, 0);

@@ -224,7 +224,7 @@ SCENE(cards) {
 }
 SCENE(empty) {
     cui_card(ui, .pad = 0, .width = CUI_PX(520)) {
-        cui_empty_state(ui, "No projects yet", .icon = CUI_ICON_FOLDER_OPEN, .description = "Create a project to get started.", .action = "New project");
+        cui_empty_state(ui, "No projects yet", .icon = CUI_ICON_FOLDER_OPEN, .description = "A project holds your screens, their builds and who can see them.", .action = "New project");
     }
 }
 SCENE(table) {
@@ -339,7 +339,7 @@ SCENE(radio_cards) {
         { "Team server", "Synced every few minutes.", CUI_ICON_SERVER, "Default" },
         { "Both", "Local, plus a nightly upload.", CUI_ICON_LAYERS, NULL },
     };
-    cui_box(ui, .width = CUI_PX(720)) { cui_radio_cards(ui, "places", places, 3, &sel); }
+    cui_box(ui, .width = CUI_PX(880)) { cui_radio_cards(ui, "places", places, 3, &sel); }
 }
 SCENE(tag_otp) {
     static char tags[128] = "design, c99, native";
@@ -1819,7 +1819,7 @@ int main(int argc, char **argv) {
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 300, true },
         { "bar-donut", scene_bar_chart, 840, 290, true }, { "command-palette", scene_palette, 680, 460, true },
         { "icons", scene_icons, 1040, 1120, false },
-        { "radio-cards", scene_radio_cards, 780, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
+        { "radio-cards", scene_radio_cards, 940, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },
         { "mosaic-pro", scene_mosaic_pro, 1440, 900, true, true, CUI_ACCENT_GREEN },

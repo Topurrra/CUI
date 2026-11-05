@@ -509,7 +509,7 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
     }
     cui_card(ui, .pad = 0) {
         if (cui_empty_state(ui, "No projects yet", .icon = CUI_ICON_FOLDER_OPEN,
-                            .description = "Projects keep your designs, code and docs together. Create one to get started.", .action = "New project"))
+                            .description = "A project holds your screens, their builds and who can see them.", .action = "New project"))
             cui_toast(ui, "Project created", .tone = CUI_TONE_SUCCESS);
     }
 }

@@ -430,7 +430,7 @@ Cards rest on a hairline border with no shadow. Card options: `pad` (24), `pad_x
 
 ```c
 if (cui_empty_state(ui, "No projects yet", .icon = CUI_ICON_FOLDER_OPEN,
-                    .description = "Create a project to get started.", .action = "New project"))
+                    .description = "A project holds your screens, their builds and who can see them.", .action = "New project"))
     create_project();
 ```
 
