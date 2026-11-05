@@ -759,7 +759,7 @@ bool cui_alert_ex(cui_ctx *ui, const char *title, const cui_alert_opts *o) {
     n->radius = CUI_CORNERS(ui->theme.radius_control);
     n->bg = o->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, SURFACE_MUTED) : cui_mix(CUI_C(ui, SURFACE), tone, dark ? 0.12f : 0.07f);
     n->border = 1;
-    n->border_color = o->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, BORDER) : cui_mix(CUI_C(ui, BORDER), tone, dark ? 0.3f : 0.22f);
+    n->border_color = o->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, BORDER) : cui_mix(CUI_C(ui, BORDER), tone, dark ? 0.2f : 0.12f);   /* the tint carries the tone; the edge stays quiet */
     cui__open(ui, i);
     int ib = cui__node_new(ui, 0);
     ui->nodes[ib].pad[0] = 1;

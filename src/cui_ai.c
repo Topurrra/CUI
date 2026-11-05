@@ -732,7 +732,7 @@ int cui_prompt_suggestions_ex(cui_ctx *ui, const char *id_str, const cui_prompt_
         int ar = cui__absolute(ui, 0, cpr.w > 0 ? cpr.w - 26 : -100, 12, 14, 14);   /* top right, out of the text's way */
         ui->nodes[ar].tx = 3 * st[0];
         ui->nodes[ar].ty = -3 * st[0];
-        ui->nodes[ar].opacity = CUI_MAX(0.001f, 0.3f + 0.7f * st[0]);
+        ui->nodes[ar].opacity = CUI_MAX(0.001f, st[0]);   /* appears with the hover, not repeated on every card at rest */
         cui__open(ui, ar);
         cui__icon_node(ui, CUI_ICON_ARROW_UP_RIGHT, 14, CUI_C(ui, TEXT_MUTED));
         cui__close(ui);
