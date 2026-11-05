@@ -870,6 +870,10 @@ static void cui__paint_time_dial(cui_ctx *ui, cui_node *n, void *data) {
             cui_vec2 pi = { c.x + sinf(a) * inner, c.y - cosf(a) * inner };
             bool so_sel = p->hour == ho % 24 && ho != 12 ? true : (ho == 12 && p->hour == 12);
             bool si_sel = p->hour == (hi % 24);
+            /* the hand runs past the inner label on its way out: cut a gap in it so the number stays clean */
+            float d = fabsf(remainderf(a - p->ang, 2 * CUI_PI));
+            float gap = cui__clampf(1 - d / 0.3f, 0, 1) * cui__clampf(p->len * 2 - 1, 0, 1);
+            if (gap > 0) cui_draw_circle(ui, pi, fs_i * 1.15f, cui_alpha(p->face, gap));
             float wo = cui__text_width(ui, CUI_FONT_MEDIUM, fs_o, so, -1, true), lo = cui__font_line_height(ui, CUI_FONT_MEDIUM, fs_o);
             float wi = cui__text_width(ui, CUI_FONT_BODY, fs_i, si, -1, true), li = cui__font_line_height(ui, CUI_FONT_BODY, fs_i);
             cui__draw_text_line(ui, CUI_FONT_MEDIUM, fs_o, po.x - wo * 0.5f, po.y - lo * 0.5f, so_sel ? p->glyph : p->fg, so, -1, true);
@@ -1578,7 +1582,11 @@ int cui_avatar_upload(cui_ctx *ui, const char *id_str, const char *name, cui_tex
     cui_avatar_opts ao;
     memset(&ao, 0, sizeof ao);
     ao.size = size; ao.image = *image;
+    /* absolute children paint in order, so the avatar sits in one too and the badge lands on top */
+    int face = cui__absolute(ui, 0, 0, 0, size, size);
+    cui__open(ui, face);
     cui_avatar_ex(ui, name, &ao);
+    cui__close(ui);
     /* edit badge */
     float bs = CUI_MAX(24.0f, size * 0.3f);
     int badge = cui__absolute(ui, 0, size - bs + 2, size - bs + 2, bs, bs);

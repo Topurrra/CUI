@@ -1792,7 +1792,7 @@ int main(int argc, char **argv) {
         { "shortcut-recorder", scene_shortcut_rec, 760, 110, true },
         { "multi-select", scene_multi, 380, 420, true }, { "date-range", scene_range, 760, 440, true },
         { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },
-        { "ruler-histogram", scene_rulers, 860, 200, true }, { "capture", scene_capture, 900, 300, true },
+        { "ruler-histogram", scene_rulers, 860, 224, true }, { "capture", scene_capture, 900, 300, true },
         { "hover-card", scene_hover_card, 460, 220, true }, { "confirm-popover", scene_confirm_pop, 420, 260, true },
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
