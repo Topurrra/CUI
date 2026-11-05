@@ -1084,8 +1084,8 @@ SCENE(agent_plan) {
 }
 static const cui_source shot_sources[] = {
     { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
-    { "Text rendering hates you", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
-    { "Springs, not curves", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
+    { "Notes on subpixel text positioning", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
+    { "Spring physics for interface motion", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
 };
 static void body_sources(cui_ctx *ui) {
     cui_text(ui, "They do very little work per frame: the interface is rebuilt from your data, laid out once and drawn in a handful of batches.", .size = 15);

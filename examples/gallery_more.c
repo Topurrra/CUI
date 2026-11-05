@@ -949,8 +949,8 @@ static void page_ai(cui_ctx *ui) {
     };
     static const cui_source sources[] = {
         { "Immediate mode GUIs and why they keep coming back", "https://example.com/blog/immediate-mode", "A look at retained and immediate mode toolkits and the trade offs between them." },
-        { "Text rendering hates you", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
-        { "Springs, not curves", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
+        { "Notes on subpixel text positioning", "https://docs.example.org/text/rendering", "Shaping, hinting and subpixel positioning explained with examples." },
+        { "Spring physics for interface motion", "https://motion.example.net/springs", "Why spring physics feel more natural than cubic beziers for interface motion." },
     };
     double now = cui_time(ui);
     if (busy && started < 0) started = now;

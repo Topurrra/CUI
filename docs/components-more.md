@@ -755,7 +755,7 @@ The rail fills up to the step in progress, the running step shimmers, and the he
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/sources-dark.png"><img src="images/components/sources.png" alt="Sources and citations"></picture>
 
 ```c
-static const cui_source sources[] = { { "Text rendering hates you", "https://docs.example.org/text", "Shaping, hinting and..." } /* ... */ };
+static const cui_source sources[] = { { "Notes on subpixel text positioning", "https://docs.example.org/text", "Shaping, hinting and..." } /* ... */ };
 for (int k = 0; k < n; k++) cui_citation(ui, k + 1, &sources[k]);   /* a chip; hover for a card */
 int open = cui_source_list(ui, "sources", sources, n);              /* cards that scroll sideways */
 ```
