@@ -101,3 +101,29 @@ A `cui_ctx` is not thread safe; use it from one thread. You may create several c
 ## Memory
 
 All allocations go through `cui_ctx_desc.allocator` if you provide one. Per frame data lives in an arena that is reused, so a steady UI does not allocate. Component state is freed automatically a few seconds after the component disappears.
+
+## Binary size
+
+CUI is built to stay small. Measured with GCC, `-DCMAKE_BUILD_TYPE=MinSizeRel`, stripped, x86-64:
+
+| | Size |
+|---|---|
+| Whole library (every component, both renderers, X11 backend, fonts) | about 345 KB |
+| of which embedded fonts (Inter, Geist, Geist Mono, 162 Lucide icons) | 95 KB, compressed |
+| `examples/hello` on Linux, whole executable | about 230 KB |
+| `examples/hello.exe` on Windows (MinGW), whole executable | about 380 KB |
+| `examples/gallery`, every component in use | about 370 KB |
+
+What keeps it small:
+
+- The library is compiled with one section per function, so the linker can drop everything your app never calls. Turn that on in your own executable for release builds: `-Wl,--gc-sections` (GCC and Clang on Linux, MinGW), `-Wl,-dead_strip` (macOS), `/OPT:REF /OPT:ICF` (MSVC). The examples already do.
+- The embedded fonts are stored as DEFLATE streams (about 48% smaller) and unpacked into memory once, when a context is created (about 1.5 ms).
+- Image decoding covers PNG and JPEG only. `-DCUI_IMAGE_ALL_FORMATS=ON` adds BMP, GIF and TGA.
+
+Going smaller:
+
+| Option | Saves |
+|---|---|
+| `-DCUI_DEFAULT_FONTS=OFF` (load your own fonts with `cui_font_load_file`) | 95 KB plus the decoder |
+| `-DCUI_STB_IMAGE=OFF` (upload pixels yourself with `cui_image_create`) | about 24 KB |
+| `-DCUI_WITH_APP=OFF` (core only, for use inside your engine) | the window layer and dialogs |

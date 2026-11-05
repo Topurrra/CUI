@@ -1,6 +1,6 @@
 # Design principles
 
-CUI's look is deliberate. These are the rules every component follows, and they are a good guide for the screens you build with it. The design language takes heavy inspiration from [Arc](https://uiarc.dev).
+CUI's look is deliberate. These are the rules every component follows, and they are a good guide for the screens you build with it.
 
 ## Color
 

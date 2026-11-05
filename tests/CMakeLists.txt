@@ -30,3 +30,7 @@ endif()
 add_executable(cui_fuzz fuzz_gallery.c ../examples/gallery_ui.c)
 target_link_libraries(cui_fuzz PRIVATE cui::cui)
 add_test(NAME cui_fuzz COMMAND cui_fuzz 3000)
+
+add_executable(cui_test_inflate test_inflate.c)
+target_include_directories(cui_test_inflate PRIVATE ../include)
+add_test(NAME cui_test_inflate COMMAND cui_test_inflate)

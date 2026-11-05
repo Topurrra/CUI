@@ -498,11 +498,13 @@ Charts draw in once, pick nice axis ticks, show a crosshair that glides between 
 
 ```c
 int w, h;
-cui_texture tex = cui_image_load(ui, "photo.jpg", &w, &h);      /* PNG, JPEG, BMP, GIF, TGA */
+cui_texture tex = cui_image_load(ui, "photo.jpg", &w, &h);      /* PNG or JPEG */
 cui_image(ui, tex, .width = CUI_PX(240), .height = CUI_PX(160), .radius = 12);
 cui_texture raw = cui_image_create(ui, w, h, rgba_pixels);        /* from memory */
 cui_image_destroy(ui, tex);
 ```
+
+PNG and JPEG are decoded out of the box. Configure with `-DCUI_IMAGE_ALL_FORMATS=ON` to add BMP, GIF and TGA, or `-DCUI_STB_IMAGE=OFF` to leave decoding out and upload your own pixels with `cui_image_create`.
 
 ## Radio cards
 

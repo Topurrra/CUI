@@ -17,6 +17,7 @@ option(CUI_BUILD_SHARED "Build a shared library" OFF)
 option(CUI_WITH_APP "Include the app layer (windows, events)" ON)
 option(CUI_DEFAULT_FONTS "Embed Inter, Geist and Lucide" ON)
 option(CUI_STB_IMAGE "Image loading with stb_image" ON)
+option(CUI_IMAGE_ALL_FORMATS "Also decode BMP, GIF and TGA (PNG and JPEG are always on)" OFF)
 set(CUI_PLATFORM "auto" CACHE STRING "Window backend: auto, win32, cocoa, x11, sdl2, glfw")
 set_property(CACHE CUI_PLATFORM PROPERTY STRINGS auto win32 cocoa x11 sdl2 glfw)
 
@@ -43,7 +44,7 @@ set(CUI_CORE_SOURCES
     src/render/cui_render_gl.c)
 
 if(CUI_DEFAULT_FONTS)
-    list(APPEND CUI_CORE_SOURCES src/cui_font_data.c)
+    list(APPEND CUI_CORE_SOURCES src/cui_font_data.c src/cui_inflate.c)
 endif()
 
 # Pick the window backend
@@ -97,6 +98,16 @@ if(NOT CUI_DEFAULT_FONTS)
 endif()
 if(NOT CUI_STB_IMAGE)
     target_compile_definitions(cui PRIVATE CUI_NO_STB_IMAGE)
+elseif(CUI_IMAGE_ALL_FORMATS)
+    target_compile_definitions(cui PRIVATE CUI_IMAGE_ALL_FORMATS)
+endif()
+
+# One section per function and object, so linkers can drop the parts an app
+# never calls (-Wl,--gc-sections, -dead_strip, /OPT:REF).
+if(MSVC)
+    target_compile_options(cui PRIVATE /Gy /Gw)
+else()
+    target_compile_options(cui PRIVATE -ffunction-sections -fdata-sections)
 endif()
 
 if(MSVC)

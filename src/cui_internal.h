@@ -48,6 +48,7 @@ static inline bool cui__color_set(cui_color c) { return c.a != 0 || cui__is_toke
 
 /* ---- memory ---- */
 void *cui__alloc(cui_ctx *ui, size_t size);
+size_t cui__inflate(const void *src, size_t src_len, void *dst, size_t dst_cap);  /* raw DEFLATE */
 void *cui__realloc(cui_ctx *ui, void *p, size_t size);
 void cui__free(cui_ctx *ui, void *p);
 void *cui__frame_alloc(cui_ctx *ui, size_t size);       /* freed at frame start */

@@ -1,16 +1,22 @@
-/* Image loading (PNG, JPEG, BMP, GIF, TGA) through stb_image.
- * Define CUI_NO_STB_IMAGE to leave it out. */
+/* Image loading through stb_image: PNG and JPEG by default. Define
+ * CUI_IMAGE_ALL_FORMATS to also accept BMP, GIF and TGA (about 7 KB more),
+ * or CUI_NO_STB_IMAGE to leave image decoding out entirely. */
 #include "cui_internal.h"
 
 #ifndef CUI_NO_STB_IMAGE
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
+#ifdef CUI_IMAGE_ALL_FORMATS
 #define STBI_ONLY_BMP
 #define STBI_ONLY_GIF
 #define STBI_ONLY_TGA
+#endif
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #if defined(__GNUC__) || defined(__clang__)
+/* stb_image declares stbi_load_gif_from_memory even with GIF off; that warning
+ * is reported at the end of the file, so it stays silenced for the whole file */
+#pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wsign-compare"

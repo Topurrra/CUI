@@ -18,11 +18,12 @@
 #endif
 
 #ifndef CUI_NO_DEFAULT_FONTS
-extern const unsigned char cui_font_inter_regular[]; extern const unsigned int cui_font_inter_regular_size;
-extern const unsigned char cui_font_inter_medium[];  extern const unsigned int cui_font_inter_medium_size;
-extern const unsigned char cui_font_geist_medium[];  extern const unsigned int cui_font_geist_medium_size;
-extern const unsigned char cui_font_geist_mono[];    extern const unsigned int cui_font_geist_mono_size;
-extern const unsigned char cui_font_lucide[];        extern const unsigned int cui_font_lucide_size;
+#define CUI__EMBEDDED(n) extern const unsigned char n[]; extern const unsigned int n##_size, n##_packed;
+CUI__EMBEDDED(cui_font_inter_regular)
+CUI__EMBEDDED(cui_font_inter_medium)
+CUI__EMBEDDED(cui_font_geist_medium)
+CUI__EMBEDDED(cui_font_geist_mono)
+CUI__EMBEDDED(cui_font_lucide)
 #endif
 
 struct cui_font_data {
@@ -153,8 +154,16 @@ void cui__fonts_init(cui_ctx *ui, bool defaults) {
                                          cui_font_geist_mono, cui_font_lucide };
         unsigned int size[5] = { cui_font_inter_regular_size, cui_font_inter_medium_size, cui_font_geist_medium_size,
                                  cui_font_geist_mono_size, cui_font_lucide_size };
+        unsigned int packed[5] = { cui_font_inter_regular_packed, cui_font_inter_medium_packed, cui_font_geist_medium_packed,
+                                   cui_font_geist_mono_packed, cui_font_lucide_packed };
         for (int i = 0; i < 5; i++) {
-            cui_font f = cui_font_load_memory(ui, data[i], size[i], false);
+            /* the embedded fonts are compressed; unpack each into a buffer the font owns */
+            unsigned char *buf = cui__alloc(ui, size[i]);
+            cui_font f = -1;
+            if (cui__inflate(data[i], packed[i], buf, size[i]) == size[i])
+                f = cui_font_load_memory(ui, buf, size[i], false);
+            if (f >= 0) ui->fonts[f - CUI__USER_FONT_BASE].owned = true;
+            else cui__free(ui, buf);
             ui->roles[i] = f >= 0 ? f - CUI__USER_FONT_BASE : -1;
         }
         if (ui->roles[4] >= 0) ui->fonts[ui->roles[4]].is_icon = true;
