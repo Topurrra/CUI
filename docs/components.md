@@ -90,6 +90,10 @@ cui_button(ui, "Saving", .variant = CUI_BUTTON_PRIMARY, .loading = true);
 
 Use one primary button per view. Presses scale to 0.97 on a snappy spring. Keyboard: Tab to focus, Enter or Space to press.
 
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/button-states-dark.png"><img src="images/components/button-states.png" alt="Every button variant at rest, under the pointer, pressed, focused from the keyboard and disabled"></picture>
+
+Every state, rendered by `tests/component_shots.c`. The focus ring only appears for keyboard focus, never after a click.
+
 ## Icon button
 
 ```c

@@ -1751,6 +1751,56 @@ static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *
     cui_destroy(ui);
 }
 
+/* ---- state matrix: every button variant at rest, hover, pressed, focus and
+ * disabled. Each cell is its own context so the states can sit side by side. */
+typedef struct { int variant, state; } cell_spec;
+static cell_spec g_cell;
+static void cell_body(cui_ctx *ui) {
+    static const char *labels[] = { "Primary", "Secondary", "Outline", "Ghost", "Danger" };
+    static const cui_button_variant vars[] = { CUI_BUTTON_PRIMARY, CUI_BUTTON_SECONDARY, CUI_BUTTON_OUTLINE, CUI_BUTTON_GHOST, CUI_BUTTON_DANGER };
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
+        if (g_cell.variant < 0) {
+            static const char *states[] = { "Rest", "Hover", "Pressed", "Keyboard focus", "Disabled" };
+            cui_text(ui, states[g_cell.state], .size = 12, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY);
+        } else {
+            cui_button(ui, labels[g_cell.variant], .variant = vars[g_cell.variant], .disabled = g_cell.state == 4);
+        }
+    }
+}
+static void render_states(const char *dir, bool dark, cui_sw_renderer *sw) {
+    const float cw = 150, ch = 64, hh = 36;
+    const int cols = 5, rows = 5, S = 2;
+    int W = (int)(cw * cols) * S, H = (int)(hh + ch * rows) * S;
+    unsigned char *big = calloc((size_t)W * H, 4);
+    for (int r = -1; r < rows; r++)
+        for (int c = 0; c < cols; c++) {
+            g_cell.variant = r; g_cell.state = c;
+            float h = r < 0 ? hh : ch;
+            cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT });
+            cui_set_viewport(ui, cw, h, S);
+            cui_input_mouse_leave(ui);
+            for (int f = 0; f < 50; f++) {
+                if (r >= 0 && f == 2 && (c == 1 || c == 2)) cui_input_mouse_move(ui, cw / 2, h / 2);
+                if (r >= 0 && f == 4 && c == 2) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+                if (r >= 0 && f == 2 && c == 3) { cui_input_key(ui, CUI_KEY_TAB, true, 0); cui_input_key(ui, CUI_KEY_TAB, false, 0); }
+                cui_begin_frame(ui, 1.0f / 60.0f); cell_body(ui); cui_end_frame(ui);
+            }
+            const cui_draw_data *dd = cui_get_draw_data(ui);
+            unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
+            cui_sw_render(sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+            int ox = (int)(c * cw) * S, oy = r < 0 ? 0 : (int)(hh + r * ch) * S;
+            for (int y = 0; y < dd->height_px && oy + y < H; y++)
+                memcpy(big + ((size_t)(oy + y) * W + ox) * 4, px + (size_t)y * dd->width_px * 4, (size_t)dd->width_px * 4);
+            free(px);
+            cui_destroy(ui);
+        }
+    char path[512];
+    snprintf(path, sizeof path, "%s/button-states%s.png", dir, dark ? "-dark" : "");
+    cui_write_png(path, big, W, H, W * 4);
+    printf("wrote %s\n", path);
+    free(big);
+}
+
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     static const scene scenes[] = {
@@ -1818,6 +1868,7 @@ int main(int argc, char **argv) {
         { "voice-orb", scene_voice_orb, 760, 230, true }, { "suggestions", scene_suggestions, 640, 260, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
+    if (argc <= 2 || strcmp(argv[2], "button-states") == 0) { render_states(dir, false, sw); render_states(dir, true, sw); }
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
         if (argc > 2 && strcmp(argv[2], scenes[i].name) != 0) continue;   /* optional: one scene */
         if (!scenes[i].dark_only) render(dir, &scenes[i], false, sw);
