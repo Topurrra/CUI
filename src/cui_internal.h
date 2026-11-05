@@ -1,0 +1,467 @@
+/* Internal declarations shared by the CUI implementation files. */
+#ifndef CUI_INTERNAL_H
+#define CUI_INTERNAL_H
+
+#ifndef CUI_BUILDING
+#define CUI_BUILDING
+#endif
+
+#include "cui/cui.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CUI_PI 3.14159265358979323846f
+
+#define CUI_MIN(a, b) ((a) < (b) ? (a) : (b))
+#define CUI_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define CUI_CLAMP(x, lo, hi) CUI_MIN(CUI_MAX((x), (lo)), (hi))
+#define CUI_COUNTOF(a) ((int)(sizeof(a) / sizeof((a)[0])))
+
+static inline float cui__clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
+static inline float cui__lerp(float a, float b, float t) { return a + (b - a) * t; }
+static inline bool cui__rect_contains(cui_rect r, float x, float y) {
+    return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+}
+static inline cui_rect cui__rect_intersect(cui_rect a, cui_rect b) {
+    float x0 = CUI_MAX(a.x, b.x), y0 = CUI_MAX(a.y, b.y);
+    float x1 = CUI_MIN(a.x + a.w, b.x + b.w), y1 = CUI_MIN(a.y + a.h, b.y + b.h);
+    cui_rect r = { x0, y0, CUI_MAX(0, x1 - x0), CUI_MAX(0, y1 - y0) };
+    return r;
+}
+static inline cui_rect cui__rect_inset(cui_rect r, float d) {
+    cui_rect o = { r.x + d, r.y + d, CUI_MAX(0, r.w - 2 * d), CUI_MAX(0, r.h - 2 * d) };
+    return o;
+}
+static inline cui_color cui__rgba(int r, int g, int b, int a) {
+    cui_color c = { (uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a };
+    return c;
+}
+static inline bool cui__is_token(cui_color c) { return c.a == 0 && c.g == 0xC5 && c.b == 0x1D && c.r != 0; }
+static inline bool cui__color_set(cui_color c) { return c.a != 0 || cui__is_token(c); }
+
+/* ---- memory ---- */
+void *cui__alloc(cui_ctx *ui, size_t size);
+void *cui__realloc(cui_ctx *ui, void *p, size_t size);
+void cui__free(cui_ctx *ui, void *p);
+void *cui__frame_alloc(cui_ctx *ui, size_t size);       /* freed at frame start */
+char *cui__frame_strdup(cui_ctx *ui, const char *s, int len);
+char *cui__frame_printf(cui_ctx *ui, const char *fmt, ...) CUI_PRINTF(2, 3);
+char *cui__frame_vprintf(cui_ctx *ui, const char *fmt, va_list ap);
+
+#define CUI__GROW(ui, arr, count, cap, need) do {                                 \
+    if ((count) + (need) > (cap)) {                                               \
+        int ncap__ = (cap) ? (cap) * 2 : 64;                                      \
+        while (ncap__ < (count) + (need)) ncap__ *= 2;                            \
+        (arr) = cui__realloc((ui), (arr), sizeof(*(arr)) * (size_t)ncap__);        \
+        (cap) = ncap__;                                                           \
+    }                                                                             \
+} while (0)
+
+/* ---- utf8 ---- */
+int cui__utf8_decode(const char *s, int len, uint32_t *cp);   /* returns bytes consumed (>=1) */
+int cui__utf8_encode(uint32_t cp, char *out);
+int cui__utf8_prev(const char *s, int pos);
+int cui__utf8_next(const char *s, int len, int pos);
+int cui__display_len(const char *label);                      /* length before "##" */
+
+/* ---- hashing ---- */
+uint32_t cui__hash(const void *data, size_t len, uint32_t seed);
+uint32_t cui__hash_str(const char *s, uint32_t seed);
+
+/* ---- animation ---- */
+typedef struct cui_spring { float x, v; } cui_spring;
+float cui__spring(cui_ctx *ui, cui_spring *s, float target, float duration, float bounce);
+float cui__tween(cui_ctx *ui, float *x, float target, float duration);   /* exponential approach */
+#define CUI_SPRING_SMOOTH 0.40f, 0.0f
+#define CUI_SPRING_SNAPPY 0.26f, 0.12f
+#define CUI_SPRING_MORPH  0.42f, 0.16f
+
+/* ---- fonts ---- */
+typedef struct cui_glyph {
+    uint32_t key_cp;
+    uint16_t font;
+    uint16_t size_q;     /* pixel size * 4 */
+    uint8_t subpx;
+    uint8_t used;
+    int16_t x0, y0;      /* offset of bitmap from pen position (pixels) */
+    uint16_t w, h;
+    uint16_t ax, ay;     /* atlas position */
+    int next;            /* hash chain */
+} cui_glyph;
+
+typedef struct cui_font_data cui_font_data;
+
+typedef struct cui_text_layout_line { int start, end; float width; } cui_text_layout_line;
+
+/* Glyph metrics for layout, in points. */
+float cui__font_line_height(cui_ctx *ui, cui_font font, float size);
+float cui__font_ascent(cui_ctx *ui, cui_font font, float size);
+float cui__text_width(cui_ctx *ui, cui_font font, float size, const char *text, int len, bool tabular);
+/* Index of the byte boundary closest to x within a single line. */
+int cui__text_hit(cui_ctx *ui, cui_font font, float size, const char *text, int len, float x);
+/* Word wrap into lines. Returns line count; writes up to max lines. */
+int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int len, float width,
+                   cui_text_layout_line *lines, int max_lines);
+float cui__text_min_width(cui_ctx *ui, cui_font font, float size, const char *text, int len);
+/* Draw single line text with top-left at pos (points). */
+void cui__draw_text_line(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color,
+                         const char *text, int len, bool tabular);
+/* Draw text truncated with an ellipsis to max_w. */
+void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, float y, float max_w,
+                             cui_color color, const char *text, int len, bool tabular);
+void cui__fonts_init(cui_ctx *ui, bool load_defaults);
+void cui__fonts_shutdown(cui_ctx *ui);
+void cui__fonts_begin_frame(cui_ctx *ui);
+void cui__fonts_upload(cui_ctx *ui);
+cui_font cui__resolve_font(cui_ctx *ui, cui_font f);
+
+/* ---- draw list ---- */
+typedef struct cui_xform { float scale, ox, oy, alpha, tx, ty; } cui_xform;
+
+typedef struct cui_draw_list {
+    cui_vertex *vtx; int vtx_count, vtx_cap;
+    uint32_t *idx; int idx_count, idx_cap;
+    cui_draw_cmd *cmd; int cmd_count, cmd_cap;
+    cui_rect clip_stack[64]; int clip_depth;
+    cui_xform xform_stack[32]; int xform_depth;
+    cui_texture cur_tex;
+} cui_draw_list;
+
+void cui__draw_reset(cui_ctx *ui);
+void cui__push_xform(cui_ctx *ui, float scale, float ox, float oy, float alpha, float tx, float ty);
+void cui__pop_xform(cui_ctx *ui);
+void cui__draw_glyph_quad(cui_ctx *ui, float x0, float y0, float x1, float y1,
+                          float u0, float v0, float u1, float v1, cui_color c);
+void cui__draw_check(cui_ctx *ui, cui_rect r, float t, float thickness, cui_color c);
+void cui__draw_spinner(cui_ctx *ui, cui_vec2 center, float radius, float thickness, cui_color c);
+void cui__draw_focus_ring(cui_ctx *ui, cui_rect r, cui_corners radius, float alpha);
+void cui__draw_elevation(cui_ctx *ui, cui_rect r, cui_corners radius, cui_elevation e, float alpha);
+/* Raw triangles with per vertex colors (points). */
+typedef struct cui_cvert { float x, y; cui_color c; } cui_cvert;
+void cui__draw_triangles(cui_ctx *ui, const cui_cvert *v, int nv, const uint32_t *idx, int ni);
+
+/* ---- layout tree ---- */
+enum {
+    CUI_NF_TEXT        = 1 << 0,
+    CUI_NF_INTERACTIVE = 1 << 1,   /* records a hit rect */
+    CUI_NF_SCROLL_X    = 1 << 2,
+    CUI_NF_SCROLL_Y    = 1 << 3,
+    CUI_NF_CLIP        = 1 << 4,
+    CUI_NF_FLOATING    = 1 << 5,
+    CUI_NF_BLOCKER     = 1 << 6,   /* blocks input to everything below (modal scrim) */
+    CUI_NF_WRAP        = 1 << 7,
+    CUI_NF_TABULAR     = 1 << 8,
+    CUI_NF_FOCUSABLE   = 1 << 9,
+    CUI_NF_SCROLLBAR   = 1 << 10,
+    CUI_NF_HIT_OPAQUE  = 1 << 11,  /* catches clicks (e.g. popover background) */
+    CUI_NF_PAINT_AFTER = 1 << 12,  /* paint callback runs after children */
+    CUI_NF_ABSOLUTE    = 1 << 13   /* positioned at (fx, fy) inside the parent, out of flow */
+};
+
+struct cui_node;
+typedef void (*cui__paint_fn)(cui_ctx *ui, struct cui_node *n, void *data);
+
+typedef struct cui_node {
+    cui_id id;
+    int parent, first, last, next;
+    int abs_first, abs_last;   /* absolutely positioned children */
+    int child_count;
+    uint32_t flags;
+
+    /* layout input */
+    uint8_t dir, align, justify, self_align;   /* self_align: 0 = inherit */
+    cui_size w, h;
+    float min_w, max_w, min_h, max_h;
+    float pad[4];             /* top, right, bottom, left */
+    float gap;
+    int columns;
+
+    /* text */
+    const char *text;
+    int text_len;
+    cui_font font;
+    float font_size;
+    float line_height;        /* multiplier */
+    uint8_t text_align;
+    cui_color text_color;
+
+    /* style */
+    cui_color bg, border_color;
+    float border;
+    cui_corners radius;
+    cui_elevation elevation;
+    float elevation_alpha;
+    float opacity;
+    float scale;              /* transform around center, 1 = none */
+    float tx, ty;             /* translation */
+
+    /* custom paint */
+    cui__paint_fn paint;
+    void *paint_data;
+
+    /* floating */
+    int z;
+    cui_id anchor;            /* 0 = viewport */
+    uint8_t placement;
+    float offset;             /* distance from anchor */
+    float fx, fy;             /* explicit position when anchor == 0 and fpos set */
+    bool fpos;
+    int root_index;           /* order among floating roots */
+
+    /* scroll */
+    float scroll_x, scroll_y;
+
+    /* computed */
+    float pref_w, pref_h, minc_w, minc_h;   /* content based sizes */
+    cui_rect rect;
+    float content_w, content_h;
+    int text_lines;
+    cui_text_layout_line *lines;
+} cui_node;
+
+/* placement values beyond cui_placement for floating roots */
+enum { CUI__PLACE_FULL = 100, CUI__PLACE_CENTER = 101, CUI__PLACE_POINT = 102 };
+
+typedef struct cui_scroll_state {
+    float x, y;                 /* current offset */
+    float tx, ty;               /* target offset */
+    float content_w, content_h; /* from last layout */
+    float view_w, view_h;
+    float bar_t;                /* scrollbar visibility 0..1 */
+    double last_activity;
+    bool drag_y, drag_x;
+    float drag_grab;
+    bool hover_bar;
+} cui_scroll_state;
+
+int cui__node_new(cui_ctx *ui, cui_id id);
+cui_node *cui__node(cui_ctx *ui, int index);
+int cui__open(cui_ctx *ui, int node);            /* push node as current parent */
+void cui__close(cui_ctx *ui);
+int cui__current(cui_ctx *ui);
+void cui__apply_box(cui_ctx *ui, cui_node *n, const cui_box *b);
+int cui__leaf(cui_ctx *ui, cui_id id, cui_size w, cui_size h);
+int cui__text_node(cui_ctx *ui, const char *text, int len, cui_font font, float size, cui_color color, bool wrap);
+void cui__layout(cui_ctx *ui);
+void cui__paint(cui_ctx *ui);
+int cui__float_begin(cui_ctx *ui, cui_id id, int z, cui_id anchor, int placement, float offset);
+void cui__float_end(cui_ctx *ui);
+int cui__absolute(cui_ctx *ui, cui_id id, float x, float y, float w, float h);
+void cui__paint_add_hit(cui_ctx *ui, cui_id id, cui_rect r, uint32_t flags);
+
+/* ---- per id state ---- */
+typedef struct cui_state_entry {
+    cui_id id;
+    uint64_t last_frame;
+    cui_rect rect;             /* rect from the previous frame */
+    bool has_rect;
+    size_t size;
+    void *data;
+    int next;
+} cui_state_entry;
+
+cui_state_entry *cui__state_entry(cui_ctx *ui, cui_id id);
+cui_rect cui__prev_rect(cui_ctx *ui, cui_id id);
+bool cui__has_prev_rect(cui_ctx *ui, cui_id id);
+
+/* ---- interaction ---- */
+typedef struct cui_hit {
+    cui_id id;
+    cui_rect rect;
+    uint32_t flags;
+    cui_id layer;
+    int order;
+} cui_hit;
+
+typedef struct cui_interact {
+    bool hovered, pressed, clicked, right_clicked, double_clicked, focused, active, released, keyboard_activate;
+    bool focus_visible;
+} cui_interact;
+
+enum { CUI_IF_FOCUSABLE = 1, CUI_IF_DRAG = 2, CUI_IF_KEEP_FOCUS = 4, CUI_IF_TEXT = 8 };
+cui_interact cui__interact(cui_ctx *ui, cui_id id, int flags);
+void cui__mark_interactive(cui_ctx *ui, int node, int flags);
+void cui__set_cursor(cui_ctx *ui, cui_cursor c);
+void cui__wakeup_after(cui_ctx *ui, float seconds);
+bool cui__is_layer_open(cui_ctx *ui, cui_id layer);
+
+/* ---- popups ---- */
+typedef struct cui_popup {
+    cui_id id;
+    cui_id anchor;
+    cui_rect anchor_rect;
+    bool open;
+    bool at_mouse;
+    cui_vec2 mouse;
+    uint64_t opened_frame;
+    uint64_t last_frame;
+    float t;                   /* open animation 0..1 */
+    cui_spring s;
+} cui_popup;
+
+typedef struct cui_toast_item {
+    int handle;
+    char title[128];
+    char desc[256];
+    char action[48];
+    cui_tone tone;
+    float duration, age;
+    bool dismissed, action_clicked, hovered_pause;
+    cui_spring enter;          /* 0..1 appear */
+    cui_spring y;              /* stacked position */
+    float height;
+} cui_toast_item;
+
+#define CUI_MAX_TOASTS 16
+#define CUI_ID_STACK 64
+#define CUI_PARENT_STACK 256
+
+struct cui_ctx {
+    cui_allocator alloc;
+    cui_renderer_iface renderer;
+    cui_platform_iface platform;
+
+    /* viewport */
+    float vw, vh, scale;
+
+    /* time */
+    double time;
+    float dt;
+    uint64_t frame;
+    bool in_frame;
+    bool animating;
+    int settle_frames;
+    float wakeup;              /* seconds, <0 none */
+
+    /* frame arena */
+    char *arena; size_t arena_used, arena_cap;
+    struct cui_arena_block { struct cui_arena_block *next; } *arena_overflow;
+
+    /* nodes */
+    cui_node *nodes; int node_count, node_cap;
+    int parents[CUI_PARENT_STACK]; int parent_depth;
+    int *float_roots; int float_count, float_cap;
+    int last_node;
+    cui_id last_id;
+
+    /* ids */
+    cui_id id_stack[CUI_ID_STACK]; int id_depth;
+    int auto_counter[CUI_ID_STACK];
+    int disabled_depth;
+    bool disabled_stack[32]; int disabled_n;
+
+    /* state store (open addressing over chained entries) */
+    cui_state_entry *states; int state_count, state_cap;
+    int *state_buckets; int bucket_count;
+    int state_free;
+
+    /* hit testing */
+    cui_hit *hits; int hit_count, hit_cap;           /* current frame */
+    cui_hit *prev_hits; int prev_hit_count, prev_hit_cap;
+    cui_id hot, hot_layer;          /* topmost interactive item under the mouse */
+    cui_id scroll_target;           /* topmost scroll area under the mouse */
+    cui_id active;                  /* item being pressed/dragged */
+    cui_id focus;                   /* keyboard focus */
+    bool focus_visible;             /* focus came from the keyboard */
+    cui_id focus_next_request;
+    int focus_move;                 /* +1/-1 tab navigation requested */
+    cui_id *focus_order; int focus_count, focus_cap;
+    cui_id *prev_focus_order; int prev_focus_count, prev_focus_cap;
+    cui_id hover_id_for_tooltip;
+    double hover_start;
+    cui_id layer_stack[32]; int layer_depth;   /* current floating layer while building */
+    cui_id current_layer;
+    cui_cursor cursor;
+
+    /* input */
+    float mx, my, pmx, pmy;
+    bool mouse_inside;
+    bool mdown[3], mpressed[3], mreleased[3];
+    int click_count;
+    double last_click_time;
+    float last_click_x, last_click_y;
+    float scroll_dx, scroll_dy;
+    bool kdown[CUI_KEY_COUNT];
+    uint8_t kpressed[CUI_KEY_COUNT];
+    int mods;
+    char text_in[256]; int text_in_len;
+    bool window_focused;
+    bool input_this_frame;
+
+    /* theme */
+    cui_theme theme;
+    cui_theme target_theme;
+    cui_theme_mode mode;
+    cui_accent accent;
+    bool reduced_motion;
+    float theme_t;              /* theme transition progress */
+    cui_theme from_theme;
+
+    /* fonts */
+    cui_font_data *fonts; int font_count, font_cap;
+    cui_font roles[5];
+    cui_glyph *glyphs; int glyph_count, glyph_cap;
+    int glyph_buckets[4096];
+    uint8_t *atlas; int atlas_w, atlas_h;
+    int pack_x, pack_y, pack_row_h;
+    bool atlas_dirty; int dirty_x0, dirty_y0, dirty_x1, dirty_y1;
+    bool atlas_reset_pending;
+    cui_texture atlas_tex;
+    int atlas_tex_w, atlas_tex_h;
+
+    /* drawing */
+    cui_draw_list dl;
+    cui_draw_data draw_data;
+
+    /* widgets */
+    cui_popup popups[32]; int popup_count;
+    cui_id open_menu_stack[8]; int open_menu_depth;
+    cui_toast_item toasts[CUI_MAX_TOASTS]; int toast_count;
+    int toast_next_handle;
+    cui_id dialog_stack[8]; int dialog_depth;
+    cui_id nav_group_last[8];
+    int tooltip_node;
+    const char *tooltip_text;
+    cui_id tooltip_id;
+    cui_rect tooltip_rect;
+    cui_id tree_last_clicked;
+    bool tree_clicked;
+    /* text editing */
+    struct cui_edit_state *edit;   /* edit state of the focused text field */
+    double caret_time;
+    /* table being built */
+    struct cui_table_build *table;
+    int table_depth;
+    /* split being built */
+    struct cui_split_build *split;
+};
+
+/* ---- theme ---- */
+void cui__theme_init(cui_ctx *ui, cui_theme_mode mode, cui_accent accent);
+void cui__theme_update(cui_ctx *ui);
+void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent);
+cui_color cui__tone_color(cui_ctx *ui, cui_tone tone);
+#define CUI_C(ui, tok) ((ui)->theme.colors[CUI_TOKEN_##tok])
+
+/* ---- widgets internal ---- */
+void cui__widgets_begin_frame(cui_ctx *ui);
+void cui__widgets_end_frame(cui_ctx *ui);   /* toasts, tooltips */
+void cui__overlay_end_frame(cui_ctx *ui);
+float cui__control_height(cui_ctx *ui, cui_control_size s);
+cui_popup *cui__popup_get(cui_ctx *ui, cui_id id, bool create);
+bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, float width, float pad, float gap, bool menu);
+void cui__popup_end(cui_ctx *ui);
+void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color);
+void cui__icon_node(cui_ctx *ui, const char *icon, float size, cui_color color);
+void cui__field_label(cui_ctx *ui, const char *label);
+void cui__field_message(cui_ctx *ui, const char *hint, const char *error);
+int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizontal);
+void cui__scroll_end_ex(cui_ctx *ui);
+
+/* paint data helpers */
+#define CUI_PAINT_DATA(ui, type) ((type *)cui__frame_alloc((ui), sizeof(type)))
+
+#endif /* CUI_INTERNAL_H */

@@ -1,0 +1,359 @@
+/* Software rasterizer for CUI draw data.
+ *
+ * Implements exactly the same shading as the GPU shader (see
+ * docs/rendering.md): signed distance rounded rectangles with borders,
+ * gaussian shadows, alpha-texture text, images and solid geometry, blended
+ * with premultiplied alpha. Rendering can be split over several threads by
+ * horizontal bands. */
+#include "../cui_internal.h"
+#include "cui/cui_render.h"
+
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#else
+#  include <pthread.h>
+#  include <unistd.h>
+#endif
+
+typedef struct cui__sw_tex {
+    int w, h;
+    cui_texture_format fmt;
+    uint8_t *data;
+    bool used;
+} cui__sw_tex;
+
+struct cui_sw_renderer {
+    cui__sw_tex *tex;
+    int tex_count, tex_cap;
+    int threads;
+};
+
+static void *cui__sw_xrealloc(void *p, size_t n) {
+    void *q = realloc(p, n);
+    if (!q && n) { fprintf(stderr, "cui: out of memory\n"); abort(); }
+    return q;
+}
+
+static cui_texture cui__sw_tex_create(void *user, int w, int h, cui_texture_format fmt, const void *pixels) {
+    cui_sw_renderer *r = user;
+    int slot = -1;
+    for (int i = 0; i < r->tex_count; i++) if (!r->tex[i].used) { slot = i; break; }
+    if (slot < 0) {
+        if (r->tex_count == r->tex_cap) {
+            r->tex_cap = r->tex_cap ? r->tex_cap * 2 : 16;
+            r->tex = cui__sw_xrealloc(r->tex, sizeof(cui__sw_tex) * (size_t)r->tex_cap);
+        }
+        slot = r->tex_count++;
+    }
+    cui__sw_tex *t = &r->tex[slot];
+    t->w = w; t->h = h; t->fmt = fmt; t->used = true;
+    size_t bytes = (size_t)w * (size_t)h * (size_t)fmt;
+    t->data = cui__sw_xrealloc(NULL, bytes);
+    if (pixels) memcpy(t->data, pixels, bytes);
+    else memset(t->data, 0, bytes);
+    return (cui_texture)(slot + 1);
+}
+
+static void cui__sw_tex_update(void *user, cui_texture tex, int x, int y, int w, int h, const void *pixels, int stride) {
+    cui_sw_renderer *r = user;
+    int slot = (int)tex - 1;
+    if (slot < 0 || slot >= r->tex_count || !r->tex[slot].used) return;
+    cui__sw_tex *t = &r->tex[slot];
+    int bpp = (int)t->fmt;
+    const uint8_t *src = pixels;
+    for (int row = 0; row < h; row++) {
+        if (y + row < 0 || y + row >= t->h) continue;
+        memcpy(t->data + ((size_t)(y + row) * (size_t)t->w + (size_t)x) * (size_t)bpp,
+               src + (size_t)row * (size_t)stride, (size_t)w * (size_t)bpp);
+    }
+}
+
+static void cui__sw_tex_destroy(void *user, cui_texture tex) {
+    cui_sw_renderer *r = user;
+    int slot = (int)tex - 1;
+    if (slot < 0 || slot >= r->tex_count) return;
+    free(r->tex[slot].data);
+    r->tex[slot].data = NULL;
+    r->tex[slot].used = false;
+}
+
+static int cui__cpu_count(void) {
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (int)si.dwNumberOfProcessors;
+#elif defined(_SC_NPROCESSORS_ONLN)
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (int)n : 1;
+#else
+    return 1;
+#endif
+}
+
+cui_sw_renderer *cui_sw_create(void) {
+    cui_sw_renderer *r = calloc(1, sizeof *r);
+    if (!r) return NULL;
+    int n = cui__cpu_count();
+    r->threads = n > 8 ? 8 : (n < 1 ? 1 : n);
+    return r;
+}
+
+void cui_sw_destroy(cui_sw_renderer *r) {
+    if (!r) return;
+    for (int i = 0; i < r->tex_count; i++) free(r->tex[i].data);
+    free(r->tex);
+    free(r);
+}
+
+void cui_sw_set_threads(cui_sw_renderer *r, int threads) { r->threads = threads < 1 ? 1 : (threads > 32 ? 32 : threads); }
+
+cui_renderer_iface cui_sw_iface(cui_sw_renderer *r) {
+    cui_renderer_iface i;
+    memset(&i, 0, sizeof i);
+    i.user = r;
+    i.texture_create = cui__sw_tex_create;
+    i.texture_update = cui__sw_tex_update;
+    i.texture_destroy = cui__sw_tex_destroy;
+    return i;
+}
+
+/* ---- shading ---- */
+
+static inline float cui__sd_rrect(float px, float py, float hw, float hh, float tl, float tr, float br, float bl) {
+    float r = px < 0 ? (py < 0 ? tl : bl) : (py < 0 ? tr : br);
+    float m = hw < hh ? hw : hh;
+    if (r > m) r = m;
+    float qx = fabsf(px) - hw + r, qy = fabsf(py) - hh + r;
+    float ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0;
+    float inside = qx > qy ? qx : qy;
+    if (inside > 0) inside = 0;
+    return inside + sqrtf(ox * ox + oy * oy) - r;
+}
+
+static inline float cui__erf(float x) {
+    /* Abramowitz-Stegun 7.1.26 */
+    float s = x < 0 ? -1.0f : 1.0f;
+    x = fabsf(x);
+    float t = 1.0f / (1.0f + 0.3275911f * x);
+    float y = 1.0f - (((((1.061405429f * t - 1.453152027f) * t) + 1.421413741f) * t - 0.284496736f) * t + 0.254829592f) * t * expf(-x * x);
+    return s * y;
+}
+
+static inline float cui__sat(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+
+typedef struct { float r, g, b, a; } cui__px;  /* premultiplied */
+
+static float cui__sample_r8(const cui__sw_tex *t, float u, float v) {
+    float x = u * (float)t->w - 0.5f, y = v * (float)t->h - 0.5f;
+    int x0 = (int)floorf(x), y0 = (int)floorf(y);
+    float fx = x - (float)x0, fy = y - (float)y0;
+    int x1 = x0 + 1, y1 = y0 + 1;
+    x0 = CUI_CLAMP(x0, 0, t->w - 1); y0 = CUI_CLAMP(y0, 0, t->h - 1);
+    x1 = CUI_CLAMP(x1, 0, t->w - 1); y1 = CUI_CLAMP(y1, 0, t->h - 1);
+    const uint8_t *d = t->data;
+    float a = d[y0 * t->w + x0], b = d[y0 * t->w + x1], c = d[y1 * t->w + x0], e = d[y1 * t->w + x1];
+    return ((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + e * fx) * fy) / 255.0f;
+}
+
+static cui__px cui__sample_rgba(const cui__sw_tex *t, float u, float v) {
+    float x = u * (float)t->w - 0.5f, y = v * (float)t->h - 0.5f;
+    int x0 = (int)floorf(x), y0 = (int)floorf(y);
+    float fx = x - (float)x0, fy = y - (float)y0;
+    int xs[2] = { x0, x0 + 1 }, ys[2] = { y0, y0 + 1 };
+    for (int i = 0; i < 2; i++) {
+        xs[i] = CUI_CLAMP(xs[i], 0, t->w - 1);
+        ys[i] = CUI_CLAMP(ys[i], 0, t->h - 1);
+    }
+    float w[4] = { (1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy };
+    cui__px o = { 0, 0, 0, 0 };
+    for (int k = 0; k < 4; k++) {
+        const uint8_t *p = t->data + ((size_t)ys[k >> 1] * (size_t)t->w + (size_t)xs[k & 1]) * 4;
+        float a = p[3] / 255.0f;
+        o.r += w[k] * p[0] / 255.0f * a;
+        o.g += w[k] * p[1] / 255.0f * a;
+        o.b += w[k] * p[2] / 255.0f * a;
+        o.a += w[k] * a;
+    }
+    return o;
+}
+
+typedef struct {
+    const cui_draw_data *dd;
+    cui_sw_renderer *r;
+    uint8_t *pixels;
+    int width, height, stride;
+    cui_sw_format fmt;
+    int y0, y1;   /* band */
+} cui__sw_job;
+
+static void cui__blend(uint8_t *p, cui__px s, bool bgra) {
+    if (s.a <= 0.0005f) return;
+    float ia = 1.0f - s.a;
+    int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
+    float dr = p[ri] / 255.0f, dg = p[1] / 255.0f, db = p[bi] / 255.0f, da = p[3] / 255.0f;
+    float r = s.r + dr * ia, g = s.g + dg * ia, b = s.b + db * ia, a = s.a + da * ia;
+    p[ri] = (uint8_t)(cui__sat(r) * 255.0f + 0.5f);
+    p[1] = (uint8_t)(cui__sat(g) * 255.0f + 0.5f);
+    p[bi] = (uint8_t)(cui__sat(b) * 255.0f + 0.5f);
+    p[3] = (uint8_t)(cui__sat(a) * 255.0f + 0.5f);
+}
+
+static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const cui_vertex *b, const cui_vertex *c,
+                            const cui__sw_tex *tex, int cx0, int cy0, int cx1, int cy1) {
+    float area = (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
+    if (fabsf(area) < 1e-8f) return;
+    float minx = CUI_MIN(a->x, CUI_MIN(b->x, c->x)), maxx = CUI_MAX(a->x, CUI_MAX(b->x, c->x));
+    float miny = CUI_MIN(a->y, CUI_MIN(b->y, c->y)), maxy = CUI_MAX(a->y, CUI_MAX(b->y, c->y));
+    int x0 = CUI_MAX(cx0, (int)floorf(minx)), x1 = CUI_MIN(cx1, (int)ceilf(maxx));
+    int y0 = CUI_MAX(cy0, (int)floorf(miny)), y1 = CUI_MIN(cy1, (int)ceilf(maxy));
+    if (x0 >= x1 || y0 >= y1) return;
+    float inv = 1.0f / area;
+    int mode = (int)(a->mode + 0.5f);
+    bool bgra = job->fmt == CUI_SW_BGRA;
+    /* flat attributes come from the first vertex */
+    float hw = a->hw, hh = a->hh, rtl = a->r_tl, rtr = a->r_tr, rbr = a->r_br, rbl = a->r_bl, bw = a->border;
+    float bcr = a->border_color.r / 255.0f, bcg = a->border_color.g / 255.0f, bcb = a->border_color.b / 255.0f, bca = a->border_color.a / 255.0f;
+    bool flat_color = memcmp(&a->color, &b->color, 4) == 0 && memcmp(&a->color, &c->color, 4) == 0;
+    for (int y = y0; y < y1; y++) {
+        float py = (float)y + 0.5f;
+        uint8_t *row = job->pixels + (size_t)y * (size_t)job->stride;
+        for (int x = x0; x < x1; x++) {
+            float px = (float)x + 0.5f;
+            float w0 = ((b->x - px) * (c->y - py) - (b->y - py) * (c->x - px)) * inv;
+            float w1 = ((c->x - px) * (a->y - py) - (c->y - py) * (a->x - px)) * inv;
+            float w2 = 1.0f - w0 - w1;
+            /* top-left style fill rule with a tiny epsilon to avoid seams */
+            if (w0 < -1e-5f || w1 < -1e-5f || w2 < -1e-5f) continue;
+            float cr, cg, cb, ca;
+            if (flat_color) {
+                cr = a->color.r / 255.0f; cg = a->color.g / 255.0f; cb = a->color.b / 255.0f; ca = a->color.a / 255.0f;
+            } else {
+                cr = (a->color.r * w0 + b->color.r * w1 + c->color.r * w2) / 255.0f;
+                cg = (a->color.g * w0 + b->color.g * w1 + c->color.g * w2) / 255.0f;
+                cb = (a->color.b * w0 + b->color.b * w1 + c->color.b * w2) / 255.0f;
+                ca = (a->color.a * w0 + b->color.a * w1 + c->color.a * w2) / 255.0f;
+            }
+            cui__px o;
+            if (mode == CUI_SHADE_SOLID) {
+                o.r = cr * ca; o.g = cg * ca; o.b = cb * ca; o.a = ca;
+            } else if (mode == CUI_SHADE_TEXT) {
+                float u = a->u * w0 + b->u * w1 + c->u * w2, v = a->v * w0 + b->v * w1 + c->v * w2;
+                float cov = tex && tex->fmt == CUI_TEXTURE_R8 ? cui__sample_r8(tex, u, v) : 1.0f;
+                float al = ca * cov;
+                o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
+            } else {
+                float lx = a->lx * w0 + b->lx * w1 + c->lx * w2, ly = a->ly * w0 + b->ly * w1 + c->ly * w2;
+                float d = cui__sd_rrect(lx, ly, hw, hh, rtl, rtr, rbr, rbl);
+                if (mode == CUI_SHADE_RRECT) {
+                    float outer = cui__sat(0.5f - d);
+                    if (outer <= 0) continue;
+                    float inner = bw > 0 ? cui__sat(0.5f - (d + bw)) : outer;
+                    float fa = ca * inner, ba = bca * (outer - inner);
+                    o.r = cr * fa + bcr * ba; o.g = cg * fa + bcg * ba; o.b = cb * fa + bcb * ba; o.a = fa + ba;
+                } else if (mode == CUI_SHADE_SHADOW) {
+                    float sigma = bw > 0.01f ? bw : 0.01f;
+                    float al = ca * 0.5f * (1.0f - cui__erf(d / (sigma * 1.41421356f)));
+                    o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
+                } else { /* image */
+                    float cov = cui__sat(0.5f - d);
+                    if (cov <= 0) continue;
+                    float u = a->u * w0 + b->u * w1 + c->u * w2, v = a->v * w0 + b->v * w1 + c->v * w2;
+                    cui__px t = tex && tex->fmt == CUI_TEXTURE_RGBA8 ? cui__sample_rgba(tex, u, v) : (cui__px){ 1, 1, 1, 1 };
+                    float k = ca * cov;
+                    o.r = t.r * cr * k; o.g = t.g * cg * k; o.b = t.b * cb * k; o.a = t.a * k;
+                }
+            }
+            cui__blend(row + (size_t)x * 4, o, bgra);
+        }
+    }
+}
+
+static void cui__sw_run(cui__sw_job *job) {
+    const cui_draw_data *dd = job->dd;
+    cui_sw_renderer *r = job->r;
+    for (int ci = 0; ci < dd->command_count; ci++) {
+        const cui_draw_cmd *cmd = &dd->commands[ci];
+        int cx0 = CUI_MAX(0, (int)floorf(cmd->clip.x));
+        int cy0 = CUI_MAX(job->y0, (int)floorf(cmd->clip.y));
+        int cx1 = CUI_MIN(job->width, (int)ceilf(cmd->clip.x + cmd->clip.w));
+        int cy1 = CUI_MIN(job->y1, (int)ceilf(cmd->clip.y + cmd->clip.h));
+        if (cx0 >= cx1 || cy0 >= cy1) continue;
+        cui_texture tid = cmd->texture ? cmd->texture : dd->font_atlas;
+        int slot = (int)tid - 1;
+        const cui__sw_tex *tex = (slot >= 0 && slot < r->tex_count && r->tex[slot].used) ? &r->tex[slot] : NULL;
+        for (uint32_t k = 0; k + 2 < cmd->index_count; k += 3) {
+            const uint32_t *ix = dd->indices + cmd->index_offset + k;
+            cui__raster_tri(job, &dd->vertices[ix[0]], &dd->vertices[ix[1]], &dd->vertices[ix[2]], tex, cx0, cy0, cx1, cy1);
+        }
+    }
+}
+
+#if defined(_WIN32)
+static DWORD WINAPI cui__sw_thread(LPVOID p) { cui__sw_run(p); return 0; }
+#else
+static void *cui__sw_thread(void *p) { cui__sw_run(p); return NULL; }
+#endif
+
+void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt) {
+    if (!r || !dd || !pixels) return;
+    /* clear */
+    cui_color cc = dd->clear_color;
+    uint8_t c4[4] = { cc.r, cc.g, cc.b, 255 };
+    if (fmt == CUI_SW_BGRA) { c4[0] = cc.b; c4[2] = cc.r; }
+    for (int y = 0; y < height; y++) {
+        uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)stride;
+        for (int x = 0; x < width; x++) memcpy(row + x * 4, c4, 4);
+    }
+    int threads = r->threads;
+    if (height < 64 || dd->index_count < 600) threads = 1;
+    if (threads > height / 16) threads = CUI_MAX(1, height / 16);
+    cui__sw_job jobs[32];
+    int band = (height + threads - 1) / threads;
+    for (int t = 0; t < threads; t++) {
+        jobs[t].dd = dd; jobs[t].r = r; jobs[t].pixels = pixels;
+        jobs[t].width = width; jobs[t].height = height; jobs[t].stride = stride; jobs[t].fmt = fmt;
+        jobs[t].y0 = t * band; jobs[t].y1 = CUI_MIN(height, (t + 1) * band);
+    }
+    if (threads == 1) { cui__sw_run(&jobs[0]); return; }
+#if defined(_WIN32)
+    HANDLE hs[32];
+    for (int t = 1; t < threads; t++) hs[t] = CreateThread(NULL, 0, cui__sw_thread, &jobs[t], 0, NULL);
+    cui__sw_run(&jobs[0]);
+    for (int t = 1; t < threads; t++) if (hs[t]) { WaitForSingleObject(hs[t], INFINITE); CloseHandle(hs[t]); } else cui__sw_run(&jobs[t]);
+#else
+    pthread_t th[32];
+    bool ok[32];
+    for (int t = 1; t < threads; t++) ok[t] = pthread_create(&th[t], NULL, cui__sw_thread, &jobs[t]) == 0;
+    cui__sw_run(&jobs[0]);
+    for (int t = 1; t < threads; t++) { if (ok[t]) pthread_join(th[t], NULL); else cui__sw_run(&jobs[t]); }
+#endif
+}
+
+/* ---- PNG writer ---- */
+
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#endif
+#include "../../third_party/stb_image_write.h"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+bool cui_write_png(const char *path, const void *rgba, int width, int height, int stride) {
+    return stbi_write_png(path, width, height, 4, rgba, stride) != 0;
+}
