@@ -191,7 +191,7 @@ void cui_carousel_end(cui_ctx *ui) {
 /* Image compare                                                            */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_texture before, after; float pos, hover; const char *lb, *la; cui_color handle, line, label_bg, label_fg; } cui__cmp_paint;
+typedef struct { cui_texture before, after; float pos, hover, aspect; const char *lb, *la; cui_color handle, line, label_bg, label_fg; } cui__cmp_paint;
 
 static void cui__cmp_label(cui_ctx *ui, const char *s, float x, float y, bool right, cui__cmp_paint *p) {
     if (!s) return;
@@ -207,6 +207,12 @@ static void cui__paint_compare(cui_ctx *ui, cui_node *n, void *data) {
     cui_rect r = n->rect;
     cui_corners rad = n->radius;
     cui_rect uv = { 0, 0, 1, 1 };
+    if (p->aspect > 0 && r.h > 0) {
+        /* cover: keep the picture's proportions and crop the overflow evenly */
+        float ra = r.w / r.h;
+        if (p->aspect > ra) { float u = ra / p->aspect; uv = (cui_rect){ (1 - u) * 0.5f, 0, u, 1 }; }
+        else { float v = p->aspect / ra; uv = (cui_rect){ 0, (1 - v) * 0.5f, 1, v }; }
+    }
     cui_color white = cui__rgba(255, 255, 255, 255);
     if (p->after) cui_draw_image(ui, p->after, r, uv, rad, white);
     float split = r.w * cui__clampf(p->pos, 0, 1);
@@ -248,7 +254,7 @@ bool cui_image_compare_ex(cui_ctx *ui, const char *id_str, cui_texture before, c
     cui__mark_interactive(ui, n, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     if (r.hovered || r.active) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
     cui__cmp_paint *p = cui__frame_alloc(ui, sizeof *p);
-    p->before = before; p->after = after; p->pos = *pos; p->hover = *hv;
+    p->before = before; p->after = after; p->pos = *pos; p->hover = *hv; p->aspect = o->aspect;
     p->lb = o->before_label ? o->before_label : "Before";
     p->la = o->after_label ? o->after_label : "After";
     p->handle = cui__rgba(255, 255, 255, 255);

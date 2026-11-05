@@ -777,13 +777,13 @@ static void shot_scene(unsigned char *px, int w, int h, bool color) {
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             float fx = (float)x / w, fy = (float)y / h;
-            float r = 0.98f - fy * 0.45f, g = 0.62f - fy * 0.3f + fx * 0.1f, b = 0.38f + fy * 0.4f;
-            float m1 = 0.55f + 0.1f * sinf(fx * 7.0f) + 0.04f * sinf(fx * 23.0f);
-            float m2 = 0.7f + 0.06f * sinf(fx * 5.0f + 2.1f);
-            float dx = fx - 0.7f, dy = fy - 0.32f;
-            if (dx * dx + dy * dy < 0.006f) { r = 1; g = 0.92f; b = 0.7f; }
-            if (fy > m1) { r = 0.32f - fy * 0.1f; g = 0.24f; b = 0.42f; }
-            if (fy > m2) { r = 0.14f; g = 0.12f; b = 0.24f + (1 - fy) * 0.2f; }
+            float r = 0.56f + fy * 0.34f, g = 0.72f + fy * 0.2f, b = 0.88f + fy * 0.06f;   /* clear daytime sky */
+            float sun = (fx - 0.72f) * (fx - 0.72f) * 15.4f + (fy - 0.24f) * (fy - 0.24f) * 6.0f;   /* round at a 1.6 aspect */
+            if (sun < 0.024f) { r = 1.0f; g = 0.97f; b = 0.86f; }
+            float m1 = 0.5f + 0.1f * sinf(fx * 6.0f + 0.6f) + 0.03f * sinf(fx * 23.0f);
+            float m2 = 0.68f + 0.06f * sinf(fx * 4.0f + 2.1f) + 0.02f * sinf(fx * 31.0f);
+            if (fy > m1) { r = 0.5f; g = 0.6f; b = 0.62f - fy * 0.08f; }        /* far hills in haze */
+            if (fy > m2) { r = 0.3f - (fy - m2) * 0.2f; g = 0.45f - (fy - m2) * 0.25f; b = 0.3f; }   /* near fields */
             if (!color) { float l = r * 0.3f + g * 0.59f + b * 0.11f; r = g = b = l * 0.85f + 0.05f; }
             unsigned char *p = px + (y * w + x) * 4;
             p[0] = (unsigned char)(fminf(1, fmaxf(0, r)) * 255); p[1] = (unsigned char)(fminf(1, fmaxf(0, g)) * 255);
@@ -796,16 +796,16 @@ SCENE(compare_stack) {
     bool *made = cui_state(ui, cui_make_id(ui, "cmp-textures"), sizeof *made);
     if (!*made) {
         *made = true;
-        static unsigned char a[480 * 300 * 4], b[480 * 300 * 4];
-        shot_scene(a, 480, 300, false);
-        shot_scene(b, 480, 300, true);
-        before = cui_image_create(ui, 480, 300, a);
-        after = cui_image_create(ui, 480, 300, b);
+        static unsigned char a[960 * 600 * 4], b[960 * 600 * 4];
+        shot_scene(a, 960, 600, false);
+        shot_scene(b, 960, 600, true);
+        before = cui_image_create(ui, 960, 600, a);
+        after = cui_image_create(ui, 960, 600, b);
     }
     cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
-        cui_box(ui, .width = CUI_GROW(1)) { cui_image_compare(ui, "cmp", before, after, &split, .height = 230); }
+        cui_box(ui, .width = CUI_GROW(1)) { cui_image_compare(ui, "cmp", before, after, &split, .height = 230, .aspect = 480.0f / 300.0f); }
         static const char *names[] = { "Kyoto", "Lisbon", "Reykjavik" };
-        static const unsigned cols[] = { 0x7c3aed, 0x0ea5e9, 0x10b981 };
+        static const unsigned cols[] = { 0xc8553d, 0x2d3047, 0x5b8e7d };
         cui_card_stack_begin(ui, "deck", 3, &(cui_card_stack_opts){ .width = CUI_PX(240), .height = 200 });
         for (int k = 0; k < 3; k++) cui_card_stack_item(ui, k) {
             cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_RGB(cols[k]), .radius = 25, .pad = 20, .justify = CUI_JUSTIFY_END, .gap = 4) {

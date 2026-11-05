@@ -519,13 +519,13 @@ static void make_scene(unsigned char *px, int w, int h, bool color) {
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             float fx = (float)x / w, fy = (float)y / h;
-            float r = 0.98f - fy * 0.35f, g = 0.62f - fy * 0.1f, b = 0.45f + fy * 0.4f;   /* dusk sky */
-            float sun = (fx - 0.68f) * (fx - 0.68f) * 2.4f + (fy - 0.42f) * (fy - 0.42f) * 6.0f;
-            if (sun < 0.012f) { r = 1.0f; g = 0.86f; b = 0.55f; }
-            float m1 = 0.55f + 0.12f * sinf(fx * 7.0f + 0.6f) + 0.05f * sinf(fx * 23.0f);
-            float m2 = 0.68f + 0.07f * sinf(fx * 5.0f + 2.1f) + 0.03f * sinf(fx * 31.0f);
-            if (fy > m1) { r = 0.32f - fy * 0.1f; g = 0.24f; b = 0.42f; }
-            if (fy > m2) { r = 0.14f; g = 0.12f; b = 0.24f + (1 - fy) * 0.2f; }
+            float r = 0.56f + fy * 0.34f, g = 0.72f + fy * 0.2f, b = 0.88f + fy * 0.06f;   /* clear daytime sky */
+            float sun = (fx - 0.72f) * (fx - 0.72f) * 15.4f + (fy - 0.24f) * (fy - 0.24f) * 6.0f;   /* round at a 1.6 aspect */
+            if (sun < 0.024f) { r = 1.0f; g = 0.97f; b = 0.86f; }
+            float m1 = 0.5f + 0.1f * sinf(fx * 6.0f + 0.6f) + 0.03f * sinf(fx * 23.0f);
+            float m2 = 0.68f + 0.06f * sinf(fx * 4.0f + 2.1f) + 0.02f * sinf(fx * 31.0f);
+            if (fy > m1) { r = 0.5f; g = 0.6f; b = 0.62f - fy * 0.08f; }        /* far hills in haze */
+            if (fy > m2) { r = 0.3f - (fy - m2) * 0.2f; g = 0.45f - (fy - m2) * 0.25f; b = 0.3f; }   /* near fields */
             if (!color) { float l = r * 0.3f + g * 0.59f + b * 0.11f; l = l * 0.85f + 0.05f; r = g = b = l; }
             unsigned char *p = px + (y * w + x) * 4;
             p[0] = (unsigned char)(fminf(1, fmaxf(0, r)) * 255); p[1] = (unsigned char)(fminf(1, fmaxf(0, g)) * 255);
@@ -611,12 +611,12 @@ static void page_social(cui_ctx *ui) {
     cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
             section(ui, "Before and after", "Drag the divider.");
-            cui_image_compare(ui, "cmp", before, after, &split, .height = 230);
+            cui_image_compare(ui, "cmp", before, after, &split, .height = 230, .aspect = 640.0f / 400.0f);
         }
         cui_column(ui, .width = CUI_GROW(1), .gap = 10, .align = CUI_ALIGN_CENTER) {
             section(ui, "Card stack", "Flick the top card away, left or right.");
             static const char *names[] = { "Kyoto", "Lisbon", "Reykjavik", "Oaxaca", "Hanoi" };
-            static const unsigned cols[] = { 0x7c3aed, 0x0ea5e9, 0x10b981, 0xf59e0b, 0xef4444 };
+            static const unsigned cols[] = { 0xc8553d, 0x2d3047, 0x5b8e7d, 0xb7791f, 0x1f3a5f };
             cui_card_stack_begin(ui, "deck", 3, &(cui_card_stack_opts){ .width = CUI_PX(260), .height = 200 });
             for (int k = 0; k < 3; k++) {
                 int idx = (deck + k) % 5;

@@ -1103,7 +1103,10 @@ CUI_API void cui_carousel_slide_end(cui_ctx *ui);
 CUI_API void cui_carousel_end(cui_ctx *ui);
 
 /* Before and after: drag the divider to compare two images. *pos is 0..1. */
-typedef struct cui_compare_opts { int _; cui_size width; float height; const char *before_label, *after_label; } cui_compare_opts;
+typedef struct cui_compare_opts {
+    int _; cui_size width; float height; const char *before_label, *after_label;
+    float aspect;               /* the images' width / height: they are cropped to fill, never stretched */
+} cui_compare_opts;
 CUI_API bool cui_image_compare_ex(cui_ctx *ui, const char *id, cui_texture before, cui_texture after, float *pos, const cui_compare_opts *opts);
 
 /* Card stack: a deck where the top card can be flicked away left or right.
