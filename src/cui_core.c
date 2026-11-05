@@ -351,6 +351,7 @@ void cui_pop_id(cui_ctx *ui) { if (ui->id_depth > 0) ui->id_depth--; }
 
 cui_id cui_last_id(cui_ctx *ui) { return ui->last_id; }
 cui_rect cui_last_rect(cui_ctx *ui) { return cui__prev_rect(ui, ui->last_id); }
+cui_rect cui_get_rect(cui_ctx *ui, cui_id id) { return cui__prev_rect(ui, id); }
 bool cui_last_hovered(cui_ctx *ui) { return ui->last_id && ui->hot == ui->last_id; }
 
 bool cui_is_disabled(cui_ctx *ui) { return ui->disabled_depth > 0; }
@@ -395,7 +396,9 @@ void cui_input_mouse_button(cui_ctx *ui, cui_mouse_button b, bool down) {
 void cui_input_scroll(cui_ctx *ui, float dx, float dy) { ui->scroll_dx += dx; ui->scroll_dy += dy; cui__poke(ui); }
 
 void cui_input_key(cui_ctx *ui, cui_key key, bool down, int mods) {
-    ui->mods = mods;
+    /* modifiers are sampled at key presses (and modifier-only changes), so a
+     * quick shortcut tap released before the next frame still registers */
+    if (down || key == CUI_KEY_NONE) ui->mods = mods;
     cui__poke(ui);
     if ((int)key <= 0 || key >= CUI_KEY_COUNT) return;
     if (down && ui->kpressed[key] < 255) ui->kpressed[key]++;

@@ -430,6 +430,8 @@ CUI_API void cui_pop_id(cui_ctx *ui);
 /* The id and rectangle of the most recent component (for tooltips, popovers). */
 CUI_API cui_id cui_last_id(cui_ctx *ui);
 CUI_API cui_rect cui_last_rect(cui_ctx *ui);
+/* Rectangle of any component or box id from the latest layout. */
+CUI_API cui_rect cui_get_rect(cui_ctx *ui, cui_id id);
 CUI_API bool cui_last_hovered(cui_ctx *ui);
 CUI_API bool cui_is_disabled(cui_ctx *ui);
 CUI_API void cui_push_disabled(cui_ctx *ui, bool disabled);

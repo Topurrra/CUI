@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.cc }}, ${{ matrix.platform }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cc: gcc, platform: x11 }
+          - { cc: clang, platform: x11 }
+          - { cc: gcc, platform: sdl2 }
+          - { cc: gcc, platform: glfw }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build libx11-dev libgl-dev xvfb mesa-utils libgl1-mesa-dri libsdl2-dev libglfw3-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCUI_PLATFORM=${{ matrix.platform }}
+      - name: Build
+        run: cmake --build build
+      - name: Unit and render tests
+        run: ctest --test-dir build --output-on-failure
+      - name: App smoke test (OpenGL)
+        run: xvfb-run -a -s "-screen 0 1400x1000x24" ./build/tests/cui_app_smoke build/smoke-gl.png
+      - name: App smoke test (software)
+        env:
+          CUI_RENDERER: software
+        run: xvfb-run -a -s "-screen 0 1400x1000x24" ./build/tests/cui_app_smoke build/smoke-sw.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-${{ matrix.cc }}-${{ matrix.platform }}-screenshots
+          path: build/**/*.png
+          if-no-files-found: ignore
+
+  sanitizers:
+    name: Linux (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build libx11-dev
+      - name: Build with sanitizers
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows (${{ matrix.name }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: MSVC, generator: "Visual Studio 17 2022", extra: "" }
+          - { name: MinGW, generator: "MinGW Makefiles", extra: "-DCMAKE_C_COMPILER=gcc" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G "${{ matrix.generator }}" ${{ matrix.extra }} -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: App smoke test
+        shell: bash
+        run: |
+          exe=$(find build -name cui_app_smoke.exe | head -1)
+          "$exe" build/smoke.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.name }}-screenshots
+          path: build/**/*.png
+          if-no-files-found: ignore
+
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j 4
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+      - name: App smoke test
+        run: ./build/tests/cui_app_smoke build/smoke.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshots
+          path: build/**/*.png
+          if-no-files-found: ignore

@@ -17,6 +17,8 @@ typedef struct cui_edit_state {
     int undo_cursor[CUI__UNDO_MAX];
     int undo_count, undo_pos;
     double last_edit;
+    int last_kind;
+    int last_cursor;
     bool init;
     bool show_password;
 } cui_edit_state;
@@ -150,9 +152,16 @@ static int cui__word_right(const char *s, int len, int pos) {
     return pos;
 }
 
-static void cui__undo_push(cui_ctx *ui, cui_edit_state *e, const char *buf) {
-    if (ui->time - e->last_edit < 0.6 && e->undo_pos > 0 && e->undo_pos == e->undo_count) { e->last_edit = ui->time; return; }
+/* kind: 1 insert, 2 delete, 3 other. Consecutive edits of the same kind at
+ * the caret within a short time merge into one undo step. */
+static void cui__undo_push_kind(cui_ctx *ui, cui_edit_state *e, const char *buf, int kind) {
+    if (ui->time - e->last_edit < 1.0 && e->undo_pos > 0 && e->undo_pos == e->undo_count && kind == e->last_kind &&
+        kind != 3 && e->cursor == e->last_cursor) {
+        e->last_edit = ui->time;
+        return;
+    }
     e->last_edit = ui->time;
+    e->last_kind = kind;
     for (int i = e->undo_pos; i < e->undo_count; i++) { cui__free(ui, e->undo[i]); e->undo[i] = NULL; }
     e->undo_count = e->undo_pos;
     if (e->undo_count == CUI__UNDO_MAX) {
@@ -168,6 +177,8 @@ static void cui__undo_push(cui_ctx *ui, cui_edit_state *e, const char *buf) {
     e->undo_count++;
     e->undo_pos = e->undo_count;
 }
+
+static void cui__undo_push(cui_ctx *ui, cui_edit_state *e, const char *buf) { cui__undo_push_kind(ui, e, buf, 3); }
 
 static void cui__delete_range(char *buf, int *len, int a, int b) {
     if (b <= a) return;
@@ -399,7 +410,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
         }
         for (int rep = ui->kpressed[CUI_KEY_BACKSPACE]; rep > 0; rep--) {
             s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push(ui, e, buf);
+            cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 2);
             if (s1 > s0) { cui__delete_range(buf, &len, s0, s1); e->cursor = e->anchor = s0; }
             else if (e->cursor > 0) {
                 int to = word_mod ? cui__word_left(buf, e->cursor) : line_mod ? 0 : cui__utf8_prev(buf, e->cursor);
@@ -410,7 +421,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
         }
         for (int rep = ui->kpressed[CUI_KEY_DELETE]; rep > 0; rep--) {
             s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push(ui, e, buf);
+            cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 2);
             if (s1 > s0) { cui__delete_range(buf, &len, s0, s1); e->cursor = e->anchor = s0; }
             else if (e->cursor < len) {
                 int to = word_mod ? cui__word_right(buf, len, e->cursor) : cui__utf8_next(buf, len, e->cursor);
@@ -430,7 +441,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
         if (multiline && cui_key_pressed(ui, CUI_KEY_TAB)) { /* keep tab for focus navigation */ }
         if (ui->text_in_len > 0 && !(prim && !(mods & CUI_MOD_ALT))) {
             s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            cui__undo_push(ui, e, buf);
+            cui__undo_push_kind(ui, e, buf, s1 > s0 ? 3 : 1);
             cui__delete_range(buf, &len, s0, s1);
             e->cursor = e->anchor = s0;
             int m = cui__insert(buf, &len, cap, e->cursor, ui->text_in, ui->text_in_len, multiline);
@@ -446,6 +457,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
 #undef CUI__MOVE
     if (edited) res.changed = true;
     if (edited || moved) ui->caret_time = ui->time;
+    if (edited) e->last_cursor = e->cursor;
 
     /* keep the caret visible */
     len = (int)strlen(buf);
