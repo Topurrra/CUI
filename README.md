@@ -155,6 +155,15 @@ Measured on a 4 core cloud VM (wall clock), gallery pages at 1240 × 820 points 
 
 `cui_bench` in the test folder reproduces these numbers.
 
+## Status and limitations
+
+CUI 1.0 is complete enough to build real desktop apps, and it is tested on every push (unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux). Things it does not do yet:
+
+- **Screen readers.** There is no accessibility tree yet. Keyboard navigation and focus are complete.
+- **Complex scripts.** Text is UTF-8 with kerning and font fallback, but there is no shaping: right-to-left scripts and scripts that need ligatures (Arabic, Devanagari) do not render correctly. CJK works once you add a fallback font.
+- **IME preedit.** Committed text from input methods works; the in-progress composition is shown by the system IME window rather than inline.
+- **Wayland natively.** Use the SDL2 or GLFW backend, or XWayland.
+
 ## Documentation
 
 - [Getting started](docs/getting-started.md): install, build, the app loop, your first screens
