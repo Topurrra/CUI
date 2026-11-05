@@ -553,14 +553,25 @@ static void cui__paint_radar(cui_ctx *ui, cui_node *n, void *data) {
     rings = CUI_CLAMP(rings, 1, 8);
     cui_vec2 *pts = cui__frame_alloc(ui, sizeof(cui_vec2) * (size_t)na);
     cui_rect grid_labels[8];
+    /* ring values go on the spoke where no series point sits near a ring, so numbers and data never collide */
+    int lab_spoke = 0;
+    float best = 1e9f;
+    for (int i = 0; i < na; i++) {
+        float cost = 0;
+        for (int k = 0; k < p->count; k++) {
+            float v = i < p->series[k].count ? p->series[k].values[i] / p->maxv : 0;
+            for (int g = 1; g < rings; g++) cost += CUI_MAX(0.0f, 1.0f - fabsf(v - (float)g / rings) / 0.2f);
+        }
+        cost += fabsf(dir[i].x) * 0.6f;   /* numbers read best stacked on a vertical spoke */
+        if (cost < best - 1e-4f) { best = cost; lab_spoke = i; }
+    }
     for (int g = 1; g <= rings; g++) {
         float rr = R * g / rings;
         for (int i = 0; i < na; i++) { pts[i].x = c.x + dir[i].x * rr; pts[i].y = c.y + dir[i].y * rr; }
         cui_draw_polyline(ui, pts, na, 1, g == rings ? CUI_C(ui, BORDER) : CUI_C(ui, BORDER_SUBTLE), true);
-        float la = -CUI_PI * 0.5f + CUI_PI / na, lr = rr * cosf(CUI_PI / na);
         const char *gl = cui__fmt_value(ui, p->o.format, p->step * g);
         float gw = cui__text_width(ui, CUI_FONT_BODY, fs * 0.92f, gl, -1, true);
-        cui_vec2 at = { c.x + cosf(la) * lr - gw * 0.5f, c.y + sinf(la) * lr };
+        cui_vec2 at = { c.x + dir[lab_spoke].x * rr - gw * 0.5f, c.y + dir[lab_spoke].y * rr };
         grid_labels[g - 1] = (cui_rect){ at.x, at.y, gw, 0 };
     }
     for (int i = 0; i < na; i++) {
@@ -570,6 +581,12 @@ static void cui__paint_radar(cui_ctx *ui, cui_node *n, void *data) {
         int al = dir[i].x > 0.3f ? 0 : dir[i].x < -0.3f ? 2 : 1;
         if (al == 1) ly += dir[i].y * 4;
         cui__text_at(ui, h ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, lx, ly, al, h ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY), p->axes[i] ? p->axes[i] : "", false);
+    }
+    /* ring values sit on the grid, under the data: the inner rings only, the outer one meets the axis names */
+    for (int g = 1; g < rings || (rings == 1 && g == 1); g++) {
+        cui_rect q = grid_labels[g - 1];
+        cui_draw_rect(ui, (cui_rect){ q.x - 3, q.y - 7, q.w + 6, 14 }, CUI_CORNERS(7), CUI_C(ui, SURFACE));
+        cui__text_at(ui, CUI_FONT_BODY, fs * 0.92f, q.x, q.y, 0, CUI_C(ui, TEXT_MUTED), cui__fmt_value(ui, p->o.format, p->step * g), true);
     }
     /* series */
     bool dark = ui->mode == CUI_THEME_DARK;
@@ -583,7 +600,8 @@ static void cui__paint_radar(cui_ctx *ui, cui_node *n, void *data) {
         }
         cui_cvert *vv = cui__frame_alloc(ui, sizeof(cui_cvert) * (size_t)(na + 1));
         uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)na * 3);
-        cui_color fill = cui_alpha(col, (p->count > 1 ? 0.12f : 0.18f) * (dark ? 1.3f : 1.0f));
+        /* only the last series is filled: stacked translucent fills mix into a muddy third color */
+        cui_color fill = cui_alpha(col, (k == p->count - 1 ? (p->count > 1 ? 0.14f : 0.18f) : 0.0f) * (dark ? 1.3f : 1.0f));
         vv[0].x = c.x; vv[0].y = c.y; vv[0].c = fill;
         for (int i = 0; i < na; i++) { vv[i + 1].x = pts[i].x; vv[i + 1].y = pts[i].y; vv[i + 1].c = fill; }
         for (int i = 0; i < na; i++) { idx[i * 3] = 0; idx[i * 3 + 1] = (uint32_t)(i + 1); idx[i * 3 + 2] = (uint32_t)((i + 1) % na + 1); }
@@ -595,12 +613,6 @@ static void cui__paint_radar(cui_ctx *ui, cui_node *n, void *data) {
             cui_draw_circle(ui, pts[i], rr + 1.5f, CUI_C(ui, SURFACE));
             cui_draw_circle(ui, pts[i], rr, col);
         }
-    }
-    /* ring values over the shapes, on a small backing so lines never cross them */
-    for (int g = 1; g <= rings; g++) {
-        cui_rect q = grid_labels[g - 1];
-        cui_draw_rect(ui, (cui_rect){ q.x - 3, q.y - 7, q.w + 6, 14 }, CUI_CORNERS(7), cui_alpha(CUI_C(ui, SURFACE), 0.85f));
-        cui__text_at(ui, CUI_FONT_BODY, fs * 0.92f, q.x, q.y, 0, CUI_C(ui, TEXT_MUTED), cui__fmt_value(ui, p->o.format, p->step * g), true);
     }
     if (p->count >= 2 && !p->o.no_legend) {
         const char **names = cui__frame_alloc(ui, sizeof(char *) * (size_t)p->count);
@@ -699,9 +711,10 @@ static void cui__paint_funnel(cui_ctx *ui, cui_node *n, void *data) {
         else cui__text_at(ui, CUI_FONT_MEDIUM, fs, x1 + 8, y + CUI__FN_ROW * 0.5f, 0, CUI_C(ui, FOREGROUND), vs, true);
         cui__text_at(ui, hov ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, r.x, y + CUI__FN_ROW * 0.5f, 0, CUI_C(ui, FOREGROUND), p->items[k].label ? p->items[k].label : "", false);
         const char *pc = cui__pct(ui, p->items[k].value, p->items[0].value);
-        cui__text_at(ui, CUI_FONT_MEDIUM, fs, r.x + r.w, y + CUI__FN_ROW * 0.5f - (k ? 7 : 0), 2, CUI_C(ui, FOREGROUND), pc, true);
-        if (k > 0) cui__text_at(ui, CUI_FONT_BODY, fx, r.x + r.w, y + CUI__FN_ROW * 0.5f + 9, 2, CUI_C(ui, TEXT_MUTED),
-                                cui__frame_printf(ui, "\xe2\x86\x93 %s", cui__pct(ui, p->items[k].value, p->items[k - 1].value)), true);
+        /* the second stage's step and overall rates are the same number: say it once */
+        cui__text_at(ui, CUI_FONT_MEDIUM, fs, r.x + r.w, y + CUI__FN_ROW * 0.5f - (k > 1 ? 7 : 0), 2, CUI_C(ui, FOREGROUND), pc, true);
+        if (k > 1) cui__text_at(ui, CUI_FONT_BODY, fx, r.x + r.w, y + CUI__FN_ROW * 0.5f + 9, 2, CUI_C(ui, TEXT_MUTED),
+                                cui__frame_printf(ui, "%s of previous", cui__pct(ui, p->items[k].value, p->items[k - 1].value)), true);   /* step conversion, said plainly */
         prev_x0 = x0; prev_x1 = x1; prev_y = y + CUI__FN_ROW;
     }
     cui__tip_draw(ui, &p->tip);
@@ -793,7 +806,8 @@ static cui__sk_geo cui__sk_layout(cui_ctx *ui, cui_rect r, const char *const *na
     }
     g.maxcol = 0;
     for (int i = 0; i < nn; i++) g.maxcol = CUI_MAX(g.maxcol, g.col[i]);
-    for (int i = 0; i < nn; i++) if (g.out[i] <= 0 && g.in[i] > 0) g.col[i] = g.maxcol;   /* sinks to the right */
+    /* an outcome that ends early (a drop off) stays at its own step; only one fed from the last step sits at the far right,
+       so no ribbon has to cross a column of nodes to reach it */
     /* room on the right for the last column's labels */
     float fs = cui__fs(ui, ui->theme.text_xs), right_w = 0;
     if (g.maxcol > 0)
@@ -802,16 +816,16 @@ static cui__sk_geo cui__sk_layout(cui_ctx *ui, cui_rect r, const char *const *na
                 right_w = CUI_MAX(right_w, cui__text_width(ui, CUI_FONT_MEDIUM, fs, names && names[i] ? names[i] : "", -1, false) + 6 +
                                                cui__text_width(ui, CUI_FONT_BODY, fs, cui__fmt_value(ui, fmt, CUI_MAX(g.in[i], g.out[i])), -1, true) + 10);
     float span = r.w - right_w - nw;
+    /* color goes to the outcomes, the largest first; sources and steps stay neutral, so the eye follows where things end up */
     g.color = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, nn));
-    int next = 0;
-    for (int c = 0; c <= g.maxcol; c++)
-        for (int i = 0; i < nn; i++) {
-            if (g.col[i] != c) continue;
-            int best = -1;
-            for (int l = 0; l < nl; l++)
-                if (g.links[l].to == i && g.col[g.links[l].from] < c && (best < 0 || g.links[l].value > g.links[best].value)) best = l;
-            g.color[i] = best >= 0 ? g.color[g.links[best].from] : next++;
-        }
+    for (int i = 0; i < nn; i++) g.color[i] = -1;
+    for (int slot = 0;; slot++) {
+        int best = -1;
+        for (int i = 0; i < nn; i++)
+            if (g.color[i] < 0 && g.out[i] <= 0 && g.in[i] > 0 && (best < 0 || g.in[i] > g.in[best])) best = i;
+        if (best < 0) break;
+        g.color[best] = slot;
+    }
     float pad = 14;
     g.k = 1e30f;
     for (int c = 0; c <= g.maxcol; c++) {
@@ -875,8 +889,9 @@ static void cui__paint_sankey(cui_ctx *ui, cui_node *n, void *data) {
         float x0 = g.node[a].x + g.node[a].w, x1 = g.node[b].x;
         float reach = cui__clampf(p->intro, 0, 1);
         bool hl = l == p->hover_link || a == p->hover_node || b == p->hover_node;
-        cui_color col = cui__viz_color(ui, (cui_color){ 0 }, g.color[a]);
-        float alpha = ui->mode == CUI_THEME_DARK ? 0.38f : 0.3f;
+        bool neutral = g.color[b] < 0;
+        cui_color col = neutral ? CUI_C(ui, TEXT_MUTED) : cui__viz_color(ui, (cui_color){ 0 }, g.color[b]);
+        float alpha = neutral ? (ui->mode == CUI_THEME_DARK ? 0.26f : 0.2f) : (ui->mode == CUI_THEME_DARK ? 0.38f : 0.3f);
         if (any) alpha = hl ? cui__lerp(alpha, 0.6f, p->t) : cui__lerp(alpha, 0.1f, p->t);
         cui_color c = cui_alpha(col, alpha);
         for (int i = 0; i <= seg; i++) {
@@ -895,7 +910,7 @@ static void cui__paint_sankey(cui_ctx *ui, cui_node *n, void *data) {
     }
     for (int i = 0; i < g.nn; i++) {
         if (g.in[i] <= 0 && g.out[i] <= 0) continue;
-        cui_color col = cui__viz_color(ui, (cui_color){ 0 }, g.color[i]);
+        cui_color col = g.color[i] < 0 ? CUI_C(ui, BORDER_STRONG) : cui__viz_color(ui, (cui_color){ 0 }, g.color[i]);
         if (any && p->hover_node >= 0 && i != p->hover_node) col = cui_mix(col, CUI_C(ui, SURFACE), 0.3f * p->t);
         cui_draw_rect(ui, g.node[i], CUI_CORNERS(3), col);
         bool right = true;
@@ -967,7 +982,7 @@ int cui_sankey_ex(cui_ctx *ui, const char *id_str, const char *const *nodes, int
     } else if (p->hover_link >= 0) {
         cui_sankey_link *L = &g.links[p->hover_link];
         p->tip.title = cui__frame_printf(ui, "%s \xe2\x86\x92 %s", nodes && nodes[L->from] ? nodes[L->from] : "", nodes && nodes[L->to] ? nodes[L->to] : "");
-        cui__tip_row(&p->tip, "Flow", cui__fmt_value(ui, o->format, L->value), cui__viz_color(ui, (cui_color){ 0 }, g.color[L->from]));
+        cui__tip_row(&p->tip, "Flow", cui__fmt_value(ui, o->format, L->value), g.color[L->to] < 0 ? CUI_C(ui, TEXT_MUTED) : cui__viz_color(ui, (cui_color){ 0 }, g.color[L->to]));
         if (g.out[L->from] > 0) cui__tip_row(&p->tip, "Of the source", cui__pct(ui, L->value, g.out[L->from]), cui__rgba(0, 0, 0, 0));
     } else p->tip.title = NULL;
     cui__viz_node(ui, id, o->width.kind ? o->width : CUI_FILL, CUI_PX(h), cui__paint_sankey, p, hover >= 0);
@@ -1279,12 +1294,15 @@ int cui_bar_list_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *items_i
 /* Activity rings                                                           */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_viz_item *items; int count; cui_rings_opts o; float size, th; float *prog; int hover; cui__tip tip; } cui__ring_paint;
+typedef struct { cui_viz_item *items; int count; cui_rings_opts o; float size, th; float *prog; int hover; cui__tip tip; float label_w; } cui__ring_paint;
+
+#define CUI__RING_LEGEND_GAP 28
+#define CUI__RING_ROW 26
 
 static void cui__paint_rings(cui_ctx *ui, cui_node *n, void *data) {
     cui__ring_paint *p = data;
     cui_rect r = n->rect;
-    cui_vec2 c = { r.x + r.w * 0.5f, r.y + p->size * 0.5f };
+    cui_vec2 c = { r.x + (p->o.legend ? p->size * 0.5f : r.w * 0.5f), r.y + p->size * 0.5f };
     float a0 = -CUI_PI * 0.5f;
     for (int k = 0; k < p->count; k++) {
         float rad = p->size * 0.5f - p->th * 0.5f - k * (p->th + 3);
@@ -1320,6 +1338,18 @@ static void cui__paint_rings(cui_ctx *ui, cui_node *n, void *data) {
         cui__text_at(ui, CUI_FONT_DISPLAY, fd, c.x, c.y - (p->o.caption ? 7 : 0), 1, CUI_C(ui, FOREGROUND), p->o.center, true);
         if (p->o.caption) cui__text_at(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_xs), c.x, c.y + fd * 0.55f, 1, CUI_C(ui, TEXT_MUTED), p->o.caption, false);
     }
+    if (p->o.legend) {   /* outer ring first, as the rings read from the outside in */
+        float fs = cui__fs(ui, ui->theme.text_sm);
+        float lx = r.x + p->size + CUI__RING_LEGEND_GAP, ly = c.y - p->count * CUI__RING_ROW * 0.5f + CUI__RING_ROW * 0.5f;
+        for (int k = 0; k < p->count; k++) {
+            bool dim = p->hover >= 0 && p->tip.alpha > 0.01f && k != p->hover;
+            cui_color col = cui__viz_color(ui, p->items[k].color, k);
+            float y = ly + k * CUI__RING_ROW;
+            cui_draw_rect(ui, (cui_rect){ lx, y - 4, 8, 8 }, CUI_CORNERS(2.5f), dim ? cui_mix(col, CUI_C(ui, SURFACE), 0.4f * p->tip.alpha) : col);
+            cui__text_at(ui, CUI_FONT_BODY, fs, lx + 16, y, 0, CUI_C(ui, TEXT_SECONDARY), p->items[k].label ? p->items[k].label : "", false);
+            cui__text_at(ui, CUI_FONT_MEDIUM, fs, lx + 16 + p->label_w + 14, y, 0, CUI_C(ui, FOREGROUND), cui__pct(ui, p->items[k].value, 1), true);
+        }
+    }
     cui__tip_draw(ui, &p->tip);
 }
 
@@ -1351,6 +1381,10 @@ int cui_activity_rings_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *r
             if (fabsf(dist - rad) <= th * 0.5f + 1.5f) hover = k;
         }
     }
+    if (o->legend && r.hovered && hover < 0) {   /* a legend row picks out its ring */
+        float lx = pr.x + size + CUI__RING_LEGEND_GAP, ly = pr.y + size * 0.5f - count * CUI__RING_ROW * 0.5f;
+        if (ui->mx >= lx && ui->my >= ly && ui->my < ly + count * CUI__RING_ROW) hover = CUI_CLAMP((int)((ui->my - ly) / CUI__RING_ROW), 0, count - 1);
+    }
     cui__viz_hover(ui, st, hover);
     p->items = cui__copy_items(ui, rings, count); p->count = count; p->o = *o; p->size = size; p->th = th;
     p->hover = st->hover_t > 0.01f && st->shown < count ? st->shown : -1;
@@ -1359,7 +1393,16 @@ int cui_activity_rings_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *r
         p->tip.title = rings[p->hover].label ? rings[p->hover].label : "";
         cui__tip_row(&p->tip, "Progress", cui__pct(ui, rings[p->hover].value, 1), cui__viz_color(ui, rings[p->hover].color, p->hover));
     }
-    cui__viz_node(ui, id, CUI_PX(size), CUI_PX(size), cui__paint_rings, p, hover >= 0);
+    float w = size;
+    if (o->legend) {
+        float fs = cui__fs(ui, ui->theme.text_sm), vw = 0;
+        for (int k = 0; k < count; k++) {
+            p->label_w = CUI_MAX(p->label_w, cui__text_width(ui, CUI_FONT_BODY, fs, rings[k].label ? rings[k].label : "", -1, false));
+            vw = CUI_MAX(vw, cui__text_width(ui, CUI_FONT_MEDIUM, fs, cui__pct(ui, rings[k].value, 1), -1, true));
+        }
+        w += CUI__RING_LEGEND_GAP + 16 + p->label_w + 14 + vw;
+    }
+    cui__viz_node(ui, id, CUI_PX(w), CUI_PX(size), cui__paint_rings, p, hover >= 0);
     return r.clicked ? hover : -1;
 }
 
@@ -1384,9 +1427,12 @@ static cui__sc_geo cui__sc_layout(cui_ctx *ui, cui_rect r, const cui_scatter_ser
         }
     if (xl > xh) { xl = 0; xh = 1; }
     if (yl > yh) { yl = 0; yh = 1; }
-    float px = (xh - xl) * 0.04f, py = (yh - yl) * 0.06f;
-    cui__nice_range(xl - px, xh + px, 5, &g.x0, &g.x1, &g.xs);
-    cui__nice_range(yl - py, yh + py, 4, &g.y0, &g.y1, &g.ys);
+    /* the axes end on the first nice value past the data; padding is added only when a point would sit on the frame */
+    float px = (xh - xl) * 0.015f, py = (yh - yl) * 0.03f;
+    cui__nice_range(xl, xh, 5, &g.x0, &g.x1, &g.xs);
+    if (g.x1 - xh < px || (xl - g.x0 < px && g.x0 != 0)) cui__nice_range(xl - (xl - g.x0 < px && g.x0 != 0 ? px : 0), xh + (g.x1 - xh < px ? px : 0), 5, &g.x0, &g.x1, &g.xs);
+    cui__nice_range(yl, yh, 4, &g.y0, &g.y1, &g.ys);
+    if (g.y1 - yh < py || (yl - g.y0 < py && g.y0 != 0)) cui__nice_range(yl - (yl - g.y0 < py && g.y0 != 0 ? py : 0), yh + (g.y1 - yh < py ? py : 0), 4, &g.y0, &g.y1, &g.ys);
     float fs = cui__fs(ui, ui->theme.text_xs), aw = 0;
     for (float v = g.y0; v <= g.y1 + g.ys * 0.5f; v += g.ys) aw = CUI_MAX(aw, cui__text_width(ui, CUI_FONT_BODY, fs, cui__fmt_value(ui, o->y_format, v), -1, true));
     float top = legend_h + (o->y_label ? 22 : 6);

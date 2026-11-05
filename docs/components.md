@@ -498,7 +498,7 @@ The content animates its height on a smooth spring and the chevron rotates.
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/bar-donut-dark.png"><img src="images/components/bar-donut.png" alt="Bar and donut"></picture>
 
 ```c
-cui_series s[] = { { "Revenue", revenue, 12 }, { "Costs", costs, 12 } };
+cui_series s[] = { { "Subscriptions", subs, 12 }, { "Cloud spend", cloud, 12 } };
 cui_line_chart(ui, "revenue", s, 2, .labels = months, .label_count = 12, .area = true, .smooth = true, .format = "$%.0fk");
 cui_bar_chart(ui, "visits", s, 2, .labels = months, .label_count = 6);
 cui_bar_chart(ui, "runs", runs, 3, .labels = weeks, .label_count = 8, .stacked = true);   /* passed, retried, failed */
@@ -506,7 +506,7 @@ cui_donut_chart(ui, "share", values, labels, 4, .format = "%.0f%%");
 cui_sparkline(ui, values, 12, CUI_PX(120), 32, CUI_COLOR_SERIES(0));
 ```
 
-Charts draw in once, pick nice axis ticks, show a crosshair that glides between points and a tooltip with every series on hover. Colors come from the theme's series palette, which starts at the accent hue. Options: `width`, `height`, `labels`, `label_count`, `area`, `smooth`, `stacked`, `no_grid`, `no_legend`, `format`, `min`, `max`.
+Charts draw in once, pick nice axis ticks, show a crosshair that glides between points and a tooltip with every series on hover. Colors come from the theme's series palette, which starts at the accent hue. Options: `width`, `height`, `labels`, `label_count`, `area`, `smooth`, `stacked`, `no_grid`, `no_legend`, `format`, `min`, `max`. With `area` and several series, only the first is filled, so fills never tint each other into a third color.
 
 ## Image
 

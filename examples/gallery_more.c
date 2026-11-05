@@ -774,8 +774,8 @@ static void page_viz(cui_ctx *ui) {
         cui_column(ui, .width = CUI_GROW(1.3f), .gap = 10) {
             section(ui, "Treemap", "Bundle size by module.");
             static const cui_viz_item mods[] = {
-                { "Layout", 412 }, { "Text", 318 }, { "Draw", 260 }, { "Controls", 233 }, { "Charts", 170 },
-                { "Overlays", 141 }, { "Platform", 120 }, { "Theme", 64 }, { "Icons", 52 }, { "Grid", 44 },
+                { "Layout", 55 }, { "Text", 42 }, { "Draw", 35 }, { "Controls", 31 }, { "Charts", 23 },
+                { "Overlays", 19 }, { "Platform", 16 }, { "Theme", 9 }, { "Icons", 7 }, { "Grid", 6 },
             };
             cui_treemap(ui, "bundle", mods, 10, .height = 280, .format = "%.0f KB");
         }
@@ -807,9 +807,9 @@ static void page_viz(cui_ctx *ui) {
     static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
     static const cui_sankey_link links[] = {
         { 0, 3, 420 }, { 1, 3, 260 }, { 2, 3, 180 }, { 0, 4, 300 }, { 1, 4, 220 },
-        { 3, 5, 610 }, { 3, 6, 250 }, { 5, 6, 330 }, { 5, 7, 280 },
+        { 3, 5, 860 }, { 5, 6, 580 }, { 5, 7, 280 },
     };
-    cui_card(ui, .pad = 18, .width = CUI_FILL) { cui_sankey(ui, "flow", nodes, 8, links, 9, .height = 280); }
+    cui_card(ui, .pad = 18, .width = CUI_FILL) { cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 280); }
     cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_column(ui, .width = CUI_GROW(1.4f), .gap = 10) {
             section(ui, "Bar list", "Ranked, keyed by label: press Shuffle and the rows slide to their new rank.");

@@ -1186,7 +1186,7 @@ typedef struct cui_bar_list_opts { int _; cui_size width; const char *format; in
 CUI_API int cui_bar_list_ex(cui_ctx *ui, const char *id, const cui_viz_item *items, int count, const cui_bar_list_opts *opts);
 
 /* Activity rings: concentric progress rings; values past 1 keep winding. */
-typedef struct cui_rings_opts { int _; float size; float thickness; const char *center; const char *caption; } cui_rings_opts;
+typedef struct cui_rings_opts { int _; float size; float thickness; const char *center; const char *caption; bool legend; /* names and shares beside the rings */ } cui_rings_opts;
 CUI_API int cui_activity_rings_ex(cui_ctx *ui, const char *id, const cui_viz_item *rings, int count, const cui_rings_opts *opts);
 
 /* Scatter (or bubble) chart: points per series, optional sizes. */

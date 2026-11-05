@@ -160,7 +160,22 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
         if (p->bars || (lo >= 0 && lo <= hi * 0.45f)) lo = CUI_MIN(lo, 0);
     }
     float step;
-    cui__nice_range(lo, hi, 4, &lo, &hi, &step);
+    if (p->o.min != p->o.max) {
+        /* a fixed range keeps its ends: pick the nice step that divides it evenly, nearest four intervals */
+        float range = hi - lo, best = 0, best_d = 1e9f;
+        float mag = powf(10.0f, floorf(log10f(range)) - 1);
+        static const float m[] = { 1, 2, 2.5f, 5 };
+        for (int e = 0; e < 3; e++, mag *= 10)
+            for (int j = 0; j < 4; j++) {
+                float st = m[j] * mag, n = range / st;
+                if (n < 2.5f || n > 6.5f || fabsf(n - roundf(n)) > 1e-3f) continue;
+                if (fabsf(n - 4) < best_d) { best_d = fabsf(n - 4); best = st; }
+            }
+        if (best > 0) step = best;
+        else cui__nice_range(lo, hi, 4, &lo, &hi, &step);
+    } else {
+        cui__nice_range(lo, hi, 4, &lo, &hi, &step);
+    }
     float fs = ui->theme.text_xs + 0.5f;
     float axis_w = 0;
     for (float v = lo; v <= hi + step * 0.5f; v += step)
@@ -249,10 +264,11 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
         int ln = s->count;
         if (p->o.smooth && s->count > 2) cui__smooth_points(ui, pts, s->count, &line, &ln);
         cui_color c = cui__series_color(ui, s, k);
-        if (p->o.area && ln > 1) {
+        /* with several series only the first is filled: overlapping fills tint each other into a third color */
+        if (p->o.area && ln > 1 && k == 0) {
             cui_cvert *v = cui__frame_alloc(ui, sizeof(cui_cvert) * (size_t)ln * 2);
             uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)(ln - 1) * 6);
-            float alpha_top = (p->count > 1 ? 0.12f : 0.2f) * (ui->mode == CUI_THEME_DARK ? 1.2f : 1.0f);
+            float alpha_top = (p->count > 1 ? 0.16f : 0.2f) * (ui->mode == CUI_THEME_DARK ? 1.2f : 1.0f);
             for (int i = 0; i < ln; i++) {
                 float rel = (base_y - line[i].y) / plot.h;
                 v[i * 2].x = line[i].x; v[i * 2].y = line[i].y; v[i * 2].c = cui_alpha(c, alpha_top * (0.35f + 0.65f * cui__clampf(rel * 1.4f, 0, 1)));

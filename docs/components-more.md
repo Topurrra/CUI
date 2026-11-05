@@ -570,7 +570,7 @@ One square a day in five levels, weeks as columns starting on Monday, month labe
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/treemap-radar-dark.png"><img src="images/components/treemap-radar.png" alt="Treemap and radar"></picture>
 
 ```c
-static const cui_viz_item mods[] = { { "Layout", 412 }, { "Text", 318 }, { "Draw", 260 } /* ... */ };
+static const cui_viz_item mods[] = { { "Layout", 55 }, { "Text", 42 }, { "Draw", 35 } /* ... */ };
 cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB");
 
 cui_series releases[] = { { "1.0", a, 6 }, { "1.1", b, 6 } };
@@ -598,11 +598,11 @@ The funnel shows each stage's share of the first and, under it, the conversion f
 
 ```c
 static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
-static const cui_sankey_link links[] = { { 0, 3, 420 }, { 1, 3, 260 }, { 3, 5, 610 }, { 5, 6, 330 } /* ... */ };
-cui_sankey(ui, "flow", nodes, 8, links, 9, .height = 300);
+static const cui_sankey_link links[] = { { 0, 3, 420 }, { 1, 3, 260 }, { 3, 5, 860 }, { 5, 6, 580 } /* ... */ };
+cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300);
 ```
 
-Columns follow the links from the sources, and nodes with no way out line up on the right. Sources take the palette in order and every other node inherits the color of its largest inflow, so a flow keeps its color as it moves across the chart. Hover a node to highlight its links, or a ribbon to see the flow and its share of the source. A cycle in the links does not hang the layout.
+Columns follow the links from the sources, and an outcome sits at the step it is reached from, so a drop off stays beside the step it left and no ribbon crosses a column of nodes. Color goes to the outcomes, the largest first, and each ribbon takes the color of where it ends; sources and steps stay neutral gray, so the eye follows where things end up. Hover a node to highlight its links, or a ribbon to see the flow and its share of the source. A cycle in the links does not hang the layout.
 
 ### Bar list and activity rings
 
@@ -611,10 +611,10 @@ Columns follow the links from the sources, and nodes with no way out line up on 
 ```c
 cui_bar_list(ui, "pages", pages, 5);   /* ranked by value; set keep_order to keep yours */
 static const cui_viz_item rings[] = { { "Move", 0.82f }, { "Exercise", 1.24f }, { "Stand", 0.58f } };
-cui_activity_rings(ui, "rings", rings, 3, .size = 180, .center = "82%", .caption = "of goal");
+cui_activity_rings(ui, "rings", rings, 3, .size = 180, .legend = true);
 ```
 
-Bar list rows are keyed by their label: when the values change, the bars grow or shrink and the rows slide to their new rank. `max_rows` keeps the top few. Ring values are fractions of a goal; past 1 a ring keeps winding, with a shadow under its tip so the overlap reads.
+Bar list rows are keyed by their label: when the values change, the bars grow or shrink and the rows slide to their new rank. `max_rows` keeps the top few. Ring values are fractions of a goal; past 1 a ring keeps winding, with a shadow under its tip so the overlap reads. `legend` lists each ring's name and share beside it, outer ring first, and hovering a row picks out its ring; without it, `center` and `caption` put a single figure in the middle.
 
 ### Scatter and bubble
 

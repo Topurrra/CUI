@@ -289,7 +289,7 @@ SCENE(chips) {
 SCENE(line_chart) {
     static const float a[] = { 18, 22, 21, 27, 31, 29, 36, 41, 39, 46, 52, 58 }, b[] = { 12, 13, 15, 14, 18, 19, 21, 22, 24, 25, 27, 29 };
     static const char *m[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    cui_series s[2] = { { "Revenue", a, 12, { 0 } }, { "Costs", b, 12, { 0 } } };
+    cui_series s[2] = { { "Subscriptions", a, 12, { 0 } }, { "Cloud spend", b, 12, { 0 } } };
     cui_card(ui, .width = CUI_PX(680)) { cui_line_chart(ui, "l", s, 2, .labels = m, .label_count = 12, .area = true, .smooth = true, .height = 200, .format = "$%.0fk"); }
 }
 SCENE(bar_chart) {
@@ -921,25 +921,28 @@ SCENE(calendar_heatmap) {
 }
 SCENE(treemap_radar) {
     static const cui_viz_item mods[] = {
-        { "Layout", 412 }, { "Text", 318 }, { "Draw", 260 }, { "Controls", 233 }, { "Charts", 170 },
-        { "Overlays", 141 }, { "Platform", 120 }, { "Theme", 64 }, { "Icons", 52 }, { "Grid", 44 },
+        { "Layout", 55 }, { "Text", 42 }, { "Draw", 35 }, { "Controls", 31 }, { "Charts", 23 },
+        { "Overlays", 19 }, { "Platform", 16 }, { "Theme", 9 }, { "Icons", 7 }, { "Grid", 6 },
     };
     static const float a[] = { 82, 64, 90, 58, 75, 88 }, b[] = { 70, 85, 72, 80, 60, 79 };
     static const char *axes[] = { "Speed", "Size", "Polish", "Docs", "Platforms", "Tests" };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
         cui_box(ui, .width = CUI_GROW(1)) { cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB"); }
         cui_series rs[] = { { "1.0", a, 6, { 0 } }, { "1.1", b, 6, { 0 } } };
-        cui_radar_chart(ui, "radar", rs, 2, axes, 6, .size = 210, .max = 100);
+        cui_column(ui, .gap = 2, .align = CUI_ALIGN_CENTER) {
+            cui_label(ui, "Review scores by release");
+            cui_radar_chart(ui, "radar", rs, 2, axes, 6, .size = 200, .max = 100);
+        }
     }
 }
 SCENE(funnel_split) {
     static const cui_viz_item stages[] = { { "Visited", 12840 }, { "Signed up", 4210 }, { "Activated", 2380 }, { "Subscribed", 860 } };
-    static const cui_viz_item parts[] = { { "Layout", 38 }, { "Text", 24 }, { "Paint", 21 }, { "Input", 9 }, { "Other", 8 } };
+    static const cui_viz_item parts[] = { { "Layout", 4.1f }, { "Text", 2.6f }, { "Paint", 2.3f }, { "Input", 1.0f }, { "Other", 0.9f } };
     static const cui_viz_item plats[] = { { "Windows", 46 }, { "macOS", 31 }, { "Linux", 23 } };
     cui_row(ui, .gap = 36, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_box(ui, .width = CUI_GROW(1)) { cui_funnel(ui, "funnel", stages, 4); }
         cui_column(ui, .width = CUI_GROW(1), .gap = 26) {
-            cui_split_bar(ui, "split", parts, 5, .format = "%.0f ms");
+            cui_split_bar(ui, "split", parts, 5, .format = "%.1f ms");
             cui_waffle(ui, "waffle", plats, 3, .cell = 12);
         }
     }
@@ -948,28 +951,33 @@ SCENE(sankey) {
     static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
     static const cui_sankey_link links[] = {
         { 0, 3, 420 }, { 1, 3, 260 }, { 2, 3, 180 }, { 0, 4, 300 }, { 1, 4, 220 },
-        { 3, 5, 610 }, { 3, 6, 250 }, { 5, 6, 330 }, { 5, 7, 280 },
+        { 3, 5, 860 }, { 5, 6, 580 }, { 5, 7, 280 },
     };
-    cui_sankey(ui, "flow", nodes, 8, links, 9, .height = 300);
+    cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300);
 }
 SCENE(bar_list_rings) {
     static const cui_viz_item pages[] = { { "/docs", 4820 }, { "/", 3920 }, { "/gallery", 2410 }, { "/blog/fast-ui-in-c", 1830 }, { "/download", 1210 } };
     static const cui_viz_item rings[] = { { "Move", 0.82f }, { "Exercise", 1.24f }, { "Stand", 0.58f } };
     cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
         cui_box(ui, .width = CUI_GROW(1)) { cui_bar_list(ui, "pages", pages, 5); }
-        cui_activity_rings(ui, "rings", rings, 3, .size = 180, .center = "82%", .caption = "of goal");
+        cui_activity_rings(ui, "rings", rings, 3, .size = 180, .legend = true);
     }
 }
 SCENE(scatter) {
     static cui_vec2 a[40], b[40];
     static float sa[40], sb[40];
+    /* measured-looking runs: the software renderer scales with the node count, OpenGL pays a fixed upload
+       and then grows slowly, so the two cross near a thousand nodes */
+    uint32_t seed = 7;
     for (int k = 0; k < 40; k++) {
-        float n = 200 + k * 95.0f;
-        a[k] = (cui_vec2){ n, 0.08f + n * 0.00006f + (float)((k * 37) % 13) * 0.004f };
-        b[k] = (cui_vec2){ n * 0.9f + 150, 0.15f + n * 0.00011f + (float)((k * 53) % 17) * 0.006f };
-        sa[k] = (float)(10 + (k * 7) % 40); sb[k] = (float)(20 + (k * 11) % 50);
+        float u[4];
+        for (int j = 0; j < 4; j++) { seed = seed * 1664525u + 1013904223u; u[j] = (float)(seed >> 8) / 16777216.0f; }
+        float n = 150 + 3800 * (k + u[0]) / 40.0f, m = 150 + 3800 * (k + u[1]) / 40.0f;
+        a[k] = (cui_vec2){ n, 0.025f + n * 0.000072f + (u[2] - 0.5f) * 0.03f * (0.5f + n / 4000) };
+        b[k] = (cui_vec2){ m, 0.085f + m * 0.000026f + (u[3] - 0.5f) * 0.022f };
+        sa[k] = sb[k] = 0;
     }
-    cui_scatter_series ss[] = { { "Software", a, sa, 40, { 0 } }, { "OpenGL", b, sb, 40, { 0 } } };
+    cui_scatter_series ss[] = { { "Software", a, NULL, 40, { 0 } }, { "OpenGL", b, NULL, 40, { 0 } } };
     cui_scatter_chart(ui, "scatter", ss, 2, .height = 300, .x_label = "Nodes", .y_label = "Frame time (ms)", .y_format = "%.2f");
 }
 
@@ -1321,7 +1329,7 @@ static void pro_assistant(cui_ctx *ui) {
         cui_chat_message(ui, "Why does the new build feel so much faster?", .mine = true);
         cui_reasoning(ui, "think", .seconds = 6) { cui_text(ui, "hidden"); }
         cui_tool_call(ui, "search", "search_commits", .icon = CUI_ICON_GIT_BRANCH, .detail = "last 30 days", .status = CUI_TASK_DONE, .seconds = 0.8f);
-        cui_text(ui, "Most of the gain comes from caching glyphs in an atlas and drawing text in one batch, so a frame now takes a quarter of a millisecond.", .size = 14);
+        cui_text(ui, "Most of the gain comes from caching glyphs in an atlas and drawing text in one batch, so a frame now takes 0.24 ms, down from about 1 ms.", .size = 14);
         cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER) {
             static const cui_source a = { "Glyph atlas", "https://github.com/cui/pull/214", "Cache rasterized glyphs" };
             static const cui_source b = { "Batching", "https://docs.cui.dev/rendering", "One draw call per texture" };
@@ -1473,7 +1481,7 @@ static void hero_ai_body(cui_ctx *ui) {
             }
             cui_tool_call(ui, "search", "search_commits", .icon = CUI_ICON_GIT_BRANCH, .detail = "rendering, last 30 days", .status = CUI_TASK_DONE, .seconds = 0.8f);
             cui_tool_call(ui, "bench", "run_benchmark", .icon = CUI_ICON_ACTIVITY, .detail = "gallery, 600 frames", .status = CUI_TASK_RUNNING, .seconds = 2.4f);
-            cui_text(ui, "Most of it comes from caching glyphs in an atlas and drawing all text in one batch: a frame now takes a quarter of a millisecond.", .size = 14.5f);
+            cui_text(ui, "Most of it comes from caching glyphs in an atlas and drawing all text in one batch: a frame now takes 0.24 ms, down from about 1 ms.", .size = 14.5f);
             cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
                 cui_citation(ui, 1, &srcs[0]);
                 cui_citation(ui, 2, &srcs[1]);
@@ -1492,15 +1500,16 @@ static void hero_ai_body(cui_ctx *ui) {
             };
             cui_box(ui, .width = CUI_FILL) { cui_agent_plan(ui, "plan", steps, 4, .title = "Speed up rendering"); }
             /* the evidence the answer rests on, as a chart rather than a claim */
-            static const float ft[] = { 1.02f, 0.98f, 1.05f, 0.97f, 0.61f, 0.44f, 0.31f, 0.27f, 0.26f, 0.25f };
+            static const float ft[] = { 1.02f, 0.98f, 1.05f, 0.97f, 0.61f, 0.44f, 0.31f, 0.27f, 0.25f, 0.24f };
             static const char *builds[] = { "1.0", "", "", "", "1.1", "", "", "", "", "1.2" };
             cui_card(ui, .gap = 10, .pad = 18, .width = CUI_FILL) {
                 cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_END) {
                     cui_box(ui, .width = CUI_FILL) { cui_label(ui, "Frame time"); }
-                    cui_text(ui, "0.25 ms", .font = CUI_FONT_MEDIUM, .size = 13, .tabular = true);
+                    cui_text(ui, "0.24 ms", .font = CUI_FONT_MEDIUM, .size = 13, .tabular = true);
                 }
                 cui_series fs = { "Frame time (ms)", ft, 10, { 0 } };
                 cui_line_chart(ui, "ft", &fs, 1, .labels = builds, .label_count = 10, .height = 120, .area = true, .no_legend = true, .format = "%.1f", .min = 0, .max = 1.2f);
+                cui_text(ui, "Milliseconds per frame, by release", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
             }
         }
     }
@@ -1816,7 +1825,7 @@ int main(int argc, char **argv) {
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },
-        { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 300, true },
+        { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 320, true },
         { "bar-donut", scene_bar_chart, 840, 290, true }, { "command-palette", scene_palette, 680, 460, true },
         { "icons", scene_icons, 1040, 1120, false },
         { "radio-cards", scene_radio_cards, 940, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
