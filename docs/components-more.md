@@ -448,7 +448,8 @@ cui_comment(ui, "c2", "Priya Nair", "Agreed, one more run.", .time = "1h", .dept
 ```c
 cui_presence(ui, "here", users, 7, 5, 30);                     /* show 5, then "+2" */
 cui_counter(ui, "revenue", revenue, .format = "$%.0f", .size = 34, .group_thousands = true);
-cui_ticker(ui, "kpis", items, 6);
+static const cui_ticker_item items[] = { { "Builds", "1,204", 12.0f }, { "Latency", "182 ms", -8.4f, true } };
+cui_ticker(ui, "kpis", items, 2);   /* true: lower is better, so the fall shows green */
 ```
 
 Presence avatars overlap with colored rings and spread out under the pointer; idle people are dimmed. The counter rolls each digit like an odometer when the value changes. The ticker scrolls continuously, fades at the edges and pauses under the pointer.

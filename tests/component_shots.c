@@ -748,7 +748,7 @@ SCENE(presence_ticker) {
         { "Rosa Delgado", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
     };
     static const cui_ticker_item tick[] = {
-        { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f }, { "Latency", "182 ms", -8.4f },
+        { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f, true }, { "Latency", "182 ms", -8.4f, true },
         { "Builds", "1,204", 12.0f }, { "Uptime", "99.98%", 0 },
     };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER) {
@@ -1028,7 +1028,7 @@ SCENE(tiles) {
 SCENE(player) {
     static float peaks[96], progress = 0.36f;
     static int tab = 0;
-    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0xc8, 0x55, 0x3d, 255 }, 76, 222, true };
     for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
     static const cui_tab_bar_item tabs[] = { { CUI_ICON_HOUSE, "Home", 0 }, { CUI_ICON_SEARCH, "Search", 0 }, { CUI_ICON_INBOX, "Inbox", 4 }, { CUI_ICON_USER, "Profile", 0 } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_START) {
@@ -1339,7 +1339,7 @@ static void pro_board(cui_ctx *ui) {
     static const cui_tone tones[] = { CUI_TONE_INFO, CUI_TONE_VIOLET };
     static const char *who[] = { "Priya Nair", "Rosa Delgado" };
     cui_kanban_begin(ui, "pro-board");
-    cui_kanban_column_begin(ui, "In progress", 2, .dot = CUI_RGB(0x8b5cf6), .limit = 3, .width = 460);
+    cui_kanban_column_begin(ui, "In progress", 2, .dot = CUI_RGB(0x3b82f6), .limit = 3, .width = 460);
     for (int k = 0; k < 2; k++) {
         cui_kanban_card_begin(ui, k);
         cui_badge(ui, tags[k], .tone = tones[k], .size = CUI_SIZE_SM);
@@ -1379,7 +1379,7 @@ static void pro_flow(cui_ctx *ui) {
     }
 }
 static void pro_player(cui_ctx *ui) {
-    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x7c, 0x3a, 0xed, 255 }, 96, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x2d, 0x30, 0x47, 255 }, 96, 222, true };
     cui_now_playing(ui, "np", &np, .width = CUI_FILL);
 }
 static void pro_plan(cui_ctx *ui) {
@@ -1512,7 +1512,7 @@ static void scene_hero_ai(cui_ctx *ui, int f) {
 
 static void hero_desk_body(cui_ctx *ui) {
     static bool wifi = true, focus = true, bt = false, dark = true;
-    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0xdb, 0x27, 0x77, 255 }, 96, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0xc8, 0x55, 0x3d, 255 }, 96, 222, true };
     static float peaks[64], progress = 0.42f;
     for (int k = 0; k < 64; k++) peaks[k] = 0.2f + 0.78f * fabsf(sinf(k * 0.41f) * sinf(k * 0.13f + 1.1f));
     cui_column(ui, .gap = 64, .align = CUI_ALIGN_CENTER) {

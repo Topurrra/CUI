@@ -1123,7 +1123,7 @@ typedef struct cui_counter_opts { int _; const char *format; float size; cui_fon
 CUI_API void cui_counter_ex(cui_ctx *ui, const char *id, double value, const cui_counter_opts *opts);
 
 /* Ticker: items that scroll by continuously, pausing on hover. */
-typedef struct cui_ticker_item { const char *label; const char *value; float delta; } cui_ticker_item;
+typedef struct cui_ticker_item { const char *label; const char *value; float delta; bool lower_is_better; } cui_ticker_item;   /* a fall is good: shown green */
 typedef struct cui_ticker_opts { int _; float speed; float height; } cui_ticker_opts;
 CUI_API void cui_ticker_ex(cui_ctx *ui, const char *id, const cui_ticker_item *items, int count, const cui_ticker_opts *opts);
 

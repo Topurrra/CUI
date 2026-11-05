@@ -587,7 +587,7 @@ static void page_social(cui_ctx *ui) {
 
     section(ui, "Ticker", "A continuous strip of figures. It pauses under the pointer.");
     static const cui_ticker_item tick[] = {
-        { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f }, { "Latency", "182 ms", -8.4f },
+        { "Revenue", "$48.2k", 6.9f }, { "Active users", "12,408", 3.1f }, { "Churn", "1.7%", -0.6f, true }, { "Latency", "182 ms", -8.4f, true },
         { "Builds", "1,204", 12.0f }, { "Uptime", "99.98%", 0 },
     };
     cui_ticker(ui, "tick", tick, 6);
@@ -851,7 +851,7 @@ static void page_motion(cui_ctx *ui) {
     static float progress = 0.36f;
     static bool wifi = true, bt = false, focus = true, airdrop = false, dark_tile = true;
     static int tab = 0;
-    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0x5b, 0x3c, 0xd6, 255 }, 76, 222, true };
+    static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0xc8, 0x55, 0x3d, 255 }, 76, 222, true };
     if (!peaks[0]) for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
     section(ui, "Text effects", "A shimmer for pending work, a typewriter for streamed text, words that settle into place.");
     cui_card(ui, .gap = 18, .pad = 20, .width = CUI_FILL) {

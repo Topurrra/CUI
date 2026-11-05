@@ -540,7 +540,7 @@ static void cui__ticker_set(cui_ctx *ui, cui_id set_id, const cui_ticker_item *i
             ui->nodes[v].flags |= CUI_NF_TABULAR;
         }
         if (it->delta != 0) {
-            cui_color c = it->delta > 0 ? CUI_C(ui, SUCCESS) : CUI_C(ui, DANGER);
+            cui_color c = (it->lower_is_better ? it->delta < 0 : it->delta > 0) ? CUI_C(ui, SUCCESS) : CUI_C(ui, DANGER);
             cui__icon_node(ui, it->delta > 0 ? CUI_ICON_TRENDING_UP : CUI_ICON_TRENDING_DOWN, 13, c);
             int dt = cui__text_node(ui, cui__frame_printf(ui, "%+.1f%%", (double)it->delta), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), c, false);
             ui->nodes[dt].line_height = 1.3f;
