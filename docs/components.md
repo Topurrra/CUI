@@ -164,7 +164,7 @@ You own the buffer; CUI never writes past `cap`. Returns flags: `CUI_CHANGED`, `
 | `label`, `placeholder`, `hint`, `error` | |
 | `icon` | Leading icon |
 | `password` | Masks the text and adds a show/hide button |
-| `clearable` | Adds a clear button when not empty (always on for `cui_search`) |
+| `clearable` | Adds a clear button when not empty (always on for `cui_search`). Hidden for `read_only` fields; `Ctrl+Z` restores the cleared text |
 | `autofocus`, `read_only`, `disabled`, `size`, `width` | |
 
 Editing: click to place the caret, drag or Shift+arrows to select, double click selects a word, triple click selects everything. Ctrl (Option on macOS) with arrows or Backspace moves or deletes by word. Home/End, Ctrl+A, cut, copy, paste, undo and redo (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y; Cmd on macOS). Esc clears the selection, then leaves the field. Full UTF-8.
