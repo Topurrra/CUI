@@ -64,9 +64,16 @@ Text defaults to `CUI_TEXT_START`; `CUI_TEXT_END` follows direction too.
 Explicit `CUI_TEXT_LEFT` keeps the same row centering as default text.
 Horizontal chevrons, double chevrons and horizontal arrows in icon nodes swap
 glyphs; checks and non-directional symbols do not. Raw `cui_draw_*` calls retain
-physical coordinates. Switch thumbs and progress fills follow RTL, and empty
-input placeholders align at the start and use static shaping with their
-container's resolved direction when enabled.
+physical coordinates.
+
+Component coverage:
+
+- Mirrors: layout containers and directional icon nodes as described above,
+  switch thumbs, progress fills, and empty input placeholders. Placeholders align
+  at the start and use static shaping with their container's direction when enabled.
+- Does not mirror yet: sliders, radio-card indicators, filled text fields, and
+  custom-drawn components such as charts, planning views and the node editor.
+
 Editing, cursor navigation and IME are unchanged.
 
 With `CUI_TEXT_SHAPING=ON`, the resolved container direction sets the paragraph
@@ -88,10 +95,6 @@ popover direction inheritance and placeholder independence from context directio
 With optional `FONT.ttf OUT_PREFIX` arguments it also renders the two probe
 screens. `CUI_GALLERY_RTL=1 cui_screenshots OUT_DIR PAGE 1` renders gallery pages
 in RTL; it does not imply all custom-painted components support RTL.
-
-Sliders, radio-card indicators and filled text fields do not mirror yet. This
-change adds no RTL editing, cursor navigation or IME support. Absolute coordinates
-and raw draw calls stay physical.
 
 The fixture is rendered by `cui_rtl_layout FONT.ttf OUT_PREFIX [dark]`:
 
