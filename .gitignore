@@ -24,5 +24,7 @@ compile_commands.json
 /web/site/images
 /web/site/src/
 
-# local tool state
+# local tool state, including AI agent instruction files
 /.claude/
+CLAUDE.md
+CLAUDE.local.md

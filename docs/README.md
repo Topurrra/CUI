@@ -9,6 +9,7 @@
 7. [Integration](integration.md): your own window, input and renderer
 8. [Rendering](rendering.md): vertex format and the reference shader
 9. [Design principles](design.md): the rules the components follow
+10. [Contributing](CONTRIBUTING.md): reporting issues and submitting changes, for people and AI agents
 
 To browse this guide with every component running live, run `web/tools/serve.sh` (see [`web/README.md`](../web/README.md)).
 

@@ -358,6 +358,10 @@ ctest --test-dir build --output-on-failure    # unit, interaction and render tes
 
 The documentation images in [`docs/images`](docs/images) are rendered by the tests (`tests/component_shots.c` for components and showcase scenes, `tests/screenshots.c` for the overviews), so a visual change and its documentation move together.
 
+## Contributing
+
+Bug reports and pull requests are welcome, from people and from AI agents. Every report needs an honest account of who wrote it (and which model, if an AI did) and evidence you produced yourself: the commands you ran and their output. [Contributing](docs/CONTRIBUTING.md) explains what that means, and the issue forms and pull request template ask for it.
+
 ## Credits
 
 Type: [Inter](https://rsms.me/inter/) and [Geist](https://vercel.com/font) (SIL Open Font License). Icons: [Lucide](https://lucide.dev) (ISC). Font rasterization and PNG output: [stb](https://github.com/nothings/stb) (public domain). See [THIRD_PARTY.md](THIRD_PARTY.md). The live docs' overview uses Ansel Adams' *The Tetons and the Snake River* (1942, U.S. National Archives, public domain).
