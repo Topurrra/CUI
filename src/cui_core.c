@@ -176,6 +176,7 @@ cui_ctx *cui_create(const cui_ctx_desc *desc) {
     memset(ui, 0, sizeof *ui);
     ui->alloc = a;
     ui->renderer = d.renderer;
+    ui->direction = d.direction;
     ui->vw = 800; ui->vh = 600; ui->scale = 1;
     ui->bucket_count = 1024;
     ui->state_buckets = cui__alloc(ui, sizeof(int) * (size_t)ui->bucket_count);
@@ -713,6 +714,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
     r->w = CUI_PX(ui->vw);
     r->h = CUI_PX(ui->vh);
     r->dir = CUI_COLUMN;
+    r->direction = (uint8_t)ui->direction;
     r->flags |= CUI_NF_CLIP;
     cui__open(ui, root);
 

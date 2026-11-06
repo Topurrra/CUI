@@ -171,12 +171,19 @@ typedef struct cui_allocator {
     void *user;
 } cui_allocator;
 
+/* Zero inherits the parent, or LTR at the context root. AUTO uses the first
+ * strong character in descendant text, ignoring explicit-direction subtrees. */
+typedef enum cui_direction {
+    CUI_DIRECTION_INHERIT = 0, CUI_DIRECTION_LTR, CUI_DIRECTION_RTL, CUI_DIRECTION_AUTO
+} cui_direction;
+
 typedef struct cui_ctx_desc {
     cui_renderer_iface renderer;      /* required for drawing; may be set later */
     cui_allocator allocator;          /* optional, defaults to malloc/free */
     cui_theme_mode theme;
     cui_accent accent;
     bool no_default_fonts;            /* skip the embedded Inter/Geist/Lucide fonts */
+    cui_direction direction;
 } cui_ctx_desc;
 
 CUI_API cui_ctx *cui_create(const cui_ctx_desc *desc);
@@ -348,9 +355,9 @@ CUI_API void cui_font_set_role(cui_ctx *ui, cui_font role, cui_font font);
 CUI_API void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback);
 
 typedef struct cui_text_metrics { float width, height, ascent, descent, line_height; } cui_text_metrics;
-/* CUI_TEXT_SHAPING optionally shapes static Arabic-script text and resolves
- * bidi paragraphs from their first strong character. Editing, explicit bidi
- * formatting and general OpenType equivalence are unsupported; see docs/integration.md. */
+/* CUI_TEXT_SHAPING optionally shapes static RTL lines; see docs/integration.md.
+ * Container direction sets the paragraph base. Editing and explicit bidi formatting
+ * are unsupported; the shaper implements an experimental OpenType subset. */
 CUI_API cui_text_metrics cui_measure_text(cui_ctx *ui, cui_font font, float size, const char *text, int len);
 
 /* ------------------------------------------------------------------------ */
@@ -398,6 +405,7 @@ typedef struct cui_box {
     bool scroll_x, scroll_y;   /* make the box a scroll area (clips content) */
     bool clip;                 /* clip children to the box */
     float opacity;             /* 0 means 1 (fully opaque) */
+    cui_direction direction;   /* inherited by default; mirrors horizontal layout and padding */
 } cui_box;
 
 CUI_API cui_id cui_box_begin(cui_ctx *ui, const cui_box *opts);
@@ -468,7 +476,7 @@ CUI_API void cui_pop_disabled(cui_ctx *ui);
 /* Text                                                                     */
 /* ------------------------------------------------------------------------ */
 
-typedef enum cui_text_align { CUI_TEXT_LEFT = 0, CUI_TEXT_CENTER, CUI_TEXT_RIGHT } cui_text_align;
+typedef enum cui_text_align { CUI_TEXT_START = 0, CUI_TEXT_CENTER, CUI_TEXT_RIGHT, CUI_TEXT_LEFT, CUI_TEXT_END } cui_text_align;
 
 typedef struct cui_text_opts {
     int _;
@@ -481,6 +489,7 @@ typedef struct cui_text_opts {
     bool selectable;           /* reserved */
     cui_size width;
     float line_height;         /* multiplier, default 1.45 */
+    cui_direction direction;   /* inherited; AUTO examines this text */
 } cui_text_opts;
 
 CUI_API void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *opts);

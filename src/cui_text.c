@@ -572,7 +572,8 @@ int cui__text_wrap(cui_ctx *ui, cui_font font, float size, const char *text, int
     if (cui__text_needs_shaping(ui, text, len)) {
         font = cui__resolve_font(ui, font);
         if (font < 0) return 0;
-        int requested = -1;
+        cui_direction direction = ui->text_direction ? ui->text_direction : ui->direction;
+        int requested = direction == CUI_DIRECTION_RTL ? 1 : direction == CUI_DIRECTION_LTR ? 0 : -1;
         cui_shaped_paragraph *p = cui__paragraph(ui, text, len, requested);
         if (p && p->wrap_lines && p->wrap_font == font && p->wrap_size == size && p->wrap_width == width) {
             if (lines && max_lines > 0)
@@ -820,7 +821,8 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
         while (pe < plen && paragraph[pe] != '\n') pe++;
         paragraph += ps; plen = pe - ps; line_start -= ps;
     }
-    int requested = -1;
+    cui_direction direction = ui->text_direction ? ui->text_direction : ui->direction;
+    int requested = direction == CUI_DIRECTION_RTL ? 1 : direction == CUI_DIRECTION_LTR ? 0 : -1;
     cui_shaped_paragraph *p = cui__paragraph(ui, paragraph, plen, requested);
     if (!p) return 0;
     cui_shaped_line *cached = p->lines;
