@@ -1293,7 +1293,7 @@ bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
 /* Command palette                                                          */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { char query[128]; int highlight; bool was_open; cui_spring t; } cui__cmdk_state;
+typedef struct { char query[128]; int highlight; bool was_open; cui_spring t; } cui__palette_state;
 
 static int cui__fuzzy(const char *text, const char *q) {
     /* subsequence match; higher is better, -1 = no match */
@@ -1318,7 +1318,7 @@ static int cui__fuzzy(const char *text, const char *q) {
 
 int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int count) {
     cui_id id = cui_make_id(ui, "#command-palette");
-    cui__cmdk_state *st = cui_state(ui, id, sizeof *st);
+    cui__palette_state *st = cui_state(ui, id, sizeof *st);
     bool is_open = open && *open;
     if (is_open && !st->was_open) { st->query[0] = 0; st->highlight = 0; }
     st->was_open = is_open;
@@ -1342,7 +1342,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
     rn->dir = CUI_STACK; rn->align = CUI_ALIGN_CENTER; rn->justify = CUI_JUSTIFY_START;
     rn->pad[0] = CUI_MAX(24.0f, ui->vh * 0.14f);
     if (!is_open) cui_push_disabled(ui, true);
-    cui_push_id(ui, "#cmdk");
+    cui_push_id(ui, "#palette");
     int panel = cui__node_new(ui, id ^ 0x9A4Eu);
     cui_node *pn = &ui->nodes[panel];
     pn->w = CUI_PX(CUI_MIN(580.0f, ui->vw - 32));

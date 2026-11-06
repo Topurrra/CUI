@@ -79,7 +79,7 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 
 ## What generic looks like
 
-A lot of interface work now comes out of the same few templates, and people have learned to spot it. The tells are well catalogued ([Impeccable](https://www.impeccable.style/slop), [The Fountain Institute](https://www.thefountaininstitute.com/blog/signs-vibe-coded-ui), [this anti-pattern list](https://cdn.jsdelivr.net/npm/@wystack/agent-kit@0.12.0/wystack-agent-kit/references/anti-patterns.md), [and the case for coherence](https://dev.to/kiwibreaksme/why-ai-generated-uis-look-off-and-the-one-principle-that-fixes-it-4j20)). Almost none of them is wrong in isolation. They read as generic because they are defaults nobody chose. CUI's components and examples stay clear of them, and so should screens built with it.
+A lot of interface work now comes out of the same few templates, and people have learned to spot it. Almost none of the tells below is wrong in isolation. They read as generic because they are defaults nobody chose. CUI's components and examples stay clear of them, and so should screens built with it.
 
 **Color and light**
 
