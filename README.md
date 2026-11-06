@@ -7,7 +7,6 @@
 About 150 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 
-[![CI](https://github.com/yappologistic/CUI/actions/workflows/ci.yml/badge.svg)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![C99](https://img.shields.io/badge/C-99-informational.svg)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey.svg)
