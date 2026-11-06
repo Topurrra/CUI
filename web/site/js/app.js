@@ -1,6 +1,7 @@
 // CUI live components: the page around the live canvases.
 import { Preview, settings, allLive } from './preview.js';
 import { loadModule } from './runtime.js';
+import { ditherArt } from './dither.js';
 
 const CAT = window.CUI_CATALOG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -518,6 +519,15 @@ function installBlock() {
   return box;
 }
 
+const FACTS = [
+  ['0.1 to 0.25 ms a frame', 'A full screen builds, lays out and paints in a fraction of a millisecond. An idle app uses no CPU.'],
+  ['About 240 KB', 'That is a complete app. CUI has no dependencies, and the library is one C99 codebase.'],
+  ['Win32, Cocoa and X11', 'Or SDL2 and GLFW, drawn with OpenGL or the software renderer. The core only emits triangles, so your own renderer works too.'],
+  ['Keyboard and reduced motion', 'Every component works from the keyboard and every animation has a reduced motion path. Text meets 4.5:1 contrast.'],
+];
+const ART = 'img/tetons.jpg';
+const artReduced = () => prefs.reducedMotion || matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 function viewHome() {
   setNav('home');
   const guide = (id) => CAT.guides.find((g) => g.id === id);
@@ -532,32 +542,88 @@ function viewHome() {
         it ? h('a', { class: 'demo-link', href: `#/c/${item}`, 'aria-label': `Open ${it.title}`, html: 'Docs' + I.arrow }) : null),
       previewBlock({ module: 'scenes', content: scene, bare: true, item: it?.title, codeSource: sc.source, codeFile: sc.file, codeLine: sc.line }));
   };
+  const head = (num, title, text, link) => h('div', { class: 'feature-head' },
+    h('span', { class: 'feature-num' }, num),
+    h('h2', {}, title),
+    h('p', {}, text),
+    link ? h('a', { class: 'text-link', href: link[0], html: link[1] + I.arrow }) : null);
   const page = h('div', { class: 'page home' },
     h('div', { class: 'hero' },
+      h('a', { class: 'hero-badge', href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer', html: '<span>Open source</span><span class="dot"></span><span>MIT licensed</span>' + I.arrow }),
       h('h1', {}, 'Native UI components for C'),
-      h('p', { class: 'lede' }, 'About 150 components with spring motion and full keyboard support, for Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB, MIT licensed.'),
-      installBlock(),
+      h('p', { class: 'lede' }, 'About 150 components with spring motion and full keyboard support, for Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.'),
       h('div', { class: 'hero-actions' },
         h('a', { class: 'btn primary', href: '#/guide/getting-started', html: 'Get started' + I.arrow }),
-        h('a', { class: 'btn', href: '#/components' }, 'Browse components'))),
+        h('a', { class: 'btn', href: '#/components' }, 'Browse components')),
+      installBlock()),
     h('div', { class: 'previews home-stage' }, previewBlock({ module: 'scenes', content: 'stage-mosaic', title: 'stage-mosaic', item: 'Overview', tight: true,
       codeSource: CAT.scenes['stage-mosaic'].source, codeFile: CAT.scenes['stage-mosaic'].file, codeLine: CAT.scenes['stage-mosaic'].line })),
-    h('section', { class: 'home-demos' },
-      h('div', { class: 'section-head' },
-        h('h2', {}, 'Every component runs here'),
-        h('p', {}, 'These are the library itself, compiled to WebAssembly. Click one and use it with the mouse or the keyboard.')),
-      h('div', { class: 'demo-grid' }, DEMOS.map(demo))),
-    h('section', { class: 'home-split' },
-      h('div', {},
-        h('h2', {}, 'Your interface is plain C'),
-        h('p', {}, 'Components are functions that draw themselves and return what happened. Your variables are the state, and the whole screen is described again every frame, so there is nothing to keep in sync.'),
-        h('p', {}, h('a', { class: 'text-link', href: '#/guide/getting-started/how-immediate-mode-works' }, 'How immediate mode works'))),
+    h('section', { class: 'home-feature home-split' },
+      head('01', 'Your interface is plain C', 'Components are functions that draw themselves and return what happened. Your variables are the state, and the whole screen is described again every frame, so there is nothing to keep in sync.',
+        ['#/guide/getting-started/how-immediate-mode-works', 'How immediate mode works']),
       (() => { const w = h('div', {}, h('pre', { class: 'code', html: '<code>' + highlight(FIRST_WINDOW) + '</code>' })); addCopy(w); return w.firstChild; })()),
+    h('section', { class: 'home-feature home-demos' },
+      head('02', 'Every component runs here', 'These are the library itself, compiled to WebAssembly. Click one and use it with the mouse or the keyboard.',
+        ['#/components', 'Browse all components']),
+      h('div', { class: 'demo-grid' }, DEMOS.map(demo))),
+    h('section', { class: 'home-feature home-facts' },
+      head('03', 'Small, fast and careful', 'Native apps should start instantly and stay out of the way. These are the numbers and rules CUI is held to.',
+        ['#/guide/design', 'Design principles']),
+      h('ul', { class: 'facts' }, FACTS.map(([t, d]) => h('li', {}, h('h3', {}, t), h('p', {}, d))))),
     h('section', { class: 'home-next' },
       h('h2', {}, 'Read next'),
       h('ul', { class: 'link-list' }, next.filter(([id]) => guide(id)).map(([id, text]) =>
-        h('li', {}, h('a', { href: `#/guide/${id}` }, h('span', { class: 'link-title' }, guide(id).title), h('span', { class: 'link-text' }, text), h('span', { class: 'link-arrow', html: I.arrow })))))));
-  return page;
+        h('li', {}, h('a', { href: `#/guide/${id}` }, h('span', { class: 'link-title' }, guide(id).title), h('span', { class: 'link-text' }, text), h('span', { class: 'link-arrow', html: I.arrow })))))),
+    h('section', { class: 'home-cta' },
+      ditherArt({ src: ART, focusY: 0.95, gamma: 1.15, reveal: 'view', reduced: artReduced }),
+      h('div', { class: 'home-cta-body' },
+        h('h2', {}, 'Start with one window'),
+        h('p', {}, 'Build CUI, open a window and draw your first components in a few minutes.'),
+        h('div', { class: 'hero-actions' },
+          h('a', { class: 'btn primary', href: '#/guide/getting-started', html: 'Get started' + I.arrow }),
+          h('a', { class: 'btn', href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer' }, 'Source on GitHub')))),
+    h('p', { class: 'art-credit' }, 'Photograph: Ansel Adams, ', h('i', {}, 'The Tetons and the Snake River'), ', 1942. U.S. National Archives, public domain.'));
+  const shell = h('div', { class: 'home-shell' },
+    h('div', { class: 'home-art' }, ditherArt({ src: ART, focusY: 0.3, gamma: 1.25, reduced: artReduced })),
+    page);
+  homeMotion(shell);
+  return shell;
+}
+
+/* Scroll motion on the overview, all in the site's one easing: the hero art
+ * drifts slower than the page and fades, and each section lifts in once as it
+ * enters, staggered within its group. Nothing moves with reduced motion. */
+function homeMotion(shell) {
+  if (artReduced()) { shell.classList.add('still'); return; }
+  const groups = ['.feature-head', '.home-split > :last-child', '.home-stage', '.home-next h2', '.home-cta', '.art-credit',
+                  '.demo-grid > .demo', '.facts > li', '.link-list > li'];
+  const items = [];
+  for (const sel of groups) shell.querySelectorAll(sel).forEach((el, i) => {
+    el.classList.add('reveal');
+    if (/>/.test(sel) && !sel.startsWith('.home-split')) el.style.setProperty('--d', `${Math.min(i, 6) * 60}ms`);
+    items.push(el);
+  });
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    e.target.classList.add('in');
+    io.unobserve(e.target);
+  }), { rootMargin: '0px 0px -6% 0px', threshold: 0 });
+  items.forEach((el) => io.observe(el));
+
+  const art = shell.querySelector('.home-art .dither');
+  let ticking = false;
+  const onScroll = () => {
+    if (!shell.isConnected) { removeEventListener('scroll', onScroll); io.disconnect(); return; }
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      const y = Math.min(scrollY, 900);
+      art.style.transform = `translate3d(0, ${(y * 0.35).toFixed(1)}px, 0)`;
+      art.style.opacity = String(Math.max(0, 1 - y / 760).toFixed(3));
+    });
+  };
+  addEventListener('scroll', onScroll, { passive: true });
 }
 
 function siteFooter() {

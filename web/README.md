@@ -22,8 +22,10 @@ can then be served by any static file server.
 
 ## What is on the site
 
-- **Overview**: what CUI is, how to get it, a live component stage and a grid
-  of components you can use with the mouse and keyboard.
+- **Overview**: what CUI is, how to get it, a live component stage, a grid of
+  components you can use with the mouse and keyboard, and the numbers CUI is
+  held to. Its backdrop is a public domain photograph drawn as an ordered
+  dither (`site/js/dither.js`, credit in `site/img/README.md`).
 - **Guide**: the pages in `docs/` (getting started, layout, theming, icons,
   custom components, integration, rendering, design principles).
 - **Components**: every documented component on its own page: the live
