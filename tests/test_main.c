@@ -381,6 +381,44 @@ static void key(cui_ctx *ui, build_fn fn, void *u, cui_key k, int mods) {
     run(ui, fn, u, 1);
 }
 
+/* A click focuses without a ring; the next key shows the ring and acts on
+ * that control, unless an open popup above it owns the keyboard. */
+typedef struct { int clicks, sel; cui_id button, select; } ck_ctx;
+static void build_ck(cui_ctx *ui, void *u) {
+    ck_ctx *c = u;
+    static const char *items[] = { "One", "Two", "Three" };
+    cui_column(ui, .pad = 20, .gap = 12) {
+        if (cui_button(ui, "Apply")) c->clicks++;
+        c->button = cui_last_id(ui);
+        cui_select(ui, "pick", items, 3, &c->sel);
+        c->select = cui_last_id(ui);
+    }
+}
+static void test_click_then_keys(void) {
+    printf("interaction: keys act on the control a click focused\n");
+    cui_ctx *ui = new_ctx();
+    ck_ctx c = { 0 };
+    run(ui, build_ck, &c, 2);
+    cui_vec2 b = center(rect_of(ui, c.button));
+    click_at(ui, build_ck, &c, b.x, b.y);
+    CHECK(c.clicks == 1);
+    key(ui, build_ck, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.clicks == 2);
+    /* select: click opens, Escape closes, Down reopens on the current item, Down and Enter pick the next */
+    cui_vec2 s = center(rect_of(ui, c.select));
+    click_at(ui, build_ck, &c, s.x, s.y);
+    run(ui, build_ck, &c, 20);
+    key(ui, build_ck, &c, CUI_KEY_ESCAPE, 0);
+    run(ui, build_ck, &c, 20);
+    key(ui, build_ck, &c, CUI_KEY_DOWN, 0);
+    run(ui, build_ck, &c, 20);
+    key(ui, build_ck, &c, CUI_KEY_DOWN, 0);
+    key(ui, build_ck, &c, CUI_KEY_ENTER, 0);
+    run(ui, build_ck, &c, 20);
+    CHECK(c.sel == 1);
+    cui_destroy(ui);
+}
+
 static void type(cui_ctx *ui, build_fn fn, void *u, const char *s) {
     cui_input_key(ui, CUI_KEY_NONE, false, 0);   /* typing happens without modifiers */
     cui_input_text(ui, s);
@@ -2258,6 +2296,7 @@ int main(void) {
     test_layout_autogrid();
     test_layout_narrow_table();
     test_button_click();
+    test_click_then_keys();
     test_keyboard_nav();
     test_toggles_and_slider();
     test_text_input();

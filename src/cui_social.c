@@ -257,7 +257,7 @@ void cui_presence(cui_ctx *ui, const char *id_str, const cui_presence_user *user
     int row = cui__node_new(ui, id);
     cui_node *rn = &ui->nodes[row];
     rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER;
-    rn->gap = cui__lerp(-outer * 0.32f, 4, t);
+    rn->gap = cui__lerp(-outer * 0.24f, 4, t);   /* overlapped, yet the next ring stops short of two wide initials */
     rn->self_align = CUI__ALIGN_NOSTRETCH;
     cui__mark_interactive(ui, row, 0);
     cui__open(ui, row);

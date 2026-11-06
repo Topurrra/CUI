@@ -336,7 +336,7 @@ bool cui_status_button_ex(cui_ctx *ui, const char *label, cui_status status, con
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui_button_variant v = o->variant ? o->variant : CUI_BUTTON_PRIMARY;
     cui__morph_face faces[4];
-    const char *busy = o->busy_label ? o->busy_label : cui__frame_printf(ui, "%.*s...", cui__display_len(label), label);
+    const char *busy = o->busy_label ? o->busy_label : cui__frame_printf(ui, "%.*s\xe2\x80\xa6", cui__display_len(label), label);
     faces[CUI_STATUS_IDLE] = (cui__morph_face){ o->icon, label, cui__button_colors(ui, v, false) };
     faces[CUI_STATUS_BUSY] = (cui__morph_face){ "spin", busy, cui__button_colors(ui, v, false) };
     cui__btn_colors ok = cui__button_colors(ui, v, false);
@@ -1190,7 +1190,7 @@ bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id_str, cui_key_combo *co
         p->t = st->rec; p->phase = ui->time; p->c = CUI_C(ui, DANGER);
         ui->nodes[dot].paint = cui__paint_rec_dot;
         ui->nodes[dot].paint_data = p;
-        int lt = cui__text_node(ui, ui->mods ? cui__frame_printf(ui, "%s...", cui_shortcut_label(ui, (cui_key_combo){ ui->mods, CUI_KEY_NONE })) : "Press a shortcut",
+        int lt = cui__text_node(ui, ui->mods ? cui__frame_printf(ui, "%s\xe2\x80\xa6", cui_shortcut_label(ui, (cui_key_combo){ ui->mods, CUI_KEY_NONE })) : "Press a shortcut",
                                 -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_SECONDARY), false);
         if (ui->mods) {
             const char *m = cui__frame_printf(ui, "%s%s%s%s", (ui->mods & CUI_MOD_CTRL) ? "Ctrl " : "", (ui->mods & CUI_MOD_SUPER) ? "Super " : "",

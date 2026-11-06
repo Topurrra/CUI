@@ -405,7 +405,7 @@ static void click_id(cui_ctx *ui, cui_id id, int f, int at) {
 }
 
 SCENE(split_button) {
-    static const char *items[] = { "Save as draft", "Save and publish", "Schedule..." };
+    static const char *items[] = { "Save as draft", "Save and publish", "Schedule\xe2\x80\xa6" };
     cui_row(ui, .gap = 12, .wrap = true) {
         cui_split_button(ui, "Save", items, 3, .icon = CUI_ICON_SAVE);
         cui_split_button(ui, "Export", items, 3, .variant = CUI_BUTTON_OUTLINE, .icon = CUI_ICON_DOWNLOAD);
@@ -1008,7 +1008,7 @@ SCENE(scatter) {
 SCENE(text_effects) {
     cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER, .wrap = true) {
         cui_loader(ui, .style = CUI_LOADER_DOTS, .size = 22);
-        cui_shimmer_text(ui, "Thinking about your question...", .size = 15);
+        cui_shimmer_text(ui, "Thinking about your question\xe2\x80\xa6", .size = 15);
     }
     cui_typewriter(ui, "tw", "CUI draws a full frame in a fraction of a millisecond, so text can stream in as fast as it arrives.", .caret = true, .size = 15);
     cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {

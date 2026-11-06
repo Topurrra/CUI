@@ -329,6 +329,8 @@ CUI 1.0 is complete enough to build real desktop apps, and it is tested on every
 - [Icons](docs/icons.md): the built-in Lucide icons and how to use any other icon
 - [Design principles](docs/design.md): the rules the components follow
 
+The same guide, with every component running live in the browser, is in [`web/`](web): run `web/tools/serve.sh` and open http://localhost:8765.
+
 ## Credits
 
 Type: [Inter](https://rsms.me/inter/) and [Geist](https://vercel.com/font) (SIL Open Font License). Icons: [Lucide](https://lucide.dev) (ISC). Font rasterization and PNG output: [stb](https://github.com/nothings/stb) (public domain). See [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -633,6 +633,12 @@ static void cui__x11_event(cui_app *app, XEvent *ev) {
         int mods = cui__x11_mods(ev->xkey.state);
         cui_key k = cui__x11_key(ks);
         if (k) cui_input_key(ui, k, down, mods);
+        else {
+            /* a modifier on its own; X reports the state from before this event, so apply the change */
+            int bit = (ks == XK_Shift_L || ks == XK_Shift_R) ? CUI_MOD_SHIFT : (ks == XK_Control_L || ks == XK_Control_R) ? CUI_MOD_CTRL
+                    : (ks == XK_Alt_L || ks == XK_Alt_R || ks == XK_Meta_L || ks == XK_Meta_R) ? CUI_MOD_ALT : (ks == XK_Super_L || ks == XK_Super_R) ? CUI_MOD_SUPER : 0;
+            if (bit) cui_input_key(ui, CUI_KEY_NONE, down, down ? (mods | bit) : (mods & ~bit));
+        }
         if (down) {
             char buf[64];
             KeySym sym = 0;

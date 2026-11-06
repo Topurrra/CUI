@@ -341,6 +341,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
         cui__popup_set(ui, pid, true);
         cui__menu_nav *nav = cui_state(ui, pid ^ 0x4E4156u, sizeof *nav);
         nav->highlight = *index;
+        ui->kpressed[CUI_KEY_DOWN] = ui->kpressed[CUI_KEY_UP] = 0;   /* the key opened the list; it does not also move the highlight */
     }
     open = p && p->open;
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);

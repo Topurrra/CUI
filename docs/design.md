@@ -72,7 +72,7 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 
 ## Interaction
 
-- Every action works with the keyboard. Focus rings appear for keyboard focus, never for clicks.
+- Every action works with the keyboard. Focus rings appear for keyboard focus, never for clicks. A clicked control keeps the focus, so the keyboard carries on from there: the first key shows the ring and acts.
 - Give icon only buttons a tooltip: it is their name.
 - Do not move layout under the user. Loading states keep their size; numbers keep their width.
 - Prefer changing a control in place ("Saved") to a toast for the result of a button press. Toasts are for background events.

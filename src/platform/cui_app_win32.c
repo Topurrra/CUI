@@ -319,6 +319,8 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         bool down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
         cui_key k = cui__win32_key(wp);
         if (k) cui_input_key(ui, k, down, cui__win32_mods());
+        else if (wp == VK_SHIFT || wp == VK_CONTROL || wp == VK_MENU || wp == VK_LWIN || wp == VK_RWIN)
+            cui_input_key(ui, CUI_KEY_NONE, down, cui__win32_mods());   /* a modifier on its own: releasing Ctrl after a shortcut must register */
         if (msg == WM_SYSKEYDOWN && wp == VK_F4) break;
         if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) return 0;
         return 0;

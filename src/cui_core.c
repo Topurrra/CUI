@@ -556,6 +556,18 @@ cui_interact cui__interact(cui_ctx *ui, cui_id id, int flags) {
         if (hovered) r.clicked = true;
     }
     r.focused = ui->focus == id;
+    /* a click gives focus without a ring; using the keyboard next shows the
+     * ring and the keys act on that control, as in a browser. A trigger whose
+     * popup is open leaves the keys to the popup. */
+    int my_z = 0;
+    for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].id == ui->current_layer) my_z = ui->popups[i].z;
+    bool covered = false;   /* an open popup above this control owns the keyboard */
+    for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open && ui->popups[i].z > my_z) { covered = true; break; }
+    if (r.focused && !ui->focus_visible && !covered && !(flags & CUI_IF_TEXT) &&
+        (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE) || cui_key_pressed(ui, CUI_KEY_LEFT) ||
+         cui_key_pressed(ui, CUI_KEY_RIGHT) || cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN) ||
+         cui_key_pressed(ui, CUI_KEY_HOME) || cui_key_pressed(ui, CUI_KEY_END)))
+        ui->focus_visible = true;
     r.focus_visible = r.focused && ui->focus_visible;
     if (r.focused && ui->focus_visible && !(flags & CUI_IF_TEXT)) {
         if (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE)) {

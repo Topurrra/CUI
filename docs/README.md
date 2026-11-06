@@ -10,4 +10,6 @@
 8. [Rendering](rendering.md): vertex format and the reference shader
 9. [Design principles](design.md): the rules the components follow
 
+To browse this guide with every component running live, run `web/tools/serve.sh` (see [`web/README.md`](../web/README.md)).
+
 The API itself is documented inline in [`include/cui/cui.h`](../include/cui/cui.h), [`cui_app.h`](../include/cui/cui_app.h) and [`cui_render.h`](../include/cui/cui_render.h).

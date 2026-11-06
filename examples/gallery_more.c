@@ -31,7 +31,7 @@ static void page_actions(cui_ctx *ui) {
 
     section(ui, "Split button", "A main action with related actions one click away.");
     cui_row(ui, .gap = 12, .wrap = true) {
-        static const char *items[] = { "Save as draft", "Save and publish", "Schedule..." };
+        static const char *items[] = { "Save as draft", "Save and publish", "Schedule\xe2\x80\xa6" };
         static const char *icons[] = { CUI_ICON_FILE_TEXT, CUI_ICON_SEND, CUI_ICON_CLOCK };
         int r = cui_split_button(ui, "Save", items, 3, .item_icons = icons, .icon = CUI_ICON_SAVE);
         if (r >= 0) split_choice = r;
@@ -859,7 +859,7 @@ static void page_motion(cui_ctx *ui) {
     cui_card(ui, .gap = 18, .pad = 20, .width = CUI_FILL) {
         cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
             cui_loader(ui, .style = CUI_LOADER_DOTS, .size = 22);
-            cui_shimmer_text(ui, "Thinking about your question...", .size = 15);
+            cui_shimmer_text(ui, "Thinking about your question\xe2\x80\xa6", .size = 15);
         }
         cui_push_id_int(ui, replay);
         cui_typewriter(ui, "tw", "CUI draws a full frame in a fraction of a millisecond, so text can stream in as fast as it arrives.", .caret = true, .size = 15);

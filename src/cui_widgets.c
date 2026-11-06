@@ -549,7 +549,7 @@ void cui_avatar_group(cui_ctx *ui, const char *const *names, int count, int max_
     if (max_visible <= 0) max_visible = 4;
     int shown = count < max_visible ? count : max_visible;
     int extra = count - shown;
-    float overlap = size * 0.22f;   /* enough to read as a group, little enough that initials stay whole */
+    float overlap = size * 0.16f;   /* reads as a group; with the 2 pt ring the next avatar stops short of two wide initials ("DM") */
     int slots = shown + (extra > 0 ? 1 : 0);
     float total_w = slots * size - (slots - 1) * overlap;
     int row = cui__node_new(ui, 0);
