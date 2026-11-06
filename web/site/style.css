@@ -697,8 +697,19 @@ body.app-mode .sidebar { display: none; }
   .swatches { display: none; }
 }
 @media (max-width: 640px) {
-  /* the page links scroll sideways; the fade says there is more */
-  .topnav { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); padding-right: 20px; }
+  /* the page links scroll sideways. Each edge fades only while there is
+   * more beyond it (app.js sets the classes), so a link that runs off the
+   * left reads as "scroll for more", not as a word cut in half */
+  .topnav {
+    --fade-l: 0px; --fade-r: 0px;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent);
+    padding-right: 20px;
+  }
+  .topnav.more-l { --fade-l: 28px; }
+  .topnav.more-r { --fade-r: 28px; }
+  /* the mark already links to the overview */
+  .topnav a[data-nav="home"] { display: none; }
   .topbar a.icon-btn[href^="https://github.com"] { display: none; }
   .demo-grid { grid-template-columns: minmax(0, 1fr); }
   .facts { grid-template-columns: minmax(0, 1fr); }

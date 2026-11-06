@@ -472,7 +472,16 @@ function setNav(which) {
     const l = cur.offsetLeft - nav.offsetLeft, r = l + cur.offsetWidth;
     if (l < nav.scrollLeft || r > nav.scrollLeft + nav.clientWidth - 24) nav.scrollLeft = Math.max(0, r - nav.clientWidth + 32);
   }
+  navFades();
 }
+// fade an edge of the scrolling nav only while there are links beyond it
+function navFades() {
+  const nav = $('#topnav');
+  nav.classList.toggle('more-l', nav.scrollLeft > 1);
+  nav.classList.toggle('more-r', nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 1);
+}
+$('#topnav').addEventListener('scroll', navFades, { passive: true });
+addEventListener('resize', navFades);
 
 const FIRST_WINDOW = `#include <cui/cui.h>
 #include <cui/cui_app.h>
