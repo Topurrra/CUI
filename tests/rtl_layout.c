@@ -206,9 +206,54 @@ static void intrinsic_direction(cui_sw_renderer *sw, const char *font) {
     }
     printf("intrinsic widths: opposite context, LTR/RTL, FIT/nowrap and wrap, repeated frames passed\n");
 }
+static void split_frame(cui_ctx *ui, float *ratio, bool vertical, cui_direction direction) {
+    cui_begin_frame(ui, 1.0f/60);
+    cui_column(ui, .direction = direction, .width = CUI_PX(500), .height = CUI_PX(500)) {
+        cui_split(ui, "split", ratio, .vertical = vertical, .min_first = 70, .min_second = 110) {
+            cui_text(ui, "سلام");
+            cui_split_next(ui);
+            cui_text(ui, "Second");
+        }
+    }
+    cui_end_frame(ui);
+}
+static float divider_position(cui_ctx *ui, bool vertical) {
+    cui_rect r = cui__prev_rect(ui, cui_make_id(ui, "split") ^ 0x78u);
+    return vertical ? r.y + r.h/2 : r.x + r.w/2;
+}
+static void split_direction(cui_sw_renderer *sw) {
+    const cui_direction directions[] = { CUI_DIRECTION_INHERIT, CUI_DIRECTION_RTL, CUI_DIRECTION_LTR, CUI_DIRECTION_AUTO };
+    for (int root_rtl = 0; root_rtl < 2; root_rtl++) for (int mode = 0; mode < 4; mode++) for (int vertical = 0; vertical < 2; vertical++) {
+        cui_ctx *ui = context(sw, root_rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR, NULL);
+        cui_set_viewport(ui, 600, 600, 1);
+        float ratio = .3f;
+        for (int f = 0; f < 3; f++) split_frame(ui, &ratio, vertical, directions[mode]);
+        float start = divider_position(ui, vertical);
+        float x = vertical ? 250 : start, y = vertical ? start : 250;
+        cui_input_mouse_move(ui, x, y); split_frame(ui, &ratio, vertical, directions[mode]);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); split_frame(ui, &ratio, vertical, directions[mode]);
+        CHECK(fabsf(ratio - .3f) < .002f, "split divider jumps on press");
+        CHECK(fabsf(divider_position(ui, vertical) - start) < 1, "split moved without pointer movement");
+        cui_input_mouse_move(ui, x + (vertical ? 0.0f : 40.0f), y + (vertical ? 40.0f : 0.0f));
+        split_frame(ui, &ratio, vertical, directions[mode]);
+        CHECK(fabsf(divider_position(ui, vertical) - start - 40) < 1, "split divider moves against pointer");
+        bool rtl = directions[mode] == CUI_DIRECTION_RTL || (directions[mode] == CUI_DIRECTION_INHERIT && root_rtl);
+#ifdef CUI_TEXT_SHAPING
+        rtl |= directions[mode] == CUI_DIRECTION_AUTO;
+#endif
+        CHECK((ratio < .3f) == (rtl && !vertical), "split ratio used wrong origin");
+        cui_input_mouse_move(ui, vertical ? 250 : 0, vertical ? 0 : 250);
+        split_frame(ui, &ratio, vertical, directions[mode]);
+        CHECK(fabsf(ratio - (rtl && !vertical ? .78f : .14f)) < .001f, "split minimum sizes use wrong direction");
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); split_frame(ui, &ratio, vertical, directions[mode]);
+        cui_destroy(ui);
+    }
+    printf("split press, drag and minimums: LTR/RTL/inherited/AUTO, horizontal/vertical passed\n");
+}
 int main(int argc,char **argv) {
     dark=argc>3;
     cui_sw_renderer *sw=cui_sw_create();
+    split_direction(sw);
     intrinsic_direction(sw, argc>1?argv[1]:NULL);
     left_alignment(sw); scroll_overflow(sw); popover_direction(sw);
     placeholder_direction(sw, argc>1?argv[1]:NULL);

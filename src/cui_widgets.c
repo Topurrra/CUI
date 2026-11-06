@@ -1174,7 +1174,12 @@ void cui_scroll_to(cui_ctx *ui, const char *scroll_id, float y) {
 /* ------------------------------------------------------------------------ */
 
 struct cui_split_build { cui_id id; float *ratio; bool vertical; int container; float min1, min2; struct cui_split_build *prev; float hover; };
-typedef struct { float hover; bool drag; } cui__split_state;
+typedef struct { float hover; bool rtl; } cui__split_state;
+
+static void cui__paint_split(cui_ctx *ui, cui_node *n, void *data) {
+    /* Input on the next frame must use the direction that placed these panes. */
+    ((cui__split_state *)data)->rtl = n->rtl;
+}
 
 void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_split_opts *o) {
     cui_split_opts d;
@@ -1193,7 +1198,7 @@ void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_sp
     cui__split_state *st = cui_state(ui, hid, sizeof *st);
     float total = o->vertical ? pr.h : pr.w;
     if (r.active && ui->mdown[0] && total > 0) {
-        float pos = o->vertical ? ui->my - pr.y : ui->mx - pr.x;
+        float pos = o->vertical ? ui->my - pr.y : st->rtl ? pr.x + pr.w - ui->mx : ui->mx - pr.x;
         pos = cui__clampf(pos, b->min1, total - b->min2);
         *ratio = pos / total;
     }
@@ -1207,6 +1212,7 @@ void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_sp
     n->h = o->height.kind ? o->height : CUI_FILL;
     n->self_align = CUI_ALIGN_STRETCH;
     b->container = i;
+    n->paint = cui__paint_split; n->paint_data = st;
     cui__open(ui, i);
     float rr = cui__clampf(*ratio, 0.02f, 0.98f);
     int p1 = cui__node_new(ui, 0);
