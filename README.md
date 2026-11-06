@@ -34,6 +34,9 @@ Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 
 </div>
 
+> [!TIP]
+> **Try it before you install it.** The [live docs](https://yappologistic.github.io/CUI/) run every component in your browser: the same C library, compiled to WebAssembly and drawn by a WebGL2 port of its renderer.
+
 ## Your interface is plain C
 
 ```c
@@ -83,10 +86,40 @@ int main(void) {
 
 ## Why CUI
 
-- **A complete library, not a box of primitives.** Buttons, fields, selects, date pickers, dialogs, toasts and tables, and also a command palette, a virtualized data grid, kanban boards, calendars, gantt charts, about a dozen kinds of chart and a set of AI chat components. They are designed together and look finished without styling.
-- **Small and fast.** A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 240 KB.
-- **Native everywhere.** Win32, Cocoa and X11, or SDL2 and GLFW, drawn with OpenGL or a software renderer. The core only emits triangles, so your own renderer works too.
-- **Careful by default.** Neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed. Every component works from the keyboard and every animation has a reduced motion path. The [design principles](docs/design.md) list the rules, including the generic patterns CUI avoids.
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**A complete library**
+
+Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtualized data grid, kanban boards, calendars, gantt charts, about a dozen kinds of chart and AI chat components. They are designed together and look finished without styling.
+
+</td>
+<td width="50%" valign="top">
+
+**Small and fast**
+
+A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 240 KB.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Native everywhere**
+
+Win32, Cocoa and X11, or SDL2 and GLFW, drawn with OpenGL or a software renderer. The core only emits triangles, so your own renderer works too.
+
+</td>
+<td valign="top">
+
+**Careful by default**
+
+Neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed. Every component works from the keyboard and every animation has a reduced motion path. The [design principles](docs/design.md) list the rules.
+
+</td>
+</tr>
+</table>
 
 ## Install
 
