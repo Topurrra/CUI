@@ -667,6 +667,10 @@ struct cui_swipe_build {
 
 #define CUI__SWIPE_W 76.0f
 
+/* the row's corners: concentric with the panel it sits in. The clip is a plain
+ * rectangle, so the outermost action tile carries these corners itself. */
+#define CUI__SWIPE_R(ui) CUI__R_ITEM(ui)
+
 static void cui__swipe_actions(cui_ctx *ui, cui_id id, const cui_swipe_action *acts, int n, bool left, float reveal,
                                int *result, cui__swipe_state *st) {
     int side = cui__node_new(ui, 0);
@@ -686,11 +690,16 @@ static void cui__swipe_actions(cui_ctx *ui, cui_id id, const cui_swipe_action *a
         cui_node *bn = &ui->nodes[b];
         bn->w = CUI_PX(CUI__SWIPE_W); bn->h = CUI_FILL;
         bn->bg = r.hovered ? cui_mix(tone, cui__rgba(0, 0, 0, 255), 0.1f) : tone;
+        float rr = CUI__SWIPE_R(ui);
+        if (left && k == 0) bn->radius = (cui_corners){ rr, 0, 0, rr };
+        if (!left && k == n - 1) bn->radius = (cui_corners){ 0, rr, rr, 0 };
         bn->align = CUI_ALIGN_CENTER; bn->justify = CUI_JUSTIFY_CENTER; bn->gap = 3;
         cui__mark_interactive(ui, b, 0);
         if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
         cui__open(ui, b);
-        cui_color fg = cui__rgba(255, 255, 255, 255);
+        /* label and icon at 4.5:1 on the tone: white in light mode, a deep shade of the same hue on dark mode's lighter tones */
+        cui_color fg = ui->mode == CUI_THEME_DARK ? cui__legible(cui__shade(tone, 0.24f, 0.5f), bn->bg, 4.5f)
+                                                  : cui__legible(cui__rgba(255, 255, 255, 255), bn->bg, 4.5f);
         if (acts[k].icon) cui__icon_node(ui, acts[k].icon, 18, fg);
         if (acts[k].label) {
             int t = cui__text_node(ui, acts[k].label, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), fg, false);
@@ -766,7 +775,7 @@ void cui_swipe_item_begin(cui_ctx *ui, const char *id_str, const cui_swipe_actio
     cui_node *on = &ui->nodes[outer];
     on->dir = CUI_STACK; on->w = CUI_FILL; on->self_align = CUI_ALIGN_STRETCH;
     on->flags |= CUI_NF_CLIP;
-    on->radius = CUI_CORNERS(CUI_MAX(6.0f, ui->theme.radius_control - 6));
+    on->radius = CUI_CORNERS(CUI__SWIPE_R(ui));
     cui__open(ui, outer);
     int under = cui__node_new(ui, 0);
     cui_node *un = &ui->nodes[under];
@@ -783,6 +792,7 @@ void cui_swipe_item_begin(cui_ctx *ui, const char *id_str, const cui_swipe_actio
     fn->w = CUI_FILL;
     fn->pad[0] = fn->pad[2] = 10; fn->pad[1] = fn->pad[3] = 12;
     fn->bg = CUI_C(ui, SURFACE);
+    fn->radius = CUI_CORNERS(CUI__SWIPE_R(ui));
     fn->tx = x;
     cui__mark_interactive(ui, fg, CUI_IF_DRAG);
     if (st->dragging) cui__set_cursor(ui, CUI_CURSOR_MOVE);

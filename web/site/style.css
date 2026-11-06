@@ -124,6 +124,12 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
   padding: 0 16px 0 20px;
   background: var(--base);
 }
+/* once the page moves under it, the top bar gains a hairline */
+.topbar { box-shadow: 0 1px 0 transparent; transition: box-shadow var(--t-state); }
+body.scrolled .topbar { box-shadow: 0 1px 0 var(--border-subtle); }
+/* guide pages: how far through the page you are */
+.read-progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--fg); transform: scaleX(0); transform-origin: 0 50%; opacity: 0; transition: opacity var(--t-state); pointer-events: none; }
+body.guide-mode .read-progress { opacity: 0.85; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; margin-right: 14px; }
 .brand-mark {
   width: 26px; height: 26px; border-radius: 8px;
@@ -379,9 +385,16 @@ pre.code, .code-view pre {
   max-height: 620px;
   scrollbar-width: thin;
 }
-.code-view pre { display: grid; grid-template-columns: auto 1fr; column-gap: 18px; }
+.code-view pre { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 18px; }
+.code-view .row { display: contents; }
 .code-view .ln { color: var(--text-3); text-align: right; user-select: none; opacity: .7; }
 .code-view .src { white-space: pre; }
+/* word wrap, one switch for every code block (js applyWrap) */
+body.wrap-code :is(pre.code, .install-code pre), body.wrap-code .code-view .src { white-space: pre-wrap; overflow-wrap: anywhere; }
+body.wrap-code pre.code code { white-space: inherit; }
+body.wrap-code pre.code.copyable { padding-right: 80px; }
+.wrap-btn[aria-pressed="true"] { color: var(--fg); background: var(--active); }
+.wrap-btn.btn svg { width: 14px; height: 14px; }
 .tok-kw { color: var(--code-kw); }
 .tok-fn { color: var(--code-fn); }
 .tok-const { color: var(--code-const); font-weight: 500; }
@@ -403,9 +416,12 @@ pre.code, .code-view pre {
 .doc li { margin: 4px 0; }
 .doc code { font-size: 13px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 1px 5px; border-radius: 5px; }
 .doc pre.code, pre.code.copyable { background: var(--bg); border: 0; border-radius: var(--radius-panel); margin: 23px 5px; max-width: calc(100% - 10px); position: relative; box-shadow: 0 0 0 4px var(--bezel), 0 0 0 5px var(--bezel-edge); }
-.code-copy { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; opacity: 0; background: var(--bg); }
-pre.code:hover .code-copy, .code-copy:focus-visible { opacity: 1; }
-.code-copy svg { width: 14px; height: 14px; }
+/* wrap and copy, top right of a code block; they show on hover or focus */
+.code-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity var(--t-hover); }
+pre.code:hover .code-tools, .install-code:hover .code-tools, .code-tools:focus-within { opacity: 1; }
+.code-tools .icon-btn { width: 28px; height: 28px; background: var(--bg); }
+.code-tools .icon-btn.wrap-btn[aria-pressed="true"] { background: var(--active); }
+.code-tools svg { width: 14px; height: 14px; }
 .doc pre.code code { background: none; border: 0; box-shadow: none; padding: 0; font-size: 13px; }
 .doc-img { display: block; width: 100%; height: auto; border-radius: var(--radius-panel); box-shadow: 0 0 0 1px var(--border-subtle); }
 .doc table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 14px; line-height: 1.5; }
@@ -424,16 +440,19 @@ pre.code:hover .code-copy, .code-copy:focus-visible { opacity: 1; }
 /* ---------------------------------------------------------------- pager */
 .pagers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 56px; }
 .pager {
-  display: grid; gap: 2px; padding: 12px 14px; text-decoration: none;
+  display: grid; gap: 4px; padding: 14px 16px; text-decoration: none;
   border: 1px solid var(--border); border-radius: var(--radius-panel);
   transition: border-color var(--t-hover), background-color var(--t-hover);
 }
-.pager:hover { border-color: var(--border-strong); }
+.pager:hover { border-color: var(--border-strong); background: var(--hover); }
 .pager.next { text-align: right; grid-column: 2; }
-.pager-dir { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+.pager-dir { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-3); transition: color var(--t-hover); }
 .pager.next .pager-dir { justify-content: flex-end; }
-.pager-dir kbd { line-height: 16px; padding: 0 4px; }
-.pager-title { font-weight: 500; font-size: 14px; }
+.pager-dir svg { width: 14px; height: 14px; transition: transform var(--t-hover) var(--ease); }
+.pager:hover .pager-dir { color: var(--text-2); }
+.pager.prev:hover .pager-dir svg { transform: translateX(-2px); }
+.pager.next:hover .pager-dir svg { transform: translateX(2px); }
+.pager-title { font-weight: 500; font-size: 15px; }
 
 /* ---------------------------------------------------------------- notes panel */
 .review-box {
@@ -501,7 +520,8 @@ body:not(.review-mode) .review-only { display: none !important; }
 .install-tabs button[aria-selected="true"] { background: var(--hover); color: var(--fg); }
 .install-code { position: relative; border: 0; border-radius: var(--radius-panel); background: var(--bg); margin: 5px; box-shadow: 0 0 0 4px var(--bezel), 0 0 0 5px var(--bezel-edge); }
 .install-code pre { margin: 0; padding: 14px 52px 14px 16px; font-size: 12.5px; line-height: 1.6; overflow-x: auto; scrollbar-width: none; }
-.install-code .icon-btn { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; }
+.install-code pre { padding-right: 84px; }
+@media (hover: none) { .code-tools { opacity: 1; } }
 .home-stage { margin-top: 80px; }
 /* numbered sections: the number, a title, one paragraph and a link, beside or above the thing itself */
 .home-feature { margin-top: 128px; }
@@ -553,10 +573,22 @@ body:not(.review-mode) .review-only { display: none !important; }
 .page.home .hero > :nth-child(3) { animation-delay: 120ms; }
 .page.home .hero > :nth-child(4) { animation-delay: 180ms; }
 .page.home .hero > :nth-child(5) { animation-delay: 240ms; }
-.home-shell .reveal { opacity: 0; transform: translateY(20px); transition: opacity 640ms var(--ease) var(--d, 0ms), transform 760ms var(--ease) var(--d, 0ms); }
-.home-shell .reveal.in { opacity: 1; transform: none; }
+/* every page: elements lift in once as they scroll into view (js revealOnScroll) */
+.reveal { opacity: 0; transform: translateY(16px); transition: opacity 560ms var(--ease) var(--d, 0ms), transform 680ms var(--ease) var(--d, 0ms); }
+.reveal.in { opacity: 1; transform: none; }
+.home-shell .reveal { transform: translateY(20px); }
+.home-shell .reveal.in { transform: none; }
+/* every page header enters with the page: crumbs, title, lede, a beat apart */
+@keyframes page-enter { from { opacity: 0; transform: translateY(10px); } }
+.page:not(.home):not(.wide) > :is(.crumbs, h1, .lede, .title-row, .api-line, .hero-actions),
+.guide-main > :is(.crumbs, h1) { animation: page-enter 520ms var(--ease) both; }
+.page > :is(h1, .title-row), .guide-main > h1 { animation-delay: 40ms; }
+.page > :is(.lede, .api-line) { animation-delay: 80ms; }
+.page > .hero-actions { animation-delay: 120ms; }
+.guide-main > .doc { animation: page-enter 520ms var(--ease) 80ms both; }
 .home-art .dither { will-change: transform; }
 .home-shell.still .hero > * { animation: none; }
+body.reduce-motion :is(.page, .guide-main) > *, body.reduce-motion .page.home .hero > * { animation: none !important; }
 .site-footer { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: center; max-width: 1520px; margin: 0 auto; padding: 24px 32px 32px; border-top: 1px solid var(--border-subtle); font-size: 13px; color: var(--text-3); }
 .site-footer nav { display: flex; gap: 18px; }
 .site-footer a { color: var(--text-2); text-decoration: none; transition: color var(--t-hover); }

@@ -33,6 +33,7 @@ const I = {
   grip: svg('<path d="M21 15l-6 6M21 9 9 21"/>'),
   arrow: svg('<path d="M5 12h14M13 6l6 6-6 6"/>'),
   left: svg('<path d="M19 12H5M11 18l-6-6 6-6"/>'),
+  wrap: svg('<path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7"/><path d="m16 16-2 2 2 2"/>'),
   note: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
   circleCheck: svg('<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>'),
@@ -52,7 +53,7 @@ const store = {
 const saved = store.get('cui-web-settings', {});
 const prefs = { theme: saved.theme || 'system', accent: saved.accent ?? 0, accentTouched: !!saved.accentTouched,
                 renderer: saved.renderer || 'gpu', speed: saved.speed || 1, reducedMotion: !!saved.reducedMotion,
-                pixelRatio: saved.pixelRatio || 'auto', pair: !!saved.pair };
+                pixelRatio: saved.pixelRatio || 'auto', pair: !!saved.pair, wrap: !!saved.wrap };
 const savePrefs = () => store.set('cui-web-settings', prefs);
 const reviewOn = () => !!prefs.review;
 function applyReview() { document.body.classList.toggle('review-mode', reviewOn()); }
@@ -64,6 +65,7 @@ const saveReviewed = () => { store.set('cui-web-reviewed', reviewed); updateCoun
 const media = matchMedia('(prefers-color-scheme: dark)');
 const isDark = () => prefs.theme === 'dark' || (prefs.theme === 'system' && media.matches);
 function syncSettings() {
+  document.body.classList.toggle('reduce-motion', !!prefs.reducedMotion);
   Object.assign(settings, { renderer: prefs.renderer, speed: prefs.speed, reducedMotion: prefs.reducedMotion,
                             pixelRatio: prefs.pixelRatio, dark: isDark(), accent: prefs.accent, accentTouched: prefs.accentTouched });
 }
@@ -384,21 +386,47 @@ function reference(opts, p) {
   return `CUI ${opts.item ? opts.item + ': ' : ''}${parts.join('; ')}`;
 }
 
+/* word wrap for code: one preference for the whole site, a toggle on every code block */
+function applyWrap() {
+  document.body.classList.toggle('wrap-code', prefs.wrap);
+  document.querySelectorAll('.wrap-btn').forEach((b) => b.setAttribute('aria-pressed', String(prefs.wrap)));
+}
+function wrapButton(cls = 'icon-btn code-wrap', label = '') {
+  return h('button', { class: `${cls} wrap-btn`, title: 'Wrap long lines', 'aria-label': 'Wrap long lines', 'aria-pressed': String(prefs.wrap),
+    html: I.wrap + label, onclick: () => { prefs.wrap = !prefs.wrap; savePrefs(); applyWrap(); } });
+}
 function addCopy(root) {
   root.querySelectorAll('pre.code').forEach((pre) => {
     if (pre.querySelector('.code-copy')) return;
     pre.classList.add('copyable');
-    pre.append(h('button', { class: 'icon-btn code-copy', title: 'Copy', 'aria-label': 'Copy code', html: I.copy, onclick: () => copy(pre.querySelector('code').textContent, 'Code copied') }));
+    pre.append(h('div', { class: 'code-tools' }, wrapButton(),
+      h('button', { class: 'icon-btn code-copy', title: 'Copy', 'aria-label': 'Copy code', html: I.copy, onclick: () => copy(pre.querySelector('code').textContent, 'Code copied') })));
   });
 }
+// highlighted source split into lines, closing and reopening a token that spans a line break
+function htmlLines(html) {
+  const out = [], open = [];
+  let cur = '', m;
+  const re = /(<span[^>]*>)|(<\/span>)|(\n)|([^<\n]+|<)/g;
+  while ((m = re.exec(html))) {
+    if (m[1]) { open.push(m[1]); cur += m[1]; }
+    else if (m[2]) { open.pop(); cur += m[2]; }
+    else if (m[3]) { out.push(cur + '</span>'.repeat(open.length)); cur = open.join(''); }
+    else cur += m[4];
+  }
+  out.push(cur);
+  return out;
+}
 function codeView(source, file, line) {
-  const lines = (source || '').split('\n');
-  const nums = lines.map((_, i) => line + i).join('\n');
+  // one row per line, so the numbers stay beside their line when long lines wrap
+  const rows = htmlLines(highlight(source || '')).map((l, i) =>
+    h('span', { class: 'row' }, h('span', { class: 'ln' }, String(line + i)), h('code', { class: 'src', html: l + '\n' })));
   return h('div', { class: 'code-view' },
     h('div', { class: 'code-head' }, h('code', {}, `${file}:${line}`), h('span', { class: 'spacer' }),
+      wrapButton('btn ghost sm', 'Wrap'),
       h('button', { class: 'btn ghost sm', html: I.copy + 'Copy code', onclick: () => copy(source, 'Code copied') }),
       h('button', { class: 'btn ghost sm', html: I.copy + 'Copy path', onclick: () => copy(`${file}:${line}`, 'Path copied') })),
-    h('pre', {}, h('span', { class: 'ln' }, nums), h('code', { class: 'src', html: highlight(source || '') })));
+    h('pre', {}, rows));
 }
 
 // ---------------------------------------------------------------- sidebar
@@ -514,7 +542,8 @@ function installBlock() {
   const tabs = h('div', { class: 'install-tabs', role: 'tablist' }, INSTALL.map(([label], i) => h('button', { role: 'tab', onclick: () => { cur = i; show(); } }, label)));
   const box = h('div', { class: 'install' }, tabs,
     h('div', { class: 'install-code' }, h('pre', {}, code),
-      h('button', { class: 'icon-btn', title: 'Copy', 'aria-label': 'Copy', html: I.copy, onclick: () => copy(INSTALL[cur][1], 'Copied') })));
+      h('div', { class: 'code-tools' }, wrapButton(),
+        h('button', { class: 'icon-btn code-copy', title: 'Copy', 'aria-label': 'Copy', html: I.copy, onclick: () => copy(INSTALL[cur][1], 'Copied') }))));
   show();
   return box;
 }
@@ -526,7 +555,6 @@ const FACTS = [
   ['Keyboard and reduced motion', 'Every component works from the keyboard and every animation has a reduced motion path. Text meets 4.5:1 contrast.'],
 ];
 const ART = 'img/tetons.jpg';
-const artReduced = () => prefs.reducedMotion || matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function viewHome() {
   setNav('home');
@@ -575,7 +603,7 @@ function viewHome() {
       h('ul', { class: 'link-list' }, next.filter(([id]) => guide(id)).map(([id, text]) =>
         h('li', {}, h('a', { href: `#/guide/${id}` }, h('span', { class: 'link-title' }, guide(id).title), h('span', { class: 'link-text' }, text), h('span', { class: 'link-arrow', html: I.arrow })))))),
     h('section', { class: 'home-cta' },
-      ditherArt({ src: ART, focusY: 0.95, gamma: 1.15, reveal: 'view', reduced: artReduced }),
+      ditherArt({ src: ART, focusY: 0.95, gamma: 1.15, reveal: 'view', reduced: motionOff }),
       h('div', { class: 'home-cta-body' },
         h('h2', {}, 'Start with one window'),
         h('p', {}, 'Build CUI, open a window and draw your first components in a few minutes.'),
@@ -584,36 +612,67 @@ function viewHome() {
           h('a', { class: 'btn', href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer' }, 'Source on GitHub')))),
     h('p', { class: 'art-credit' }, 'Photograph: Ansel Adams, ', h('i', {}, 'The Tetons and the Snake River'), ', 1942. U.S. National Archives, public domain.'));
   const shell = h('div', { class: 'home-shell' },
-    h('div', { class: 'home-art' }, ditherArt({ src: ART, focusY: 0.3, gamma: 1.25, reduced: artReduced })),
+    h('div', { class: 'home-art' }, ditherArt({ src: ART, focusY: 0.3, gamma: 1.25, reduced: motionOff })),
     page);
   homeMotion(shell);
   return shell;
 }
 
-/* Scroll motion on the overview, all in the site's one easing: the hero art
- * drifts slower than the page and fades, and each section lifts in once as it
- * enters, staggered within its group. Nothing moves with reduced motion. */
-function homeMotion(shell) {
-  if (artReduced()) { shell.classList.add('still'); return; }
-  const groups = ['.feature-head', '.home-split > :last-child', '.home-stage', '.home-next h2', '.home-cta', '.art-credit',
-                  '.demo-grid > .demo', '.facts > li', '.link-list > li'];
+const motionOff = () => prefs.reducedMotion || matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* Scroll reveals, shared by every page: each element lifts in once as it
+ * enters, in the site's one easing. Selectors with '>' are groups (cards, list
+ * rows) and stagger within their parent. Nothing moves with reduced motion. */
+function revealOnScroll(root, selectors) {
+  if (motionOff()) return null;
   const items = [];
-  for (const sel of groups) shell.querySelectorAll(sel).forEach((el, i) => {
-    el.classList.add('reveal');
-    if (/>/.test(sel) && !sel.startsWith('.home-split')) el.style.setProperty('--d', `${Math.min(i, 6) * 60}ms`);
-    items.push(el);
-  });
+  for (const sel of selectors) {
+    const seen = new Map();
+    root.querySelectorAll(sel).forEach((el) => {
+      if (el.classList.contains('reveal')) return;
+      el.classList.add('reveal');
+      if (sel.includes('>')) {
+        const i = seen.get(el.parentNode) || 0;
+        seen.set(el.parentNode, i + 1);
+        el.style.setProperty('--d', `${Math.min(i, 8) * 45}ms`);
+      }
+      items.push(el);
+    });
+  }
   const io = new IntersectionObserver((es) => es.forEach((e) => {
     if (!e.isIntersecting) return;
     e.target.classList.add('in');
     io.unobserve(e.target);
   }), { rootMargin: '0px 0px -6% 0px', threshold: 0 });
   items.forEach((el) => io.observe(el));
+  return io;
+}
 
+// what lifts in on each kind of page; the page header has its own entrance in CSS
+const DOC_REVEAL = ['.doc h2', '.doc pre.code', '.doc table', '.doc .doc-img', '.figure', '.pagers'];
+const PAGE_REVEAL = {
+  components: ['.section-title', '.grid > .card'],
+  guide: DOC_REVEAL,
+  c: ['.previews', ...DOC_REVEAL],
+  showcase: ['.previews > div'],
+  accents: ['.accent-grid > *'],
+  apps: ['.grid > .card'],
+};
+function pageMotion(view, kind) {
+  const sel = PAGE_REVEAL[kind];
+  if (sel) revealOnScroll(view, sel);
+}
+
+/* The overview adds two things: the hero art drifts slower than the page and
+ * fades, and its sections reveal like every other page. */
+function homeMotion(shell) {
+  if (motionOff()) { shell.classList.add('still'); return; }
+  const io = revealOnScroll(shell, ['.feature-head', '.home-split > :last-child', '.home-stage', '.home-next h2', '.home-cta', '.art-credit',
+                                    '.demo-grid > .demo', '.facts > li', '.link-list > li']);
   const art = shell.querySelector('.home-art .dither');
   let ticking = false;
   const onScroll = () => {
-    if (!shell.isConnected) { removeEventListener('scroll', onScroll); io.disconnect(); return; }
+    if (!shell.isConnected) { removeEventListener('scroll', onScroll); io?.disconnect(); return; }
     if (ticking) return;
     ticking = true;
     requestAnimationFrame(() => {
@@ -625,6 +684,21 @@ function homeMotion(shell) {
   };
   addEventListener('scroll', onScroll, { passive: true });
 }
+
+/* Two quiet scroll cues on every page: the top bar gains a hairline once the
+ * page moves under it, and guide pages show how far through you are. */
+const progressBar = h('div', { class: 'read-progress', 'aria-hidden': 'true' });
+document.querySelector('.topbar').append(progressBar);
+function scrollCues() {
+  const y = scrollY;
+  document.body.classList.toggle('scrolled', y > 4);
+  if (document.body.classList.contains('guide-mode')) {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    progressBar.style.transform = `scaleX(${max > 0 ? Math.min(1, y / max).toFixed(4) : 0})`;
+  }
+}
+let cueTick = false;
+addEventListener('scroll', () => { if (!cueTick) { cueTick = true; requestAnimationFrame(() => { cueTick = false; scrollCues(); }); } }, { passive: true });
 
 function siteFooter() {
   return h('footer', { class: 'site-footer' },
@@ -668,8 +742,7 @@ function viewGuide(id, sec) {
   });
   const toc = g.sections.length > 2 ? h('nav', { class: 'toc', 'aria-label': 'On this page' }, h('div', { class: 'toc-title' }, 'On this page'),
     g.sections.map((x) => h('a', { href: `#/guide/${g.id}/${x.id}`, 'data-sec': x.id }, x.title))) : null;
-  const pager = (it2, dir) => it2 ? h('a', { class: 'pager ' + dir, href: `#/guide/${it2.id}` },
-    h('span', { class: 'pager-dir' }, dir === 'prev' ? 'Previous' : 'Next'), h('span', { class: 'pager-title' }, it2.title)) : h('span');
+  const pager = (it2, dir) => pagerLink(it2, dir, `#/guide/${it2?.id}`);
   const page = h('div', { class: 'page guide-page' },
     h('div', { class: 'guide-main' },
       h('div', { class: 'crumbs' }, h('a', { href: '#/guide/getting-started' }, 'Guide'), '/', h('span', {}, g.title)),
@@ -739,11 +812,18 @@ function viewItem(id) {
   addCopy(docs);
   docs.append(h('p', { class: 'source-note' }, 'From ', h('code', {}, docRef), ' in the repository.'));
   page.append(docs);
-  const pager = (it2, dir) => it2 ? h('a', { class: 'pager ' + dir, href: `#/c/${it2.id}` },
-    h('span', { class: 'pager-dir' }, dir === 'prev' ? 'Previous' : 'Next', h('kbd', {}, dir === 'prev' ? '[' : ']')),
-    h('span', { class: 'pager-title' }, it2.title)) : h('span');
+  const pager = (it2, dir) => pagerLink(it2, dir, `#/c/${it2?.id}`, dir === 'prev' ? '[' : ']');
   page.append(h('nav', { class: 'pagers', 'aria-label': 'Previous and next component' }, pager(prev, 'prev'), pager(next, 'next')));
   return page;
+}
+
+// previous / next at the foot of a page; the arrow points the way, the shortcut lives in the tooltip
+function pagerLink(it2, dir, href, key) {
+  if (!it2) return h('span');
+  const label = dir === 'prev' ? 'Previous' : 'Next';
+  return h('a', { class: 'pager ' + dir, href, title: key ? `${label}: ${it2.title} (${key})` : `${label}: ${it2.title}` },
+    h('span', { class: 'pager-dir', html: dir === 'prev' ? I.left + label : label + I.arrow }),
+    h('span', { class: 'pager-title' }, it2.title));
 }
 
 // a readable name for a scene variant: "toast-demo" under Toast reads "Demo"
@@ -931,8 +1011,11 @@ function route() {
   else view = viewMissing();
   document.body.classList.toggle('app-mode', kind === 'app');
   document.body.classList.toggle('home-mode', !kind || kind === 'home');
+  document.body.classList.toggle('guide-mode', kind === 'guide');
   main.replaceChildren(view, ...(kind === 'app' ? [] : [siteFooter()]));
   window.scrollTo(0, 0);
+  pageMotion(view, kind);
+  scrollCues();
   renderNav($('#filter').value);
   const it = kind === 'c' && CAT.items[id];
   const gd = kind === 'guide' && CAT.guides.find((g) => g.id === (id || 'getting-started').split('/')[0]);
@@ -1058,6 +1141,7 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------- start
 window.cuiDebug = { allLive, blocks: () => blocks, settings };
 applyTheme();
+applyWrap();
 applyReview();
 updateCounts();
 route();
