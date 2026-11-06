@@ -7,13 +7,14 @@
 About 150 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 
+[![CI](https://github.com/yappologistic/CUI/actions/workflows/ci.yml/badge.svg)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![C99](https://img.shields.io/badge/C-99-informational.svg)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey.svg)
 
 [Getting started](docs/getting-started.md) ·
 [Components](docs/components.md) ·
-[Live docs](#documentation) ·
+[Live docs](https://yappologistic.github.io/CUI/) ·
 [Examples](examples) ·
 [Design principles](docs/design.md)
 
@@ -311,7 +312,7 @@ CUI 1.0 is complete enough to build real desktop apps. Every push runs unit, int
 | [Rendering](docs/rendering.md) | The vertex format and the reference shader |
 | [Design principles](docs/design.md) | The rules every component follows |
 
-**Live docs.** The same guide runs in the browser with every component live: the library compiled to WebAssembly and drawn with a WebGL2 port of its renderer. Build and serve it locally with `web/tools/serve.sh` (needs clang with the `wasm32` target), then open http://localhost:8765. See [`web/`](web).
+**Live docs.** The same guide, with every component running in your browser, is at **https://yappologistic.github.io/CUI/**: the library compiled to WebAssembly and drawn with a WebGL2 port of its renderer. It is rebuilt from `master` on every push. To run it locally, use `web/tools/serve.sh` (needs clang with the `wasm32` target) and open http://localhost:8765. See [`web/`](web).
 
 ## Development
 

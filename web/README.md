@@ -5,6 +5,9 @@ compiled to WebAssembly and drawn with a WebGL2 port of its OpenGL renderer
 (or its software renderer). It also renders the guide in `docs/` and the
 example apps in `examples/`, so what you see is exactly what the library does.
 
+The published copy is at https://yappologistic.github.io/CUI/, built and
+deployed from `master` by `.github/workflows/pages.yml`.
+
 ## Run it
 
 ```sh
