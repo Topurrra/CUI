@@ -647,22 +647,6 @@ static int cui__strong_class(uint32_t cp) {
     int t = cui__bidi_strong_direction(cp);
     return t < 0 ? 0 : (t ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR);
 }
-#else
-#include "cui_direction_data.h"
-static int cui__strong_class(uint32_t cp) {
-    int lo = 0, hi = (int)sizeof(cui__strong_ranges) / 3;
-    while (lo < hi) {
-        int mid = lo + (hi - lo) / 2;
-        const unsigned char *p = cui__strong_ranges + mid * 3;
-        uint32_t v = p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
-        if (cp > (v & 0x1fffff)) lo = mid + 1;
-        else hi = mid;
-    }
-    if (lo == (int)sizeof(cui__strong_ranges) / 3) return 0;
-    int t = cui__strong_ranges[lo * 3 + 2] >> 5;
-    return t == 1 ? CUI_DIRECTION_LTR : (t == 2 ? CUI_DIRECTION_RTL : 0);
-}
-#endif
 
 static int cui__first_strong(cui_ctx *ui, int i) {
     cui_node *n = &ui->nodes[i];
@@ -681,11 +665,14 @@ static int cui__first_strong(cui_ctx *ui, int i) {
     }
     return 0;
 }
+#endif
 
 static void cui__resolve_direction(cui_ctx *ui, int i, bool inherited) {
     cui_node *n = &ui->nodes[i];
     int d = n->direction;
+#ifdef CUI_TEXT_SHAPING
     if (d == CUI_DIRECTION_AUTO) d = cui__first_strong(ui, i);
+#endif
     n->rtl = d == CUI_DIRECTION_RTL || (!d && inherited);
     for (int c = n->first; c >= 0; c = ui->nodes[c].next) cui__resolve_direction(ui, c, n->rtl);
     for (int c = n->abs_first; c >= 0; c = ui->nodes[c].next) cui__resolve_direction(ui, c, n->rtl);

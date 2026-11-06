@@ -8,6 +8,11 @@
 static int clicked[6];
 static cui_id button_ids[6];
 static bool dark;
+#ifdef CUI_TEXT_SHAPING
+static const bool shaping = true;
+#else
+static const bool shaping = false;
+#endif
 static bool enabled = true, checked = true;
 static int segment;
 static char input[64];
@@ -153,7 +158,7 @@ static void popover_direction(cui_sw_renderer *sw) {
         cui_end_frame(ui);
         CHECK(ui->float_count == 1, "popover missing");
         cui_node *popup = &ui->nodes[ui->float_roots[0]];
-        CHECK(popup->rtl == (mode != 1) && ui->nodes[popup->first].rtl == popup->rtl,
+        CHECK(popup->rtl == (mode == 0 || (shaping && mode == 2)) && ui->nodes[popup->first].rtl == popup->rtl,
               "popover must inherit opening container direction");
         cui_destroy(ui);
     }
@@ -210,12 +215,12 @@ int main(int argc,char **argv) {
     cui_ctx *automatic=context(sw,CUI_DIRECTION_LTR,argc>1?argv[1]:NULL);frames(automatic,true,3);
     int rows=0;
     for(int i=0;i<automatic->node_count;i++) if(automatic->nodes[i].direction==CUI_DIRECTION_AUTO) {
-        bool expected=rows==0||rows==2;
+        bool expected=shaping&&(rows==0||rows==2);
         CHECK(automatic->nodes[i].rtl==expected,"AUTO first strong failed");
         for(int j=i+1;j<automatic->node_count && automatic->nodes[j].parent>=i;j++) CHECK(automatic->nodes[j].rtl==expected,"row subtitle direction differs");
         rows++;
     }
-    CHECK(rows==4,"AUTO rows missing");printf("AUTO passed: Persian and Persian-first mixed RTL; English-first LTR\n");
+    CHECK(rows==4,"AUTO rows missing");printf("AUTO passed: %s\n",shaping?"first strong":"LTR without shaping");
     if(argc>2)save(automatic,sw,argv[2],"auto");
     alignment_cases(ltr);alignment_cases(rtl);
     for(int i=0;i<ltr->node_count;i++) {
@@ -223,10 +228,10 @@ int main(int argc,char **argv) {
         if(a->parent<0 || ltr->nodes[a->parent].direction!=CUI_DIRECTION_AUTO)
             CHECK(fabsf(b->rect.x-(W-a->rect.x-a->rect.w))<=0.5f,"alignment/padding mirror failed");
         if(a->direction==CUI_DIRECTION_AUTO) {
-            if(i==ltr->node_count-2) CHECK(!a->rtl&&b->rtl,"neutral AUTO must inherit");
+            if(i==ltr->node_count-2) CHECK(!a->rtl&&b->rtl==shaping,"neutral AUTO direction");
         }
     }
-    CHECK(ltr->nodes[ltr->node_count-6].rtl&&rtl->nodes[rtl->node_count-6].rtl,"AUTO must skip digits before Persian");
+    CHECK(ltr->nodes[ltr->node_count-6].rtl==shaping&&rtl->nodes[rtl->node_count-6].rtl==shaping,"AUTO Persian direction");
     CHECK(!ltr->nodes[ltr->node_count-4].rtl&&!rtl->nodes[rtl->node_count-4].rtl,"AUTO must skip digits before English");
     printf("asymmetric padding, end alignment, wrapped row, grid, stack and neutral AUTO passed\n");
     cui_destroy(ltr);cui_destroy(rtl);cui_destroy(automatic);cui_sw_destroy(sw);return 0;

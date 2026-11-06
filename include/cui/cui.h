@@ -171,8 +171,9 @@ typedef struct cui_allocator {
     void *user;
 } cui_allocator;
 
-/* Zero inherits the parent, or LTR at the context root. AUTO uses the first
- * strong character in descendant text, ignoring explicit-direction subtrees. */
+/* Zero inherits the parent, or LTR at the context root. With text shaping, AUTO
+ * uses the first strong character in descendant text, ignoring explicitly
+ * directed subtrees. Without text shaping, AUTO resolves to LTR. */
 typedef enum cui_direction {
     CUI_DIRECTION_INHERIT = 0, CUI_DIRECTION_LTR, CUI_DIRECTION_RTL, CUI_DIRECTION_AUTO
 } cui_direction;

@@ -34,10 +34,12 @@ Every container accepts the same options (`cui_box` struct):
 Set `.direction = CUI_DIRECTION_RTL` in `cui_ctx_desc` for a Persian interface.
 Containers (`cui_box`, `cui_row`, `cui_column`) and `cui_text` accept the same named
 option. Zero (`CUI_DIRECTION_INHERIT`) inherits; the context defaults to LTR.
-`CUI_DIRECTION_LTR` overrides an RTL parent. `CUI_DIRECTION_AUTO` finds the first
+`CUI_DIRECTION_LTR` overrides an RTL parent. With `CUI_TEXT_SHAPING=ON`,
+`CUI_DIRECTION_AUTO` finds the first
 strong Unicode character in descendant text, skipping explicitly directed
 subtrees and icon glyphs. Digits and punctuation are not strong. With no strong
-character it inherits. A row's subtitle inherits the row's result too:
+character it inherits. With shaping OFF, `AUTO` resolves to LTR, including inside
+an RTL parent. A row's subtitle inherits the row's result too:
 
 ```c
 cui_row(ui, .direction = CUI_DIRECTION_AUTO, .width = CUI_FILL) {
@@ -73,7 +75,7 @@ base, including English-first mixed text in a forced RTL container. Direct drawi
 uses the context direction; AUTO/INHERIT use first-strong, default LTR. Shaped
 wrapping preserves paragraph levels; see [integration](integration.md).
 Auto classification reuses CUI bidi's Unicode 17.0.0 data when shaping is enabled;
-otherwise a compact generated Unicode 15.1.0 first-strong table is used.
+the OFF build includes no Unicode direction table.
 
 `cui_rtl_layout` checks every node rectangle and clicks six distinct RTL buttons.
 It also checks physical LEFT row alignment, horizontal overflow in both directions,
@@ -84,8 +86,7 @@ in RTL; it does not imply all custom-painted components support RTL.
 
 Sliders, radio-card indicators and filled text fields do not mirror yet. This
 change adds no RTL editing, cursor navigation or IME support. Absolute coordinates
-and raw draw calls stay physical. The OFF build includes the direction tables and
-layout logic (about 6 KB above the upstream MSVC Release `hello.exe`).
+and raw draw calls stay physical.
 
 The fixture is rendered by `cui_rtl_layout FONT.ttf OUT_PREFIX [dark]`:
 
