@@ -2,130 +2,34 @@
 
 # CUI
 
-### Native UI components for C
+**Native UI components for C.**
 
 About 150 components with spring motion and full keyboard support.<br>
-Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB, MIT licensed.
+Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 
-[Getting started](docs/getting-started.md) &nbsp;·&nbsp;
-[Components](docs/components.md) &nbsp;·&nbsp;
-[More components](docs/components-more.md) &nbsp;·&nbsp;
-[Layout](docs/layout.md) &nbsp;·&nbsp;
-[Theming](docs/theming.md) &nbsp;·&nbsp;
-[Integration](docs/integration.md) &nbsp;·&nbsp;
-[Examples](examples)
+[![CI](https://github.com/yappologistic/CUI/actions/workflows/ci.yml/badge.svg)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![C99](https://img.shields.io/badge/C-99-informational.svg)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey.svg)
+
+[Getting started](docs/getting-started.md) ·
+[Components](docs/components.md) ·
+[Live docs](#documentation) ·
+[Examples](examples) ·
+[Design principles](docs/design.md)
 
 <br>
 
-<img src="docs/images/showcase/hero-ai-dark.png" alt="An assistant window built with CUI: reasoning, tool calls, citations and a composer, beside a task plan and a frame time chart">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/components-dark.png">
+  <img src="docs/images/showcase/components.png" alt="CUI components: a sign up form, metric cards, a calendar with time slots, a bar chart, team members and settings">
+</picture>
 
 <sub>Every image on this page is drawn by CUI itself, from plain C.</sub>
 
 </div>
 
-<br>
-
-## Why CUI
-
-C has excellent low level libraries and very few ways to build an interface that looks current. CUI is a complete component library rather than a box of primitives. Buttons, inputs, selects, date pickers, dialogs, toasts and tables are all there, along with a command palette, a data grid, kanban boards, calendars and gantt charts, about a dozen kinds of chart and a set of AI chat components. They are designed together and look finished without any styling.
-
-Your interface is plain C that runs every frame. Components are functions that draw themselves and return what happened, and your variables are the state. Behind them sits a flexbox style layout engine with rows, columns, grids, wrapping text, scroll areas and split views.
-
-The look is restrained on purpose: neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed (presses, gliding highlights, menus that open from their trigger). Every animation has a reduced motion path, and every component works from the keyboard. [Design principles](docs/design.md) has the rules, including the generic patterns CUI avoids.
-
-A full screen builds, lays out and paints in 0.1 to 0.25 ms, idle apps use no CPU, and a complete app is about 240 KB. It runs on Win32, Cocoa and X11, or on SDL2 and GLFW, with OpenGL or a software renderer. You can also plug in your own renderer, because the core only emits triangles.
-
-## Showcase
-
-<table>
-<tr>
-<td colspan="2"><img src="docs/images/showcase/hero-data.png" alt="A data grid with a filter bar, two selected rows, team tags and score bars"></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><sub><b>Data grid</b>: 2,000 virtualized rows, filters, sorting, resizable columns and spreadsheet style selection</sub></td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/showcase/hero-desk-dark.png" alt="Control tiles, a now playing card, a waveform and a dock"></td>
-<td width="50%"><img src="docs/images/showcase/hero-board.png" alt="A kanban board with a card being dragged between columns"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Dock, tiles and player</b>: icons grow under the pointer, the waveform seeks on click</sub></td>
-<td align="center"><sub><b>Kanban</b>: the lifted card follows the pointer and the column opens a slot for it</sub></td>
-</tr>
-<tr>
-<td colspan="2"><img src="docs/images/showcase/hero-pick-dark.png" alt="A date range picker with presets and two months, and a wheel time picker"></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><sub><b>Pickers</b>: a date range with presets over two months, and wheels that spin with momentum</sub></td>
-</tr>
-<tr>
-<td><img src="docs/images/showcase/hero-palette-dark.png" alt="A command palette with grouped commands and shortcuts"></td>
-<td><img src="docs/images/showcase/hero-charts.png" alt="A contribution heatmap, a sankey of test runs, a radar chart and a task plan"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Command palette</b>: fuzzy search, groups and shortcuts</sub></td>
-<td align="center"><sub><b>Charts</b>: calendar heatmap, sankey and radar, with a live task plan</sub></td>
-</tr>
-<tr>
-<td><img src="docs/images/showcase/hero-social-dark.png" alt="Chat bubbles, threaded comments, a rolling counter and presence avatars"></td>
-<td><img src="docs/images/showcase/hero-effects-dark.png" alt="Three cards for choosing a renderer, one lit by the pointer"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Conversation</b>: grouped bubbles, threads, a rolling counter, presence</sub></td>
-<td align="center"><sub><b>Spotlight cards</b>: the surface and edge nearest the pointer light up</sub></td>
-</tr>
-<tr>
-<td colspan="2"><img src="docs/images/showcase/hero-plan-dark.png" alt="A gantt chart with dependencies, progress and a today line"></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><sub><b>Gantt</b>: drag to reschedule, pull the ends to resize, arrows follow dependencies</sub></td>
-</tr>
-</table>
-
-## Built with CUI
-
-Every screenshot here is a real app from [`examples/`](examples), rendered by CUI itself.
-
-<table>
-<tr>
-<td colspan="2"><img src="docs/images/showcase/assistant.png" alt="An AI assistant built with CUI"></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><sub><b>Muse</b>: reasoning, tool calls, sources, a plan and a composer with a model picker · <a href="examples/assistant.c">assistant.c</a></sub></td>
-</tr>
-<tr>
-<td colspan="2"><img src="docs/images/showcase/tracker.png" alt="An issue tracker built with CUI, in dark mode"></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><sub><b>Orbit</b>: an issue tracker with grouped lists, custom glyphs and an activity pane · <a href="examples/tracker.c">tracker.c</a></sub></td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/showcase/music.png" alt="Music player"></td>
-<td width="50%"><img src="docs/images/showcase/finance.png" alt="Personal finance app"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Tempo</b>: cover art drawn on a canvas, track list, transport bar · <a href="examples/music.c">music.c</a></sub></td>
-<td align="center"><sub><b>Halden</b>: balance chart, painted card, budgets, goals · <a href="examples/finance.c">finance.c</a></sub></td>
-</tr>
-<tr>
-<td><img src="docs/images/showcase/dashboard-dark.png" alt="Analytics dashboard"></td>
-<td><img src="docs/images/showcase/mail-dark.png" alt="Mail client"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Larkspur</b>: figures, charts, sortable table · <a href="examples/dashboard.c">dashboard.c</a></sub></td>
-<td align="center"><sub><b>Mail</b>: three pane inbox and compose dialog · <a href="examples/mail.c">mail.c</a></sub></td>
-</tr>
-<tr>
-<td><img src="docs/images/showcase/notes-dark.png" alt="Notes app"></td>
-<td><img src="docs/images/showcase/settings-dark.png" alt="Settings screen"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>Notes</b>: split view, search, context menus, export · <a href="examples/notes.c">notes.c</a></sub></td>
-<td align="center"><sub><b>Settings</b>: forms, validation, preferences · <a href="examples/settings.c">settings.c</a></sub></td>
-</tr>
-</table>
-
-## A first app
+## Your interface is plain C
 
 <table>
 <tr>
@@ -138,6 +42,7 @@ Every screenshot here is a real app from [`examples/`](examples), rendered by CU
 int main(void) {
     cui_app *app = cui_app_create(&(cui_app_desc){
         .title = "Hello", .width = 420, .height = 300 });
+    if (!app) return 1;
     bool notifications = true;
     int clicks = 0;
 
@@ -156,27 +61,46 @@ int main(void) {
         }
     }
     cui_app_destroy(app);
+    return 0;
 }
 ```
 
 </td>
 <td width="42%" valign="top">
 
-<img src="docs/images/showcase/hello-dark.png" alt="The hello example">
+<img src="docs/images/showcase/hello-dark.png" alt="The hello example: a heading, a line of text, a switch and a button">
 
-Components are functions. They draw themselves, handle input and return what happened.
+**Components are functions.** They draw themselves, handle input and return what happened.
 
-Options are named arguments, so the common case stays short and everything else is one `.field = value` away.
+**Options are named arguments,** so the common case stays short and everything else is one `.field = value` away.
 
-Your variables are the state. There is nothing to sync.
+**Your variables are the state.** The screen is described again every frame, so there is nothing to keep in sync.
 
 </td>
 </tr>
 </table>
 
-## Build
+## Why CUI
 
-CUI uses CMake and builds with GCC, Clang, MSVC and MinGW.
+- **A complete library, not a box of primitives.** Buttons, fields, selects, date pickers, dialogs, toasts and tables, and also a command palette, a virtualized data grid, kanban boards, calendars, gantt charts, about a dozen kinds of chart and a set of AI chat components. They are designed together and look finished without styling.
+- **Small and fast.** A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 240 KB.
+- **Native everywhere.** Win32, Cocoa and X11, or SDL2 and GLFW, drawn with OpenGL or a software renderer. The core only emits triangles, so your own renderer works too.
+- **Careful by default.** Neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed. Every component works from the keyboard and every animation has a reduced motion path. The [design principles](docs/design.md) list the rules, including the generic patterns CUI avoids.
+
+## Install
+
+CUI uses CMake and builds with GCC, Clang, MSVC and MinGW. Add it to your project:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(cui
+    GIT_REPOSITORY https://github.com/yappologistic/CUI.git
+    GIT_TAG master)
+FetchContent_MakeAvailable(cui)
+target_link_libraries(my_app PRIVATE cui::cui)
+```
+
+Or build it and run an example:
 
 ```sh
 git clone https://github.com/yappologistic/CUI.git
@@ -185,88 +109,120 @@ cmake --build build
 ./build/examples/tracker
 ```
 
-Use it from your own CMake project:
-
-```cmake
-add_subdirectory(CUI)            # or FetchContent
-target_link_libraries(my_app PRIVATE cui::cui)
-```
-
-On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS need nothing beyond the SDK. See [Getting started](docs/getting-started.md) for other build systems and backends.
+On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS need nothing beyond the SDK. [Getting started](docs/getting-started.md) covers other build systems and backends.
 
 ## Components
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/components-dark.png">
-  <img src="docs/images/showcase/components.png" alt="A mosaic of CUI components: a sign up form, metric cards, a calendar with time slots, a bar chart, team members and settings">
-</picture>
-
 | | |
 |---|---|
-| **Actions** | button, icon button, button group, copy button, hold to confirm, segmented control, dropdown menu, context menu, command palette |
-| **Inputs** | text field, password with strength meter, search, text area, number field, tag input, one time code, select, combobox, date picker, calendar, color picker |
-| **Selection** | checkbox, switch, radio group, radio cards, elastic slider, range slider, chips, rating |
-| **Navigation** | tabs (underline and pill), sidebar navigation, breadcrumb, pagination, stepper |
-| **Overlays** | dialog, sheet, popover, tooltip, toast stack |
-| **Feedback** | alert, progress bar and ring, meter, spinner, skeleton, badge, avatar, avatar group, empty state, timeline |
-| **Data** | card, metric card, table, list, reorderable list, tree view, accordion, virtual list, line, area, bar, stacked bar and donut charts, sparkline, gauge |
-| **Layout** | row, column, grid, stack, scroll area, resizable split view, separator, spacer |
-| **Custom** | canvas with a full 2D drawing API, per component state, spring animation helpers |
+| **Actions** | button, icon button, button group, split button, toggle group, copy button, hold to confirm, segmented control, menus, command palette |
+| **Inputs** | text field, password, search, text area, number, money and scrub fields, tag input, one time code, select, combobox, multi-select, shortcut recorder |
+| **Pickers** | date and date range, time, wheel and dial pickers, calendar, color picker, ruler and histogram sliders |
+| **Selection** | checkbox, switch, radio group and cards, sliders, chips, rating |
+| **Navigation** | tabs, sidebar, breadcrumb, pagination, stepper, table of contents, dock, tab bar |
+| **Overlays** | dialog, sheet, popover, hover card, tooltip, toast stack, confirm popover |
+| **Feedback** | alert, banner, progress bar and ring, meter, spinner, skeleton, badge, avatar, empty state, timeline |
+| **Data** | card, metric, table, virtualized data grid, list, tree, accordion, code block, JSON viewer, filter bar |
+| **Charts** | line, area, bar, donut, sparkline, gauge, heatmap, treemap, radar, funnel, sankey, waffle, scatter and more |
+| **Planning** | kanban board, week calendar, gantt chart with dependencies |
+| **AI** | reasoning, tool calls, agent plan, sources and citations, context meter, prompt suggestions, model picker, chat composer |
+| **Custom** | a canvas with a full 2D drawing API, per component state and spring animation helpers |
 
-Every component is documented with a screenshot, usage, options and keyboard behaviour in [docs/components.md](docs/components.md).
+Every component is documented with a screenshot, usage, options and keyboard behaviour in [Components](docs/components.md) and [More components](docs/components-more.md).
 
-### And the ones usually sold separately
+<details>
+<summary><b>The extended set</b></summary>
+<br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/components-pro-dark.png">
-  <img src="docs/images/showcase/components-pro.png" alt="A mosaic of the extended CUI components: an AI answer with tools, a contribution heatmap, a sankey diagram, an agent plan, control tiles, a player and a radar chart">
+  <img src="docs/images/showcase/components-pro.png" alt="Extended CUI components: an AI answer with tools, a contribution heatmap, a sankey diagram, an agent plan, control tiles, a player and a radar chart">
 </picture>
 
-| | |
-|---|---|
-| **Actions** | split button, toggle group, confirm button, status button, reactions, speed dial, theme switcher, user menu, swipe actions |
-| **Inputs** | inline edit, scrub field, money field, prefix and suffix, shortcut recorder, multi-select, date range picker, time picker, wheel picker, time dial, ruler and histogram sliders |
-| **Capture** | dropzone with real file drops, avatar upload, signature pad |
-| **Disclosure** | hover card, confirm popover, expandable text and card, table of contents, banner, countdown, onboarding checklist, undo toast |
-| **Data** | virtualized data grid (sort, resize, select, edit), tree cells, filter bar, code block with highlighting, JSON viewer |
-| **Planning** | kanban board, week calendar, gantt chart with dependencies |
-| **Conversation** | chat bubbles, comments, presence, rolling counter, ticker, carousel, image compare, card stack |
-| **Charts** | heatmap, calendar heatmap, treemap, radar, funnel, sankey, waffle, split bar, ranked bar list, activity rings, scatter and bubble |
-| **Motion** | shimmer text, typewriter, word reveal, rotating words, gradient text, spotlight cards with a border beam, loaders, dock, tab bar, control tiles, waveform, now playing |
-| **AI** | reasoning, tool calls, agent plan and status, sources and citations, context meter, response actions, prompt suggestions, model picker, chat composer, voice orb |
+Capture (dropzone with real file drops, avatar upload, signature pad), conversation (chat bubbles, comments, presence, rolling counter, ticker, carousel, image compare, card stack), motion (shimmer text, typewriter, word reveal, spotlight cards, loaders, waveform, now playing) and more, all in [More components](docs/components-more.md).
 
-All of them are in [docs/components-more.md](docs/components-more.md), with screenshots that follow your light or dark theme.
+</details>
 
-## Light, dark and eight accents
+## Showcase
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/accents-dark.png">
-  <img src="docs/images/showcase/accents.png" alt="The same controls in all eight accents">
-</picture>
+<table>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/hero-data.png" alt="A data grid with a filter bar, two selected rows, team tags and score bars"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Data grid</b>: 2,000 virtualized rows, filters, sorting, resizable columns and spreadsheet style selection</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/showcase/hero-board.png" alt="A kanban board with a card being dragged between columns"></td>
+<td width="50%"><img src="docs/images/showcase/hero-palette-dark.png" alt="A command palette with grouped commands and shortcuts"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Kanban</b>: the lifted card follows the pointer and the column opens a slot for it</sub></td>
+<td align="center"><sub><b>Command palette</b>: fuzzy search, groups and shortcuts</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/hero-pick-dark.png" alt="A date range picker with presets and two months, and a wheel time picker"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Pickers</b>: a date range with presets over two months, and wheels that spin with momentum</sub></td>
+</tr>
+</table>
 
-| | |
-|---|---|
-| ![Overview in light](docs/images/overview-light.png) | ![Overview in dark with the green accent](docs/images/overview-green-dark.png) |
+<details>
+<summary><b>More: charts, planning, conversation, effects</b></summary>
+<br>
 
-```c
-cui_set_theme(ui, CUI_THEME_DARK);      /* animates */
-cui_set_accent(ui, CUI_ACCENT_BLUE);    /* neutral, violet, blue, green, amber, orange, coral, rose */
-```
+<table>
+<tr>
+<td width="50%"><img src="docs/images/showcase/hero-charts.png" alt="A contribution heatmap, a sankey of test runs, a radar chart and a task plan"></td>
+<td width="50%"><img src="docs/images/showcase/hero-desk-dark.png" alt="Control tiles, a now playing card, a waveform and a dock"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Charts</b>: calendar heatmap, sankey and radar, with a live task plan</sub></td>
+<td align="center"><sub><b>Dock, tiles and player</b>: icons grow under the pointer, the waveform seeks on click</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/showcase/hero-social-dark.png" alt="Chat bubbles, threaded comments, a rolling counter and presence avatars"></td>
+<td><img src="docs/images/showcase/hero-effects-dark.png" alt="Three cards for choosing a renderer, one lit by the pointer"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Conversation</b>: grouped bubbles, threads, a rolling counter, presence</sub></td>
+<td align="center"><sub><b>Spotlight cards</b>: the surface and edge nearest the pointer light up</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/hero-plan-dark.png" alt="A gantt chart with dependencies, progress and a today line"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Gantt</b>: drag to reschedule, pull the ends to resize, arrows follow dependencies</sub></td>
+</tr>
+</table>
 
-All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`, `CUI_COLOR_ACCENT`...), so your own boxes follow the theme too. Try any app in the other theme with `CUI_THEME=dark` or `CUI_THEME=light`. See [Theming](docs/theming.md).
+</details>
 
-## Small by design
+## Example apps
 
-| | |
-|---|---|
-| Whole library: every component, both renderers, X11 backend, fonts and icons | about 590 KB |
-| `hello` on Linux, stripped, whole executable | about 240 KB |
-| `assistant` (the AI app above), whole executable | about 330 KB |
-| Embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons), compressed | 95 KB |
+Complete apps in [`examples/`](examples), each a single C file.
 
-The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off. Details in [Integration](docs/integration.md#binary-size).
+<table>
+<tr>
+<td colspan="2"><img src="docs/images/showcase/assistant.png" alt="An AI assistant built with CUI"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Muse</b>: reasoning, tool calls, sources, a plan and a composer with a model picker · <a href="examples/assistant.c">assistant.c</a></sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/showcase/tracker.png" alt="An issue tracker built with CUI"></td>
+<td width="50%"><img src="docs/images/showcase/dashboard-dark.png" alt="An analytics dashboard built with CUI"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Orbit</b>: grouped issues, custom glyphs, an activity pane · <a href="examples/tracker.c">tracker.c</a></sub></td>
+<td align="center"><sub><b>Larkspur</b>: figures, charts and a sortable table · <a href="examples/dashboard.c">dashboard.c</a></sub></td>
+</tr>
+</table>
 
-## Examples
+<details>
+<summary><b>All examples</b></summary>
+<br>
 
 | Example | |
 |---|---|
@@ -278,8 +234,48 @@ The library is compiled for dead code stripping, so apps only carry what they us
 | [`mail`](examples/mail.c) | Three pane inbox, folders, reading pane, compose dialog |
 | [`notes`](examples/notes.c) | Split view, search, context menus, dialogs, shortcuts, file export |
 | [`settings`](examples/settings.c) | Forms, validation, preferences and a danger zone |
-| [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents (the extended ones are under *Extended*) |
+| [`gallery`](examples/gallery_ui.c) | Every component, light and dark, all accents |
 | [`hello`](examples/hello.c) | The smallest app |
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/showcase/music.png" alt="Music player"></td>
+<td width="50%"><img src="docs/images/showcase/finance.png" alt="Personal finance app"></td>
+</tr>
+<tr>
+<td><img src="docs/images/showcase/mail-dark.png" alt="Mail client"></td>
+<td><img src="docs/images/showcase/notes-dark.png" alt="Notes app"></td>
+</tr>
+</table>
+
+</details>
+
+## Light, dark and eight accents
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showcase/accents-dark.png">
+  <img src="docs/images/showcase/accents.png" alt="The same controls in all eight accents">
+</picture>
+
+```c
+cui_set_theme(ui, CUI_THEME_DARK);      /* animates */
+cui_set_accent(ui, CUI_ACCENT_BLUE);    /* neutral, violet, blue, green, amber, orange, coral, rose */
+```
+
+All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`, `CUI_COLOR_ACCENT` and so on), so your own boxes follow the theme too. Run any app in the other theme with `CUI_THEME=dark` or `CUI_THEME=light`. See [Theming](docs/theming.md).
+
+## Size and speed
+
+| | |
+|---|---|
+| `hello` on Linux, stripped, whole executable | about 240 KB |
+| `assistant` (the AI app above), whole executable | about 330 KB |
+| Whole library: every component, both renderers, X11 backend, fonts and icons | about 590 KB |
+| Build, layout and paint a frame (gallery pages, 1240 × 820 points at 2×) | 0.12 to 0.25 ms |
+| Software rasterization of the same frame (2480 × 1640 pixels, 4 threads) | 12 to 46 ms |
+| Idle CPU | 0%, event driven |
+
+The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off ([Integration](docs/integration.md#binary-size)). Timings are wall clock on a 4 core cloud VM; `cui_bench` in [`tests/`](tests) reproduces them.
 
 ## Platforms
 
@@ -291,49 +287,46 @@ The library is compiled for dead code stripping, so apps only carry what they us
 | Wayland and others | SDL2 or GLFW | OpenGL 3.3 | GCC |
 | Anything | Your own | Your own (one shader) | |
 
-Set `CUI_RENDERER=software` to force the software renderer and `CUI_SCALE=2` to override the display scale.
-
-## Performance
-
-Measured on a 4 core cloud VM (wall clock), gallery pages at 1240 × 820 points on a 2× display:
-
-| | |
-|---|---|
-| Build, layout and paint a frame | 0.12 to 0.25 ms |
-| Vertices per frame | 1,600 to 5,100 |
-| Software rasterization (2480 × 1640 pixels, 4 threads) | 12 to 46 ms |
-| GPU rendering | one draw call per clip or texture change |
-| Idle CPU | 0% (event driven) |
-
-`cui_bench` in the test folder reproduces these numbers.
+Set `CUI_RENDERER=software` to force the software renderer and `CUI_SCALE=2` to override the display scale. To use CUI inside an engine with your own window and renderer, see [Integration](docs/integration.md) and [Rendering](docs/rendering.md).
 
 ## Status and limitations
 
-CUI 1.0 is complete enough to build real desktop apps, and it is tested on every push: unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. Things it does not do yet:
+CUI 1.0 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
 
 - **Screen readers.** There is no accessibility tree yet. Keyboard navigation and focus are complete.
-- **Complex scripts.** Text is UTF-8 with kerning and font fallback, but there is no shaping: right-to-left scripts and scripts that need ligatures (Arabic, Devanagari) do not render correctly. CJK works once you add a fallback font.
-- **IME preedit.** Committed text from input methods works; the in-progress composition is shown by the system IME window rather than inline.
-- **Wayland natively.** Use the SDL2 or GLFW backend, or XWayland.
+- **Complex scripts.** Text is UTF-8 with kerning and font fallback, but there is no shaping, so right-to-left scripts and scripts that need ligatures (Arabic, Devanagari) do not render correctly. CJK works once you add a fallback font.
+- **Inline IME composition.** Committed text from input methods works; the text being composed shows in the system's IME window.
+- **Native Wayland.** Use the SDL2 or GLFW backend, or XWayland.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md): install, build, the app loop, your first screens
-- [Layout](docs/layout.md): rows, columns, sizes, alignment, grids, scrolling, split views
-- [Components](docs/components.md): every component with screenshots, options and keyboard support
-- [More components](docs/components-more.md): data grid, planning, more charts, motion and AI interfaces
-- [Theming](docs/theming.md): tokens, light and dark, accents, fonts, icons, motion
-- [Custom components](docs/custom-components.md): canvas, drawing API, state and animation
-- [Integration](docs/integration.md): use CUI in your engine with your own window and renderer
-- [Rendering](docs/rendering.md): the vertex format and the reference shader
-- [Icons](docs/icons.md): the built-in Lucide icons and how to use any other icon
-- [Design principles](docs/design.md): the rules the components follow
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install, build, the frame loop, your first screens |
+| [Layout](docs/layout.md) | Rows, columns, sizes, alignment, grids, scrolling, split views |
+| [Components](docs/components.md) and [more](docs/components-more.md) | Every component with screenshots, options and keyboard support |
+| [Theming](docs/theming.md) | Tokens, light and dark, accents, fonts, motion |
+| [Icons](docs/icons.md) | The built-in Lucide icons, and how to use any other icon font |
+| [Custom components](docs/custom-components.md) | Canvas, drawing API, state and animation |
+| [Integration](docs/integration.md) | Your own window, input and renderer |
+| [Rendering](docs/rendering.md) | The vertex format and the reference shader |
+| [Design principles](docs/design.md) | The rules every component follows |
 
-The same guide, with every component running live in the browser, is in [`web/`](web): run `web/tools/serve.sh` and open http://localhost:8765.
+**Live docs.** The same guide runs in the browser with every component live: the library compiled to WebAssembly and drawn with a WebGL2 port of its renderer. Build and serve it locally with `web/tools/serve.sh` (needs clang with the `wasm32` target), then open http://localhost:8765. See [`web/`](web).
+
+## Development
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure    # unit, interaction and render tests, the fuzzer
+```
+
+The documentation images in [`docs/images`](docs/images) are rendered by the tests (`tests/component_shots.c` for components and showcase scenes, `tests/screenshots.c` for the overviews), so a visual change and its documentation move together.
 
 ## Credits
 
-Type: [Inter](https://rsms.me/inter/) and [Geist](https://vercel.com/font) (SIL Open Font License). Icons: [Lucide](https://lucide.dev) (ISC). Font rasterization and PNG output: [stb](https://github.com/nothings/stb) (public domain). See [THIRD_PARTY.md](THIRD_PARTY.md).
+Type: [Inter](https://rsms.me/inter/) and [Geist](https://vercel.com/font) (SIL Open Font License). Icons: [Lucide](https://lucide.dev) (ISC). Font rasterization and PNG output: [stb](https://github.com/nothings/stb) (public domain). See [THIRD_PARTY.md](THIRD_PARTY.md). The live docs' overview uses Ansel Adams' *The Tetons and the Snake River* (1942, U.S. National Archives, public domain).
 
 ## License
 
