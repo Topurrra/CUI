@@ -587,8 +587,8 @@ static void cui__resolve_h(cui_ctx *ui, int i) {
             int count = cui__line_count(ui, c);
             float line_h = 0;
             int k = 0;
-            for (int i = c; k < count; i = ui->nodes[i].next, k++) {
-                cui_node *ch = &ui->nodes[i];
+            for (int child = c; k < count; child = ui->nodes[child].next, k++) {
+                cui_node *ch = &ui->nodes[child];
                 line_h = CUI_MAX(line_h, ch->h.kind == CUI_SIZE_FIXED ? ch->h.value : ch->pref_h);
             }
             for (k = 0; k < count; c = ui->nodes[c].next, k++) {
@@ -650,9 +650,9 @@ static void cui__place(cui_ctx *ui, int i) {
                 int lc = cui__line_count(ui, c);
                 float total = 0, line_h = 0;
                 int k = 0;
-                for (int i = c; k < lc; i = ui->nodes[i].next, k++) {
-                    total += ui->nodes[i].rect.w;
-                    line_h = CUI_MAX(line_h, ui->nodes[i].rect.h);
+                for (int child = c; k < lc; child = ui->nodes[child].next, k++) {
+                    total += ui->nodes[child].rect.w;
+                    line_h = CUI_MAX(line_h, ui->nodes[child].rect.h);
                 }
                 float gap = n->gap, pos = 0;
                 total += lc > 1 ? gap * (float)(lc - 1) : 0;
@@ -869,7 +869,14 @@ static void cui__paint_text_lines(cui_ctx *ui, cui_node *n);
 static void cui__paint_text(cui_ctx *ui, cui_node *n) {
     ui->text_fx = n->text_fx;
     ui->text_fx_data = n->text_fx_data;
+#ifdef CUI_TEXT_SHAPING
+    ui->text_paragraph_len = n->text_len;
+    ui->text_paragraph = cui__text_needs_shaping(ui, n->text, n->text_len) ? n->text : NULL;
+#endif
     cui__paint_text_lines(ui, n);
+#ifdef CUI_TEXT_SHAPING
+    ui->text_paragraph = NULL;
+#endif
     ui->text_fx = NULL;
     ui->text_fx_base = 0;
 }

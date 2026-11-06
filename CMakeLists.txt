@@ -13,6 +13,7 @@ endif()
 
 option(CUI_BUILD_EXAMPLES "Build the examples" ${CUI_IS_TOP_LEVEL})
 option(CUI_BUILD_TESTS "Build the tests" ${CUI_IS_TOP_LEVEL})
+option(CUI_TEXT_SHAPING "Shape static Arabic text with OpenType" OFF)
 option(CUI_BUILD_SHARED "Build a shared library" OFF)
 option(CUI_WITH_APP "Include the app layer (windows, events)" ON)
 option(CUI_DEFAULT_FONTS "Embed Inter, Geist and Lucide" ON)
@@ -106,6 +107,11 @@ add_library(cui::cui ALIAS cui)
 target_include_directories(cui PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
+
+if(CUI_TEXT_SHAPING)
+    target_sources(cui PRIVATE src/cui_bidi.c src/cui_shape.c)
+    target_compile_definitions(cui PRIVATE CUI_TEXT_SHAPING)
+endif()
 
 if(NOT CUI_DEFAULT_FONTS)
     target_compile_definitions(cui PRIVATE CUI_NO_DEFAULT_FONTS)

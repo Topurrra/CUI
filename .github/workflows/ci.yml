@@ -12,16 +12,20 @@ concurrency:
 
 jobs:
   linux:
-    name: Linux (${{ matrix.cc }}, ${{ matrix.platform }})
+    name: Linux (${{ matrix.cc }}, ${{ matrix.platform }}, shaping ${{ matrix.shaping }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { cc: gcc, platform: x11 }
-          - { cc: clang, platform: x11 }
-          - { cc: gcc, platform: sdl2 }
-          - { cc: gcc, platform: glfw }
+          - { cc: gcc, platform: x11, shaping: OFF }
+          - { cc: gcc, platform: x11, shaping: ON }
+          - { cc: clang, platform: x11, shaping: OFF }
+          - { cc: clang, platform: x11, shaping: ON }
+          - { cc: gcc, platform: sdl2, shaping: OFF }
+          - { cc: gcc, platform: sdl2, shaping: ON }
+          - { cc: gcc, platform: glfw, shaping: OFF }
+          - { cc: gcc, platform: glfw, shaping: ON }
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -29,7 +33,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q ninja-build libx11-dev libgl-dev xvfb mesa-utils libgl1-mesa-dri libsdl2-dev libglfw3-dev
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCUI_PLATFORM=${{ matrix.platform }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCUI_PLATFORM=${{ matrix.platform }} -DCUI_TEXT_SHAPING=${{ matrix.shaping }}
       - name: Build
         run: cmake --build build
       - name: Unit and render tests
@@ -43,19 +47,22 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-${{ matrix.cc }}-${{ matrix.platform }}-screenshots
+          name: linux-${{ matrix.cc }}-${{ matrix.platform }}-${{ matrix.shaping }}-screenshots
           path: build/**/*.png
           if-no-files-found: ignore
 
   sanitizers:
-    name: Linux (ASan + UBSan)
+    name: Linux (ASan + UBSan, shaping ${{ matrix.shaping }})
+    strategy:
+      matrix:
+        shaping: [OFF, ON]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build libx11-dev
       - name: Build with sanitizers
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang \
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCUI_TEXT_SHAPING=${{ matrix.shaping }} \
             -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           cmake --build build
@@ -63,18 +70,20 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   windows:
-    name: Windows (${{ matrix.name }})
+    name: Windows (${{ matrix.name }}, shaping ${{ matrix.shaping }})
     runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: MSVC, generator: "Visual Studio 17 2022", extra: "" }
-          - { name: MinGW, generator: "MinGW Makefiles", extra: "-DCMAKE_C_COMPILER=gcc" }
+          - { name: MSVC, generator: "Visual Studio 17 2022", extra: "", shaping: OFF }
+          - { name: MSVC, generator: "Visual Studio 17 2022", extra: "", shaping: ON }
+          - { name: MinGW, generator: "MinGW Makefiles", extra: "-DCMAKE_C_COMPILER=gcc", shaping: OFF }
+          - { name: MinGW, generator: "MinGW Makefiles", extra: "-DCMAKE_C_COMPILER=gcc", shaping: ON }
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -G "${{ matrix.generator }}" ${{ matrix.extra }} -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G "${{ matrix.generator }}" ${{ matrix.extra }} -DCMAKE_BUILD_TYPE=Release -DCUI_TEXT_SHAPING=${{ matrix.shaping }}
       - name: Build
         run: cmake --build build --config Release
       - name: Tests
@@ -87,17 +96,20 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-${{ matrix.name }}-screenshots
+          name: windows-${{ matrix.name }}-${{ matrix.shaping }}-screenshots
           path: build/**/*.png
           if-no-files-found: ignore
 
   macos:
-    name: macOS
+    name: macOS (shaping ${{ matrix.shaping }})
+    strategy:
+      matrix:
+        shaping: [OFF, ON]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCUI_TEXT_SHAPING=${{ matrix.shaping }}
       - name: Build
         run: cmake --build build -j 4
       - name: Tests
@@ -107,6 +119,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-screenshots
+          name: macos-${{ matrix.shaping }}-screenshots
           path: build/**/*.png
           if-no-files-found: ignore

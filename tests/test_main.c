@@ -100,6 +100,13 @@ static void build_wrap(cui_ctx *ui, void *u) {
     cui_box_end(ui);
 }
 
+static void build_fixed_wrap(cui_ctx *ui, void *u) {
+    wrap_ctx *w = u;
+    w->col = cui_column_begin(ui, &(cui_box){ .id = "fixed_wrap", .width = CUI_PX(600) });
+    cui_text(ui, "The quick brown fox jumps over the lazy dog.", .width = CUI_PX(100), .size = 20);
+    cui_box_end(ui);
+}
+
 static void test_layout_wrap(void) {
     printf("layout: text wraps and grows taller when narrow\n");
     cui_ctx *ui = new_ctx();
@@ -111,6 +118,8 @@ static void test_layout_wrap(void) {
     float narrow_h = rect_of(ui, w.col).h;
     CHECK(narrow_h > wide_h * 3);
     CHECK_NEAR(rect_of(ui, w.col).w, 120, 0.01);
+    run(ui, build_fixed_wrap, &w, 2);
+    CHECK_NEAR(rect_of(ui, w.col).h, 5 * 29, 0.01);
     cui_destroy(ui);
 }
 
