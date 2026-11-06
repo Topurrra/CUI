@@ -1374,6 +1374,273 @@ static void test_reorder(void) {
     cui_destroy(ui);
 }
 
+/* app chrome ------------------------------------------------------------- */
+
+static cui_id scoped_id(cui_ctx *ui, const char *scope, const char *name) {
+    cui_push_id(ui, scope);
+    cui_id id = cui_make_id(ui, name);
+    cui_pop_id(ui);
+    return id;
+}
+
+typedef struct { int chosen; int menus_built; } bar_ctx;
+static void build_bar(cui_ctx *ui, void *u) {
+    bar_ctx *b = u;
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_menu_bar(ui, "bar") {
+            cui_menu_bar_menu(ui, "File") {
+                b->menus_built |= 1;
+                if (cui_menu_item(ui, "New")) b->chosen = 1;
+                if (cui_menu_item(ui, "Open")) b->chosen = 2;
+            }
+            cui_menu_bar_menu(ui, "Edit") {
+                b->menus_built |= 2;
+                if (cui_menu_item(ui, "Undo")) b->chosen = 11;
+                if (cui_menu_item(ui, "Redo")) b->chosen = 12;
+            }
+            cui_menu_bar_menu(ui, "View", .disabled = true) { b->menus_built |= 4; }
+        }
+        if (cui_button(ui, "Body")) b->chosen = 99;
+    }
+}
+
+typedef struct { bool on; int fired[10]; float width; } tool_ctx;
+static void build_tools(cui_ctx *ui, void *u) {
+    tool_ctx *t = u;
+    static const char *names[10] = { "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten" };
+    cui_column(ui, .width = CUI_PX(t->width)) {
+        cui_toolbar(ui, "tb") {
+            for (int k = 0; k < 10; k++) {
+                bool hit = k == 0 ? cui_toolbar_button(ui, CUI_ICON_BOLD, .tooltip = names[k], .toggle = &t->on)
+                                  : cui_toolbar_button(ui, CUI_ICON_PLUS, .tooltip = names[k]);
+                if (hit) t->fired[k]++;
+                if (k == 4) cui_toolbar_separator(ui);
+            }
+        }
+    }
+}
+
+typedef struct { int clicks; } status_ctx;
+static void build_status(cui_ctx *ui, void *u) {
+    status_ctx *s = u;
+    cui_column(ui, .width = CUI_FILL) {
+        cui_status_bar(ui, "sb") {
+            cui_status_bar_text(ui, "Ready", .icon = CUI_ICON_CHECK, .tone = CUI_TONE_SUCCESS);
+            cui_status_bar_progress(ui, 0.5f, .label = "Indexing");
+            cui_status_bar_progress(ui, 0, .indeterminate = true);
+            cui_status_bar_spacer(ui);
+            if (cui_status_bar_item(ui, "Ln 1, Col 1###pos")) s->clicks++;
+        }
+    }
+}
+
+typedef struct { int sel; cui_doc_tabs_result r; int closes, moves; bool shortcuts; cui_doc_tab tabs[3]; } dtabs_ctx;
+static void build_dtabs(cui_ctx *ui, void *u) {
+    dtabs_ctx *d = u;
+    cui_column(ui, .width = CUI_FILL) {
+        d->r = cui_doc_tabs(ui, "dt", d->tabs, 3, &d->sel, .shortcuts = d->shortcuts);
+        if (d->r.close >= 0) d->closes++;
+        if (d->r.move_from >= 0) {   /* apply the move, as an app would */
+            cui_doc_tab t = d->tabs[d->r.move_from];
+            int f = d->r.move_from, to = d->r.move_to;
+            if (to > f) memmove(&d->tabs[f], &d->tabs[f + 1], sizeof t * (size_t)(to - f));
+            else memmove(&d->tabs[to + 1], &d->tabs[to], sizeof t * (size_t)(f - to));
+            d->tabs[to] = t;
+            d->moves++;
+        }
+    }
+}
+
+static void test_chrome(void) {
+    printf("app chrome: menu bar, toolbar, status bar, document tabs\n");
+    /* menu bar: click opens, hover switches, Enter picks, outside click closes */
+    cui_ctx *ui = new_ctx();
+    bar_ctx b = { 0, 0 };
+    run(ui, build_bar, &b, 3);
+    cui_rect file = rect_of(ui, scoped_id(ui, "bar", "File")), edit = rect_of(ui, scoped_id(ui, "bar", "Edit"));
+    cui_rect view = rect_of(ui, scoped_id(ui, "bar", "View"));
+    CHECK(file.w > 0 && edit.x > file.x && view.x > edit.x);
+    CHECK(file.h >= 28 && file.h <= 32);
+    click_at(ui, build_bar, &b, file.x + 5, file.y + 5);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 2);
+    CHECK(b.menus_built == 1);
+    cui_input_mouse_move(ui, edit.x + 5, edit.y + 5);
+    run(ui, build_bar, &b, 2);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 2);
+    /* first Edit item, under the trigger: panel padding 6, rows 32 tall */
+    click_at(ui, build_bar, &b, edit.x + 20, edit.y + edit.h + 6 + 6 + 16);
+    CHECK(b.chosen == 11);
+    run(ui, build_bar, &b, 2);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 0);
+    /* a disabled menu does not open */
+    click_at(ui, build_bar, &b, view.x + 5, view.y + 5);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 0);
+    /* the keyboard: F10 focuses the bar, Right moves, Enter opens with the first item ready */
+    cui_input_mouse_move(ui, 700, 550);
+    b.chosen = 0;
+    key(ui, build_bar, &b, CUI_KEY_F10, 0);
+    key(ui, build_bar, &b, CUI_KEY_RIGHT, 0);
+    key(ui, build_bar, &b, CUI_KEY_ENTER, 0);
+    run(ui, build_bar, &b, 1);
+    key(ui, build_bar, &b, CUI_KEY_DOWN, 0);
+    key(ui, build_bar, &b, CUI_KEY_ENTER, 0);
+    CHECK(b.chosen == 12);
+    /* Alt + mnemonic opens a menu; Left wraps around the enabled menus; Esc steps back, then out */
+    run(ui, build_bar, &b, 2);
+    b.chosen = 0;
+    cui_input_key(ui, CUI_KEY_NONE, true, CUI_MOD_ALT);
+    run(ui, build_bar, &b, 1);
+    key(ui, build_bar, &b, CUI_KEY_F, CUI_MOD_ALT);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_bar, &b, 1);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 1);
+    key(ui, build_bar, &b, CUI_KEY_LEFT, 0);   /* View is disabled, so Left lands on Edit */
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 2);
+    key(ui, build_bar, &b, CUI_KEY_ESCAPE, 0);
+    run(ui, build_bar, &b, 2);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 0);
+    key(ui, build_bar, &b, CUI_KEY_ENTER, 0);   /* still on the bar: Enter reopens Edit */
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 2);
+    key(ui, build_bar, &b, CUI_KEY_ESCAPE, 0);
+    key(ui, build_bar, &b, CUI_KEY_ESCAPE, 0);
+    run(ui, build_bar, &b, 1);
+    key(ui, build_bar, &b, CUI_KEY_ENTER, 0);   /* the bar let go: Enter does nothing here */
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 0 && b.chosen == 0);
+    /* Alt pressed and released on its own focuses the bar */
+    cui_input_key(ui, CUI_KEY_NONE, true, CUI_MOD_ALT);
+    run(ui, build_bar, &b, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_bar, &b, 1);
+    key(ui, build_bar, &b, CUI_KEY_DOWN, 0);
+    b.menus_built = 0;
+    run(ui, build_bar, &b, 1);
+    CHECK(b.menus_built == 1);
+    cui_destroy(ui);
+
+    /* toolbar: toggles flip; items that do not fit go to the overflow menu and fire from there */
+    ui = new_ctx();
+    tool_ctx t = { false, { 0 }, 600 };
+    run(ui, build_tools, &t, 3);
+    cui_rect tb = rect_of(ui, cui_make_id(ui, "tb"));
+    CHECK(tb.w > 0 && tb.h >= 34 && tb.h <= 38);
+    click_at(ui, build_tools, &t, tb.x + 6 + 15, tb.y + tb.h / 2);
+    CHECK(t.on && t.fired[0] == 1);
+    t.width = 200;   /* room for 188: 4 items and the more button */
+    run(ui, build_tools, &t, 4);
+    tb = rect_of(ui, cui_make_id(ui, "tb"));
+    CHECK(tb.w <= 200.5f);
+    click_at(ui, build_tools, &t, tb.x + 6 + 4 * 32 + 15, tb.y + tb.h / 2);
+    run(ui, build_tools, &t, 2);
+    cui_input_mouse_move(ui, 700, 550);
+    run(ui, build_tools, &t, 1);
+    key(ui, build_tools, &t, CUI_KEY_DOWN, 0);
+    key(ui, build_tools, &t, CUI_KEY_ENTER, 0);
+    run(ui, build_tools, &t, 2);
+    CHECK(t.fired[4] == 1);
+    int total = 0;
+    for (int k = 0; k < 10; k++) total += t.fired[k];
+    CHECK(total == 2);
+    cui_destroy(ui);
+
+    /* status bar */
+    ui = new_ctx();
+    status_ctx s = { 0 };
+    run(ui, build_status, &s, 3);
+    cui_rect sb = rect_of(ui, cui_make_id(ui, "sb"));
+    CHECK(sb.h >= 26 && sb.h <= 30);
+    cui_rect pos = rect_of(ui, scoped_id(ui, "sb", "Ln 1, Col 1###pos"));
+    CHECK(pos.w > 0 && pos.x + pos.w <= sb.x + sb.w);
+    click_at(ui, build_status, &s, pos.x + pos.w / 2, pos.y + pos.h / 2);
+    CHECK(s.clicks == 1);
+    cui_destroy(ui);
+
+    /* document tabs */
+    ui = new_ctx();
+    dtabs_ctx d = { 0, { false, -1, -1, -1 }, 0, 0, false,
+                    { { "alpha.c", NULL, NULL, false }, { "beta.c", NULL, "src/beta.c", true }, { "gamma.c", NULL, NULL, false } } };
+    run(ui, build_dtabs, &d, 3);
+    cui_rect ta = rect_of(ui, scoped_id(ui, "dt", "alpha.c")), tbeta = rect_of(ui, scoped_id(ui, "dt", "beta.c")), tg = rect_of(ui, scoped_id(ui, "dt", "gamma.c"));
+    CHECK(ta.w > 0 && tbeta.x > ta.x && tg.x > tbeta.x);
+    click_at(ui, build_dtabs, &d, tbeta.x + 20, tbeta.y + tbeta.h / 2);
+    CHECK(d.sel == 1);
+    /* the close button sits at the right end of the tab */
+    click_at(ui, build_dtabs, &d, tbeta.x + tbeta.w - 6 - 10, tbeta.y + tbeta.h / 2);
+    CHECK(d.closes == 1 && d.sel == 1);
+    /* middle click closes */
+    cui_input_mouse_move(ui, tg.x + 20, tg.y + tg.h / 2);
+    run(ui, build_dtabs, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, true);
+    run(ui, build_dtabs, &d, 1);
+    CHECK(d.closes == 2 && d.r.close == 2);
+    cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, false);
+    run(ui, build_dtabs, &d, 1);
+    /* keys on the focused strip: Right selects, Shift+Right moves, Delete closes */
+    key(ui, build_dtabs, &d, CUI_KEY_RIGHT, 0);
+    CHECK(d.sel == 2);
+    key(ui, build_dtabs, &d, CUI_KEY_LEFT, CUI_MOD_SHIFT);
+    CHECK(d.moves == 1 && d.r.move_from == 2 && d.r.move_to == 1 && d.sel == 1);
+    CHECK(strcmp(d.tabs[1].title, "gamma.c") == 0);
+    run(ui, build_dtabs, &d, 1);
+    key(ui, build_dtabs, &d, CUI_KEY_DELETE, 0);
+    CHECK(d.closes == 3 && d.r.close == 1);
+    /* drag alpha past the last tab (the order is now alpha, gamma, beta) */
+    run(ui, build_dtabs, &d, 2);
+    ta = rect_of(ui, scoped_id(ui, "dt", "alpha.c"));
+    tg = rect_of(ui, scoped_id(ui, "dt", "beta.c"));
+    d.moves = 0;
+    cui_input_mouse_move(ui, ta.x + 20, ta.y + ta.h / 2);
+    run(ui, build_dtabs, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_dtabs, &d, 1);
+    CHECK(d.sel == 0);
+    int last_from = -1, last_to = -1;
+    for (float x = ta.x + 20; x <= tg.x + tg.w; x += 12) { cui_input_mouse_move(ui, x, ta.y + ta.h / 2); run(ui, build_dtabs, &d, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_dtabs, &d, 1);
+    last_from = d.r.move_from; last_to = d.r.move_to;
+    CHECK(d.moves == 1 && last_from == 0 && last_to == 2 && d.sel == 2);
+    CHECK(strcmp(d.tabs[2].title, "alpha.c") == 0);
+    run(ui, build_dtabs, &d, 3);
+    /* window shortcuts are opt in */
+    d.sel = 0;
+    key(ui, build_dtabs, &d, CUI_KEY_TAB, CUI_MOD_CTRL);
+    CHECK(d.sel == 0);
+    d.shortcuts = true;
+    run(ui, build_dtabs, &d, 1);
+    key(ui, build_dtabs, &d, CUI_KEY_TAB, CUI_MOD_CTRL);
+    CHECK(d.sel == 1);
+    key(ui, build_dtabs, &d, CUI_KEY_TAB, CUI_MOD_CTRL | CUI_MOD_SHIFT);
+    key(ui, build_dtabs, &d, CUI_KEY_TAB, CUI_MOD_CTRL | CUI_MOD_SHIFT);
+    CHECK(d.sel == 2);
+    d.closes = 0;
+    key(ui, build_dtabs, &d, CUI_KEY_W, CUI_MOD_PRIMARY);
+    CHECK(d.closes == 1 && d.r.close == 2);
+    /* no tabs at all is fine */
+    cui_doc_tabs_result empty;
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    empty = cui_doc_tabs(ui, "none", NULL, 0, NULL);
+    cui_end_frame(ui);
+    CHECK(empty.close == -1 && empty.move_from == -1 && !empty.changed);
+    cui_destroy(ui);
+}
+
 /* virtual list ---------------------------------------------------------- */
 
 typedef struct { int first, last, built; } vl_ctx;
@@ -1597,6 +1864,40 @@ static void test_truncated_tooltip(void) {
     cui_destroy(ui);
 }
 
+/* a popover open over a truncated label owns the pointer: no label tooltip */
+static void build_trunc_covered(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_column(ui, .pad = 20, .gap = 4) {
+        cui_button(ui, "Open");
+        if (cui_popover_begin(ui, "pop", &(cui_popover_opts){ .width = 320, .gap = 2 })) {
+            for (int i = 0; i < 6; i++) { cui_push_id_int(ui, i); cui_text(ui, "Popover line"); cui_pop_id(ui); }
+            cui_popover_end(ui);
+        }
+        cui_box(ui, .id = "row2", .width = CUI_PX(140)) {
+            cui_text(ui, "A rather long file name that will not fit.pdf", .nowrap = true, .width = CUI_FILL);
+        }
+    }
+}
+
+static void test_truncated_tooltip_covered(void) {
+    printf("text: a truncated label under an open popover shows no tooltip\n");
+    cui_ctx *ui = new_ctx();
+    cui_input_mouse_move(ui, 600, 600);
+    run(ui, build_trunc_covered, NULL, 3);
+    cui_popover_open(ui, "pop");
+    run(ui, build_trunc_covered, NULL, 40);
+    CHECK(cui_popover_is_open(ui, "pop"));
+    cui_rect lr = rect_of(ui, cui_make_id(ui, "row2"));
+    CHECK(lr.w > 100 && lr.h > 10);
+    cui_input_mouse_move(ui, lr.x + 40, lr.y + lr.h * 0.5f);
+    run(ui, build_trunc_covered, NULL, 3);
+    int before = cui_get_draw_data(ui)->vertex_count;
+    run(ui, build_trunc_covered, NULL, 70);
+    CHECK(cui_popover_is_open(ui, "pop"));
+    CHECK(cui_get_draw_data(ui)->vertex_count == before);   /* no tooltip appeared */
+    cui_destroy(ui);
+}
+
 /* scroll edge fades ------------------------------------------------------ */
 
 typedef struct { bool fade; int rows; } fade_ctx;
@@ -1723,6 +2024,165 @@ static void kb_move(plan_ctx *a) {
     for (int k = a->len[m->to_column]; k > m->to_index; k--) a->cols[m->to_column][k] = a->cols[m->to_column][k - 1];
     a->cols[m->to_column][m->to_index] = m->card;
     a->len[m->to_column]++;
+}
+
+/* ---- node editor ---- */
+typedef struct {
+    cui_node_view view;
+    float pos[3][2];
+    bool alive[3];
+    int links[8][3]; int link_n, next_link;
+    float value;
+    cui_id card[3], pin_a_out, pin_b_in, pin_b_float, pin_c_in;
+    cui_rect slider;
+    int created, removed, deleted, last_from, last_to, last_removed, last_deleted;
+    bool sel_a;
+} nodes_ctx;
+
+static void build_nodes(cui_ctx *ui, void *user) {
+    nodes_ctx *a = user;
+    if (cui_node_editor_begin(ui, "graph", &a->view, .height = CUI_PX(500))) {
+        if (a->alive[0]) {
+            a->sel_a = cui_node_begin(ui, 1, &a->pos[0][0], &a->pos[0][1], "Source");
+            a->card[0] = cui_last_id(ui);
+            cui_node_output(ui, 10, "Color", .type = 1);
+            a->pin_a_out = cui_last_id(ui);
+            cui_node_end(ui);
+        }
+        if (a->alive[1]) {
+            cui_node_begin(ui, 2, &a->pos[1][0], &a->pos[1][1], "Mix");
+            a->card[1] = cui_last_id(ui);
+            cui_node_input(ui, 20, "Color", .type = 1);
+            a->pin_b_in = cui_last_id(ui);
+            cui_node_input(ui, 21, "Factor", .type = 2);
+            a->pin_b_float = cui_last_id(ui);
+            cui_node_content(ui) { cui_slider(ui, "##v", &a->value, 0, 100); a->slider = cui_last_rect(ui); }
+            cui_node_end(ui);
+        }
+        if (a->alive[2]) {
+            cui_node_begin(ui, 3, &a->pos[2][0], &a->pos[2][1], "Output");
+            a->card[2] = cui_last_id(ui);
+            cui_node_input(ui, 30, "Base", .type = 1);
+            a->pin_c_in = cui_last_id(ui);
+            cui_node_end(ui);
+        }
+        for (int k = 0; k < a->link_n; k++) cui_node_link(ui, a->links[k][0], a->links[k][1], a->links[k][2]);
+        int f, t, id;
+        while (cui_node_link_created(ui, &f, &t)) { a->created++; a->last_from = f; a->last_to = t; if (a->link_n < 8) { a->links[a->link_n][0] = a->next_link++; a->links[a->link_n][1] = f; a->links[a->link_n][2] = t; a->link_n++; } }
+        while (cui_node_link_removed(ui, &id)) {
+            a->removed++; a->last_removed = id;
+            for (int k = 0; k < a->link_n; k++) if (a->links[k][0] == id) { memcpy(a->links[k], a->links[--a->link_n], sizeof a->links[k]); break; }
+        }
+        while (cui_node_deleted(ui, &id)) { a->deleted++; a->last_deleted = id; if (id >= 1 && id <= 3) a->alive[id - 1] = false; }
+        cui_node_editor_end(ui);
+    }
+}
+
+static void drag_to(cui_ctx *ui, nodes_ctx *a, cui_vec2 from, cui_vec2 to) {
+    cui_input_mouse_move(ui, from.x, from.y);
+    run(ui, build_nodes, a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_nodes, a, 1);
+    for (int k = 1; k <= 6; k++) {
+        cui_input_mouse_move(ui, from.x + (to.x - from.x) * k / 6.0f, from.y + (to.y - from.y) * k / 6.0f);
+        run(ui, build_nodes, a, 1);
+    }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_nodes, a, 2);
+}
+
+static void test_node_editor(void) {
+    printf("node editor: select, drag, links, detach, zoom, hosted controls, delete, marquee\n");
+    cui_ctx *ui = new_ctx();
+    nodes_ctx a;
+    memset(&a, 0, sizeof a);
+    float init[3][2] = { { 20, 20 }, { 300, 40 }, { 300, 260 } };
+    memcpy(a.pos, init, sizeof init);
+    a.alive[0] = a.alive[1] = a.alive[2] = true;
+    a.links[0][0] = 100; a.links[0][1] = 10; a.links[0][2] = 20; a.link_n = 1; a.next_link = 101;
+    a.value = 20;
+    run(ui, build_nodes, &a, 3);
+    CHECK_NEAR(a.view.zoom, 1, 0.001);
+    /* click a card: it is selected */
+    cui_rect ca = cui_get_rect(ui, a.card[0]);
+    CHECK(ca.w > 100 && ca.h > 40);
+    click_at(ui, build_nodes, &a, ca.x + 40, ca.y + 12);
+    CHECK(a.sel_a);
+    /* drag it: the caller's position moves by the pointer travel (zoom 1) */
+    drag_to(ui, &a, (cui_vec2){ ca.x + 40, ca.y + 12 }, (cui_vec2){ ca.x + 90, ca.y + 42 });
+    CHECK_NEAR(a.pos[0][0], 70, 0.5);
+    CHECK_NEAR(a.pos[0][1], 50, 0.5);
+    /* a wire from the output to a compatible input makes a link */
+    drag_to(ui, &a, center(cui_get_rect(ui, a.pin_a_out)), center(cui_get_rect(ui, a.pin_c_in)));
+    CHECK(a.created == 1 && a.last_from == 10 && a.last_to == 30 && a.link_n == 2);
+    /* types must match: Color does not go into Factor */
+    drag_to(ui, &a, center(cui_get_rect(ui, a.pin_a_out)), center(cui_get_rect(ui, a.pin_b_float)));
+    CHECK(a.created == 1 && a.link_n == 2);
+    /* a click on a pin changes nothing */
+    click_at(ui, build_nodes, &a, center(cui_get_rect(ui, a.pin_b_in)).x, center(cui_get_rect(ui, a.pin_b_in)).y);
+    CHECK(a.removed == 0 && a.link_n == 2);
+    /* drag a link's input end off its pin: the link is removed */
+    cui_vec2 bin = center(cui_get_rect(ui, a.pin_b_in));
+    drag_to(ui, &a, bin, (cui_vec2){ bin.x - 120, bin.y + 150 });
+    CHECK(a.removed == 1 && a.last_removed == 100 && a.link_n == 1);
+    /* a hosted slider: clicking 90% along it gives the same value at 100% and zoomed in */
+    float v100 = -1;
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 1) {
+            /* the wheel zooms around the pointer: the canvas point under it stays put */
+            cui_rect cb = cui_get_rect(ui, a.card[1]);
+            cui_input_mouse_move(ui, cb.x + 20, cb.y + 200);
+            run(ui, build_nodes, &a, 1);
+            cui_input_scroll(ui, 0, 3);
+            run(ui, build_nodes, &a, 2);
+            CHECK(a.view.zoom > 1.3f);
+            cui_rect cb2 = cui_get_rect(ui, a.card[1]);
+            CHECK_NEAR(cb.x + 20 - (cb.x + 20 - cb2.x) / a.view.zoom, cb.x, 0.6);
+            a.value = 20;
+            run(ui, build_nodes, &a, 1);
+        }
+        cui_rect sr = a.slider;   /* laid out at 100%, shown scaled from its top left */
+        float z = a.view.zoom;
+        cui_vec2 sp = { sr.x + sr.w * 0.9f * z, sr.y + sr.h * 0.5f * z };
+        cui_input_mouse_move(ui, sp.x, sp.y);
+        run(ui, build_nodes, &a, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        run(ui, build_nodes, &a, 2);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        run(ui, build_nodes, &a, 2);
+        if (pass == 0) { v100 = a.value; CHECK(v100 > 80); }
+        else CHECK_NEAR(a.value, v100, 1.5);
+    }
+    /* F frames every node at 100% or less */
+    cui_rect cc = cui_get_rect(ui, a.card[2]);
+    click_at(ui, build_nodes, &a, cc.x + 30, cc.y + 10);
+    cui_input_key(ui, CUI_KEY_F, true, 0); cui_input_key(ui, CUI_KEY_F, false, 0);
+    run(ui, build_nodes, &a, 2);
+    CHECK(a.view.zoom <= 1.0f);
+    /* Delete removes the selected node and reports its links */
+    cc = cui_get_rect(ui, a.card[2]);
+    click_at(ui, build_nodes, &a, cc.x + 30, cc.y + 10);
+    cui_input_key(ui, CUI_KEY_DELETE, true, 0); cui_input_key(ui, CUI_KEY_DELETE, false, 0);
+    run(ui, build_nodes, &a, 2);
+    CHECK(a.deleted == 1 && a.last_deleted == 3 && !a.alive[2]);
+    CHECK(a.removed == 2 && a.link_n == 0);
+    /* a marquee on the empty canvas selects what it touches */
+    ca = cui_get_rect(ui, a.card[0]);
+    drag_to(ui, &a, (cui_vec2){ ca.x - 10, ca.y + ca.h + 30 }, (cui_vec2){ ca.x + 20, ca.y + ca.h - 10 });
+    CHECK(a.sel_a);
+    /* the middle button pans */
+    float vx = a.view.x;
+    cui_rect er = cui_get_rect(ui, cui_make_id(ui, "graph"));
+    cui_input_mouse_move(ui, er.x + er.w - 40, er.y + 40);
+    run(ui, build_nodes, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, true);
+    run(ui, build_nodes, &a, 1);
+    cui_input_mouse_move(ui, er.x + er.w - 100, er.y + 40);
+    run(ui, build_nodes, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, false);
+    run(ui, build_nodes, &a, 1);
+    CHECK_NEAR(a.view.x, vx - 60, 0.5);
+    cui_destroy(ui);
 }
 
 static void test_planning(void) {
@@ -2285,6 +2745,259 @@ static void test_ai(void) {
     cui_destroy(ui);
 }
 
+/* tool panels: inspector and log console ------------------------------- */
+
+typedef struct {
+    float f, vec[3];
+    int i, sel;
+    bool b, open, body;
+    char text[32];
+    cui_color color;
+    int changed;
+    cui_id float_id, vec_id, insp_id;
+} insp_ctx;
+
+static void build_insp(cui_ctx *ui, void *u) {
+    insp_ctx *a = u;
+    static const char *const items[] = { "Lit", "Unlit", "Toon" };
+    a->body = false;
+    cui_column(ui, .width = CUI_PX(420), .pad = 10) {
+        if (cui_inspector_begin(ui, "props")) {
+            if (cui_inspector_group(ui, "Transform", &a->open)) {
+                a->body = true;
+                if (cui_prop_float(ui, "Intensity", &a->f, .min = 0, .max = 100, .step = 1)) a->changed++;
+                a->float_id = cui_last_id(ui);
+                if (cui_prop_vec3(ui, "Position", a->vec)) a->changed++;
+                a->vec_id = cui_last_id(ui);
+            }
+            if (cui_inspector_group(ui, "More", NULL)) {
+                if (cui_prop_int(ui, "Layer", &a->i, .min = 0, .max = 31)) a->changed++;
+                if (cui_prop_bool(ui, "Visible", &a->b)) a->changed++;
+                if (cui_prop_enum(ui, "Shader", items, 3, &a->sel)) a->changed++;
+                if (cui_prop_text(ui, "Name", a->text, sizeof a->text)) a->changed++;
+                if (cui_prop_color(ui, "Tint", &a->color)) a->changed++;
+                if (cui_prop_bool(ui, "Locked", &a->b, .checkbox = true, .disabled = true)) a->changed++;
+            }
+            cui_inspector_end(ui);
+        }
+        a->insp_id = cui_last_id(ui);
+    }
+    /* rows also work on their own */
+    cui_prop_float(ui, "Loose", &a->f);
+}
+
+typedef struct { cui_log_buffer *buf; bool timestamps; cui_id id; } logv_ctx;
+static void build_logv(cui_ctx *ui, void *u) {
+    logv_ctx *a = u;
+    cui_column(ui, .width = CUI_FILL, .pad = 10) {
+        cui_log_view(ui, "log", a->buf, .height = 300, .timestamps = a->timestamps);
+        a->id = cui_last_id(ui);
+    }
+}
+
+/* expected text of line number seq in the stress test */
+static int log_expect(uint64_t seq, char *out, int cap) {
+    int len = (int)((seq * 7919u) % 90u);
+    for (int k = 0; k < len && k < cap - 1; k++) out[k] = (char)('a' + (int)((seq + (uint64_t)k) % 26u));
+    return len;
+}
+
+static void test_tools(void) {
+    printf("tool panels: inspector rows and groups, log buffer and view\n");
+    cui_ctx *ui = new_ctx();
+    insp_ctx a;
+    memset(&a, 0, sizeof a);
+    a.f = 50; a.open = true; a.color = CUI_RGB(0x336699);
+    snprintf(a.text, sizeof a.text, "crate");
+    run(ui, build_insp, &a, 3);
+    CHECK(a.body);
+    cui_rect fr = rect_of(ui, a.float_id), vr = rect_of(ui, a.vec_id), ir = rect_of(ui, a.insp_id);
+    CHECK(fr.w > 100 && fr.h >= 30);
+    CHECK(ir.w > 380);
+    /* the label column takes about 38% of the width; editors start after it */
+    CHECK(fr.x > ir.x + ir.w * 0.3f && fr.x < ir.x + ir.w * 0.5f);
+    CHECK(vr.w > 40 && vr.x + vr.w <= ir.x + ir.w + 0.5f);
+    /* the field scrubs: arrows step when focused */
+    click_at(ui, build_insp, &a, fr.x + fr.w / 2, fr.y + fr.h / 2);   /* a click starts typing */
+    key(ui, build_insp, &a, CUI_KEY_ESCAPE, 0);
+    a.changed = 0;
+    key(ui, build_insp, &a, CUI_KEY_RIGHT, 0);
+    CHECK_NEAR(a.f, 51, 0.001);
+    CHECK(a.changed == 1);
+    /* the label scrubs too: drag it sideways */
+    float lx = ir.x + 20, ly = fr.y + fr.h / 2;
+    cui_input_mouse_move(ui, lx, ly);
+    run(ui, build_insp, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_insp, &a, 1);
+    cui_input_mouse_move(ui, lx + 20, ly);
+    run(ui, build_insp, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_insp, &a, 1);
+    CHECK_NEAR(a.f, 71, 0.001);
+    /* drag the column line to widen the labels */
+    float line_x = fr.x - 6;
+    cui_input_mouse_move(ui, line_x, fr.y + 4);
+    run(ui, build_insp, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_insp, &a, 1);
+    cui_input_mouse_move(ui, line_x + 40, fr.y + 4);
+    run(ui, build_insp, &a, 2);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_insp, &a, 2);
+    cui_rect fr2 = rect_of(ui, a.float_id);
+    CHECK(fr2.x > fr.x + 30 && fr2.x < fr.x + 50);
+    CHECK_NEAR(a.f, 71, 0.001);
+    /* Tab walks from the number field into the vector fields; arrows step them */
+    click_at(ui, build_insp, &a, fr2.x + fr2.w / 2, fr2.y + fr2.h / 2);
+    key(ui, build_insp, &a, CUI_KEY_ESCAPE, 0);
+    run(ui, build_insp, &a, 1);   /* the scrub field rejoins the focus order a frame after typing ends */
+    a.changed = 0;
+    key(ui, build_insp, &a, CUI_KEY_TAB, 0);
+    key(ui, build_insp, &a, CUI_KEY_UP, 0);
+    key(ui, build_insp, &a, CUI_KEY_TAB, 0);
+    key(ui, build_insp, &a, CUI_KEY_UP, 0);
+    key(ui, build_insp, &a, CUI_KEY_UP, 0);
+    CHECK_NEAR(a.vec[0], 0.1, 0.001);
+    CHECK_NEAR(a.vec[1], 0.2, 0.001);
+    CHECK_NEAR(a.f, 71, 0.001);
+    CHECK(a.changed == 3);
+    /* folding: the body is not built once the group has closed */
+    cui_rect hr = { ir.x, ir.y, ir.w, 40 };
+    click_at(ui, build_insp, &a, hr.x + 60, hr.y + 20);
+    CHECK(!a.open);
+    run(ui, build_insp, &a, 2);
+    CHECK(!a.body);
+    click_at(ui, build_insp, &a, hr.x + 60, hr.y + 20);
+    CHECK(a.open && a.body);
+    cui_destroy(ui);
+
+    /* ---- log buffer ---- */
+    static cui_log_line lines[64];
+    static char text[1024];
+    cui_log_buffer lb;
+    cui_log_init(&lb, NULL, 0, NULL, 0);   /* no storage: appends are ignored */
+    cui_log_append(&lb, CUI_LOG_INFO, "dropped %d", 1);
+    CHECK(lb.count == 0 && lb.total == 0);
+    cui_log_init(&lb, lines, 4, text, sizeof text);
+    lb.now = 3723.5;
+    cui_log_append(&lb, CUI_LOG_INFO, "hello %s\n", "world");
+    cui_log_append_text(&lb, CUI_LOG_WARN, 1.0, "tab\there", -1);
+    const char *t = NULL;
+    const cui_log_line *l = cui_log_get(&lb, 0, &t);
+    CHECK(l && l->len == 11 && !strcmp(t, "hello world") && l->time == 3723.5 && l->level == CUI_LOG_INFO);
+    l = cui_log_get(&lb, 1, &t);
+    CHECK(l && !strcmp(t, "tab here") && l->level == CUI_LOG_WARN);
+    CHECK(cui_log_get(&lb, 2, &t) == NULL && t == NULL);
+    for (int k = 0; k < 10; k++) cui_log_append(&lb, CUI_LOG_ERROR, "line %d", k);
+    CHECK(lb.count == 4 && lb.total == 12);
+    l = cui_log_get(&lb, 0, &t);
+    CHECK(l && !strcmp(t, "line 6"));
+    CHECK(lb.level_count[CUI_LOG_ERROR] == 4 && lb.level_count[CUI_LOG_INFO] == 0);
+    /* a line longer than the whole buffer is cut to fit */
+    static char big[5000];
+    memset(big, 'x', sizeof big - 1);
+    big[sizeof big - 1] = 0;
+    cui_log_append(&lb, CUI_LOG_INFO, "%s", big);
+    l = cui_log_get(&lb, lb.count - 1, &t);
+    CHECK(l && l->len == sizeof text - 1 && t[l->len] == 0 && t[0] == 'x');
+    CHECK(lb.count == 1);
+    cui_log_append(&lb, CUI_LOG_INFO, "after");
+    l = cui_log_get(&lb, lb.count - 1, &t);
+    CHECK(l && !strcmp(t, "after") && lb.count == 1);
+    cui_log_clear(&lb);
+    CHECK(lb.count == 0 && lb.level_count[CUI_LOG_INFO] == 0);
+    /* stress: random lengths through both rings; every kept line is intact */
+    static cui_log_line slines[40];
+    static char stext[700];
+    cui_log_init(&lb, slines, 40, stext, sizeof stext);
+    bool ok = true;
+    for (uint64_t seq = 0; seq < 20000 && ok; seq++) {
+        char want[128];
+        int len = log_expect(seq, want, sizeof want);
+        if (seq % 3) cui_log_append_text(&lb, (cui_log_level)(seq % 5), (double)seq, want, len);
+        else cui_log_append(&lb, (cui_log_level)(seq % 5), "%.*s", len, want);
+        int sum = 0;
+        for (int k = 0; k < CUI_LOG_LEVEL_COUNT; k++) sum += lb.level_count[k];
+        if (sum != lb.count || lb.total != seq + 1 || lb.count < 1) ok = false;
+        for (int i = 0; i < lb.count && ok; i++) {
+            uint64_t s2 = lb.total - (uint64_t)lb.count + (uint64_t)i;
+            l = cui_log_get(&lb, i, &t);
+            int wl = log_expect(s2, want, sizeof want);
+            if (!l || (int)l->len != wl || l->offset + l->len >= sizeof stext || t[l->len] != 0 || memcmp(t, want, (size_t)wl) != 0) ok = false;
+        }
+    }
+    CHECK(ok);
+
+    /* ---- log view ---- */
+    static cui_log_line vlines[4096];
+    static char vtext[128 * 1024];
+    cui_log_buffer vb;
+    cui_log_init(&vb, vlines, 4096, vtext, sizeof vtext);
+    ui = new_ctx();
+    logv_ctx v = { &vb, true, 0 };
+    run(ui, build_logv, &v, 2);   /* empty */
+    v.buf = NULL;
+    run(ui, build_logv, &v, 2);   /* no buffer at all */
+    v.buf = &vb;
+    for (int k = 0; k < 6000; k++) {
+        vb.now = k * 0.25;
+        cui_log_append(&vb, (cui_log_level)(k % 5), "event %d payload %s", k, k % 7 ? "ok" : "slow frame");
+    }
+    run(ui, build_logv, &v, 3);
+    CHECK(vb.count == 4096);
+    cui_rect lr = rect_of(ui, v.id);
+    CHECK(lr.h > 290 && lr.h < 310);
+    /* following: the newest line sits at the bottom of the list */
+    g_clip[0] = 0;
+    click_at(ui, build_logv, &v, lr.x + 300, lr.y + lr.h - 12);
+    key(ui, build_logv, &v, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strstr(g_clip, "event 5999 ") != NULL);
+    /* scrolling up stops following: new lines do not move the view */
+    cui_input_mouse_move(ui, lr.x + 300, lr.y + 150);
+    cui_input_scroll(ui, 0, 5);
+    run(ui, build_logv, &v, 20);
+    for (int k = 6000; k < 6100; k++) cui_log_append(&vb, CUI_LOG_INFO, "event %d payload ok", k);
+    run(ui, build_logv, &v, 20);
+    click_at(ui, build_logv, &v, lr.x + 300, lr.y + lr.h - 12);
+    key(ui, build_logv, &v, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strstr(g_clip, "event 6099 ") == NULL && strstr(g_clip, "event ") != NULL);
+    /* End follows again */
+    key(ui, build_logv, &v, CUI_KEY_END, 0);
+    key(ui, build_logv, &v, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strstr(g_clip, "event 6099 ") != NULL);
+    run(ui, build_logv, &v, 20);
+    click_at(ui, build_logv, &v, lr.x + 300, lr.y + lr.h - 12);
+    key(ui, build_logv, &v, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strstr(g_clip, "event 6099 ") != NULL);
+    /* Shift+Up extends the selection; copy gets both lines */
+    key(ui, build_logv, &v, CUI_KEY_UP, CUI_MOD_SHIFT);
+    key(ui, build_logv, &v, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strstr(g_clip, "event 6098 ") != NULL && strstr(g_clip, "event 6099 ") != NULL && strchr(g_clip, '\n') != NULL);
+    /* search: type into the filter field (the toolbar's second focus stop) */
+    for (int k = 0; k < 12; k++) {
+        key(ui, build_logv, &v, CUI_KEY_TAB, 0);
+        if (cui_wants_keyboard(ui)) break;
+    }
+    CHECK(cui_wants_keyboard(ui));
+    cui_input_text(ui, "no such text");
+    run(ui, build_logv, &v, 3);
+    g_clip[0] = 0;
+    key(ui, build_logv, &v, CUI_KEY_TAB, 0);   /* on to Follow, Copy... */
+    run(ui, build_logv, &v, 2);
+    for (int k = 0; k < 6000; k += 37) cui_log_append(&vb, CUI_LOG_WARN, "late %d", k);
+    run(ui, build_logv, &v, 3);
+    /* a very long line and a wrap of the whole ring while searching */
+    static char huge[200000];
+    memset(huge, 'q', sizeof huge - 1);
+    huge[sizeof huge - 1] = 0;
+    cui_log_append_text(&vb, CUI_LOG_ERROR, 1.0, huge, -1);
+    run(ui, build_logv, &v, 3);
+    cui_log_clear(&vb);
+    run(ui, build_logv, &v, 3);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -2309,7 +3022,9 @@ int main(void) {
     test_disclosure();
     test_checklist();
     test_data_grid();
+    test_tools();
     test_planning();
+    test_node_editor();
     test_media();
     test_viz();
     test_motion();
@@ -2320,12 +3035,14 @@ int main(void) {
     test_focus_trap();
     test_extras();
     test_reorder();
+    test_chrome();
     test_virtual_list();
     test_theme();
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();
     test_truncated_tooltip();
+    test_truncated_tooltip_covered();
     test_number_roll();
     test_stress();
     test_atlas_pressure();

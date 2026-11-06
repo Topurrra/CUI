@@ -1578,6 +1578,258 @@ CUI_API bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id, cui_key_combo
 CUI_API const char *cui_shortcut_label(cui_ctx *ui, cui_key_combo combo);
 CUI_API const char *cui_key_name(cui_key key);
 
+/* ---- Node editor ---- */
+
+/* Node editor: nodes with input and output pins on a canvas that pans and
+ * zooms, joined by curved links. You own the nodes, pins and links; the
+ * editor moves the node positions you pass and reports what the user did:
+ *
+ *     if (cui_node_editor_begin(ui, "graph", &view, .height = CUI_PX(480))) {
+ *         for (each node n) {
+ *             cui_node_begin(ui, n->id, &n->x, &n->y, n->title);
+ *             cui_node_input(ui, n->in_pin, "Color", .type = 1);
+ *             cui_node_content(ui) { cui_slider(ui, "##fac", &n->factor, 0, 1); }
+ *             cui_node_output(ui, n->out_pin, "Result", .type = 1);
+ *             cui_node_end(ui);
+ *         }
+ *         for (each link l) cui_node_link(ui, l->id, l->from_pin, l->to_pin);
+ *         int a, b, id;
+ *         while (cui_node_link_created(ui, &a, &b)) add_link(a, b);   (output pin, input pin)
+ *         while (cui_node_link_removed(ui, &id)) remove_link(id);
+ *         while (cui_node_deleted(ui, &id)) remove_node(id);
+ *         cui_node_editor_end(ui);
+ *     }
+ *
+ * Node, pin and link ids are your own integers (pin ids unique in the
+ * editor). Scroll to zoom around the pointer; pan with the middle button or
+ * Space and drag. Drag a card to move it (with the rest of the selection),
+ * click to select, Shift or Ctrl to add, drag on the empty canvas for a
+ * marquee. Drag from a pin to make a link; drag a link's input end off its
+ * pin to detach it. Delete removes the selection, F frames every node. */
+typedef struct cui_node_view { float x, y, zoom; } cui_node_view;   /* pan in points; zoom 0 means 1 */
+typedef struct cui_node_editor_opts {
+    int _;
+    cui_size width, height;    /* default: fill the width, 440 tall */
+    float min_zoom, max_zoom;  /* default 0.25 .. 2 */
+    bool no_grid;
+    bool minimap;              /* an overview of the graph in the bottom right corner; click it to move there */
+} cui_node_editor_opts;
+CUI_API bool cui_node_editor_begin_ex(cui_ctx *ui, const char *id, cui_node_view *view, const cui_node_editor_opts *opts);
+CUI_API void cui_node_editor_end(cui_ctx *ui);
+/* A node at canvas position (*x, *y), updated while it is dragged. Returns
+ * true while the node is selected. */
+typedef struct cui_node_opts { int _; float width; const char *icon; } cui_node_opts;   /* width default 184 */
+CUI_API bool cui_node_begin_ex(cui_ctx *ui, int node_id, float *x, float *y, const char *title, const cui_node_opts *opts);
+CUI_API void cui_node_end(cui_ctx *ui);
+/* A row with a pin on the left (input) or right (output). type picks the pin
+ * color from the series palette and limits links to pins of the same type
+ * (0 connects to anything). Returns true when the pin has a link. */
+typedef struct cui_pin_opts { int _; int type; } cui_pin_opts;
+CUI_API bool cui_node_input_ex(cui_ctx *ui, int pin_id, const char *label, const cui_pin_opts *opts);
+CUI_API bool cui_node_output_ex(cui_ctx *ui, int pin_id, const char *label, const cui_pin_opts *opts);
+/* A row for ordinary components. They are laid out at 100% and scaled with
+ * the view, so their text is sharpest at 100% zoom and below. */
+CUI_API void cui_node_content_begin(cui_ctx *ui);
+CUI_API void cui_node_content_end(cui_ctx *ui);
+/* A link from an output pin to an input pin. Returns true while it is selected. */
+CUI_API bool cui_node_link(cui_ctx *ui, int link_id, int from_pin, int to_pin);
+/* What the user did this frame, one event per call; call them after
+ * cui_node_editor_begin (and up to the end of the frame). */
+CUI_API bool cui_node_link_created(cui_ctx *ui, int *from_pin, int *to_pin);
+CUI_API bool cui_node_link_removed(cui_ctx *ui, int *link_id);
+CUI_API bool cui_node_deleted(cui_ctx *ui, int *node_id);
+#ifndef __cplusplus
+#define cui_node_editor_begin(ui, id, view, ...) cui_node_editor_begin_ex((ui), (id), (view), CUI__OPTS(cui_node_editor_opts, __VA_ARGS__))
+#define cui_node_begin(ui, node_id, x, y, title, ...) cui_node_begin_ex((ui), (node_id), (x), (y), (title), CUI__OPTS(cui_node_opts, __VA_ARGS__))
+#define cui_node_input(ui, pin, label, ...)  cui_node_input_ex((ui), (pin), (label), CUI__OPTS(cui_pin_opts, __VA_ARGS__))
+#define cui_node_output(ui, pin, label, ...) cui_node_output_ex((ui), (pin), (label), CUI__OPTS(cui_pin_opts, __VA_ARGS__))
+#define cui_node_content(ui)                 CUI__SCOPE(cui_node_content_begin(ui), cui_node_content_end(ui))
+#endif
+
+/* ------------------------------------------------------------------------ */
+/* App chrome: menu bar, toolbar, status bar, document tabs                 */
+/* ------------------------------------------------------------------------ */
+
+/* Menu bar: File / Edit / View along the top of a window. Each menu holds
+ * the usual menu items (cui_menu_item, cui_menu_separator, cui_menu_label).
+ * Once a menu is open, hovering another one switches to it. Alt (on its own)
+ * or F10 focuses the bar; arrows move between menus and items, Enter
+ * chooses, Esc steps back. Alt + a menu's mnemonic letter opens it (the
+ * first letter of its label unless `mnemonic` says otherwise). */
+typedef struct cui_menu_bar_opts { int _; bool no_border; } cui_menu_bar_opts;
+CUI_API void cui_menu_bar_begin(cui_ctx *ui, const char *id, const cui_menu_bar_opts *opts);
+CUI_API void cui_menu_bar_end(cui_ctx *ui);
+/* One menu of the bar. Returns true while its items should be built; call
+ * cui_menu_bar_menu_end only then. */
+typedef struct cui_menu_bar_menu_opts { int _; char mnemonic; float width; bool disabled; } cui_menu_bar_menu_opts;
+CUI_API bool cui_menu_bar_menu_begin(cui_ctx *ui, const char *label, const cui_menu_bar_menu_opts *opts);
+CUI_API void cui_menu_bar_menu_end(cui_ctx *ui);
+
+/* Toolbar: a row of compact icon buttons, toggles, separators and small text
+ * buttons. Icon only buttons show their tooltip as their name. Items that do
+ * not fit collapse, from the end, into a "more" menu; an item chosen there
+ * returns true on the next frame. */
+typedef struct cui_toolbar_opts { int _; bool no_border; } cui_toolbar_opts;
+CUI_API void cui_toolbar_begin(cui_ctx *ui, const char *id, const cui_toolbar_opts *opts);
+CUI_API void cui_toolbar_end(cui_ctx *ui);
+typedef struct cui_tool_opts {
+    int _;
+    const char *label;         /* text on the button (icon may be NULL); also its name in the overflow menu */
+    const char *tooltip;       /* the name of an icon only button */
+    const char *shortcut;      /* shown in the tooltip, e.g. "Ctrl B" */
+    bool *toggle;              /* toggle button: flipped on click, shown pressed while true */
+    bool disabled;
+} cui_tool_opts;
+CUI_API bool cui_toolbar_button_ex(cui_ctx *ui, const char *icon, const cui_tool_opts *opts);
+CUI_API void cui_toolbar_separator(cui_ctx *ui);
+CUI_API void cui_toolbar_spacer(cui_ctx *ui);   /* pushes the following items to the right */
+
+/* Status bar: a thin bar along the bottom of a window, with a hairline on
+ * top and no fill of its own (put it in a box with the background you want).
+ * Items go left to right; cui_status_bar_spacer sends the rest to the right
+ * edge. */
+typedef struct cui_status_bar_opts { int _; bool no_border; } cui_status_bar_opts;
+CUI_API void cui_status_bar_begin(cui_ctx *ui, const char *id, const cui_status_bar_opts *opts);
+CUI_API void cui_status_bar_end(cui_ctx *ui);
+CUI_API void cui_status_bar_spacer(cui_ctx *ui);
+typedef struct cui_status_item_opts { int _; const char *icon; cui_tone tone; const char *tooltip; bool disabled; } cui_status_item_opts;
+/* A message; `tone` colors its icon. */
+CUI_API void cui_status_bar_text_ex(cui_ctx *ui, const char *text, const cui_status_item_opts *opts);
+/* A small clickable item ("Ln 12, Col 4", "UTF-8"). Returns true when clicked. */
+CUI_API bool cui_status_bar_item_ex(cui_ctx *ui, const char *label, const cui_status_item_opts *opts);
+/* A small progress bar with an optional label. value is 0..1. */
+typedef struct cui_status_progress_opts { int _; const char *label; bool indeterminate; float width; } cui_status_progress_opts;
+CUI_API void cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progress_opts *opts);
+
+/* Document tabs: editor style tabs. Clicking selects (*selected is
+ * updated), the x or a middle click asks to close, dragging reorders, and
+ * the strip scrolls sideways when the tabs do not fit. A dirty tab shows a
+ * dot that turns into the close button under the pointer. The selected tab
+ * is filled with the surface color so it joins the content below; the strip
+ * itself has no fill, like the other bars. Tabs keep their
+ * state by title, so give two tabs with the same name a key: "main.c##src".
+ * The component never removes or moves your tabs itself: it reports a close
+ * or a move in the result and you apply it (selection already follows a
+ * move). With keyboard focus on the strip, Left and Right select, Home and
+ * End jump, Shift+Left/Right move the tab and Delete closes it. With
+ * `shortcuts` set it also answers Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PageUp/Down
+ * and Ctrl+W (Cmd+W on macOS) from anywhere in the window. */
+typedef struct cui_doc_tab { const char *title; const char *icon; const char *tooltip; bool dirty; } cui_doc_tab;
+typedef struct cui_doc_tabs_opts { int _; bool shortcuts; bool no_close; bool no_reorder; } cui_doc_tabs_opts;
+typedef struct cui_doc_tabs_result {
+    bool changed;              /* *selected changed (click, keys or a move) */
+    int close;                 /* tab to close, or -1 */
+    int move_from, move_to;    /* move the tab at move_from to move_to, or -1 */
+} cui_doc_tabs_result;
+CUI_API cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id, const cui_doc_tab *tabs, int count, int *selected, const cui_doc_tabs_opts *opts);
+/* Tool panels: property inspector, log console                             */
+/* ------------------------------------------------------------------------ */
+
+/* Property inspector: labelled rows in folding groups, a label column on the
+ * left (drag the line between the columns to resize it) and an editor on the
+ * right. Every row returns true when its value changed. Groups end at the
+ * next group or at cui_inspector_end.
+ *
+ *     static bool transform_open = true;
+ *     if (cui_inspector_begin(ui, "props")) {
+ *         if (cui_inspector_group(ui, "Transform", &transform_open)) {
+ *             cui_prop_vec3(ui, "Position", pos);
+ *             cui_prop_float(ui, "Scale", &scale, .min = 0.01f, .max = 100, .step = 0.01f);
+ *         }
+ *         cui_inspector_end(ui);
+ *     }
+ *
+ * Number rows are scrub fields: drag the field or its label sideways (Shift
+ * for fine steps), click to type, arrows step. Rows can also be used outside
+ * an inspector. */
+typedef struct cui_inspector_opts {
+    int _;
+    cui_size width;            /* default fill */
+    float label_width;         /* initial label column in points, default 38% of the width */
+} cui_inspector_opts;
+CUI_API bool cui_inspector_begin_ex(cui_ctx *ui, const char *id, const cui_inspector_opts *opts);
+CUI_API void cui_inspector_end(cui_ctx *ui);
+/* A folding group header. Build its rows only when this returns true (it
+ * stays true while the group animates closed). open may be NULL for a plain
+ * section that does not fold. */
+CUI_API bool cui_inspector_group(cui_ctx *ui, const char *title, bool *open);
+
+typedef struct cui_prop_opts {
+    int _;
+    float min, max;            /* number and vector rows; both 0 = unbounded */
+    float step;                /* drag and arrow step, default 1/100 of the range (0.1 unbounded) */
+    const char *format;        /* printf format, default from the step ("%.2f" for 0.01) */
+    const char *suffix;        /* unit after the value, e.g. "px" or "deg" */
+    const char *placeholder;   /* text rows */
+    const char *tooltip;       /* shown on the label */
+    bool disabled;
+    bool checkbox;             /* bool rows: a checkbox instead of a switch */
+} cui_prop_opts;
+CUI_API bool cui_prop_float_ex(cui_ctx *ui, const char *label, float *value, const cui_prop_opts *opts);
+CUI_API bool cui_prop_int_ex(cui_ctx *ui, const char *label, int *value, const cui_prop_opts *opts);
+CUI_API bool cui_prop_text_ex(cui_ctx *ui, const char *label, char *buf, size_t cap, const cui_prop_opts *opts);
+CUI_API bool cui_prop_bool_ex(cui_ctx *ui, const char *label, bool *value, const cui_prop_opts *opts);
+CUI_API bool cui_prop_enum_ex(cui_ctx *ui, const char *label, const char *const *items, int count, int *index, const cui_prop_opts *opts);
+/* A swatch and hex value that opens the color picker. */
+CUI_API bool cui_prop_color_ex(cui_ctx *ui, const char *label, cui_color *value, const cui_prop_opts *opts);
+/* Compact X, Y (Z, W) scrub fields side by side; value holds 2, 3 or 4 floats. */
+CUI_API bool cui_prop_vec_ex(cui_ctx *ui, const char *label, float *value, int components, const cui_prop_opts *opts);
+
+/* Log console. The app owns the storage: give cui_log_init an array of line
+ * records and a byte buffer for the text. Appending never allocates; when
+ * either is full the oldest lines are dropped (a ring buffer). Lines longer
+ * than the text buffer are cut to fit.
+ *
+ *     static cui_log_line lines[4096];
+ *     static char text[256 * 1024];
+ *     static cui_log_buffer log;
+ *     cui_log_init(&log, lines, 4096, text, sizeof text);
+ *     log.now = seconds_since_start();             // optional timestamp source
+ *     cui_log_append(&log, CUI_LOG_WARN, "Shader %s took %d ms", name, ms);
+ *     ...
+ *     cui_log_view(ui, "log", &log, .height = 320, .timestamps = true);
+ *
+ * Each append is one line: a trailing newline is dropped and other control
+ * characters show as spaces. The view keeps its own filter, search, follow
+ * and selection state (a small index of the matching lines, at most one entry
+ * per line slot, freed with the context). */
+typedef enum cui_log_level { CUI_LOG_TRACE = 0, CUI_LOG_DEBUG, CUI_LOG_INFO, CUI_LOG_WARN, CUI_LOG_ERROR, CUI_LOG_LEVEL_COUNT } cui_log_level;
+typedef struct cui_log_line { uint32_t offset, len; double time; uint8_t level; } cui_log_line;
+typedef struct cui_log_buffer {
+    double now;                /* timestamp given to the next appended line (seconds) */
+    /* everything below is managed by cui_log_*; read it, do not write it */
+    cui_log_line *lines; int line_cap;
+    char *text; uint32_t text_cap;
+    int first, count;          /* ring of lines: oldest record and how many */
+    uint32_t text_end;         /* where the next line's text goes */
+    uint64_t total;            /* lines ever appended; line i of the buffer is number total - count + i */
+    int level_count[CUI_LOG_LEVEL_COUNT];
+} cui_log_buffer;
+CUI_API void cui_log_init(cui_log_buffer *buf, cui_log_line *lines, int line_cap, char *text, size_t text_cap);
+CUI_API void cui_log_append(cui_log_buffer *buf, cui_log_level level, const char *fmt, ...) CUI_PRINTF(3, 4);
+CUI_API void cui_log_appendv(cui_log_buffer *buf, cui_log_level level, const char *fmt, va_list ap);
+/* Appends len bytes (-1: up to the terminator) stamped with time. */
+CUI_API void cui_log_append_text(cui_log_buffer *buf, cui_log_level level, double time, const char *text, int len);
+CUI_API void cui_log_clear(cui_log_buffer *buf);
+/* Line i (0 = oldest), or NULL when out of range. *text is terminated (and len bytes long). */
+CUI_API const cui_log_line *cui_log_get(const cui_log_buffer *buf, int i, const char **text);
+
+typedef struct cui_log_view_opts {
+    int _;
+    cui_size width;            /* default fill */
+    float height;              /* default 320; negative fills the space */
+    bool timestamps;           /* show each line's time as HH:MM:SS.mmm */
+    bool no_toolbar;           /* just the lines */
+    float size;                /* font size, default 12 */
+} cui_log_view_opts;
+/* Toolbar: level filters, a search field that filters and highlights,
+ * Follow (keeps the newest line in view; scrolling up turns it off, reaching
+ * the bottom turns it back on), Copy (selected lines, or all shown) and Clear.
+ * Click a line to select it, Shift+click for a range; with the list focused,
+ * arrows move, Shift+arrows extend, Ctrl+A selects all, Ctrl+C copies, Esc
+ * clears the selection, End follows again. */
+CUI_API void cui_log_view_ex(cui_ctx *ui, const char *id, cui_log_buffer *buf, const cui_log_view_opts *opts);
+
 /* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
@@ -1798,6 +2050,29 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_scrub(ui, label, value, min, max, ...) cui_scrub_ex((ui), (label), (value), (min), (max), CUI__OPTS(cui_scrub_opts, __VA_ARGS__))
 #define cui_money_input(ui, id, value, ...) cui_money_input_ex((ui), (id), (value), CUI__OPTS(cui_money_opts, __VA_ARGS__))
 #define cui_shortcut_recorder(ui, id, combo, ...) cui_shortcut_recorder_ex((ui), (id), (combo), CUI__OPTS(cui_shortcut_recorder_opts, __VA_ARGS__))
+/* app chrome */
+#define cui_menu_bar(ui, id, ...)           CUI__SCOPE(cui_menu_bar_begin((ui), (id), CUI__OPTS(cui_menu_bar_opts, __VA_ARGS__)), cui_menu_bar_end(ui))
+#define cui_menu_bar_menu(ui, label, ...)   CUI__SCOPE_IF(cui_menu_bar_menu_begin((ui), (label), CUI__OPTS(cui_menu_bar_menu_opts, __VA_ARGS__)), cui_menu_bar_menu_end(ui))
+#define cui_toolbar(ui, id, ...)            CUI__SCOPE(cui_toolbar_begin((ui), (id), CUI__OPTS(cui_toolbar_opts, __VA_ARGS__)), cui_toolbar_end(ui))
+#define cui_toolbar_button(ui, icon, ...)   cui_toolbar_button_ex((ui), (icon), CUI__OPTS(cui_tool_opts, __VA_ARGS__))
+#define cui_status_bar(ui, id, ...)         CUI__SCOPE(cui_status_bar_begin((ui), (id), CUI__OPTS(cui_status_bar_opts, __VA_ARGS__)), cui_status_bar_end(ui))
+#define cui_status_bar_text(ui, text, ...)  cui_status_bar_text_ex((ui), (text), CUI__OPTS(cui_status_item_opts, __VA_ARGS__))
+#define cui_status_bar_item(ui, label, ...) cui_status_bar_item_ex((ui), (label), CUI__OPTS(cui_status_item_opts, __VA_ARGS__))
+#define cui_status_bar_progress(ui, value, ...) cui_status_bar_progress_ex((ui), (value), CUI__OPTS(cui_status_progress_opts, __VA_ARGS__))
+#define cui_doc_tabs(ui, id, tabs, count, selected, ...) cui_doc_tabs_ex((ui), (id), (tabs), (count), (selected), CUI__OPTS(cui_doc_tabs_opts, __VA_ARGS__))
+/* tool panels */
+#define cui_inspector_begin(ui, id, ...)    cui_inspector_begin_ex((ui), (id), CUI__OPTS(cui_inspector_opts, __VA_ARGS__))
+#define cui_inspector(ui, id, ...)          CUI__SCOPE_IF(cui_inspector_begin_ex((ui), (id), CUI__OPTS(cui_inspector_opts, __VA_ARGS__)), cui_inspector_end(ui))
+#define cui_prop_float(ui, label, v, ...)   cui_prop_float_ex((ui), (label), (v), CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_int(ui, label, v, ...)     cui_prop_int_ex((ui), (label), (v), CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_text(ui, label, buf, cap, ...) cui_prop_text_ex((ui), (label), (buf), (cap), CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_bool(ui, label, v, ...)    cui_prop_bool_ex((ui), (label), (v), CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_enum(ui, label, items, n, idx, ...) cui_prop_enum_ex((ui), (label), (items), (n), (idx), CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_color(ui, label, v, ...)   cui_prop_color_ex((ui), (label), (v), CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_vec2(ui, label, v, ...)    cui_prop_vec_ex((ui), (label), (v), 2, CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_vec3(ui, label, v, ...)    cui_prop_vec_ex((ui), (label), (v), 3, CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_prop_vec4(ui, label, v, ...)    cui_prop_vec_ex((ui), (label), (v), 4, CUI__OPTS(cui_prop_opts, __VA_ARGS__))
+#define cui_log_view(ui, id, buf, ...)      cui_log_view_ex((ui), (id), (buf), CUI__OPTS(cui_log_view_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 
 #ifdef __cplusplus

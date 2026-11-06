@@ -275,6 +275,8 @@ MORE_CAT = {
     "Actions": "actions", "Inputs": "inputs", "Pickers": "pickers", "Capture": "inputs", "Disclosure": "overlays",
     "Feedback": "feedback", "Data": "data", "Code": "data", "Conversation": "social", "Media": "social",
     "Planning": "planning", "More charts": "charts", "Motion": "motion", "AI interfaces": "ai",
+    "App chrome": "navigation",
+    "Tool panels": "data",
 }
 ITEM_CAT = {"Table of contents": "navigation"}
 # sections whose docs have no screenshot: the scene that shows them
@@ -285,7 +287,9 @@ NO_IMAGE = {
     "Speed dial": ["speed-dial"], "Theme switcher and toggle": ["theme-switcher"], "Swipe actions": ["swipe-actions"],
     "Money field": ["money-field"], "Prefix and suffix": ["prefix-suffix"], "Rolling numbers": ["rolling-numbers"],
 }
-EXTRA_FOR = {"Toast": ["toast-demo"], "Dialog": ["dialog-demo"]}
+EXTRA_FOR = {"Toast": ["toast-demo"], "Dialog": ["dialog-demo"],
+             # the four chrome parts together in one window, after each part alone
+             "Menu bar": ["app-chrome"], "Toolbar": ["app-chrome"], "Document tabs": ["app-chrome"], "Status bar": ["app-chrome"]}
 # live variants shown before the doc scene, when the doc scene only poses a moment
 PREPEND = {"Kanban board": ["kanban-live"]}
 

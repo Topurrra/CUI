@@ -412,6 +412,58 @@ if (!cui_json_view(ui, "response", body, .expand_depth = 1)) { /* not valid JSON
 
 A collapsible tree with typed colors. Collapsed objects and arrays show their size; click a chevron to fold or unfold.
 
+## Tool panels
+
+Panels for editors and developer tools.
+
+### Property inspector
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/inspector-dark.png"><img src="images/components/inspector.png" alt="Property inspector"></picture>
+
+```c
+static bool transform_open = true, material_open = true;
+static const char *const shaders[] = { "Standard PBR", "Unlit", "Toon", "Glass" };
+if (cui_inspector_begin(ui, "props")) {
+    if (cui_inspector_group(ui, "Transform", &transform_open)) {
+        cui_prop_vec3(ui, "Position", obj->pos, .step = 0.05f, .format = "%.2f");
+        cui_prop_vec3(ui, "Rotation", obj->rot, .step = 1, .format = "%.0f");
+    }
+    if (cui_inspector_group(ui, "Material", &material_open)) {
+        cui_prop_text(ui, "Name", obj->name, sizeof obj->name);
+        cui_prop_enum(ui, "Shader", shaders, 4, &obj->shader);
+        cui_prop_color(ui, "Base color", &obj->base);
+        if (cui_prop_float(ui, "Roughness", &obj->roughness, .min = 0, .max = 1, .step = 0.01f)) mark_dirty(obj);
+        cui_prop_float(ui, "Emission", &obj->emission, .step = 0.1f, .suffix = "nits");
+        cui_prop_bool(ui, "Double sided", &obj->double_sided);
+    }
+    cui_inspector_end(ui);
+}
+```
+
+A panel of named properties in folding groups, each edited with the control that fits its type. Each row is a label on the left and an editor on the right, built from the library's own fields: number rows (`cui_prop_float`, `cui_prop_int`) are scrub fields, so dragging the field or its label sideways changes the value (Shift for fine steps), a click types a number and the arrow keys step it. `cui_prop_vec2`, `cui_prop_vec3` and `cui_prop_vec4` put compact X, Y, Z and W fields side by side, their letters tinted with the theme's tones. Text rows are text fields, bool rows switches (`.checkbox = true` for a checkbox), enum rows selects and color rows open the color picker. Every row returns true when its value changed. With `.min` and `.max` a number shows where it sits in its range; without them it is unbounded. The label column takes 38% of the width (or `.label_width`); drag the line between the columns to resize it. Below 380 points the labels move above their editors.
+
+Groups fold with a chevron and open and close with the disclosure spring; their rows are built only while open or closing, and groups end at the next group or at `cui_inspector_end`. Tab moves through the group headers and every editor in order; Enter, Space or the left and right arrows fold a focused group.
+
+### Log console
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/log-console-dark.png"><img src="images/components/log-console.png" alt="Log console"></picture>
+
+```c
+static cui_log_line lines[8192];
+static char text[512 * 1024];
+static cui_log_buffer log;
+cui_log_init(&log, lines, 8192, text, sizeof text);   /* once */
+
+log.now = seconds_since_start();                     /* timestamp for the next lines */
+cui_log_append(&log, CUI_LOG_WARN, "Physics step took %.1f ms (budget %.1f ms)", step_ms, budget_ms);
+
+cui_log_view(ui, "log", &log, .height = 320, .timestamps = true);
+```
+
+A log view for many thousands of lines, with level filters, search, follow and copy. The app owns the storage: an array of line records and a byte buffer for the text, used as a ring. Appending never allocates; when either fills up the oldest lines are dropped, and a line longer than the whole text buffer is cut to fit. The view builds only the rows in sight, so a buffer of many thousands of lines scrolls as fast as a short one, and it keeps a small index of the lines that pass its filter (at most one entry per line slot, freed with the context).
+
+Each line shows its level as a quiet tag (warnings and errors also tint their row), an optional `HH:MM:SS.mmm` time and the text in the code font. The toolbar filters by level (warning and error counts appear on their toggles, which shorten to initials when the console is narrow), searches as you type (matches are marked and the field counts the lines found), and Follow keeps the newest line in view: scrolling up turns it off, coming back to the bottom turns it on. Copy takes the selected lines or, with no selection, every line shown; Clear empties the buffer. Click a line to select it, drag or Shift+click for a range. With the list focused, the arrows move through lines, Shift+arrows extend the selection, Page Up, Page Down and Home jump, End returns to following, Ctrl+A selects all, Ctrl+C copies and Esc clears the selection.
+
 ## Conversation
 
 ### Chat
@@ -539,6 +591,33 @@ int clicked = cui_gantt(ui, "plan", tasks, 3, start_date, 28, .today = 10);
 ```
 
 A task list on the left and a timeline that scrolls sideways, with months, day numbers and shaded weekends. Drag a bar to reschedule it, or drag either end to change its length. The darker part of a bar is its progress. Dependencies draw as elbow arrows and milestones as diamonds. A focused bar moves a day with the arrow keys and changes its length with Shift and the arrows.
+
+### Node editor
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/node-editor-dark.png"><img src="images/components/node-editor.png" alt="Node editor"></picture>
+
+```c
+static cui_node_view view;                                   /* pan and zoom, kept by you */
+if (cui_node_editor_begin(ui, "material", &view, .height = CUI_PX(480), .minimap = true)) {
+    for (int i = 0; i < node_count; i++) {
+        node *n = &nodes[i];
+        cui_node_begin(ui, n->id, &n->x, &n->y, n->title, .width = 160);   /* moves n->x, n->y */
+        cui_node_input(ui, n->pin_color, "Color", .type = PIN_COLOR);
+        if (!cui_node_input(ui, n->pin_factor, "Factor", .type = PIN_FLOAT))
+            cui_node_content(ui) { cui_slider(ui, "##factor", &n->factor, 0, 1); }   /* unlinked: set it here */
+        cui_node_output(ui, n->pin_out, "Result", .type = PIN_COLOR);
+        cui_node_end(ui);
+    }
+    for (int k = 0; k < link_count; k++) cui_node_link(ui, links[k].id, links[k].from_pin, links[k].to_pin);
+    int from, to, id;
+    while (cui_node_link_created(ui, &from, &to)) add_link(from, to);   /* output pin, input pin */
+    while (cui_node_link_removed(ui, &id)) remove_link(id);
+    while (cui_node_deleted(ui, &id)) remove_node(id);           /* its links were reported above */
+    cui_node_editor_end(ui);
+}
+```
+
+A canvas of nodes joined by curved links, for shader graphs, audio patching or visual scripting. You own the graph: node, pin and link ids are your integers, the editor moves the positions you pass and reports links made, links removed and nodes deleted, and you change your data. Scroll to zoom around the pointer (25% to 200%); pan with the middle button, or hold Space and drag. Click a node to select it, Shift or Ctrl click to add to the selection, drag on the empty canvas for a marquee, and drag a node to move it with the rest of the selection, which lifts while it moves. Drag from a pin to make a link: the wire follows the pointer, pins it can join show a ring, and it snaps to the nearest one. Pins of one `type` share a color from the series palette and only join their own type (0 joins anything); an input takes one link, so a new one replaces the old. Drag a link's input end off its pin to detach it, or click a wire and press Delete. With the keyboard, Tab moves through the nodes (focusing a node selects it), the arrow keys move the selection (Shift for single points), Delete or Backspace removes it, Ctrl+A selects every node, F frames them all, + and - zoom, 0 returns to 100% and Esc drops a wire or clears the selection. The editor draws its cards, labels, pins and wires at the zoom, so they stay sharp. Components in `cui_node_content` are laid out at 100% and scaled with the view: they work at any zoom, but their text is sharpest at 100% and below, and menus they open are placed for 100%. Links cannot be made from the keyboard.
 
 ## More charts
 
@@ -813,3 +892,82 @@ if (cui_voice_orb(ui, "voice", listening ? CUI_VOICE_LISTENING : CUI_VOICE_IDLE,
 ```
 
 A living shape for voice modes. It breathes when idle, ripples with the level while listening, sends a ring of dots around while thinking and swells with the voice while speaking. It moves between states smoothly.
+
+## App chrome
+
+The parts around a desktop window's content: a menu bar, a toolbar, document tabs and a status bar. The bars have no fill of their own and draw a hairline on their inner edge, so they take the color of whatever holds them. In the picture the window's chrome sits in a muted box and the content in a white one.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/app-chrome-dark.png"><img src="images/components/app-chrome.png" alt="Menu bar, toolbar, document tabs and status bar in one window"></picture>
+
+### Menu bar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/menu-bar-dark.png"><img src="images/components/menu-bar.png" alt="Menu bar with the View menu open"></picture>
+
+```c
+cui_menu_bar(ui, "menubar") {
+    cui_menu_bar_menu(ui, "File") {
+        if (cui_menu_item(ui, "Open...", .shortcut = "Ctrl O")) open_file();
+        if (cui_menu_item(ui, "Save", .shortcut = "Ctrl S", .disabled = !dirty)) save();
+        cui_menu_separator(ui);
+        if (cui_menu_item(ui, "Close window", .shortcut = "Ctrl Shift W")) close_window();
+    }
+    cui_menu_bar_menu(ui, "View") {
+        if (cui_menu_item(ui, "Word wrap", .checked = wrap)) wrap = !wrap;
+    }
+}
+```
+
+Each menu holds ordinary menu items, so shortcuts, separators, labels, icons, disabled and checked items work as they do in a dropdown. A press opens a menu; while one is open, moving over another title switches to it. Alt on its own or F10 puts the keyboard on the bar and underlines each title's mnemonic (its first letter, or `.mnemonic`). Then Left and Right move along the bar, Enter or Down opens a menu with its first item ready, Left and Right inside a menu move to the next one, Enter chooses, and Esc steps back to the bar and then gives the keyboard back to what had it. Alt plus a mnemonic opens that menu from anywhere. Shortcuts shown in the menus are labels only: handle them in your app with `cui_shortcut`. A check sits after the shortcut text, so a menu reads best when its checkable items have no shortcut. Submenus are not supported.
+
+### Toolbar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toolbar-dark.png"><img src="images/components/toolbar.png" alt="Toolbar, wide and collapsed into a more menu"></picture>
+
+```c
+static bool bold;
+cui_toolbar(ui, "tools") {
+    if (cui_toolbar_button(ui, CUI_ICON_SAVE, .tooltip = "Save", .shortcut = "Ctrl S")) save();
+    cui_toolbar_separator(ui);
+    cui_toolbar_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .toggle = &bold);
+    cui_toolbar_spacer(ui);
+    if (cui_toolbar_button(ui, CUI_ICON_PLAY, .label = "Preview")) preview();
+}
+```
+
+Buttons are small ghost buttons; an icon only button needs a `tooltip`, which is its name. A `toggle` flips its bool on each click and shows pressed while it is on. When the row is too narrow, items collapse from the end into a "more" menu that shows their icons, names, check marks and the separators between them. An item chosen there returns true on the next frame (the toolbar learns its width from the previous frame, so a resize settles one frame later too). Every button is in the Tab order; on the more button, Enter or Down opens the menu.
+
+### Document tabs
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/document-tabs-dark.png"><img src="images/components/document-tabs.png" alt="Document tabs with an unsaved dot and a hovered close button"></picture>
+
+```c
+static cui_doc_tab tabs[16] = { { "README.md", CUI_ICON_FILE_TEXT }, { "tile_cache.c", CUI_ICON_CODE, "src/tile_cache.c", true } };
+static int count = 2, active = 0;
+cui_doc_tabs_result r = cui_doc_tabs(ui, "docs", tabs, count, &active, .shortcuts = true);
+if (r.move_from >= 0) move_tab(tabs, r.move_from, r.move_to);   /* active already follows */
+if (r.close >= 0 && confirm_close(r.close)) {
+    remove_tab(tabs, &count, r.close);
+    if (active > r.close || active == count) active--;
+}
+```
+
+A click selects a tab, the x or a middle click asks to close it, and dragging a tab sideways reorders the strip while the others make room. A tab with unsaved changes (`dirty`) shows a dot, which turns into the x under the pointer. The selected tab is filled with the surface color and opens into the content below. Too many tabs scroll sideways with a fade at the edge, and a newly selected tab scrolls into view. The component reports closes and moves and leaves your array alone, so you can ask before closing; tabs keep their state by title, so give two tabs with the same name a key (`"main.c##src"`). The selected tab is in the Tab order: Left and Right select, Home and End jump, Shift+Left and Shift+Right move it, Delete closes it. With `.shortcuts = true` Ctrl+Tab and Ctrl+Shift+Tab (or Ctrl+PageDown and Ctrl+PageUp) switch tabs and Ctrl+W (Cmd+W on macOS) closes the selected one from anywhere in the window. `.no_close` and `.no_reorder` turn those parts off.
+
+### Status bar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/status-bar-dark.png"><img src="images/components/status-bar.png" alt="Status bar with a branch, a message, progress and clickable items"></picture>
+
+```c
+cui_status_bar(ui, "status") {
+    if (cui_status_bar_item(ui, branch, .icon = CUI_ICON_GIT_BRANCH, .tooltip = "Switch branch")) pick_branch();
+    cui_status_bar_text(ui, "Saved", .icon = CUI_ICON_CHECK, .tone = CUI_TONE_SUCCESS);
+    cui_status_bar_progress(ui, indexed, .label = "Indexing");
+    cui_status_bar_spacer(ui);
+    char pos[48];
+    snprintf(pos, sizeof pos, "Ln %d, Col %d###pos", line, col);
+    if (cui_status_bar_item(ui, pos)) go_to_line();
+    if (cui_status_bar_item(ui, "UTF-8")) pick_encoding();
+}
+```
+
+Items run left to right and `cui_status_bar_spacer` sends the rest to the right edge. Texts and items are 12 point with tabular figures, so a counting position keeps its width; give an item whose label changes a fixed key (`"Ln 12, Col 4###pos"`) so it keeps its hover and focus. Items are in the Tab order and return true when clicked. `tone` colors a message's icon. The progress bar is 64 points wide (`.width`) and fills with the accent; `.indeterminate` slides a segment along it, which stays still with reduced motion.

@@ -477,6 +477,9 @@ void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
     cui__tooltip_state *tt = cui__tip(ui);
     if (tt->visible && !tt->passive) return;
     if (ui->active != 0) return;
+    /* callers test the pointer against a plain rect; a menu, popover or dialog
+     * open above that rect owns the pointer, so its label stays quiet */
+    if (ui->hot_layer != ui->current_layer) return;
     if (ui->tooltip_id != anchor) { ui->tooltip_id = anchor; ui->hover_start = ui->time; }
     bool warm = ui->time - tt->last_shown < 0.4;
     float delay = warm ? 0.0f : 0.7f;

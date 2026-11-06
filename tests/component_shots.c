@@ -736,6 +736,79 @@ SCENE(code_block) {
         "}\n",
         .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
 }
+/* ---- tool panels ---- */
+SCENE(inspector) {
+    static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 }, scale[3] = { 1, 1, 1 };
+    static float roughness = 0.42f, metallic = 0.0f, emission = 1.6f;
+    static cui_color base = { 0xC2, 0x6A, 0x3D, 255 };
+    static int shader = 0, layer = 3;
+    static bool cast = true, double_sided = false;
+    static bool t_open = true, m_open = true, s_open = false;
+    static char name[32] = "crate_large_02";
+    static const char *const shaders[] = { "Standard PBR", "Unlit", "Toon", "Glass" };
+    cui_card(ui, .width = CUI_FILL, .max_width = 460, .pad_x = 16, .pad_y = 6, .gap = 0) {
+        if (cui_inspector_begin(ui, "props")) {
+            if (cui_inspector_group(ui, "Transform", &t_open)) {
+                cui_prop_vec3(ui, "Position", pos, .step = 0.05f, .format = "%.2f");
+                cui_prop_vec3(ui, "Rotation", rot, .step = 1, .format = "%.0f");
+                cui_prop_vec3(ui, "Scale", scale, .step = 0.01f, .format = "%.2f");
+            }
+            if (cui_inspector_group(ui, "Material", &m_open)) {
+                cui_prop_text(ui, "Name", name, sizeof name);
+                cui_prop_enum(ui, "Shader", shaders, 4, &shader);
+                cui_prop_color(ui, "Base color", &base);
+                cui_prop_float(ui, "Roughness", &roughness, .min = 0, .max = 1, .step = 0.01f);
+                cui_prop_float(ui, "Metallic", &metallic, .min = 0, .max = 1, .step = 0.01f);
+                cui_prop_float(ui, "Emission", &emission, .step = 0.1f, .suffix = "nits");
+                cui_prop_bool(ui, "Double sided", &double_sided);
+            }
+            if (cui_inspector_group(ui, "Shadows", &s_open)) {
+                cui_prop_bool(ui, "Cast shadows", &cast);
+                cui_prop_int(ui, "Layer", &layer, .min = 0, .max = 31);
+            }
+            cui_inspector_end(ui);
+        }
+    }
+}
+static cui_log_line g_log_lines[512];
+static char g_log_text[32 * 1024];
+static cui_log_buffer g_log;
+static void fill_build_log(void) {
+    static const struct { cui_log_level lv; const char *text; } lines[] = {
+        { CUI_LOG_INFO, "Loading project harbor_town (412 assets)" },
+        { CUI_LOG_DEBUG, "Asset cache hit rate 91.4% (376 of 412)" },
+        { CUI_LOG_TRACE, "vfs: mounted /content/packs/base.pak (218 MB)" },
+        { CUI_LOG_INFO, "Compiling shaders: 64 variants on 8 threads" },
+        { CUI_LOG_DEBUG, "terrain_blend.frag: 3 permutations, 1.8 ms each" },
+        { CUI_LOG_WARN, "water_surface.frag:118: implicit float to half conversion" },
+        { CUI_LOG_INFO, "Shaders compiled in 2.41 s" },
+        { CUI_LOG_TRACE, "gpu: uploaded 37 textures, 148.2 MB resident" },
+        { CUI_LOG_INFO, "Baking navmesh for 3 regions" },
+        { CUI_LOG_DEBUG, "navmesh: harbor 18,204 polys, market 9,377 polys" },
+        { CUI_LOG_WARN, "Texture props/barrel_d.png is 4096x4096; streaming budget is 2048" },
+        { CUI_LOG_INFO, "Lightmaps: 12 of 12 atlases up to date" },
+        { CUI_LOG_ERROR, "Missing material 'dock_planks_wet' on mesh pier_03.obj (using fallback)" },
+        { CUI_LOG_DEBUG, "audio: 96 voices, 48 kHz, latency 10.7 ms" },
+        { CUI_LOG_INFO, "Entering play mode" },
+        { CUI_LOG_TRACE, "frame 1: 14.2 ms (update 3.1, render 9.8, present 1.3)" },
+        { CUI_LOG_INFO, "Spawned 214 entities in harbor" },
+        { CUI_LOG_WARN, "Physics step took 21.4 ms (budget 16.6 ms) after the crane collision" },
+        { CUI_LOG_DEBUG, "Streaming in market district, 31 cells" },
+        { CUI_LOG_INFO, "Autosave written to saves/slot_2.sav (1.2 MB)" },
+    };
+    cui_log_init(&g_log, g_log_lines, 512, g_log_text, sizeof g_log_text);
+    double t = 14 * 3600 + 2 * 60 + 7.120;
+    for (int k = 0; k < (int)(sizeof lines / sizeof lines[0]); k++) {
+        g_log.now = t;
+        cui_log_append(&g_log, lines[k].lv, "%s", lines[k].text);
+        t += 0.083 + (k % 5) * 0.217 + (k % 3) * 0.061;
+    }
+}
+SCENE(log_console) {
+    static bool filled = false;
+    if (!filled) { fill_build_log(); filled = true; }
+    cui_log_view(ui, "log", &g_log, .height = 352, .timestamps = true);
+}
 SCENE(json_view) {
     cui_json_view(ui, "json",
         "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
@@ -909,6 +982,95 @@ static void body_gantt(cui_ctx *ui) {
     };
     cui_date org = { 2026, 10, 26 };
     cui_gantt(ui, "plan", tasks, 6, org, 27, .day_width = 26.3f, .today = 10);   /* the range fits the frame: no date cut at the edge */
+}
+
+/* ---- node editor: a small material graph ---- */
+enum { NP_UV = 1, NP_TEX_VEC, NP_TEX_COLOR, NP_TEX_ALPHA, NP_MIX_A, NP_MIX_B, NP_MIX_FAC, NP_MIX_OUT,
+       NP_ROUGH, NP_MUL_A, NP_MUL_B, NP_MUL_OUT, NP_OUT_BASE, NP_OUT_ROUGH, NP_OUT_NORMAL };
+enum { PT_COLOR = 1, PT_FLOAT = 2, PT_VECTOR = 3 };
+typedef struct { int id, from, to; } ne_link;
+static float ne_pos[6][2] = { { 16, 40 }, { 176, 40 }, { 430, 50 }, { 780, 150 }, { 176, 300 }, { 430, 330 } };
+static ne_link ne_links[16] = { { 1, NP_UV, NP_TEX_VEC }, { 2, NP_TEX_COLOR, NP_MIX_A }, { 3, NP_MIX_OUT, NP_OUT_BASE },
+                                { 4, NP_ROUGH, NP_MUL_A }, { 5, NP_MUL_OUT, NP_OUT_ROUGH } };
+static int ne_link_n = 5, ne_next_link = 6;
+static bool ne_alive[6] = { true, true, true, true, true, true };
+static float ne_rough = 0.62f, ne_fac = 0.35f;
+static cui_node_view ne_view;
+static cui_id ne_mul_card, ne_alpha_pin, ne_fac_pin;
+static void body_node_editor(cui_ctx *ui);
+static void scene_node_editor(cui_ctx *ui, int f) {
+    if (f < 0) {   /* select Multiply, then pull a wire from the texture's alpha toward the mix factor */
+        int t = -f - 1;
+        cui_rect m = cui_get_rect(ui, ne_mul_card), a = cui_get_rect(ui, ne_alpha_pin), b = cui_get_rect(ui, ne_fac_pin);
+        float ax = a.x + a.w * 0.5f, ay = a.y + a.h * 0.5f, bx = b.x + b.w * 0.5f - 34, by = b.y + b.h * 0.5f - 8;
+        if (t == 8) cui_input_mouse_move(ui, m.x + 60, m.y + 16);
+        if (t == 9) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (t == 10) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (t == 20) cui_input_mouse_move(ui, ax, ay);
+        if (t == 21) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (t >= 22 && t <= 46) { float k = (t - 22) / 24.0f; cui_input_mouse_move(ui, ax + (bx - ax) * k, ay + (by - ay) * k); }
+        return;
+    }
+    frame_wrap(ui, body_node_editor);
+}
+static void body_node_editor(cui_ctx *ui) {
+    static const char *titles[6] = { "UV", "Brick texture", "Mix", "Material output", "Roughness", "Multiply" };
+    static const float widths[6] = { 110, 160, 150, 140, 160, 140 };
+    if (cui_node_editor_begin(ui, "material", &ne_view, .height = CUI_FILL, .minimap = true)) {
+        for (int i = 0; i < 6; i++) {
+            if (!ne_alive[i]) continue;
+            cui_node_begin(ui, i, &ne_pos[i][0], &ne_pos[i][1], titles[i], .width = widths[i]);
+            switch (i) {
+            case 0: cui_node_output(ui, NP_UV, "UV", .type = PT_VECTOR); break;
+            case 1:
+                cui_node_input(ui, NP_TEX_VEC, "Vector", .type = PT_VECTOR);
+                cui_node_output(ui, NP_TEX_COLOR, "Color", .type = PT_COLOR);
+                cui_node_output(ui, NP_TEX_ALPHA, "Alpha", .type = PT_FLOAT);
+                ne_alpha_pin = cui_last_id(ui);
+                break;
+            case 2:   /* inputs without a link show a control for their value */
+                cui_node_input(ui, NP_MIX_A, "Color A", .type = PT_COLOR);
+                if (!cui_node_input(ui, NP_MIX_B, "Color B", .type = PT_COLOR))
+                    cui_node_content(ui) {
+                        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+                            cui_box(ui, .width = CUI_PX(18), .height = CUI_PX(18), .radius = 5, .bg = CUI_RGB(0xb8683f)) {}
+                            cui_text(ui, "#B8683F", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .tabular = true);
+                        }
+                    }
+                bool linked = cui_node_input(ui, NP_MIX_FAC, "Factor", .type = PT_FLOAT);
+                ne_fac_pin = cui_last_id(ui);
+                if (!linked) cui_node_content(ui) { cui_slider(ui, "##fac", &ne_fac, 0, 1); }
+                cui_node_output(ui, NP_MIX_OUT, "Color", .type = PT_COLOR);
+                break;
+            case 3:
+                cui_node_input(ui, NP_OUT_BASE, "Base color", .type = PT_COLOR);
+                cui_node_input(ui, NP_OUT_ROUGH, "Roughness", .type = PT_FLOAT);
+                cui_node_input(ui, NP_OUT_NORMAL, "Normal", .type = PT_VECTOR);
+                break;
+            case 4:
+                cui_node_content(ui) { cui_slider(ui, "Value", &ne_rough, 0, 1, .show_value = true, .format = "%.2f"); }
+                cui_node_output(ui, NP_ROUGH, "Value", .type = PT_FLOAT);
+                break;
+            case 5:
+                ne_mul_card = cui_last_id(ui);
+                cui_node_input(ui, NP_MUL_A, "A", .type = PT_FLOAT);
+                cui_node_input(ui, NP_MUL_B, "B", .type = PT_FLOAT);
+                cui_node_output(ui, NP_MUL_OUT, "Result", .type = PT_FLOAT);
+                break;
+            }
+            cui_node_end(ui);
+        }
+        for (int k = 0; k < ne_link_n; k++) cui_node_link(ui, ne_links[k].id, ne_links[k].from, ne_links[k].to);
+        /* the graph is ours: apply what the user did */
+        int a, b, id;
+        while (cui_node_link_removed(ui, &id))
+            for (int k = 0; k < ne_link_n; k++) if (ne_links[k].id == id) { ne_links[k] = ne_links[--ne_link_n]; break; }
+        while (cui_node_link_created(ui, &a, &b))
+            if (ne_link_n < 16) ne_links[ne_link_n++] = (ne_link){ ne_next_link++, a, b };
+        while (cui_node_deleted(ui, &id))
+            if (id >= 0 && id < 6) ne_alive[id] = false;
+        cui_node_editor_end(ui);
+    }
 }
 
 /* ---- more charts ---- */
@@ -1762,6 +1924,238 @@ static void scene_accent(cui_ctx *ui, int f) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 20, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) { accent_body(ui); }
 }
 
+/* ---- app chrome: menu bar, toolbar, status bar, document tabs ---- */
+static cui_id nested_id(cui_ctx *ui, const char *scope, const char *name) {
+    cui_push_id(ui, scope);
+    cui_id id = cui_make_id(ui, name);
+    cui_pop_id(ui);
+    return id;
+}
+static void move_to(cui_ctx *ui, cui_rect r, float fx, float fy) { cui_input_mouse_move(ui, r.x + r.w * fx, r.y + r.h * fy); }
+static bool v_sidebar = true, v_minimap = false, v_wrap = true;
+static void chrome_menus(cui_ctx *ui) {
+    cui_menu_bar(ui, "menubar") {
+        cui_menu_bar_menu(ui, "File") {
+            cui_menu_item(ui, "New file", .shortcut = "Ctrl N");
+            cui_menu_item(ui, "Open\xe2\x80\xa6", .shortcut = "Ctrl O");
+            cui_menu_separator(ui);
+            cui_menu_item(ui, "Save", .shortcut = "Ctrl S");
+            cui_menu_item(ui, "Save as\xe2\x80\xa6", .shortcut = "Ctrl Shift S");
+            cui_menu_separator(ui);
+            cui_menu_item(ui, "Close window", .shortcut = "Ctrl Shift W");
+        }
+        cui_menu_bar_menu(ui, "Edit") {
+            cui_menu_item(ui, "Undo", .shortcut = "Ctrl Z");
+            cui_menu_item(ui, "Redo", .shortcut = "Ctrl Shift Z", .disabled = true);
+            cui_menu_separator(ui);
+            cui_menu_item(ui, "Cut", .shortcut = "Ctrl X");
+            cui_menu_item(ui, "Copy", .shortcut = "Ctrl C");
+            cui_menu_item(ui, "Paste", .shortcut = "Ctrl V");
+            cui_menu_separator(ui);
+            cui_menu_item(ui, "Find\xe2\x80\xa6", .shortcut = "Ctrl F");
+        }
+        cui_menu_bar_menu(ui, "View") {
+            if (cui_menu_item(ui, "Sidebar", .checked = v_sidebar)) v_sidebar = !v_sidebar;
+            if (cui_menu_item(ui, "Minimap", .checked = v_minimap)) v_minimap = !v_minimap;
+            if (cui_menu_item(ui, "Word wrap", .checked = v_wrap)) v_wrap = !v_wrap;
+            cui_menu_separator(ui);
+            cui_menu_item(ui, "Zoom in", .shortcut = "Ctrl =");
+            cui_menu_item(ui, "Zoom out", .shortcut = "Ctrl \xe2\x88\x92");
+        }
+        cui_menu_bar_menu(ui, "Go") {
+            cui_menu_item(ui, "Go to file\xe2\x80\xa6", .shortcut = "Ctrl P");
+            cui_menu_item(ui, "Go to line\xe2\x80\xa6", .shortcut = "Ctrl G");
+        }
+        cui_menu_bar_menu(ui, "Help") {
+            cui_menu_item(ui, "Keyboard shortcuts", .shortcut = "Ctrl K");
+            cui_menu_item(ui, "Release notes");
+        }
+    }
+}
+static bool t_bold = true, t_italic = false, t_under = false, t_list = true;
+static void chrome_tools(cui_ctx *ui, const char *id, bool border) {
+    cui_toolbar(ui, id, .no_border = !border) {
+        cui_toolbar_button(ui, CUI_ICON_PLUS, .tooltip = "New file", .shortcut = "Ctrl N");
+        cui_toolbar_button(ui, CUI_ICON_FOLDER_OPEN, .tooltip = "Open", .shortcut = "Ctrl O");
+        cui_toolbar_button(ui, CUI_ICON_SAVE, .tooltip = "Save", .shortcut = "Ctrl S");
+        cui_toolbar_separator(ui);
+        cui_toolbar_button(ui, CUI_ICON_UNDO_2, .tooltip = "Undo", .shortcut = "Ctrl Z");
+        cui_toolbar_button(ui, CUI_ICON_REDO_2, .tooltip = "Redo", .disabled = true);
+        cui_toolbar_separator(ui);
+        cui_toolbar_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .shortcut = "Ctrl B", .toggle = &t_bold);
+        cui_toolbar_button(ui, CUI_ICON_ITALIC, .tooltip = "Italic", .shortcut = "Ctrl I", .toggle = &t_italic);
+        cui_toolbar_button(ui, CUI_ICON_UNDERLINE, .tooltip = "Underline", .shortcut = "Ctrl U", .toggle = &t_under);
+        cui_toolbar_separator(ui);
+        cui_toolbar_button(ui, CUI_ICON_LIST, .tooltip = "Bulleted list", .toggle = &t_list);
+        cui_toolbar_button(ui, CUI_ICON_LINK, .tooltip = "Insert link", .shortcut = "Ctrl K");
+        cui_toolbar_button(ui, CUI_ICON_IMAGE, .tooltip = "Insert image");
+        cui_toolbar_spacer(ui);
+        cui_toolbar_button(ui, CUI_ICON_PLAY, .label = "Preview");
+        cui_toolbar_button(ui, CUI_ICON_SHARE_2, .label = "Share");
+    }
+}
+static void chrome_status(cui_ctx *ui) {
+    /* the bar has no fill; this box gives it one, rounded to the window */
+    cui_box(ui, .width = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .radius_bl = 13, .radius_br = 13)
+    cui_status_bar(ui, "status") {
+        cui_status_bar_item(ui, "main", .icon = CUI_ICON_GIT_BRANCH, .tooltip = "Switch branch");
+        cui_status_bar_text(ui, "Saved", .icon = CUI_ICON_CHECK, .tone = CUI_TONE_SUCCESS);
+        cui_status_bar_progress(ui, 0.62f, .label = "Indexing 62%");
+        cui_status_bar_spacer(ui);
+        cui_status_bar_item(ui, "Ln 48, Col 17###pos", .tooltip = "Go to line");
+        /* clicks change the values, as in an editor; labels that change keep a key */
+        static int spaces = 1, enc = 0, lang = 0;
+        static const int space_n[] = { 2, 4, 8 };
+        static const char *encs[] = { "UTF-8", "UTF-16" }, *langs[] = { "Markdown", "C", "Plain text" };
+        char lbl[48];
+        snprintf(lbl, sizeof lbl, "Spaces: %d###spaces", space_n[spaces]);
+        if (cui_status_bar_item(ui, lbl)) spaces = (spaces + 1) % 3;
+        snprintf(lbl, sizeof lbl, "%s###enc", encs[enc]);
+        if (cui_status_bar_item(ui, lbl)) enc ^= 1;
+        snprintf(lbl, sizeof lbl, "%s###lang", langs[lang]);
+        if (cui_status_bar_item(ui, lbl)) lang = (lang + 1) % 3;
+        cui_status_bar_item(ui, NULL, .icon = CUI_ICON_BELL, .tooltip = "Notifications");
+    }
+}
+static int i_doc = 1;
+static const cui_doc_tab doc_tabs[] = {
+    { "README.md", CUI_ICON_FILE_TEXT, "docs/README.md", false },
+    { "tile_cache.c", CUI_ICON_CODE, "src/tile_cache.c", true },
+    { "tile_cache.h", CUI_ICON_CODE, "src/tile_cache.h", false },
+    { "CHANGELOG.md", CUI_ICON_FILE_TEXT, "CHANGELOG.md", true },
+    { "render_sw.c", CUI_ICON_CODE, "src/render/render_sw.c", false },
+    { "atlas.c", CUI_ICON_CODE, "src/atlas.c", false },
+};
+/* The live pages keep what you do: the tabs below are copies that the
+ * scenes reorder and close as the component reports it. */
+static void doc_tabs_apply(cui_doc_tab *t, int *n, int *active, cui_doc_tabs_result r) {
+    if (r.move_from >= 0 && r.move_to >= 0 && r.move_from != r.move_to && r.move_from < *n && r.move_to < *n) {
+        cui_doc_tab m = t[r.move_from];
+        if (r.move_from < r.move_to) memmove(t + r.move_from, t + r.move_from + 1, (size_t)(r.move_to - r.move_from) * sizeof *t);
+        else memmove(t + r.move_to + 1, t + r.move_to, (size_t)(r.move_from - r.move_to) * sizeof *t);
+        t[r.move_to] = m;
+    }
+    if (r.close >= 0 && r.close < *n && *n > 1) {
+        memmove(t + r.close, t + r.close + 1, (size_t)(*n - r.close - 1) * sizeof *t);
+        (*n)--;
+        if (*active > r.close || *active >= *n) (*active)--;
+        if (*active < 0) *active = 0;
+    }
+}
+static cui_doc_tab docs_live[6], files_live[4];
+static int docs_n = -1, files_n = -1;
+static void chrome_editor(cui_ctx *ui, int lines) {
+    static const char *code[] = {
+        "static tile *cache_lookup(tile_cache *c, uint32_t key) {",
+        "    uint32_t slot = key & (c->capacity - 1);",
+        "    while (c->tiles[slot].key != key) {",
+        "        if (!c->tiles[slot].used) return NULL;",
+        "        slot = (slot + 1) & (c->capacity - 1);",
+        "    }",
+        "    return &c->tiles[slot];",
+        "}",
+    };
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .pad_x = 16, .pad_y = 14, .gap = 3, .clip = true) {
+        for (int i = 0; i < lines && i < 8; i++) {
+            static const char *nums[] = { "41", "42", "43", "44", "45", "46", "47", "48" };
+            cui_row(ui, .gap = 18) {
+                cui_text(ui, nums[i], .font = CUI_FONT_MONO, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(18), .align = CUI_TEXT_RIGHT, .nowrap = true);
+                cui_text(ui, code[i], .font = CUI_FONT_MONO, .size = 12, .nowrap = true);
+            }
+        }
+    }
+}
+#define WINDOW(ui) cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_SURFACE, .border = 1, .radius = 14, .clip = true)
+/* the bars have no fill: the window's chrome gets one, rounded to the window's inner corners */
+#define CHROME_TOP(ui) cui_column(ui, .width = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .radius_tl = 13, .radius_tr = 13)
+static void body_menu_bar(cui_ctx *ui) {
+    WINDOW(ui) {
+        CHROME_TOP(ui) { chrome_menus(ui); }
+        chrome_editor(ui, 8);
+    }
+}
+static void scene_menu_bar(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        cui_rect edit = cui_get_rect(ui, nested_id(ui, "menubar", "Edit")), view = cui_get_rect(ui, nested_id(ui, "menubar", "View"));
+        if (f == 3) move_to(ui, edit, 0.5f, 0.5f);
+        if (f == 4) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (f == 5) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (f == 14) move_to(ui, view, 0.5f, 0.5f);   /* hovering another menu switches to it */
+        if (f == 24) cui_input_mouse_move(ui, view.x + 60, view.y + view.h + 6 + 6 + 32 * 2.5f);
+        return;
+    }
+    frame_wrap(ui, body_menu_bar);
+}
+static void body_toolbar(cui_ctx *ui) {
+    cui_column(ui, .gap = 18, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_box(ui, .width = CUI_FILL, .border = 1, .radius = 14, .clip = true, .bg = CUI_COLOR_SURFACE) { chrome_tools(ui, "wide", false); }
+        cui_box(ui, .width = CUI_FILL, .max_width = 300, .border = 1, .radius = 14, .clip = true, .bg = CUI_COLOR_SURFACE) { chrome_tools(ui, "narrow", false); }
+    }
+}
+static void scene_toolbar(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        /* the narrow toolbar's overflow menu, open */
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "narrow"));
+        if (f == 6) cui_input_mouse_move(ui, r.x + r.w - 6 - 15, r.y + r.h * 0.5f);
+        if (f == 7) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (f == 8) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (f == 16) cui_input_mouse_move(ui, r.x + r.w - 90, r.y + r.h + 6 + 6 + 32 * 2.5f + 9);
+        return;
+    }
+    frame_wrap(ui, body_toolbar);
+}
+static void body_status_bar(cui_ctx *ui) {
+    cui_column(ui, .width = CUI_FILL, .border = 1, .radius = 14, .clip = true, .bg = CUI_COLOR_SURFACE) {
+        chrome_editor(ui, 2);
+        chrome_status(ui);
+    }
+}
+static void scene_status_bar(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        if (f == 10) { cui_rect r = cui_get_rect(ui, nested_id(ui, "status", "###enc")); move_to(ui, r, 0.5f, 0.5f); }
+        return;
+    }
+    frame_wrap(ui, body_status_bar);
+}
+static void body_document_tabs(cui_ctx *ui) {
+    WINDOW(ui) {
+        CHROME_TOP(ui) {
+            if (docs_n < 0) { memcpy(docs_live, doc_tabs, sizeof docs_live); docs_n = 6; }
+            cui_doc_tabs_result r = cui_doc_tabs(ui, "docs", docs_live, docs_n, &i_doc, .shortcuts = true);
+            doc_tabs_apply(docs_live, &docs_n, &i_doc, r);
+        }
+        chrome_editor(ui, 5);
+    }
+}
+static void scene_document_tabs(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        if (f == 50) { cui_rect r = cui_get_rect(ui, nested_id(ui, "docs", "CHANGELOG.md")); move_to(ui, r, 0.55f, 0.5f); }
+        return;
+    }
+    frame_wrap(ui, body_document_tabs);
+}
+static int i_doc2 = 1;
+static void body_app_chrome(cui_ctx *ui) {
+    WINDOW(ui) {
+        CHROME_TOP(ui) {
+            chrome_menus(ui);
+            chrome_tools(ui, "tools", true);
+            if (files_n < 0) { memcpy(files_live, doc_tabs, sizeof files_live); files_n = 4; }
+            doc_tabs_apply(files_live, &files_n, &i_doc2, cui_doc_tabs(ui, "files", files_live, files_n, &i_doc2));
+        }
+        chrome_editor(ui, 8);
+        chrome_status(ui);
+    }
+}
+static void scene_app_chrome(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    frame_wrap(ui, body_app_chrome);
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -1882,11 +2276,12 @@ int main(int argc, char **argv) {
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
-        { "json-view", scene_json_view, 560, 330, true }, { "chat", scene_chat, 560, 440, true },
+        { "json-view", scene_json_view, 560, 330, true },
+        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "chat", scene_chat, 560, 440, true },
         { "comments", scene_comments, 600, 370, true }, { "presence-ticker", scene_presence_ticker, 640, 170, true },
         { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },
         { "kanban", scene_kanban, 920, 480, true }, { "week-calendar", scene_week_calendar, 960, 520, true },
-        { "gantt", scene_gantt, 1000, 360, true },
+        { "gantt", scene_gantt, 1000, 360, true }, { "node-editor", scene_node_editor, 1000, 540, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
         { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
@@ -1897,6 +2292,9 @@ int main(int argc, char **argv) {
         { "reasoning-tools", scene_reasoning_tools, 680, 640, true }, { "agent-plan", scene_agent_plan, 820, 340, true },
         { "sources", scene_sources, 680, 380, true }, { "composer", scene_composer, 640, 190, true }, { "model-picker", scene_model_picker, 380, 300, true },
         { "voice-orb", scene_voice_orb, 760, 230, true }, { "suggestions", scene_suggestions, 640, 260, true },
+        { "app-chrome", scene_app_chrome, 900, 440, true }, { "menu-bar", scene_menu_bar, 640, 360, true },
+        { "toolbar", scene_toolbar, 640, 370, true }, { "status-bar", scene_status_bar, 820, 160, true },
+        { "document-tabs", scene_document_tabs, 720, 230, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     if (argc <= 2 || strcmp(argv[2], "button-states") == 0) { render_states(dir, false, sw); render_states(dir, true, sw); }
