@@ -131,12 +131,8 @@ body.scrolled .topbar { box-shadow: 0 1px 0 var(--border-subtle); }
 .read-progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--fg); transform: scaleX(0); transform-origin: 0 50%; opacity: 0; transition: opacity var(--t-state); pointer-events: none; }
 body.guide-mode .read-progress { opacity: 0.85; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; margin-right: 14px; }
-.brand-mark {
-  width: 26px; height: 26px; border-radius: 8px;
-  background: var(--fg); color: var(--bg);
-  display: grid; place-items: center;
-  font: 500 15px/1 var(--font-display);
-}
+/* the raster C: inline SVG in currentColor, so it follows the site's own theme toggle */
+.brand-mark { display: block; flex: none; width: 26px; height: 26px; color: var(--fg); }
 .brand-name { font-weight: 500; font-size: 15px; }
 .topnav { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .topnav::-webkit-scrollbar { display: none; }
