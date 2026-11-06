@@ -43,7 +43,7 @@ typedef struct {
 static int cui__edit_mask(char *out, int cap, int len_cp) {
     /* bullet per code point */
     int n = 0;
-    for (int i = 0; i < len_cp && n + 3 < cap; i++) { out[n++] = (char)0xE2; out[n++] = (char)0x80; out[n++] = (char)0xA2; }
+    for (int i = 0; i < len_cp && n + 3 < cap; i++) { memcpy(out + n, "\xE2\x80\xA2", 3); n += 3; }
     out[n] = 0;
     return n;
 }
@@ -67,6 +67,8 @@ static float cui__x_at(cui_ctx *ui, const cui__edit_paint *p, const char *line, 
 }
 
 static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;
     cui__edit_paint *p = data;
     cui_rect r = n->rect;
     cui_push_clip(ui, r);
@@ -136,6 +138,7 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
         }
     }
     cui_pop_clip(ui);
+    ui->text_unshaped = unshaped;
 }
 
 /* ---- editing primitives ---- */
@@ -518,6 +521,8 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     if (!buf || cap == 0) return 0;
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;
     bool disabled = o->disabled || cui_is_disabled(ui);
     cui_edit_state *e = cui_state(ui, id, sizeof *e);
     if (!e->init) {
@@ -705,6 +710,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         cui__close(ui);
     }
     ui->last_id = id;
+    ui->text_unshaped = unshaped;
     return flags;
 }
 

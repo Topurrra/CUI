@@ -128,3 +128,117 @@ Going smaller:
 | `-DCUI_DEFAULT_FONTS=OFF` (load your own fonts with `cui_font_load_file`) | 95 KB plus the decoder |
 | `-DCUI_STB_IMAGE=OFF` (upload pixels yourself with `cui_image_create`) | about 24 KB |
 | `-DCUI_WITH_APP=OFF` (core only, for use inside your engine) | the window layer and dialogs |
+
+## Optional Arabic-script text shaping
+
+Configure with `-DCUI_TEXT_SHAPING=ON` to enable experimental static
+Arabic-script shaping and Unicode bidi. It is off by default. The draw and measure
+paths share the shaped advances; labels, headings, buttons and `cui_text` need no
+API changes. Load a trusted Arabic-script font, such as Vazirmatn, and assign it to
+a font role or add it as a fallback. The embedded Latin fonts do not cover Persian.
+
+Each paragraph takes its bidi base from its first strong character, defaulting
+to LTR for neutral-only text. This switch does not change container direction.
+CUI resolves the Unicode embedding levels and visual run order. CUI's internal
+`cui_shape.c` reads OpenType substitutions and positioning directly from the loaded
+font bytes, including lam-alef, ZWNJ and ZWJ. It needs no additional library. Only
+strings containing RTL characters or bidi/join controls enter this path. Latin-only
+strings keep the original iterator, rasterization and optical tracking. Shaped
+strings use the font's natural advances without optical tracking, which would
+otherwise pull cursive joins apart.
+
+Text fields keep their existing drawing, cursor and selection behavior. This option
+does not add RTL editing or IME. Shaped paragraphs wrap greedily
+at spaces using complete shaped candidate-line advances. They retain their
+paragraph levels and use UAX #9 line ordering for each resulting line. The Latin
+path retains its existing heading balancing and orphan adjustment. An overlong
+shaped word stays whole, like the browser's default overflow behavior. RTL ellipsis
+truncation remains experimental.
+
+The C99 bidi implementation has no runtime dependency or allocator. It implements
+P2/P3, W1-W7, N0-N2 (including bracket pairing), I1/I2, L1/L2 and L4 character
+mirroring from UAX #9. Explicit embeddings, overrides and isolates are unsupported
+and treated as boundary neutrals. CUI substitutes mirrored characters before shaping.
+The internal `cui_bidi.h` separates paragraph resolution from line ordering: resolve
+the paragraph once, then order each line range without changing paragraph levels.
+The wrapper resolves each paragraph once and reuses those levels for every line.
+A context retains up to 64 paragraphs in least-recently-used order and up to 128
+shaped line ranges per paragraph. Cached glyph positions are shared by measurement
+and drawing; loading fonts or changing font roles/fallbacks invalidates them. Atlas
+resets and viewport scale changes keep glyph positions in logical units valid.
+Each retained text also keeps its completed wrapping result for the most recent
+font, size and width, so repeated frames skip candidate-line measurements.
+Multiline measurement returns the widest newline-separated paragraph.
+
+Unicode 17.0.0 tables are checked in. To regenerate, download
+`extracted/DerivedBidiClass.txt`, `BidiBrackets.txt` and `BidiMirroring.txt` from
+`https://www.unicode.org/Public/17.0.0/ucd/` into a scratch UCD directory, then run
+`python tools/gen_bidi.py UCD_DIRECTORY src/cui_bidi_data.h`.
+The data files are not bundled. `cui_bidi_conformance BidiCharacterTest.txt` runs
+the separately downloaded Unicode 17 character tests, excluding cases containing
+explicit embeddings, overrides or isolates; levels and visual order must both match.
+`cui_test_bidi` checks paragraph context across line ranges, L1/L2 and mirroring.
+
+The internal shaper and bidi sources compile only with this option. Shaping buffers
+use the CUI allocator. Font loading requires trusted fonts because stb_truetype
+does not validate untrusted downloaded font data. Script segmentation covers
+Arabic, Hebrew and Latin; other script tags currently fall back to Latin.
+
+The internal shaper implements Arabic joining, canonical Arabic composition and
+mark ordering, GSUB single/multiple/alternate/ligature/context/chained-context/
+extension lookups, and GPOS single/pair/mark-to-base/mark-to-ligature/mark-to-mark/
+context/chained-context/extension lookups. It uses the font's default language
+system. It does not implement variable-font positioning, device corrections,
+cursive attachment, reverse-chained substitutions or Arabic presentation-form
+fallback for fonts without OpenType Arabic features. Context and ligature rules
+are limited to 256 input glyphs. This remains an experimental subset of OpenType,
+not a claim of general HarfBuzz equivalence.
+
+Regenerate the Unicode 17.0.0 tables with `python tools/generate_joining.py`.
+The script downloads Unicode data for generation; the data files are not vendored.
+For the test-only HarfBuzz oracle, install `uharfbuzz` in an isolated Python
+environment, build `cui_shape_dump`, then run:
+
+```sh
+python tools/compare_shape.py build/tests/Release/cui_shape_dump.exe path/to/Vazirmatn-Regular.ttf path/to/tahoma.ttf --output shape-results.json
+python tools/check_shape_size.py build-off/examples/Release/hello.exe build-on/examples/Release/hello.exe
+python tools/test_shape_size.py
+```
+
+MSVC x64 Release `hello.exe` must stay within 46,080 bytes of the fixed upstream
+OFF reference (282,112 bytes), so ON must not exceed 328,192 bytes. The size
+command prints both actual sizes and exits unsuccessfully above this ceiling.
+The fixed upstream reference is never replaced by the current OFF size.
+
+The 220-line Persian corpus matches HarfBuzz 15.0.0 glyph IDs, advances and offsets
+with Vazirmatn Regular and Windows Tahoma. With the additional 441 mark-pair cases
+(`--marks`), all 661 glyph sequences match for both fonts. Tahoma positions match
+on all 661; six Vazirmatn cases differ by one font unit in one mark's horizontal
+offset. Exact positioning equivalence is therefore not yet achieved.
+
+With tests enabled, `cui_rtl` is a headless visual probe. Pass an external trusted
+Vazirmatn-Regular.ttf and output PNG path. It checks lam-alef advance reduction,
+ZWNJ's effect, fallback measurement and the Persian glyphs in a mixed-script
+label. It renders Persian, mixed text, digits, punctuation and a wrapped paragraph:
+
+```sh
+cmake -S . -B build -DCUI_TEXT_SHAPING=ON
+cmake --build build --config Release
+build/tests/Release/cui_rtl path/to/Vazirmatn-Regular.ttf rtl.png
+```
+
+The font is not bundled. The ordinary CTest suite needs no external font.
+
+`cui_rtl_paragraph FONT.ttf OUT_PREFIX` checks shaped wrapping and captures the
+mixed Persian paragraph at 240, 360 and 600 px. Append `bench` for 200 measured
+build/layout/draw-list frames after 30 warm-up frames, excluding rasterization.
+It also benchmarks two copies joined into one 156-word Persian paragraph.
+It fails if either Persian average exceeds 0.25 ms. This measures cached steady-state
+frames, not cold-frame latency. Add any fourth argument to `cui_rtl` for dark images.
+
+The following fixture is rendered by `cui_rtl` with shaping OFF and ON:
+
+| | Before | After |
+|---|---|---|
+| Light | ![Unshaped Persian](images/rtl/text-before-light.png) | ![Shaped Persian](images/rtl/text-after-light.png) |
+| Dark | ![Unshaped Persian](images/rtl/text-before-dark.png) | ![Shaped Persian](images/rtl/text-after-dark.png) |

@@ -748,7 +748,7 @@ void cui_log_view_ex(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const
     cui_log_view_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
-    static const cui_log_buffer empty_buf;   /* stands in for a NULL buffer: never written */
+    static const cui_log_buffer empty_buf = {0};   /* stands in for a NULL buffer: never written */
     const cui_log_buffer *b = buf ? buf : &empty_buf;
     cui_id id = cui_make_id(ui, id_str);
     cui_id lid = id ^ 0x11575u, sid = id ^ 0x5C2011u;

@@ -348,6 +348,9 @@ CUI_API void cui_font_set_role(cui_ctx *ui, cui_font role, cui_font font);
 CUI_API void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback);
 
 typedef struct cui_text_metrics { float width, height, ascent, descent, line_height; } cui_text_metrics;
+/* CUI_TEXT_SHAPING optionally shapes static Arabic-script text and resolves
+ * bidi paragraphs from their first strong character. Editing, explicit bidi
+ * formatting and general OpenType equivalence are unsupported; see docs/integration.md. */
 CUI_API cui_text_metrics cui_measure_text(cui_ctx *ui, cui_font font, float size, const char *text, int len);
 
 /* ------------------------------------------------------------------------ */

@@ -122,6 +122,9 @@ typedef struct cui_font_data cui_font_data;
 
 typedef struct cui_text_layout_line { int start, end; float width; } cui_text_layout_line;
 
+#ifdef CUI_TEXT_SHAPING
+bool cui__text_needs_shaping(cui_ctx *ui, const char *text, int len);
+#endif
 /* Glyph metrics for layout, in points. */
 float cui__font_line_height(cui_ctx *ui, cui_font font, float size);
 float cui__font_ascent(cui_ctx *ui, cui_font font, float size);
@@ -467,6 +470,13 @@ struct cui_ctx {
     cui_theme from_theme;
 
     /* fonts */
+#ifdef CUI_TEXT_SHAPING
+    struct cui_shaped_paragraph *shape_cache;
+    int shape_cache_count;
+    const char *text_paragraph;
+    int text_paragraph_len;
+#endif
+    bool text_unshaped;             /* editing keeps logical glyph positions */
     cui_font_data *fonts; int font_count, font_cap;
     cui_font roles[5];
     cui_glyph *glyphs; int glyph_count, glyph_cap;

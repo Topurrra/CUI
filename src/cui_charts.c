@@ -186,9 +186,9 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
         static const float m[] = { 1, 2, 2.5f, 5 };
         for (int e = 0; e < 3; e++, mag *= 10)
             for (int j = 0; j < 4; j++) {
-                float st = m[j] * mag, n = range / st;
-                if (n < 2.5f || n > 6.5f || fabsf(n - roundf(n)) > 1e-3f) continue;
-                if (fabsf(n - 4) < best_d) { best_d = fabsf(n - 4); best = st; }
+                float st = m[j] * mag, intervals = range / st;
+                if (intervals < 2.5f || intervals > 6.5f || fabsf(intervals - roundf(intervals)) > 1e-3f) continue;
+                if (fabsf(intervals - 4) < best_d) { best_d = fabsf(intervals - 4); best = st; }
             }
         if (best > 0) step = best;
         else cui__nice_range(lo, hi, 4, &lo, &hi, &step);
