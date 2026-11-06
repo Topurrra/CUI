@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/site/img/cui-mark-dark.svg">
+  <img src="web/site/img/cui-mark-light.svg" width="64" height="64" alt="">
+</picture>
+
 # CUI
 
 **Native UI components for C.**
@@ -7,10 +12,10 @@
 About 150 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 
-[![CI](https://github.com/yappologistic/CUI/actions/workflows/ci.yml/badge.svg)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![C99](https://img.shields.io/badge/C-99-informational.svg)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey.svg)
+[![CI](https://img.shields.io/github/actions/workflow/status/yappologistic/CUI/ci.yml?branch=master&label=CI&style=flat-square&labelColor=24292f)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-57606a.svg?style=flat-square&labelColor=24292f&color=57606a)](LICENSE)
+![C99](https://img.shields.io/badge/C-99-57606a.svg?style=flat-square&labelColor=24292f&color=57606a)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-57606a.svg?style=flat-square&labelColor=24292f&color=57606a)
 
 [Getting started](docs/getting-started.md) ·
 [Components](docs/components.md) ·
@@ -30,10 +35,6 @@ Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 </div>
 
 ## Your interface is plain C
-
-<table>
-<tr>
-<td width="58%" valign="top">
 
 ```c
 #include <cui/cui.h>
@@ -65,10 +66,10 @@ int main(void) {
 }
 ```
 
-</td>
-<td width="42%" valign="top">
-
-<img src="docs/images/showcase/hello-dark.png" alt="The hello example: a heading, a line of text, a switch and a button">
+<table>
+<tr>
+<td width="40%" valign="middle"><img src="docs/images/showcase/hello-dark.png" alt="The hello example: a heading, a line of text, a switch and a button"></td>
+<td valign="middle">
 
 **Components are functions.** They draw themselves, handle input and return what happened.
 
@@ -113,7 +114,7 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 
 ## Components
 
-| | |
+| Group | Components |
 |---|---|
 | **Actions** | button, icon button, button group, split button, toggle group, copy button, hold to confirm, segmented control, menus, command palette |
 | **Inputs** | text field, password, search, text area, number, money and scrub fields, tag input, one time code, select, combobox, multi-select, shortcut recorder |
@@ -224,7 +225,7 @@ Complete apps in [`examples/`](examples), each a single C file.
 <summary><b>All examples</b></summary>
 <br>
 
-| Example | |
+| Example | What it shows |
 |---|---|
 | [`assistant`](examples/assistant.c) | AI assistant: reasoning, tool calls, sources, plan, composer with a model picker |
 | [`tracker`](examples/tracker.c) | Issue tracker: grouped list, custom status glyphs, detail pane, activity |
@@ -266,7 +267,7 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 
 ## Size and speed
 
-| | |
+| Measure | Result |
 |---|---|
 | `hello` on Linux, stripped, whole executable | about 240 KB |
 | `assistant` (the AI app above), whole executable | about 330 KB |
@@ -300,7 +301,7 @@ CUI 1.0 is complete enough to build real desktop apps. Every push runs unit, int
 
 ## Documentation
 
-| | |
+| Guide | What it covers |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, build, the frame loop, your first screens |
 | [Layout](docs/layout.md) | Rows, columns, sizes, alignment, grids, scrolling, split views |
