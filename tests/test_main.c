@@ -160,6 +160,111 @@ static void test_layout_grid(void) {
     cui_destroy(ui);
 }
 
+typedef struct { cui_id row, items[4], a, b; float width; } flow_ctx;
+static void build_flow(cui_ctx *ui, void *u) {
+    flow_ctx *f = u;
+    f->row = cui_box_begin(ui, &(cui_box){ .id = "flow", .dir = CUI_ROW, .wrap = true, .gap = 10, .width = CUI_PX(f->width), .align = CUI_ALIGN_START });
+    for (int i = 0; i < 4; i++) {
+        char id[8];
+        snprintf(id, sizeof id, "w%d", i);
+        f->items[i] = cui_box_begin(ui, &(cui_box){ .id = id, .width = CUI_PX(100), .height = CUI_PX(20 + i * 5) });
+        cui_box_end(ui);
+    }
+    cui_box_end(ui);
+    /* growing panels with a minimum: side by side, or stacked when there is no room */
+    cui_box_begin(ui, &(cui_box){ .dir = CUI_ROW, .wrap = true, .gap = 10, .width = CUI_PX(f->width) });
+    f->a = cui_box_begin(ui, &(cui_box){ .id = "pa", .width = CUI_GROW(2), .min_width = 200, .height = CUI_PX(30) }); cui_box_end(ui);
+    f->b = cui_box_begin(ui, &(cui_box){ .id = "pb", .width = CUI_GROW(1), .min_width = 150, .height = CUI_PX(30) }); cui_box_end(ui);
+    cui_box_end(ui);
+}
+
+static void test_layout_flow(void) {
+    printf("layout: wrapping rows\n");
+    cui_ctx *ui = new_ctx();
+    flow_ctx f = { .width = 500 };
+    run(ui, build_flow, &f, 2);
+    CHECK_NEAR(rect_of(ui, f.items[3]).x, 330, 0.01);        /* one line, like a plain row */
+    CHECK_NEAR(rect_of(ui, f.items[3]).y, rect_of(ui, f.items[0]).y, 0.01);
+    CHECK_NEAR(rect_of(ui, f.row).h, 35, 0.01);
+    CHECK_NEAR(rect_of(ui, f.a).w, 2 * (500 - 10) / 3.0, 0.05);
+    CHECK_NEAR(rect_of(ui, f.b).y, rect_of(ui, f.a).y, 0.01);
+    f.width = 230;                                           /* two per line */
+    run(ui, build_flow, &f, 2);
+    cui_rect r = rect_of(ui, f.row);
+    CHECK_NEAR(rect_of(ui, f.items[1]).x, r.x + 110, 0.01);
+    CHECK_NEAR(rect_of(ui, f.items[2]).x, r.x, 0.01);
+    CHECK_NEAR(rect_of(ui, f.items[2]).y, r.y + 25 + 10, 0.01);   /* first line as tall as its tallest */
+    CHECK_NEAR(r.h, 25 + 10 + 35, 0.01);
+    CHECK_NEAR(rect_of(ui, f.a).w, 230, 0.01);               /* stacked, each fills the line */
+    CHECK_NEAR(rect_of(ui, f.b).w, 230, 0.01);
+    CHECK_NEAR(rect_of(ui, f.b).y, rect_of(ui, f.a).y + 40, 0.01);
+    cui_destroy(ui);
+}
+
+typedef struct { cui_id grid, cells[5], field; float width; } autogrid_ctx;
+static void build_autogrid(cui_ctx *ui, void *u) {
+    autogrid_ctx *g = u;
+    cui_column(ui, .width = CUI_PX(g->width), .align = CUI_ALIGN_START) {
+        g->grid = cui_box_begin(ui, &(cui_box){ .id = "ag", .dir = CUI_GRID, .columns = 4, .min_column_width = 100, .gap = 10, .width = CUI_FILL });
+        for (int i = 0; i < 5; i++) {
+            char id[8];
+            snprintf(id, sizeof id, "g%d", i);
+            g->cells[i] = cui_box_begin(ui, &(cui_box){ .id = id, .height = CUI_PX(20) });
+            cui_box_end(ui);
+        }
+        cui_box_end(ui);
+        static int sel = 0;
+        static const char *items[] = { "One", "Two" };
+        cui_select(ui, "soft", items, 2, &sel);
+        g->field = cui_last_id(ui);
+    }
+}
+
+static void test_layout_autogrid(void) {
+    printf("layout: grid columns from a minimum width, soft default widths\n");
+    cui_ctx *ui = new_ctx();
+    autogrid_ctx g = { .width = 600 };
+    run(ui, build_autogrid, &g, 2);
+    CHECK_NEAR(rect_of(ui, g.cells[0]).w, (600 - 30) / 4.0, 0.05);   /* capped at columns = 4 */
+    CHECK_NEAR(rect_of(ui, g.cells[4]).y, rect_of(ui, g.cells[0]).y + 30, 0.01);
+    CHECK_NEAR(rect_of(ui, g.field).w, 220, 0.01);                   /* the select's default width */
+    g.width = 230;
+    run(ui, build_autogrid, &g, 2);
+    CHECK_NEAR(rect_of(ui, g.cells[0]).w, 110, 0.01);                 /* two columns fit */
+    CHECK_NEAR(rect_of(ui, g.cells[2]).x, rect_of(ui, g.cells[0]).x, 0.01);
+    CHECK_NEAR(rect_of(ui, g.grid).h, 3 * 20 + 2 * 10, 0.01);
+    CHECK(rect_of(ui, g.field).w <= 230.01f);                        /* shrinks into the column */
+    g.width = 90;
+    run(ui, build_autogrid, &g, 2);
+    CHECK_NEAR(rect_of(ui, g.cells[1]).w, 90, 0.01);                  /* never fewer than one column */
+    cui_destroy(ui);
+}
+
+typedef struct { cui_id table; float width; } wtable_ctx;
+static void build_wtable(cui_ctx *ui, void *u) {
+    wtable_ctx *t = u;
+    cui_table_column cols[] = { { "Name", CUI_FILL, CUI_TEXT_LEFT, false }, { "Role", CUI_PX(120), CUI_TEXT_LEFT, false },
+                                { "Amount", CUI_PX(120), CUI_TEXT_RIGHT, false } };
+    cui_column(ui, .width = CUI_PX(t->width)) {
+        cui_table(ui, "wt", cols, 3) {
+            for (int i = 0; i < 3; i++) { cui_table_row(ui, false); cui_table_cell_text(ui, "Jonas Berg"); cui_table_cell_text(ui, "Owner"); cui_table_cell_text(ui, "$12"); }
+        }
+        t->table = cui_make_id(ui, "wt");
+    }
+}
+
+static void test_layout_narrow_table(void) {
+    printf("layout: a narrow table scrolls sideways\n");
+    cui_ctx *ui = new_ctx();
+    wtable_ctx t = { 0, 600 };
+    run(ui, build_wtable, &t, 2);
+    CHECK_NEAR(rect_of(ui, t.table).w, 600, 0.01);
+    t.width = 200;
+    run(ui, build_wtable, &t, 2);
+    CHECK_NEAR(rect_of(ui, t.table).w, 200, 0.01);                   /* stays inside its column */
+    cui_destroy(ui);
+}
+
 /* interaction ---------------------------------------------------------- */
 
 typedef struct { int clicks; cui_id id; bool check; bool sw; float slider; } basic_ctx;
@@ -2149,6 +2254,9 @@ int main(void) {
     test_layout_wrap();
     test_layout_center();
     test_layout_grid();
+    test_layout_flow();
+    test_layout_autogrid();
+    test_layout_narrow_table();
     test_button_click();
     test_keyboard_nav();
     test_toggles_and_slider();

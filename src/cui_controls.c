@@ -653,17 +653,39 @@ bool cui_tabs_ex(cui_ctx *ui, const char *id, const char *const *items, int coun
     cui_tabs_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
-    if (o->variant == CUI_TABS_PILL) return cui__segments(ui, id, items, o->icons, count, index, 2, CUI_SIZE_MD, o->full_width);
-    int col = cui__node_new(ui, 0);
-    ui->nodes[col].w = CUI_FILL;
-    ui->nodes[col].self_align = CUI_ALIGN_STRETCH;
-    cui_color *bc = cui__frame_alloc(ui, sizeof *bc);
-    *bc = CUI_C(ui, BORDER);
-    ui->nodes[col].paint = cui__paint_tab_baseline;
-    ui->nodes[col].paint_data = bc;
-    cui__open(ui, col);
-    bool r = cui__segments(ui, id, items, o->icons, count, index, 1, CUI_SIZE_MD, o->full_width);
-    cui__close(ui);
+    bool pill = o->variant == CUI_TABS_PILL;
+    if (pill && o->full_width) return cui__segments(ui, id, items, o->icons, count, index, 2, CUI_SIZE_MD, true);
+    /* Tabs never truncate: when they are wider than their container the
+     * strip scrolls sideways, fades at the edge with more, and brings a newly
+     * selected tab into view. */
+    cui_id sid = cui_make_id(ui, id) ^ 0x7AB5u;
+    cui_scroll_state *ss = cui_state(ui, sid, sizeof *ss);
+    int *last = cui_state(ui, sid ^ 0x1u, sizeof(int));   /* last index + 1, so 0 means unset */
+    if (*index >= 0 && *index < count && last[0] != *index + 1 && ss->content_w > ss->view_w + 0.5f) {
+        cui_rect vr = cui__prev_rect(ui, sid), tr = cui__prev_rect(ui, cui__hash(index, sizeof *index, cui_make_id(ui, id)));
+        if (vr.w > 0 && tr.w > 0) {
+            float margin = 24;
+            if (tr.x < vr.x) ss->tx -= vr.x - tr.x + margin;
+            else if (tr.x + tr.w > vr.x + vr.w) ss->tx += tr.x + tr.w - (vr.x + vr.w) + margin;
+        }
+    }
+    if (*index >= 0) last[0] = *index + 1;
+    cui_box sb;
+    memset(&sb, 0, sizeof sb);
+    sb.width = CUI_FILL;
+    int col = cui__scroll_begin_ex(ui, sid, &sb, true);
+    ui->nodes[col].flags &= ~(uint32_t)CUI_NF_SCROLL_Y;
+    ui->nodes[col].self_align = pill ? CUI__ALIGN_NOSTRETCH : CUI_ALIGN_STRETCH;
+    if (pill) ui->nodes[col].w = CUI_FIT;
+    ss->fade = cui__backdrop(ui);
+    if (!pill) {
+        cui_color *bc = cui__frame_alloc(ui, sizeof *bc);
+        *bc = CUI_C(ui, BORDER);
+        ui->nodes[col].paint = cui__paint_tab_baseline;
+        ui->nodes[col].paint_data = bc;
+    }
+    bool r = cui__segments(ui, id, items, o->icons, count, index, pill ? 2 : 1, CUI_SIZE_MD, o->full_width);
+    cui__scroll_end_ex(ui);
     return r;
 }
 

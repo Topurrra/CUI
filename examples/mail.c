@@ -1,5 +1,6 @@
 /* Mail: a three pane inbox with folders, search, a reading pane and a
- * compose dialog. */
+ * compose dialog. Narrower windows drop to two panes with the folders in a
+ * drawer, and a phone shows one pane at a time. */
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 
@@ -37,6 +38,9 @@ typedef struct {
     bool compose;
     char to[96], subject[128], body[1024];
     bool dark;
+    int panes;       /* 3, 2 or 1, from the window width */
+    bool reading;    /* one pane: the message is open */
+    bool drawer;     /* folders in a drawer below three panes */
 } mail_app;
 
 static bool match(const message *m, const char *q) {
@@ -54,10 +58,10 @@ static bool in_folder(const message *m, int folder) {
     return m->folder == folder;
 }
 
-static void folders(cui_ctx *ui, mail_app *a) {
+static void folders(cui_ctx *ui, mail_app *a, bool drawer) {
     static const char *names[] = { "Inbox", "Starred", "Sent", "Archive" };
     static const char *icons[] = { CUI_ICON_INBOX, CUI_ICON_STAR, CUI_ICON_SEND, CUI_ICON_ARCHIVE };
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = drawer ? CUI_TRANSPARENT : CUI_COLOR_SURFACE_MUTED, .pad = drawer ? 0 : 12, .gap = 2) {
         cui_row(ui, .pad_x = 6, .pad_bottom = 12, .gap = 10) {
             cui_avatar(ui, "Maya Okafor", .size = 28);
             cui_column(ui, .gap = 0, .width = CUI_FILL) {
@@ -65,7 +69,7 @@ static void folders(cui_ctx *ui, mail_app *a) {
                 cui_text(ui, "maya@fieldwork.studio", .size = 12, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
             }
         }
-        if (cui_button(ui, "Compose", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_SQUARE_PEN, .full_width = true)) a->compose = true;
+        if (cui_button(ui, "Compose", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_SQUARE_PEN, .full_width = true)) { a->compose = true; a->drawer = false; }
         cui_gap(ui, 10);
         for (int f = 0; f < 4; f++) {
             int unread = 0;
@@ -75,6 +79,7 @@ static void folders(cui_ctx *ui, mail_app *a) {
             if (cui_nav_item(ui, names[f], .icon = icons[f], .selected = a->folder == f, .badge = unread ? badge : NULL)) {
                 a->folder = f;
                 a->selected = -1;
+                a->drawer = a->reading = false;
             }
         }
         cui_spacer(ui);
@@ -101,8 +106,10 @@ static void paint_row(cui_ctx *ui, cui_rect r, void *user) {
 static void message_list(cui_ctx *ui, mail_app *a) {
     static const char *names[] = { "Inbox", "Starred", "Sent", "Archive" };
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .gap = 10, .pad = 12) {
-        cui_row(ui, .pad_x = 4, .pad_top = 4) {
-            cui_heading(ui, names[a->folder], 4);
+        cui_row(ui, .pad_x = 4, .pad_top = 4, .gap = 6, .width = CUI_FILL) {
+            if (a->panes < 3 && cui_icon_button(ui, CUI_ICON_MENU, .tooltip = "Folders")) a->drawer = true;
+            cui_box(ui, .width = CUI_FILL) { cui_heading(ui, names[a->folder], 4); }
+            if (a->panes < 3 && cui_icon_button(ui, CUI_ICON_SQUARE_PEN, .tooltip = "Compose")) a->compose = true;
         }
         cui_search(ui, "search", a->query, sizeof a->query, .placeholder = "Search mail", .size = CUI_SIZE_SM);
         cui_scroll(ui, .id = "list", .gap = 0, .fade_edges = true) {
@@ -119,7 +126,7 @@ static void message_list(cui_ctx *ui, mail_app *a) {
                     row_bg b = { *hover, a->selected == i, next >= MESSAGE_COUNT || a->selected == next };
                     cui_canvas_result res = cui_canvas(ui, "bg", CUI_FILL, CUI_FILL, paint_row, &b, sizeof b);
                     *hover = res.hovered;
-                    if (res.clicked) { a->selected = i; m->unread = false; }
+                    if (res.clicked) { a->selected = i; m->unread = false; a->reading = true; }
                     /* every row keeps the dot's gutter, so names line up read or unread */
                     cui_row(ui, .width = CUI_FILL, .pad_y = 12, .pad_right = 12, .align = CUI_ALIGN_START) {
                         cui_box(ui, .width = CUI_PX(26), .pad_top = 6, .align = CUI_ALIGN_CENTER) {
@@ -156,7 +163,8 @@ static void reading_pane(cui_ctx *ui, mail_app *a) {
             return;
         }
         message *m = &messages[a->selected];
-        cui_row(ui, .gap = 4, .pad_x = 20, .pad_y = 10) {
+        cui_row(ui, .gap = 4, .pad_x = a->panes == 1 ? 12 : 20, .pad_y = 10) {
+            if (a->panes == 1 && cui_icon_button(ui, CUI_ICON_CHEVRON_LEFT, .tooltip = "Back to the list")) a->reading = false;
             if (cui_icon_button(ui, CUI_ICON_ARCHIVE, .tooltip = "Archive", .shortcut = "E")) { m->folder = 3; a->selected = -1; cui_toast(ui, "Archived", .action = "Undo"); }
             cui_icon_button(ui, CUI_ICON_TRASH_2, .tooltip = "Delete");
             if (cui_icon_button(ui, CUI_ICON_STAR, .tooltip = m->starred ? "Unstar" : "Star", .selected = m->starred,
@@ -170,7 +178,7 @@ static void reading_pane(cui_ctx *ui, mail_app *a) {
         }
         cui_separator(ui);
         if (a->selected < 0) return;
-        cui_scroll(ui, .id = "reader", .pad = 28, .gap = 18, .fade_edges = true) {
+        cui_scroll(ui, .id = "reader", .pad = a->panes == 1 ? 16 : 28, .gap = 18, .fade_edges = true) {
             cui_heading(ui, m->subject, 3);
             cui_row(ui, .gap = 12) {
                 cui_avatar(ui, m->from, .size = 36);
@@ -190,17 +198,33 @@ static void reading_pane(cui_ctx *ui, mail_app *a) {
 static void frame(cui_ctx *ui, void *user) {
     mail_app *a = user;
     if (!cui_wants_keyboard(ui) && cui_key_pressed(ui, CUI_KEY_C)) a->compose = true;
+    float vw = cui_viewport_size(ui).x;
+    a->panes = vw < 720 ? 1 : vw < 1100 ? 2 : 3;
+    if (a->panes == 3) a->drawer = false;
     cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND) {
-        cui_split(ui, "outer", &a->split1, .min_first = 200, .min_second = 600) {
-            folders(ui, a);
-            cui_split_next(ui);
-            cui_split(ui, "inner", &a->split2, .min_first = 280, .min_second = 320) {
+        if (a->panes == 3) {
+            cui_split(ui, "outer", &a->split1, .min_first = 200, .min_second = 600) {
+                folders(ui, a, false);
+                cui_split_next(ui);
+                cui_split(ui, "inner", &a->split2, .min_first = 280, .min_second = 320) {
+                    message_list(ui, a);
+                    cui_split_next(ui);
+                    reading_pane(ui, a);
+                }
+            }
+        } else if (a->panes == 2) {
+            cui_split(ui, "inner", &a->split2, .min_first = 260, .min_second = 320) {
                 message_list(ui, a);
                 cui_split_next(ui);
                 reading_pane(ui, a);
             }
+        } else if (a->reading && a->selected >= 0) {
+            reading_pane(ui, a);
+        } else {
+            message_list(ui, a);
         }
     }
+    cui_sheet(ui, "Mail", &a->drawer, .side = CUI_SIDE_LEFT, .size = 280) { folders(ui, a, true); }
     cui_dialog(ui, "New message", &a->compose, .width = 560) {
         cui_input(ui, "to", a->to, sizeof a->to, .label = "To", .icon = CUI_ICON_AT_SIGN, .autofocus = true);
         cui_input(ui, "subject", a->subject, sizeof a->subject, .label = "Subject");

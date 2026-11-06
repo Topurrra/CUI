@@ -19,13 +19,13 @@ static int cui__label_wrap_begin(cui_ctx *ui, const char *label, cui_size width)
 }
 
 /* A field shell shared by the pickers: icon, text, trailing chevron. */
-static int cui__picker_field(cui_ctx *ui, cui_id id, cui_interact r, float hover, bool open, cui_size width, bool in_label) {
+static int cui__picker_field(cui_ctx *ui, cui_id id, cui_interact r, float hover, bool open, cui_size width, float def, bool in_label) {
     float h = cui__control_height(ui, CUI_SIZE_MD);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
     n->min_h = h;
-    n->w = in_label ? CUI_FILL : (width.kind ? width : CUI_PX(240));
+    if (in_label) n->w = CUI_FILL; else cui__soft_width(n, width, def);
     n->pad[1] = CUI__FIELD_PAD_ICON; n->pad[3] = CUI__FIELD_PAD; n->pad[0] = n->pad[2] = 3;
     n->radius = CUI_CORNERS(CUI_MIN(ui->theme.radius_control, h * 0.5f));
     n->bg = CUI_C(ui, SURFACE);
@@ -120,7 +120,7 @@ bool cui_multi_select_ex(cui_ctx *ui, const char *id_str, const char *const *ite
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     bool changed = false;
     int col = cui__label_wrap_begin(ui, o->label, o->width);
-    int field = cui__picker_field(ui, id, r, st->hover, open, o->width.kind ? o->width : CUI_PX(300), col >= 0);
+    int field = cui__picker_field(ui, id, r, st->hover, open, o->width, 300, col >= 0);
     cui__open(ui, field);
     int max_chips = o->max_chips > 0 ? o->max_chips : 3;
     int n_sel = 0, shown = 0;
@@ -452,6 +452,40 @@ static void cui__fmt_range(char *out, size_t cap, cui_date_range r) {
                  cui__mon[r.end.month - 1], r.end.day, r.end.year);
 }
 
+/* The preset ranges, as menu items in the current container. */
+static bool cui__range_presets(cui_ctx *ui, cui_date_range *range) {
+    static const char *names[] = { "Today", "Yesterday", "Last 7 days", "Last 30 days", "This month", "Last month", "This year" };
+    bool changed = false;
+    cui_date today = cui_date_today();
+    int td = cui_date_to_days(today);
+    for (int k = 0; k < 7; k++) {
+        cui_menu_item_opts mo;
+        memset(&mo, 0, sizeof mo);
+        cui_date_range pr = { today, today };
+        switch (k) {
+        case 1: pr.start = pr.end = cui_date_from_days(td - 1); break;
+        case 2: pr.start = cui_date_from_days(td - 6); break;
+        case 3: pr.start = cui_date_from_days(td - 29); break;
+        case 4: pr.start = (cui_date){ today.year, today.month, 1 }; break;
+        case 5: {
+            int pm = today.month == 1 ? 12 : today.month - 1, py = today.month == 1 ? today.year - 1 : today.year;
+            pr.start = (cui_date){ py, pm, 1 };
+            pr.end = (cui_date){ py, pm, cui__month_days(py, pm) };
+            break;
+        }
+        case 6: pr.start = (cui_date){ today.year, 1, 1 }; break;
+        default: break;
+        }
+        mo.checked = range->start.year && cui_date_to_days(range->start) == cui_date_to_days(pr.start) &&
+                     range->end.year && cui_date_to_days(range->end) == cui_date_to_days(pr.end);
+        cui_push_id_int(ui, k);
+        /* menu items close every popup when chosen, which is what a preset should do */
+        if (cui_menu_item_ex(ui, names[k], &mo)) { *range = pr; changed = true; }
+        cui_pop_id(ui);
+    }
+    return changed;
+}
+
 bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *range, const cui_date_range_opts *o) {
     cui_date_range_opts d;
     memset(&d, 0, sizeof d);
@@ -465,7 +499,7 @@ bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *r
     bool open = p && p->open;
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int col = cui__label_wrap_begin(ui, o->label, o->width);
-    int field = cui__picker_field(ui, id, r, st->hover, open, o->width.kind ? o->width : CUI_PX(280), col >= 0);
+    int field = cui__picker_field(ui, id, r, st->hover, open, o->width, 280, col >= 0);
     ui->nodes[field].h = CUI_PX(cui__control_height(ui, CUI_SIZE_MD));
     cui__open(ui, field);
     cui__icon_node(ui, CUI_ICON_CALENDAR, 16, CUI_C(ui, TEXT_MUTED));
@@ -482,44 +516,26 @@ bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *r
     ui->last_id = id;
     bool changed = false;
     if (cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_START, 0, 0, 0, false)) {
+        /* The popover adapts to the screen: presets beside two months, beside
+         * one month, or above one month on a phone. */
+        float avail = ui->vw - 16, month = 7 * 36, cal_w = month + 28, side = 157;
+        bool presets = !o->no_presets;
+        bool beside = presets && avail >= side + cal_w;
+        ui->nodes[cui__current(ui)].max_h = 1e9f;   /* presets above a month are taller than a menu; the viewport still limits it */
+        int months = avail >= (beside ? side : 0) + cal_w + month + 24 ? 2 : 1;
         int row = cui__node_new(ui, 0);
-        ui->nodes[row].dir = CUI_ROW; ui->nodes[row].align = CUI_ALIGN_STRETCH;
+        ui->nodes[row].dir = beside || !presets ? CUI_ROW : CUI_COLUMN; ui->nodes[row].align = CUI_ALIGN_STRETCH;
         cui__open(ui, row);
-        if (!o->no_presets) {
-            static const char *names[] = { "Today", "Yesterday", "Last 7 days", "Last 30 days", "This month", "Last month", "This year" };
+        if (presets) {
             int pc = cui__node_new(ui, 0);
-            ui->nodes[pc].w = CUI_PX(156); ui->nodes[pc].gap = 2;
+            ui->nodes[pc].gap = 2;
+            if (beside) ui->nodes[pc].w = CUI_PX(156);
+            else { ui->nodes[pc].dir = CUI_GRID; ui->nodes[pc].columns = 2; }
             ui->nodes[pc].pad[0] = ui->nodes[pc].pad[1] = ui->nodes[pc].pad[2] = ui->nodes[pc].pad[3] = 8;
             cui__open(ui, pc);
-            cui_date today = cui_date_today();
-            int td = cui_date_to_days(today);
-            for (int k = 0; k < 7; k++) {
-                cui_menu_item_opts mo;
-                memset(&mo, 0, sizeof mo);
-                cui_date_range pr = { today, today };
-                switch (k) {
-                case 1: pr.start = pr.end = cui_date_from_days(td - 1); break;
-                case 2: pr.start = cui_date_from_days(td - 6); break;
-                case 3: pr.start = cui_date_from_days(td - 29); break;
-                case 4: pr.start = (cui_date){ today.year, today.month, 1 }; break;
-                case 5: {
-                    int pm = today.month == 1 ? 12 : today.month - 1, py = today.month == 1 ? today.year - 1 : today.year;
-                    pr.start = (cui_date){ py, pm, 1 };
-                    pr.end = (cui_date){ py, pm, cui__month_days(py, pm) };
-                    break;
-                }
-                case 6: pr.start = (cui_date){ today.year, 1, 1 }; break;
-                default: break;
-                }
-                mo.checked = range->start.year && cui_date_to_days(range->start) == cui_date_to_days(pr.start) &&
-                             range->end.year && cui_date_to_days(range->end) == cui_date_to_days(pr.end);
-                cui_push_id_int(ui, k);
-                /* menu items close every popup when chosen, which is what a preset should do */
-                if (cui_menu_item_ex(ui, names[k], &mo)) { *range = pr; changed = true; }
-                cui_pop_id(ui);
-            }
+            if (cui__range_presets(ui, range)) changed = true;
             cui__close(ui);
-            int sep = cui__leaf(ui, 0, CUI_PX(1), CUI_FILL);
+            int sep = beside ? cui__leaf(ui, 0, CUI_PX(1), CUI_FILL) : cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
             ui->nodes[sep].bg = CUI_C(ui, BORDER);
         }
         int cal = cui__node_new(ui, 0);
@@ -527,7 +543,7 @@ bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *r
         cui__open(ui, cal);
         cui__rcal_state *cs = cui_state(ui, cui_make_id(ui, "#rcal"), sizeof *cs);
         bool was_picking = cs->picking;
-        if (cui_range_calendar(ui, "#rcal", range, 2)) {
+        if (cui_range_calendar(ui, "#rcal", range, months)) {
             changed = true;
             if (was_picking && range->end.year) cui__popup_set(ui, pid, false);   /* a full range closes the picker */
         }
@@ -615,7 +631,7 @@ bool cui_time_picker_ex(cui_ctx *ui, const char *id_str, int *hour, int *minute,
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int h = CUI_CLAMP(*hour, 0, 23), m = CUI_CLAMP(*minute, 0, 59);
     int col = cui__label_wrap_begin(ui, o->label, o->width);
-    int field = cui__picker_field(ui, id, r, st->hover, open, o->width.kind ? o->width : CUI_PX(150), col >= 0);
+    int field = cui__picker_field(ui, id, r, st->hover, open, o->width, 150, col >= 0);
     ui->nodes[field].h = CUI_PX(cui__control_height(ui, CUI_SIZE_MD));
     cui__open(ui, field);
     cui__icon_node(ui, CUI_ICON_CLOCK, 16, CUI_C(ui, TEXT_MUTED));

@@ -324,6 +324,7 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
 static int cui__legend(cui_ctx *ui, const cui_series *series, int count) {
     int row = cui__node_new(ui, 0);
     ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 16;
+    ui->nodes[row].flags |= CUI_NF_ROW_WRAP;   /* series names wrap rather than truncate */
     cui__open(ui, row);
     for (int k = 0; k < count; k++) {
         int item = cui__node_new(ui, 0);
@@ -501,6 +502,7 @@ void cui_donut_chart_ex(cui_ctx *ui, const char *id_str, const float *values, co
     int row = cui__node_new(ui, id);
     ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 24; ui->nodes[row].align = CUI_ALIGN_CENTER;
     ui->nodes[row].w = o->width.kind ? o->width : CUI_FIT;
+    ui->nodes[row].flags |= CUI_NF_ROW_WRAP;   /* the legend moves below the donut when there is no room beside it */
     cui__open(ui, row);
     int dn = cui__leaf(ui, did, CUI_PX(size), CUI_PX(size));
     cui__mark_interactive(ui, dn, 0);

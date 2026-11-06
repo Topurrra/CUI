@@ -592,7 +592,8 @@ void cui_loader_ex(cui_ctx *ui, const cui_loader_opts *o) {
 /* Dock                                                                     */
 /* ------------------------------------------------------------------------ */
 
-struct cui_dock_build { cui_id id; float size, mag; bool hot; int k; struct cui_dock_build *prev; };
+struct cui_dock_build { cui_id id; float size, mag; bool hot; int k, seps; struct cui_dock_build *prev; };
+typedef struct { int items, seps; } cui__dock_count;
 
 typedef struct { cui_spring s, press; float hover; } cui__dock_item_state;
 
@@ -605,6 +606,13 @@ void cui_dock_begin(cui_ctx *ui, const char *id_str, const cui_dock_opts *o) {
     b->id = cui_make_id(ui, id_str);
     b->size = o->size > 0 ? o->size : 46;
     b->mag = o->magnify > 0 ? o->magnify : 1.55f;
+    /* on a narrow screen the icons get smaller so the whole dock stays on it */
+    cui__dock_count *dc = cui_state(ui, b->id ^ 0xD0C5u, sizeof *dc);
+    if (dc->items > 0) {
+        float avail = ui->vw - 16 - 16 - 8.0f * (float)(dc->items + dc->seps - 1) - (float)dc->seps;
+        float fit = floorf(avail / (float)dc->items);
+        if (fit < b->size) b->size = CUI_MAX(24.0f, fit);
+    }
     b->prev = (struct cui_dock_build *)ui->dock;
     ui->dock = b;
     cui_rect pr = cui__prev_rect(ui, b->id);
@@ -692,6 +700,7 @@ void cui_dock_separator(cui_ctx *ui) {
     int n = cui__leaf(ui, 0, CUI_PX(1), CUI_PX(h));
     ui->nodes[n].bg = CUI_C(ui, BORDER);
     ui->nodes[n].self_align = CUI_ALIGN_CENTER;
+    if (b) b->seps++;
 }
 
 void cui_dock_end(cui_ctx *ui) {
@@ -699,6 +708,8 @@ void cui_dock_end(cui_ctx *ui) {
     if (!b) return;
     cui_pop_id(ui);
     cui__close(ui);
+    cui__dock_count *dc = cui_state(ui, b->id ^ 0xD0C5u, sizeof *dc);
+    dc->items = b->k; dc->seps = b->seps;
     ui->dock = b->prev;
     ui->last_id = b->id;
 }
@@ -1016,7 +1027,7 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
     cui_node *rn = &ui->nodes[root];
     rn->dir = CUI_COLUMN; rn->gap = 14;
     rn->pad[0] = rn->pad[1] = rn->pad[2] = rn->pad[3] = compact ? 10 : 16;
-    rn->w = o->width.kind ? o->width : CUI_PX(compact ? 340 : 360);
+    cui__soft_width(rn, o->width, compact ? 340 : 360);
     rn->radius = CUI_CORNERS(ui->theme.radius_panel);
     rn->bg = CUI_C(ui, SURFACE);
     rn->border = 1; rn->border_color = CUI_C(ui, BORDER);

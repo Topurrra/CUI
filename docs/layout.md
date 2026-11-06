@@ -18,7 +18,9 @@ Every container accepts the same options (`cui_box` struct):
 | `width`, `height` | A size (see below). Default: fit the content |
 | `min_width`, `max_width`, `min_height`, `max_height` | Limits in points |
 | `pad`, `pad_x`, `pad_y`, `pad_top`, `pad_right`, `pad_bottom`, `pad_left` | Inner spacing. Specific sides override `pad_x`/`pad_y`, which override `pad` |
-| `gap` | Space between children |
+| `gap` | Space between children, and between wrapped lines |
+| `wrap` | Rows only: children that do not fit move to a new line (see below) |
+| `columns`, `min_column_width` | Grids only: the column count, or as many columns as fit (see below) |
 | `align` | Cross axis alignment of children: `CUI_ALIGN_START`, `CENTER`, `END`, `STRETCH` |
 | `justify` | Main axis distribution: `CUI_JUSTIFY_START`, `CENTER`, `END`, `BETWEEN`, `AROUND` |
 | `bg`, `border`, `border_color`, `radius`, `radius_tl`... | Painting |
@@ -50,6 +52,8 @@ cui_row(ui, .gap = 16, .align = CUI_ALIGN_STRETCH) {
 ```
 
 When children want more space than there is, flexible children shrink down to their minimum content size: the longest word for wrapping text, a few characters for single line text (which then shows an ellipsis). Fixed sizes never shrink.
+
+Components with a default width (selects, date and time pickers, number fields, the shortcut recorder) take that width when there is room and shrink to fit a narrower column, like `CUI_FIT` with a preferred size. Give them an explicit `CUI_PX` to pin the width.
 
 ## Alignment defaults
 
@@ -93,6 +97,48 @@ cui_box(ui, .dir = CUI_GRID, .columns = 4, .gap = 16) {
     cui_metric(ui, "Churn", "1.7%", .delta = -0.6f);
 }
 ```
+
+Add `min_column_width` and the grid picks its own column count: as many columns of at least that width as fit, never fewer than one. With `columns` set as well, that is the most it uses. This is the one line that makes a metric strip or a card gallery work from a phone to a wide monitor:
+
+```c
+cui_box(ui, .dir = CUI_GRID, .columns = 4, .min_column_width = 180, .gap = 16) { ... }   /* 4, 3, 2 or 1 columns */
+```
+
+## Wrapping rows
+
+`.wrap = true` lets a row continue on a new line when its children do not fit. Each line is laid out like its own row, `justify` applies per line, and `gap` also separates the lines. On one line a wrapping row is exactly a plain row.
+
+```c
+cui_row(ui, .gap = 8, .wrap = true) { for (int i = 0; i < n; i++) cui_chip(ui, tags[i], &on[i]); }
+```
+
+Children break onto lines at their content width; a growing child breaks at its minimum (`min_width`, or its minimum content width) and then shares the free space on its line. That turns side by side panels into a stack below a width, with no breakpoint code:
+
+```c
+cui_row(ui, .width = CUI_FILL, .gap = 16, .wrap = true, .align = CUI_ALIGN_STRETCH) {
+    cui_card(ui, .width = CUI_GROW(2), .min_width = 320) { /* chart */ }
+    cui_card(ui, .width = CUI_GROW(1), .min_width = 260) { /* breakdown: beside it, or below it on a narrow window */ }
+}
+```
+
+## Responsive layouts
+
+CUI lays out at whatever size the window is, so a screen adapts when its layout says how. In order of preference:
+
+1. **Fill up to a width** instead of a fixed size: `.width = CUI_FILL, .max_width = 560` fills a phone and stops on a monitor. Cards take `min_width` and `max_width` too.
+2. **Wrap and stack**: `wrap` rows for toolbars, chips and side by side panels; `min_column_width` grids for anything in columns.
+3. **Change the structure** where a layout does not shrink well: read `cui_viewport_size(ui)` and branch. The demo apps move their sidebar into a `cui_sheet` drawer below 760 points, show one pane at a time on a phone and swap secondary text buttons for icon buttons.
+
+```c
+bool narrow = cui_viewport_size(ui).x < 760;
+cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_STRETCH) {
+    if (!narrow) { sidebar(ui, s); cui_separator(ui); }
+    content(ui, s, narrow);   /* a menu button opens the drawer when narrow */
+}
+cui_sheet(ui, "Menu", &s->drawer, .side = CUI_SIDE_LEFT, .size = 280) { nav(ui, s); }
+```
+
+Components already adapt to the space they get: tabs scroll sideways rather than truncate, tables and the week calendar scroll sideways once their columns would get too narrow, chart legends wrap and a donut's legend moves below it, the calendar heatmap shows the most recent weeks that fit, radio cards drop columns, the date range picker puts its presets above a single month on a phone, and every popover, menu, dialog and sheet stays inside the window. The mouse wheel goes to the innermost scroll area that can move that way, so a sideways strip inside a page does not stop the page from scrolling.
 
 ## Stacks
 

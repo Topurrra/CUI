@@ -625,6 +625,9 @@ bool cui_card_begin(cui_ctx *ui, const cui_card_opts *o) {
     n->align = (uint8_t)o->align;
     n->w = o->width;
     n->h = o->height;
+    if (o->min_width > 0) n->min_w = o->min_width;
+    if (o->max_width > 0) n->max_w = o->max_width;
+    if (o->wrap && o->dir == CUI_ROW) n->flags |= CUI_NF_ROW_WRAP;
     n->radius = CUI_CORNERS(ui->theme.radius_surface);
     if (o->muted) n->bg = CUI_C(ui, SURFACE_MUTED);
     else {

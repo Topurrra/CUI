@@ -74,6 +74,8 @@ void cui__apply_box(cui_ctx *ui, cui_node *n, const cui_box *b) {
     n->pad[3] = b->pad_left > 0 ? b->pad_left : px;
     n->gap = b->gap;
     n->columns = b->columns;
+    if (b->min_column_width > 0) n->col_min = b->min_column_width;
+    if (b->wrap && b->dir == CUI_ROW) n->flags |= CUI_NF_ROW_WRAP;
     n->align = (uint8_t)b->align;
     n->justify = (uint8_t)b->justify;
     n->bg = cui_color_of(ui, b->bg);
@@ -95,6 +97,13 @@ int cui__leaf(cui_ctx *ui, cui_id id, cui_size w, cui_size h) {
     cui_node *n = &ui->nodes[i];
     n->w = w; n->h = h;
     return i;
+}
+
+void cui__soft_width(cui_node *n, cui_size requested, float def) {
+    if (requested.kind) { n->w = requested; return; }
+    n->w = CUI_FIT;
+    n->pref_hint = def;
+    n->self_align = CUI__ALIGN_NOSTRETCH;
 }
 
 int cui__text_node(cui_ctx *ui, const char *text, int len, cui_font font, float size, cui_color color, bool wrap) {
@@ -237,6 +246,24 @@ static int cui__eff_align(cui_node *parent, cui_node *child) {
 
 static float cui__text_line_px(cui_node *n) { return n->font_size * n->line_height; }
 
+/* Columns of a grid in the latest width pass. */
+static int cui__grid_cols(cui_node *n) { return n->grid_cols > 0 ? n->grid_cols : (n->columns > 0 ? n->columns : 1); }
+
+/* A wrapping row that actually broke into more than one line. */
+static bool cui__multiline(cui_ctx *ui, cui_node *n) {
+    if (!(n->flags & CUI_NF_ROW_WRAP) || n->first < 0) return false;
+    for (int c = ui->nodes[n->first].next; c >= 0; c = ui->nodes[c].next)
+        if (ui->nodes[c].flags & CUI_NF_LINE_START) return true;
+    return false;
+}
+
+/* Children of a wrapped line: from `c` up to the next line start. */
+static int cui__line_count(cui_ctx *ui, int c) {
+    int k = 0;
+    for (int i = c; i >= 0 && (i == c || !(ui->nodes[i].flags & CUI_NF_LINE_START)); i = ui->nodes[i].next) k++;
+    return k;
+}
+
 /* Pass 1: content widths, bottom up. */
 static void cui__measure_w(cui_ctx *ui, int i) {
     cui_node *n = &ui->nodes[i];
@@ -269,25 +296,36 @@ static void cui__measure_w(cui_ctx *ui, int i) {
             count++;
         }
         float gaps = count > 1 ? n->gap * (float)(count - 1) : 0;
-        if (n->dir == CUI_ROW) { pref = sum + gaps; minc = sum_min + gaps; }
-        else if (n->dir == CUI_GRID) {
+        if (n->dir == CUI_ROW) {
+            pref = sum + gaps;
+            /* a wrapping row can go down to its widest child, one per line */
+            minc = (n->flags & CUI_NF_ROW_WRAP) ? mx_min : sum_min + gaps;
+        } else if (n->dir == CUI_GRID) {
             int cols = n->columns > 0 ? n->columns : 1;
-            float cg = cols > 1 ? n->gap * (float)(cols - 1) : 0;
-            pref = mx * (float)cols + cg; minc = mx_min * (float)cols + cg;
+            if (n->col_min > 0) {
+                /* auto columns: as wide as all of them at their minimum, as narrow as one */
+                cols = n->columns > 0 ? n->columns : (count > 0 ? count : 1);
+                float cg = cols > 1 ? n->gap * (float)(cols - 1) : 0;
+                pref = CUI_MAX(mx, n->col_min) * (float)cols + cg; minc = mx_min;
+            } else {
+                float cg = cols > 1 ? n->gap * (float)(cols - 1) : 0;
+                pref = mx * (float)cols + cg; minc = mx_min * (float)cols + cg;
+            }
         } else { pref = mx; minc = mx_min; }
         float padw = n->pad[1] + n->pad[3];
         pref += padw; minc += padw;
         if (n->flags & CUI_NF_SCROLL_X) minc = padw;
     }
+    if (n->pref_hint > 0 && n->w.kind == CUI_SIZE_FIT) { pref = n->pref_hint; minc = CUI_MIN(minc, pref); }
+    if (n->flags & CUI_NF_KEEP_W) minc = pref;
     if (n->w.kind == CUI_SIZE_FIXED) { pref = minc = n->w.value; }
     n->pref_w = cui__clamp_size(pref, n->min_w, n->max_w);
     n->minc_w = cui__clamp_size(CUI_MIN(minc, n->pref_w), n->min_w, n->max_w);
 }
 
 /* Distributes `inner` along a main axis (flex grow / shrink). */
-static void cui__distribute(cui_ctx *ui, cui_node *n, float inner, bool horizontal, bool can_shrink) {
-    int count = n->child_count;
-    if (count == 0) return;
+static void cui__distribute(cui_ctx *ui, cui_node *n, int first, int count, float inner, bool horizontal, bool can_shrink) {
+    if (count <= 0) return;
     float gaps = count > 1 ? n->gap * (float)(count - 1) : 0;
     float avail = inner - gaps;
     float used = 0, grow_total = 0;
@@ -295,7 +333,7 @@ static void cui__distribute(cui_ctx *ui, cui_node *n, float inner, bool horizont
 #define CUI__DST(ch) (horizontal ? &(ch)->rect.w : &(ch)->rect.h)
 #define CUI__MIN(ch) (horizontal ? CUI_MAX((ch)->minc_w, (ch)->min_w) : CUI_MAX((ch)->minc_h, (ch)->min_h))
 #define CUI__MAXV(ch) (horizontal ? (ch)->max_w : (ch)->max_h)
-    for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
+    for (int c = first, k_ = 0; c >= 0 && k_ < count; c = ui->nodes[c].next, k_++) {
         cui_node *ch = &ui->nodes[c];
         cui_size sz = CUI__SZ(ch);
         float v;
@@ -318,7 +356,7 @@ static void cui__distribute(cui_ctx *ui, cui_node *n, float inner, bool horizont
             float per = grow_total > 0 ? remaining / grow_total : 0;
             bool any = false;
             int k = 0;
-            for (int c = n->first; c >= 0; c = ui->nodes[c].next, k++) {
+            for (int c = first; c >= 0 && k < count; c = ui->nodes[c].next, k++) {
                 cui_node *ch = &ui->nodes[c];
                 cui_size sz = CUI__SZ(ch);
                 if (sz.kind != CUI_SIZE_GROW || frozen[k]) continue;
@@ -335,14 +373,14 @@ static void cui__distribute(cui_ctx *ui, cui_node *n, float inner, bool horizont
             if (remaining < 0) remaining = 0;
         }
         used = 0;
-        for (int c = n->first; c >= 0; c = ui->nodes[c].next) used += *CUI__DST(&ui->nodes[c]);
+        for (int c = first, k_ = 0; c >= 0 && k_ < count; c = ui->nodes[c].next, k_++) used += *CUI__DST(&ui->nodes[c]);
         free_space = avail - used;
     }
     if (free_space < -0.01f && can_shrink) {
         /* shrink flexible children toward their minimum content size */
         for (int pass = 0; pass < 3 && free_space < -0.01f; pass++) {
             float shrinkable = 0;
-            for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
+            for (int c = first, k_ = 0; c >= 0 && k_ < count; c = ui->nodes[c].next, k_++) {
                 cui_node *ch = &ui->nodes[c];
                 cui_size sz = CUI__SZ(ch);
                 if (sz.kind == CUI_SIZE_FIXED || sz.kind == CUI_SIZE_PERCENT) continue;
@@ -351,7 +389,7 @@ static void cui__distribute(cui_ctx *ui, cui_node *n, float inner, bool horizont
             }
             if (shrinkable <= 0) break;
             float k = CUI_MIN(1.0f, -free_space / shrinkable);
-            for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
+            for (int c = first, k_ = 0; c >= 0 && k_ < count; c = ui->nodes[c].next, k_++) {
                 cui_node *ch = &ui->nodes[c];
                 cui_size sz = CUI__SZ(ch);
                 if (sz.kind == CUI_SIZE_FIXED || sz.kind == CUI_SIZE_PERCENT) continue;
@@ -371,15 +409,49 @@ static void cui__resolve_w(cui_ctx *ui, int i) {
     cui_node *n = &ui->nodes[i];
     float inner = n->rect.w - n->pad[1] - n->pad[3];
     if (inner < 0) inner = 0;
-    if (n->dir == CUI_ROW) {
-        cui__distribute(ui, n, inner, true, !(n->flags & CUI_NF_SCROLL_X));
+    if (n->dir == CUI_ROW && (n->flags & CUI_NF_ROW_WRAP)) {
+        /* greedy lines: each child at its basis (content size, or the minimum
+         * for growing children), then every line is distributed on its own */
+        int c = n->first;
+        while (c >= 0) {
+            int start = c, count = 0;
+            float used = 0;
+            for (; c >= 0; c = ui->nodes[c].next) {
+                cui_node *ch = &ui->nodes[c];
+                ch->flags &= ~(uint32_t)CUI_NF_LINE_START;
+                float b;
+                switch (ch->w.kind) {
+                case CUI_SIZE_FIXED: b = ch->w.value; break;
+                case CUI_SIZE_PERCENT: b = inner * ch->w.value / 100.0f; break;
+                case CUI_SIZE_GROW: b = CUI_MAX(ch->minc_w, ch->min_w); break;
+                default: b = ch->pref_w; break;
+                }
+                b = cui__clamp_size(b, ch->min_w, ch->max_w);
+                float need = count ? used + n->gap + b : b;
+                if (count && need > inner + 0.01f) break;
+                used = need; count++;
+            }
+            ui->nodes[start].flags |= CUI_NF_LINE_START;
+            cui__distribute(ui, n, start, count, inner, true, true);
+        }
+    } else if (n->dir == CUI_ROW) {
+        cui__distribute(ui, n, n->first, n->child_count, inner, true, !(n->flags & CUI_NF_SCROLL_X));
     } else if (n->dir == CUI_GRID) {
         int cols = n->columns > 0 ? n->columns : 1;
+        if (n->col_min > 0) {
+            int most = n->columns > 0 ? n->columns : (n->child_count > 0 ? n->child_count : 1);
+            cols = (int)floorf((inner + n->gap) / (n->col_min + n->gap));
+            if (cols > most) cols = most;
+            if (cols < 1) cols = 1;
+        }
+        n->grid_cols = cols;
         float cell = (inner - n->gap * (float)(cols - 1)) / (float)cols;
         if (cell < 0) cell = 0;
         for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
             cui_node *ch = &ui->nodes[c];
-            ch->rect.w = ch->w.kind == CUI_SIZE_FIXED ? ch->w.value : cell;
+            if (ch->w.kind == CUI_SIZE_FIXED) ch->rect.w = ch->w.value;
+            else if (ch->pref_hint > 0) ch->rect.w = CUI_MAX(ch->minc_w, CUI_MIN(ch->pref_w, cell));
+            else ch->rect.w = cell;
         }
     } else {
         bool sx = (n->flags & CUI_NF_SCROLL_X) != 0;
@@ -429,8 +501,9 @@ static void cui__measure_h(cui_ctx *ui, int i) {
     } else {
         int count = 0;
         float sum = 0, sum_min = 0, mx = 0, mx_min = 0;
-        if (n->dir == CUI_GRID) {
-            int cols = n->columns > 0 ? n->columns : 1;
+        if (n->dir == CUI_GRID || cui__multiline(ui, n)) {
+            bool grid = n->dir == CUI_GRID;
+            int cols = cui__grid_cols(n);
             int k = 0;
             float row_max = 0;
             int rows = 0;
@@ -438,7 +511,8 @@ static void cui__measure_h(cui_ctx *ui, int i) {
                 cui_node *ch = &ui->nodes[c];
                 float ph = ch->h.kind == CUI_SIZE_FIXED ? ch->h.value : ch->pref_h;
                 if (ph > row_max) row_max = ph;
-                if (k % cols == cols - 1 || ch->next < 0) { sum += row_max; row_max = 0; rows++; }
+                bool end = grid ? (k % cols == cols - 1) : (ch->next >= 0 && (ui->nodes[ch->next].flags & CUI_NF_LINE_START));
+                if (end || ch->next < 0) { sum += row_max; row_max = 0; rows++; }
             }
             pref = sum + (rows > 1 ? n->gap * (float)(rows - 1) : 0);
             minc = pref;
@@ -486,10 +560,10 @@ static void cui__resolve_h(cui_ctx *ui, int i) {
                 ch->rect.h = cui__clamp_size(v, ch->min_h, ch->max_h);
             }
         } else {
-            cui__distribute(ui, n, inner, false, true);
+            cui__distribute(ui, n, n->first, n->child_count, inner, false, true);
         }
     } else if (n->dir == CUI_GRID) {
-        int cols = n->columns > 0 ? n->columns : 1;
+        int cols = cui__grid_cols(n);
         int first_in_row = n->first;
         int k = 0;
         float row_max = 0;
@@ -505,6 +579,28 @@ static void cui__resolve_h(cui_ctx *ui, int i) {
                 }
                 first_in_row = ch->next;
                 row_max = 0;
+            }
+        }
+    } else if (cui__multiline(ui, n)) {
+        /* each wrapped line is as tall as its tallest child */
+        for (int c = n->first; c >= 0;) {
+            int count = cui__line_count(ui, c);
+            float line_h = 0;
+            int k = 0;
+            for (int i = c; k < count; i = ui->nodes[i].next, k++) {
+                cui_node *ch = &ui->nodes[i];
+                line_h = CUI_MAX(line_h, ch->h.kind == CUI_SIZE_FIXED ? ch->h.value : ch->pref_h);
+            }
+            for (k = 0; k < count; c = ui->nodes[c].next, k++) {
+                cui_node *ch = &ui->nodes[c];
+                float v;
+                switch (ch->h.kind) {
+                case CUI_SIZE_FIXED: v = ch->h.value; break;
+                case CUI_SIZE_PERCENT: v = line_h * ch->h.value / 100.0f; break;
+                case CUI_SIZE_GROW: v = line_h; break;
+                default: v = cui__eff_align(n, ch) == CUI_ALIGN_STRETCH ? line_h : ch->pref_h; break;
+                }
+                ch->rect.h = cui__clamp_size(v, ch->min_h, ch->max_h);
             }
         }
     } else {
@@ -547,7 +643,41 @@ static void cui__place(cui_ctx *ui, int i) {
     int count = n->child_count;
     float max_r = 0, max_b = 0;
     if (count > 0) {
-        if (n->dir == CUI_ROW || n->dir == CUI_COLUMN) {
+        if (cui__multiline(ui, n)) {
+            /* wrapped lines: justify within each line, align within its height */
+            float y = 0;
+            for (int c = n->first; c >= 0;) {
+                int lc = cui__line_count(ui, c);
+                float total = 0, line_h = 0;
+                int k = 0;
+                for (int i = c; k < lc; i = ui->nodes[i].next, k++) {
+                    total += ui->nodes[i].rect.w;
+                    line_h = CUI_MAX(line_h, ui->nodes[i].rect.h);
+                }
+                float gap = n->gap, pos = 0;
+                total += lc > 1 ? gap * (float)(lc - 1) : 0;
+                float free_space = iw - total;
+                if (free_space > 0) {
+                    switch (n->justify) {
+                    case CUI_JUSTIFY_CENTER: pos = free_space * 0.5f; break;
+                    case CUI_JUSTIFY_END: pos = free_space; break;
+                    case CUI_JUSTIFY_BETWEEN: if (lc > 1) gap += free_space / (float)(lc - 1); break;
+                    case CUI_JUSTIFY_AROUND: pos = free_space / (float)lc * 0.5f; gap += free_space / (float)lc; break;
+                    default: break;
+                    }
+                }
+                for (k = 0; k < lc; c = ui->nodes[c].next, k++) {
+                    cui_node *ch = &ui->nodes[c];
+                    int al = cui__eff_align(n, ch);
+                    float cpos = 0;
+                    if (al == CUI_ALIGN_CENTER) cpos = (line_h - ch->rect.h) * 0.5f;
+                    else if (al == CUI_ALIGN_END) cpos = line_h - ch->rect.h;
+                    ch->rect.x = ox + pos; ch->rect.y = oy + y + cpos;
+                    pos += ch->rect.w + gap;
+                }
+                y += line_h + n->gap;
+            }
+        } else if (n->dir == CUI_ROW || n->dir == CUI_COLUMN) {
             bool row = n->dir == CUI_ROW;
             float total = 0;
             for (int c = n->first; c >= 0; c = ui->nodes[c].next) total += row ? ui->nodes[c].rect.w : ui->nodes[c].rect.h;
@@ -587,7 +717,7 @@ static void cui__place(cui_ctx *ui, int i) {
                 ch->rect.x = x; ch->rect.y = y;
             }
         } else if (n->dir == CUI_GRID) {
-            int cols = n->columns > 0 ? n->columns : 1;
+            int cols = cui__grid_cols(n);
             float cell = (iw - n->gap * (float)(cols - 1)) / (float)cols;
             int k = 0;
             float y = oy, row_h = 0;

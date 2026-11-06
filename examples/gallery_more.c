@@ -30,7 +30,7 @@ static void page_actions(cui_ctx *ui) {
     static int split_choice = -1;
 
     section(ui, "Split button", "A main action with related actions one click away.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         static const char *items[] = { "Save as draft", "Save and publish", "Schedule..." };
         static const char *icons[] = { CUI_ICON_FILE_TEXT, CUI_ICON_SEND, CUI_ICON_CLOCK };
         int r = cui_split_button(ui, "Save", items, 3, .item_icons = icons, .icon = CUI_ICON_SAVE);
@@ -40,7 +40,7 @@ static void page_actions(cui_ctx *ui) {
     }
 
     section(ui, "Toggle group", "Independent toggles for toolbars, or exclusive like radio buttons.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         static const char *labels[] = { "Bold", "Italic", "Underline", "Code" };
         static const char *icons[] = { CUI_ICON_BOLD, CUI_ICON_ITALIC, CUI_ICON_UNDERLINE, CUI_ICON_CODE };
         cui_toggle_group(ui, "format", labels, 4, fmt, .icons = icons, .icon_only = true);
@@ -50,7 +50,7 @@ static void page_actions(cui_ctx *ui) {
     }
 
     section(ui, "Morphing buttons", "Confirm before destroying, and show the result of work in place.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         if (cui_confirm_button(ui, "Delete project", .icon = CUI_ICON_TRASH_2)) deleted++;
         if (cui_status_button(ui, "Save changes", save_status, .icon = CUI_ICON_SAVE, .success_label = "Saved")) {
             save_status = CUI_STATUS_BUSY;
@@ -67,7 +67,7 @@ static void page_actions(cui_ctx *ui) {
     cui_reactions(ui, "reactions", reactions, 4);
 
     section(ui, "Theme", "A compact switcher and a single toggle that morphs between sun and moon.");
-    cui_row(ui, .gap = 16) {
+    cui_row(ui, .gap = 16, .wrap = true) {
         cui_theme_switcher(ui, &theme_mode, true);
         cui_theme_toggle(ui);
     }
@@ -127,7 +127,7 @@ static void page_inputs(cui_ctx *ui) {
     }
 
     section(ui, "Scrub fields", "Drag sideways to change the value, Shift for fine steps, click to type.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         cui_scrub(ui, "Opacity", &opacity, 0, 100, .suffix = "%");
         cui_scrub(ui, "Radius", &radius, 0, 48, .step = 0.5f, .format = "%.1f", .suffix = "px");
         cui_scrub(ui, "Blur", &blur, 0, 80, .suffix = "px", .width = CUI_PX(140));
@@ -140,13 +140,13 @@ static void page_inputs(cui_ctx *ui) {
     }
 
     section(ui, "Prefix and suffix", "Any text field can carry muted text before and after the value.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         cui_input(ui, "url", url, sizeof url, .prefix = "https://", .width = CUI_PX(260));
         cui_input(ui, "weight", weight, sizeof weight, .suffix = "kg", .width = CUI_PX(120));
     }
 
     section(ui, "Shortcut recorder", "Click, then press a combination. Backspace clears.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         cui_shortcut_recorder(ui, "palette-key", &combo);
         cui_shortcut_recorder(ui, "search-key", &combo2, .placeholder = "Record shortcut");
     }
@@ -173,14 +173,14 @@ static void page_pickers(cui_ctx *ui) {
     }
 
     section(ui, "Date range", "Presets on the left, two months to pick a start and an end.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         cui_date_range_picker(ui, "range", &range, .width = CUI_PX(300));
         cui_date_range_picker(ui, "stay", &stay, .width = CUI_PX(300), .no_presets = true);
     }
     cui_row(ui) { cui_card(ui, .pad = 16) { cui_range_calendar(ui, "inline-range", &stay, 2); } }   /* as wide as its months */
 
     section(ui, "Time", "A field with hour and minute columns, 24 hour or 12 hour.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         cui_time_picker(ui, "start", &hour, &minute);
         cui_time_picker(ui, "end", &h2, &m2, .twelve_hour = true, .minute_step = 15);
     }
@@ -221,7 +221,7 @@ static void page_capture(cui_ctx *ui) {
     section(ui, "Dropzone", "Drop files from your desktop, or click to browse.");
     int n = cui_dropzone(ui, "files", .description = "PNG, JPG or PDF, up to 25 MB", .accept = "png;jpg;jpeg;pdf");
     if (n > 0) snprintf(last, sizeof last, "%s", cui_dropped_file(ui, 0));
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         cui_box(ui, .width = CUI_FILL) { cui_dropzone(ui, "compact", .compact = true, .title = "Attach a file", .description = "Any type"); }
         cui_box(ui, .width = CUI_FILL) { cui_dropzone(ui, "images", .compact = true, .title = "Add images", .description = "PNG or JPG", .icon = CUI_ICON_IMAGE, .accept = "png;jpg;jpeg"); }
     }
@@ -258,7 +258,7 @@ static void page_disclosure(cui_ctx *ui) {
     if (!banner && cui_button(ui, "Show the banner again", .size = CUI_SIZE_SM)) banner = true;
 
     section(ui, "Hover card", "Rest the pointer on a name.");
-    cui_row(ui, .gap = 6) {
+    cui_row(ui, .gap = 6, .wrap = true) {
         cui_text(ui, "Assigned to");
         cui_link(ui, "@jonas");
         cui_hover_card(ui, "grace-card", .width = 300) {
@@ -267,7 +267,7 @@ static void page_disclosure(cui_ctx *ui) {
                 cui_column(ui, .gap = 4, .width = CUI_FILL) {
                     cui_text(ui, "Jonas Berg", .font = CUI_FONT_MEDIUM);
                     cui_text(ui, "Engineer on the rendering team. Joined March 2024.", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
-                    cui_row(ui, .gap = 6, .pad_top = 4) {
+                    cui_row(ui, .gap = 6, .pad_top = 4, .wrap = true) {
                         cui_icon(ui, CUI_ICON_CALENDAR, 12, CUI_COLOR_TEXT_MUTED);
                         cui_text(ui, "Usually replies within an hour", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
                     }
@@ -278,7 +278,7 @@ static void page_disclosure(cui_ctx *ui) {
     }
 
     section(ui, "Confirm popover", "Ask right where the action is.");
-    cui_row(ui, .gap = 12) {
+    cui_row(ui, .gap = 12, .wrap = true) {
         if (cui_button(ui, "Delete branch", .icon = CUI_ICON_TRASH_2)) cui_popover_open(ui, "confirm-delete");
         if (cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .description = "The branch and its 12 commits are removed from the remote.",
                                 .confirm_label = "Delete branch", .danger = true)) deleted++;
@@ -297,11 +297,11 @@ static void page_disclosure(cui_ctx *ui) {
     cui_column(ui, .gap = 10) {
         cui_expandable_card(ui, "Billing", &card1, .description = "Pro plan, renews on December 1", .icon = CUI_ICON_CREDIT_CARD, .badge = "Active", .badge_tone = CUI_TONE_SUCCESS) {
             /* plain label and value pairs: a card inside the card would only add edges */
-            cui_row(ui, .gap = 40) {
+            cui_row(ui, .gap = 40, .wrap = true) {
                 cui_column(ui, .gap = 2) { cui_muted(ui, "This month"); cui_text(ui, "$84.00", .font = CUI_FONT_DISPLAY, .size = 22, .tabular = true); }
                 cui_column(ui, .gap = 2) { cui_muted(ui, "Seats"); cui_text(ui, "7 of 10", .font = CUI_FONT_DISPLAY, .size = 22, .tabular = true); }
             }
-            cui_row(ui, .gap = 8) { cui_button(ui, "Change plan", .size = CUI_SIZE_SM); cui_button(ui, "Invoices", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST); }
+            cui_row(ui, .gap = 8, .wrap = true) { cui_button(ui, "Change plan", .size = CUI_SIZE_SM); cui_button(ui, "Invoices", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST); }
         }
         cui_expandable_card(ui, "Security", &card2, .description = "Two-factor authentication is on", .icon = CUI_ICON_SHIELD) {
             cui_text(ui, "Recovery codes were generated 3 months ago.", .color = CUI_COLOR_TEXT_SECONDARY);

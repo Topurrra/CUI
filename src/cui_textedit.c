@@ -747,14 +747,14 @@ bool cui_number_ex(cui_ctx *ui, const char *id_str, double *value, double min, d
     if (o->label) {
         col = cui__node_new(ui, 0);
         ui->nodes[col].gap = 6;
-        ui->nodes[col].w = o->width.kind ? o->width : CUI_PX(160);
+        cui__soft_width(&ui->nodes[col], o->width, 160);
         cui__open(ui, col);
         cui__field_label(ui, o->label);
     }
     int row = cui__node_new(ui, 0);
     cui_node *rn = &ui->nodes[row];
     rn->dir = CUI_ROW; rn->gap = 0; rn->align = CUI_ALIGN_CENTER;
-    rn->w = col >= 0 ? CUI_FILL : (o->width.kind ? o->width : CUI_PX(160));
+    if (col >= 0) rn->w = CUI_FILL; else cui__soft_width(rn, o->width, 160);
     cui__open(ui, row);
     cui_input_opts io;
     memset(&io, 0, sizeof io);

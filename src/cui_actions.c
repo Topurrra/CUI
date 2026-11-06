@@ -961,7 +961,7 @@ bool cui_scrub_ex(cui_ctx *ui, const char *label, float *value, float min, float
         int box = cui__node_new(ui, id);
         cui_node *bn = &ui->nodes[box];
         bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 8;
-        bn->h = CUI_PX(h); bn->w = o->width.kind ? o->width : CUI_PX(160);
+        bn->h = CUI_PX(h); cui__soft_width(bn, o->width, 160);
         bn->pad[1] = 12; bn->pad[3] = 12;
         bn->radius = CUI_CORNERS(CUI_MIN(ui->theme.radius_control, h * 0.5f));
         bn->bg = CUI_C(ui, SURFACE);
@@ -1175,7 +1175,7 @@ bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id_str, cui_key_combo *co
     int box = cui__node_new(ui, id);
     cui_node *bn = &ui->nodes[box];
     bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 8;
-    bn->h = CUI_PX(h); bn->w = o->width.kind ? o->width : CUI_PX(220);
+    bn->h = CUI_PX(h); cui__soft_width(bn, o->width, 220);
     bn->pad[1] = 8; bn->pad[3] = 12;
     bn->radius = CUI_CORNERS(CUI_MIN(ui->theme.radius_control, h * 0.5f));
     bn->bg = CUI_C(ui, SURFACE);

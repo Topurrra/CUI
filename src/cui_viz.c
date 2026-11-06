@@ -173,6 +173,11 @@ static cui__hm_geo cui__hm_layout(cui_ctx *ui, cui_rect r, int rows, int cols, c
     g.gap = 3;
     float avail = (r.w > 0 ? r.w : 480) - g.lw;
     g.cell = o->cell > 0 ? o->cell : cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)CUI_MAX(1, cols), 12, 56);
+    if (o->cell <= 0 && r.w > 0 && g.lw + cols * (g.cell + g.gap) - g.gap > r.w + 0.5f) {
+        /* a narrow container: tighter gaps and smaller cells rather than spilling out */
+        g.gap = 2;
+        g.cell = cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)CUI_MAX(1, cols), 6, 12);
+    }
     g.gx = r.x + g.lw; g.gy = r.y;
     g.grid_h = rows * (g.cell + g.gap) - g.gap;
     return g;
@@ -366,6 +371,16 @@ int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id_str, cui_date start, con
     int wd0 = ((base + 3) % 7 + 7) % 7;   /* 0 = Monday */
     int weeks = (wd0 + days + 6) / 7;
     float cell = o->cell > 0 ? o->cell : 11, gap = cell >= 10 ? 3 : 2, step = cell + gap;
+    float full_w = CUI__CAL_LW + weeks * step - gap;
+    if (pr.w > 0 && pr.w + 0.5f < full_w) {
+        /* narrower than the whole range: show the most recent weeks that fit */
+        int fit = CUI_MAX(1, (int)floorf((pr.w - CUI__CAL_LW + gap) / step));
+        if (fit < weeks) {
+            int skip = (weeks - fit) * 7 - wd0;
+            values += skip; days -= skip; base += skip;
+            wd0 = 0; weeks = fit;
+        }
+    }
     float maxv = 0, total = 0;
     for (int k = 0; k < days; k++) { maxv = CUI_MAX(maxv, values[k]); total += values[k] > 0 ? values[k] : 0; }
     int hover = -1;
@@ -392,8 +407,9 @@ int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id_str, cui_date start, con
         cui__tip_row(&p->tip, o->unit ? o->unit : "Value", cui__fmt_value(ui, o->format, values[p->hover]),
                      cui__cal_color(ui, p->base, cui__cal_level(values[p->hover], maxv)));
     }
-    float w = CUI__CAL_LW + weeks * step - gap, h = CUI__CAL_TOP + 7 * step - gap + 12 + CUI_MIN(cell, 12) + 2;
-    cui__viz_node(ui, id, CUI_PX(w), CUI_PX(h), cui__paint_calendar, p, hover >= 0);
+    float h = CUI__CAL_TOP + 7 * step - gap + 12 + CUI_MIN(cell, 12) + 2;
+    int node = cui__viz_node(ui, id, CUI_FIT, CUI_PX(h), cui__paint_calendar, p, hover >= 0);
+    cui__soft_width(&ui->nodes[node], CUI_FIT, full_w);
     return r.clicked ? hover : -1;
 }
 

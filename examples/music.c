@@ -107,10 +107,14 @@ typedef struct {
     float position, volume;
     double time;
     char search[64];
+    bool drawer;     /* the library drawer on a narrow window */
 } app_state;
+
+static bool compact(cui_ctx *ui) { return cui_viewport_size(ui).x < 820; }
 
 static void fmt_time(char *out, size_t cap, int seconds) { snprintf(out, cap, "%d:%02d", seconds / 60, seconds % 60); }
 
+static void library(cui_ctx *ui, app_state *s);
 static void sidebar(cui_ctx *ui, app_state *s) {
     cui_column(ui, .width = CUI_PX(248), .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
         cui_row(ui, .gap = 10, .pad_x = 6, .pad_top = 4, .pad_bottom = 14, .align = CUI_ALIGN_CENTER) {
@@ -120,10 +124,17 @@ static void sidebar(cui_ctx *ui, app_state *s) {
             }
             cui_text(ui, "Tempo", .font = CUI_FONT_MEDIUM, .size = 15);
         }
+        library(ui, s);
+    }
+}
+
+/* navigation and playlists: in the sidebar, or in a drawer on a narrow window */
+static void library(cui_ctx *ui, app_state *s) {
+    {
         static const char *items[] = { "Home", "Browse", "Radio" };
         static const char *icons[] = { CUI_ICON_HOUSE, CUI_ICON_COMPASS, CUI_ICON_RADIO };
         for (int i = 0; i < 3; i++)
-            if (cui_nav_item(ui, items[i], .icon = icons[i], .selected = s->nav == i, .group = "nav")) s->nav = i;
+            if (cui_nav_item(ui, items[i], .icon = icons[i], .selected = s->nav == i, .group = "nav")) { s->nav = i; s->drawer = false; }
         cui_box(ui, .height = CUI_PX(14)) {}
         cui_row(ui, .pad_right = 4, .align = CUI_ALIGN_CENTER) {
             cui_box(ui, .width = CUI_FILL) { cui_nav_section(ui, "Your library"); }
@@ -135,7 +146,7 @@ static void sidebar(cui_ctx *ui, app_state *s) {
         for (int i = 0; i < 5; i++) {
             cui_push_id_int(ui, i);
             cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL, .height = CUI_PX(52)) {
-                if (row_background(ui, s->playlist == i)) s->playlist = i;
+                if (row_background(ui, s->playlist == i)) { s->playlist = i; s->drawer = false; }
                 cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .pad_x = 8, .gap = 12, .align = CUI_ALIGN_CENTER) {
                     cover(ui, "art", i == 4 ? 5 : i, 38, 8);
                     cui_column(ui, .gap = 0, .width = CUI_FILL) {
@@ -151,11 +162,13 @@ static void sidebar(cui_ctx *ui, app_state *s) {
 }
 
 static void hero(cui_ctx *ui, app_state *s) {
-    cui_row(ui, .width = CUI_FILL, .gap = 28, .align = CUI_ALIGN_END) {
+    bool narrow = compact(ui);
+    cui_row(ui, .width = CUI_FILL, .gap = narrow ? 20 : 28, .align = CUI_ALIGN_END, .wrap = true) {
         art_paint a = { 0, 16, false };
-        cui_canvas(ui, "hero-art", CUI_PX(196), CUI_PX(196), paint_art, &a, sizeof a);
-        cui_column(ui, .gap = 10, .width = CUI_FILL) {
-            cui_text(ui, "Late Night Coding", .font = CUI_FONT_DISPLAY, .size = 44, .line_height = 1.1f, .nowrap = true);
+        float art = narrow ? 148 : 196;
+        cui_canvas(ui, "hero-art", CUI_PX(art), CUI_PX(art), paint_art, &a, sizeof a);
+        cui_column(ui, .gap = 10, .width = CUI_FILL, .min_width = 260) {
+            cui_text(ui, "Late Night Coding", .font = CUI_FONT_DISPLAY, .size = narrow ? 32 : 44, .line_height = 1.1f);
             cui_text(ui, "Warm synths and steady beats for the hours after everyone has logged off.",
                      .color = CUI_COLOR_TEXT_SECONDARY);
             cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
@@ -164,7 +177,7 @@ static void hero(cui_ctx *ui, app_state *s) {
                 cui_text(ui, "·  48 songs  ·  3 h 12 min", .size = 13, .color = CUI_COLOR_TEXT_MUTED);
             }
             cui_box(ui, .height = CUI_PX(4)) {}
-            cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+            cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {
                 if (cui_button(ui, s->paused ? "Play" : "Pause", .icon = s->paused ? CUI_ICON_PLAY : CUI_ICON_PAUSE,
                                .variant = CUI_BUTTON_PRIMARY, .size = CUI_SIZE_LG))
                     s->paused = !s->paused;
@@ -183,11 +196,12 @@ static void hero(cui_ctx *ui, app_state *s) {
 }
 
 static void track_list(cui_ctx *ui, app_state *s) {
+    bool album = cui_viewport_size(ui).x >= 600;   /* a phone shows the title, the artist and the length */
     cui_column(ui, .width = CUI_FILL, .gap = 2) {
         cui_row(ui, .width = CUI_FILL, .pad_x = 14, .pad_bottom = 8, .gap = 14, .align = CUI_ALIGN_CENTER) {
             cui_text(ui, "#", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(18), .align = CUI_TEXT_CENTER);
             cui_text(ui, "Title", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_FILL);
-            cui_text(ui, "Album", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(180));
+            if (album) cui_text(ui, "Album", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(180));
             cui_box(ui, .width = CUI_PX(28)) {}
             cui_box(ui, .width = CUI_PX(44), .align = CUI_ALIGN_END) { cui_icon(ui, CUI_ICON_CLOCK, 14, CUI_COLOR_TEXT_MUTED); }
         }
@@ -217,7 +231,7 @@ static void track_list(cui_ctx *ui, app_state *s) {
                             cui_text(ui, t->artist, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
                         }
                     }
-                    cui_text(ui, t->album, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_PX(180), .nowrap = true);
+                    if (album) cui_text(ui, t->album, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_PX(180), .nowrap = true);
                     if (cui_icon_button(ui, CUI_ICON_HEART, .size = CUI_SIZE_SM,
                                         .color = s->liked[i] ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_MUTED,
                                         .tooltip = s->liked[i] ? "Remove from liked" : "Like"))
@@ -240,7 +254,7 @@ static void made_for_you(cui_ctx *ui) {
         cui_text(ui, "Made for you", .font = CUI_FONT_DISPLAY, .size = 20, .width = CUI_FILL);
         cui_button(ui, "Show all", .variant = CUI_BUTTON_GHOST, .size = CUI_SIZE_SM, .icon_right = CUI_ICON_ARROW_RIGHT);
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 4, .gap = 16, .width = CUI_FILL) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 4, .min_column_width = 160, .gap = 16, .width = CUI_FILL) {
         for (int i = 0; i < 4; i++) {
             cui_push_id_int(ui, i);
             cui_card(ui, .pad = 12, .gap = 10, .hoverable = true) {
@@ -258,8 +272,9 @@ static void made_for_you(cui_ctx *ui) {
 
 static void player_bar(cui_ctx *ui, app_state *s) {
     const track *t = &tracks[s->playing];
-    cui_row(ui, .width = CUI_FILL, .height = CUI_PX(84), .pad_x = 20, .gap = 24, .align = CUI_ALIGN_CENTER, .bg = CUI_COLOR_SURFACE) {
-        cui_row(ui, .width = CUI_PX(300), .gap = 12, .align = CUI_ALIGN_CENTER) {
+    bool narrow = compact(ui);
+    cui_row(ui, .width = CUI_FILL, .height = CUI_PX(narrow ? 72 : 84), .pad_x = narrow ? 12 : 20, .gap = narrow ? 8 : 24, .align = CUI_ALIGN_CENTER, .bg = CUI_COLOR_SURFACE) {
+        cui_row(ui, .width = narrow ? CUI_FILL : CUI_PX(300), .gap = 12, .align = CUI_ALIGN_CENTER) {
             cover(ui, "now-art", t->art, 52, 10);
             cui_column(ui, .gap = 2, .width = CUI_FILL) {
                 cui_text(ui, t->title, .font = CUI_FONT_MEDIUM, .nowrap = true);
@@ -269,6 +284,12 @@ static void player_bar(cui_ctx *ui, app_state *s) {
             if (cui_icon_button(ui, CUI_ICON_HEART, .size = CUI_SIZE_SM, .color = liked ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_MUTED,
                                 .tooltip = liked ? "Remove from liked" : "Like"))
                 s->liked[s->playing] = !liked;
+        }
+        if (narrow) {   /* a mini player: play and skip; the full controls need the width */
+            if (cui_icon_button(ui, s->paused ? CUI_ICON_PLAY : CUI_ICON_PAUSE, .variant = CUI_BUTTON_PRIMARY, .size = CUI_SIZE_LG,
+                                .tooltip = s->paused ? "Play" : "Pause")) s->paused = !s->paused;
+            if (cui_icon_button(ui, CUI_ICON_SKIP_FORWARD, .tooltip = "Next")) { s->playing = (s->playing + 1) % TRACK_COUNT; s->position = 0; }
+            return;
         }
         cui_column(ui, .width = CUI_FILL, .gap = 6, .align = CUI_ALIGN_CENTER) {
             cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
@@ -311,19 +332,26 @@ static void frame(cui_ctx *ui, void *user) {
     }
     if (!cui_wants_keyboard(ui) && cui_key_pressed(ui, CUI_KEY_SPACE)) s->paused = !s->paused;
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND) {
+        bool narrow = compact(ui);
+        if (!narrow) s->drawer = false;
         cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_STRETCH) {
-            sidebar(ui, s);
-            cui_separator(ui);
+            if (!narrow) { sidebar(ui, s); cui_separator(ui); }
             cui_column(ui, .width = CUI_FILL) {
-                cui_row(ui, .width = CUI_FILL, .pad_x = 32, .pad_y = 14, .gap = 8, .align = CUI_ALIGN_CENTER) {
-                    cui_icon_button(ui, CUI_ICON_CHEVRON_LEFT, .tooltip = "Back");
-                    cui_icon_button(ui, CUI_ICON_CHEVRON_RIGHT, .tooltip = "Forward");
-                    cui_search(ui, "search", s->search, sizeof s->search, .placeholder = "Songs, artists, podcasts", .width = CUI_PX(320));
+                cui_row(ui, .width = CUI_FILL, .pad_x = narrow ? 12 : 32, .pad_y = 14, .gap = 8, .align = CUI_ALIGN_CENTER) {
+                    if (narrow) {
+                        if (cui_icon_button(ui, CUI_ICON_MENU, .tooltip = "Library")) s->drawer = true;
+                    } else {
+                        cui_icon_button(ui, CUI_ICON_CHEVRON_LEFT, .tooltip = "Back");
+                        cui_icon_button(ui, CUI_ICON_CHEVRON_RIGHT, .tooltip = "Forward");
+                    }
+                    cui_box(ui, .width = CUI_GROW(4), .max_width = 320) {
+                        cui_search(ui, "search", s->search, sizeof s->search, .placeholder = "Songs, artists, podcasts");
+                    }
                     cui_spacer(ui);
                     cui_icon_button(ui, CUI_ICON_BELL, .tooltip = "What's new");
                     cui_avatar(ui, "Mara Quinn", .size = 30);
                 }
-                cui_scroll(ui, .id = "main", .pad = 32, .gap = 28, .fade_edges = true) {
+                cui_scroll(ui, .id = "main", .pad = narrow ? 16 : 32, .gap = narrow ? 20 : 28, .fade_edges = true) {
                     hero(ui, s);
                     track_list(ui, s);
                     made_for_you(ui);
@@ -333,6 +361,7 @@ static void frame(cui_ctx *ui, void *user) {
         cui_separator(ui);
         player_bar(ui, s);
     }
+    cui_sheet(ui, "Tempo", &s->drawer, .side = CUI_SIDE_LEFT, .size = 300) { library(ui, s); }
 }
 
 int main(void) {

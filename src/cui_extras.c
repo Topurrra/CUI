@@ -47,6 +47,7 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
     cui_box gb;
     memset(&gb, 0, sizeof gb);
     gb.dir = CUI_GRID; gb.columns = cols; gb.gap = 12;
+    gb.min_column_width = 180;   /* fewer columns, down to one, in a narrow container */
     int grid = cui__node_new(ui, gid);
     cui__apply_box(ui, &ui->nodes[grid], &gb);
     cui__open(ui, grid);

@@ -421,10 +421,14 @@ bool cui_banner_ex(cui_ctx *ui, const char *text, bool *open, const cui_banner_o
     cui_spacer(ui);
     cui_color fg = cui_mix(CUI_C(ui, FOREGROUND), tc, ui->mode == CUI_THEME_DARK ? 0.25f : 0.35f);
     if (o->icon) cui__icon_node(ui, o->icon, 16, tc);
-    int tt = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, false);
+    /* on a narrow screen the message wraps and the action keeps its label */
+    int tt = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_sm), fg, true);
     ui->nodes[tt].line_height = 1.35f;
     bool action = false;
     if (o->action) {
+        int keep = cui__node_new(ui, 0);
+        ui->nodes[keep].flags |= CUI_NF_KEEP_W;
+        cui__open(ui, keep);
         cui_push_id(ui, text);
         cui_button_opts bo;
         memset(&bo, 0, sizeof bo);
@@ -432,6 +436,7 @@ bool cui_banner_ex(cui_ctx *ui, const char *text, bool *open, const cui_banner_o
         bo.color = tc;
         action = cui_button_ex(ui, o->action, &bo);
         cui_pop_id(ui);
+        cui__close(ui);
     }
     cui_spacer(ui);
     if (o->dismissible && open) {

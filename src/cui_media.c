@@ -346,7 +346,7 @@ void cui_card_stack_begin(cui_ctx *ui, const char *id_str, int count, const cui_
     int box = cui__node_new(ui, b->id);
     cui_node *bn = &ui->nodes[box];
     bn->dir = CUI_STACK;
-    bn->w = o->width.kind ? o->width : CUI_PX(320);
+    cui__soft_width(bn, o->width, 320);
     bn->h = CUI_PX(b->h + 12.0f * (float)(b->visible - 1));
     bn->self_align = CUI__ALIGN_NOSTRETCH;
     cui__open(ui, box);

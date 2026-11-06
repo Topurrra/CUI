@@ -501,6 +501,7 @@ bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fie
     int row = cui__node_new(ui, id);
     ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 8; ui->nodes[row].align = CUI_ALIGN_CENTER;
     ui->nodes[row].w = CUI_FILL;
+    ui->nodes[row].flags |= CUI_NF_ROW_WRAP;   /* filter chips continue on a new line */
     cui__open(ui, row);
     if (search) {
         cui_input_opts io;

@@ -1,5 +1,6 @@
 /* Notes: a small but complete app. Split view, search, create, edit,
- * pin and delete notes, with keyboard shortcuts and a command palette. */
+ * pin and delete notes, with keyboard shortcuts and a command palette.
+ * On a phone the list and the editor take turns. */
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 
@@ -26,6 +27,8 @@ typedef struct {
     bool confirm_delete;
     bool dark;
     int filter;
+    bool one_pane;   /* a phone: the list or the open note */
+    bool editing;
 } notes_app;
 
 static const char *tags[] = { "Personal", "Work", "Ideas" };
@@ -48,6 +51,7 @@ static void add_note(notes_app *a, const char *title, const char *body, int tag)
     snprintf(n->body, sizeof n->body, "%s", body);
     n->tag = tag;
     a->selected = a->count++;
+    a->editing = true;
 }
 
 static void delete_selected(notes_app *a) {
@@ -90,8 +94,10 @@ static void list_pane(cui_ctx *ui, notes_app *a) {
                     }
                     cui_push_id_int(ui, i);
                     if (cui_list_item(ui, n->title[0] ? n->title : "Untitled", .subtitle = preview, .selected = a->selected == i,
-                                      .icon = n->pinned ? CUI_ICON_BOOKMARK : CUI_ICON_FILE_TEXT))
+                                      .icon = n->pinned ? CUI_ICON_BOOKMARK : CUI_ICON_FILE_TEXT)) {
                         a->selected = i;
+                        a->editing = true;
+                    }
                     cui_context_menu(ui, "note-menu") {
                         if (cui_menu_item(ui, n->pinned ? "Unpin" : "Pin to top", .icon = CUI_ICON_BOOKMARK)) n->pinned = !n->pinned;
                         if (cui_menu_item(ui, "Duplicate", .icon = CUI_ICON_COPY)) add_note(a, n->title, n->body, n->tag);
@@ -108,7 +114,7 @@ static void list_pane(cui_ctx *ui, notes_app *a) {
 }
 
 static void editor_pane(cui_ctx *ui, notes_app *a) {
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .pad_x = 40, .pad_y = 28, .gap = 16) {
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .pad_x = a->one_pane ? 16 : 40, .pad_y = a->one_pane ? 16 : 28, .gap = 16) {
         if (a->selected < 0 || a->selected >= a->count) {
             cui_spacer(ui);
             if (cui_empty_state(ui, "Nothing selected", .icon = CUI_ICON_NOTEBOOK_PEN, .description = "Pick a note on the left or start a new one.", .action = "New note"))
@@ -118,6 +124,7 @@ static void editor_pane(cui_ctx *ui, notes_app *a) {
         }
         note *n = &a->notes[a->selected];
         cui_row(ui, .gap = 8) {
+            if (a->one_pane && cui_icon_button(ui, CUI_ICON_CHEVRON_LEFT, .tooltip = "All notes")) a->editing = false;
             cui_badge(ui, tags[n->tag], .tone = n->tag == 1 ? CUI_TONE_INFO : n->tag == 2 ? CUI_TONE_VIOLET : CUI_TONE_NEUTRAL);
             cui_text(ui, n->pinned ? "Pinned" : "", .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true, .width = CUI_FILL);
             if (cui_icon_button(ui, CUI_ICON_BOOKMARK, .tooltip = n->pinned ? "Unpin" : "Pin", .selected = n->pinned,
@@ -161,11 +168,18 @@ static void frame(cui_ctx *ui, void *user) {
     if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_N)) add_note(a, "Untitled", "", 0);
     if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_K)) a->palette = true;
     if (!cui_wants_keyboard(ui) && cui_key_pressed(ui, CUI_KEY_DELETE) && a->count > 0) a->confirm_delete = true;
+    a->one_pane = cui_viewport_size(ui).x < 640;
     cui_box(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND) {
-        cui_split(ui, "split", &a->split, .min_first = 240, .min_second = 360) {
-            list_pane(ui, a);
-            cui_split_next(ui);
+        if (!a->one_pane) {
+            cui_split(ui, "split", &a->split, .min_first = 240, .min_second = 360) {
+                list_pane(ui, a);
+                cui_split_next(ui);
+                editor_pane(ui, a);
+            }
+        } else if (a->editing && a->selected >= 0) {
             editor_pane(ui, a);
+        } else {
+            list_pane(ui, a);
         }
     }
     cui_dialog(ui, "Delete this note?", &a->confirm_delete, .description = "The note will be removed permanently.", .width = 380) {
@@ -202,5 +216,6 @@ int main(void) {
     add_note(&a, "Meeting notes", "Discussed the roadmap for Q1. Focus on accessibility, keyboard support and docs.", 1);
     a.notes[0].pinned = true;
     a.selected = 0;
+    a.editing = false;   /* a phone opens on the list */
     return cui_app_run(&(cui_app_desc){ .title = "Notes", .width = 1100, .height = 720, .accent = CUI_ACCENT_AMBER }, frame, &a);
 }

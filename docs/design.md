@@ -64,6 +64,12 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 - Exits are faster than entrances. Everything is interruptible because everything is a spring.
 - Every animation has a reduced motion path that keeps the final state and the feedback.
 
+## Responsive
+
+- Every screen works from a 360 point phone to a wide monitor. Layout adapts before anything gets smaller: fill up to a comfortable width, wrap side by side parts into a stack, then change structure (a drawer for the sidebar, one pane at a time).
+- Never truncate what someone has to read to act: tabs and wide tables scroll sideways instead, and a banner's message wraps while its action keeps its label.
+- Margins tighten on small screens (16 pt instead of 24 to 40); type and control sizes do not.
+
 ## Interaction
 
 - Every action works with the keyboard. Focus rings appear for keyboard focus, never for clicks.

@@ -293,6 +293,8 @@ void cui_virtual_list_end(cui_ctx *ui) {
 /* Table                                                                    */
 /* ------------------------------------------------------------------------ */
 
+#define CUI__TABLE_MIN_COL 96   /* narrowest a flexible column gets before the table scrolls */
+
 struct cui_table_build {
     cui_id id;
     const cui_table_column *cols;
@@ -337,6 +339,22 @@ bool cui_table_begin_ex(cui_ctx *ui, const char *id_str, const cui_table_column 
     wn->flags |= CUI_NF_CLIP;
     if (o->height.kind) wn->h = o->height;
     cui__open(ui, wrap);
+    /* Narrower than its columns need, the table scrolls sideways instead of
+     * squeezing cells: flexible columns keep at least CUI__TABLE_MIN_COL. */
+    float min_w = 16;
+    for (int k = 0; k < ncols; k++) min_w += cols[k].width.kind == CUI_SIZE_FIXED ? cols[k].width.value : CUI__TABLE_MIN_COL;
+    cui_box xb;
+    memset(&xb, 0, sizeof xb);
+    xb.width = CUI_FILL;
+    if (o->height.kind) xb.height = CUI_FILL;
+    int xs = cui__scroll_begin_ex(ui, id ^ 0x7AB1E5u, &xb, true);
+    ui->nodes[xs].flags &= ~(uint32_t)CUI_NF_SCROLL_Y;
+    int content = cui__node_new(ui, 0);
+    cui_node *ct = &ui->nodes[content];
+    ct->pref_hint = min_w;
+    ct->self_align = CUI_ALIGN_STRETCH;
+    if (o->height.kind) ct->h = CUI_FILL;
+    cui__open(ui, content);
     /* header */
     int head = cui__node_new(ui, 0);
     cui_node *hn = &ui->nodes[head];
@@ -466,6 +484,8 @@ void cui_table_end(cui_ctx *ui) {
     if (!t) return;
     cui__table_close_row(ui, t);
     if (t->scroll) cui__scroll_end_ex(ui);
+    cui__close(ui);   /* content */
+    cui__scroll_end_ex(ui);
     cui__close(ui);   /* wrap */
     cui_pop_id(ui);
     ui->table = t->prev;

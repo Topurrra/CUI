@@ -377,6 +377,8 @@ static void cui__paint_event_bar(cui_ctx *ui, cui_node *n, void *data) {
 
 static const char *cui__wd_short[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
 
+#define CUI__WEEK_MIN_DAY 76   /* narrowest readable day column */
+
 int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, cui_cal_event *ev, int count, const cui_week_opts *o) {
     cui_week_opts d;
     memset(&d, 0, sizeof d);
@@ -436,6 +438,16 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
     on->bg = CUI_C(ui, SURFACE);
     on->flags |= CUI_NF_CLIP;
     cui__open(ui, outer);
+    /* narrower than seven readable days, the week scrolls sideways */
+    cui_box xb;
+    memset(&xb, 0, sizeof xb);
+    xb.width = CUI_FILL;
+    int xs = cui__scroll_begin_ex(ui, id ^ 0x7EE4u, &xb, true);
+    ui->nodes[xs].flags &= ~(uint32_t)CUI_NF_SCROLL_Y;
+    int content = cui__node_new(ui, 0);
+    ui->nodes[content].pref_hint = gutter + 7 * CUI__WEEK_MIN_DAY;
+    ui->nodes[content].self_align = CUI_ALIGN_STRETCH;
+    cui__open(ui, content);
     /* day headers */
     int head = cui__node_new(ui, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].w = CUI_FILL; ui->nodes[head].h = CUI_PX(56);
@@ -597,6 +609,8 @@ int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, c
         cui__focus_ring(ui, en, r.focus_visible ? 1.0f : 0.0f);
     }
     cui__close(ui);
+    cui__scroll_end_ex(ui);
+    cui__close(ui);   /* content */
     cui__scroll_end_ex(ui);
     cui__close(ui);
     ui->last_id = id;

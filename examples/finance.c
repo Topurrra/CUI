@@ -1,5 +1,7 @@
 /* Personal finance: top navigation, a balance chart, a painted payment card,
- * budgets, savings goals and recent transactions. Dark by default. */
+ * budgets, savings goals and recent transactions. Dark by default. The cards
+ * wrap onto new lines as the window narrows; on a phone the tabs get a line
+ * of their own. */
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 
@@ -59,8 +61,12 @@ static void paint_card(cui_ctx *ui, cui_rect r, void *user) {
 
 /* --- pieces --------------------------------------------------------------- */
 
+static bool compact(cui_ctx *ui) { return cui_viewport_size(ui).x < 900; }
+
 static void topbar(cui_ctx *ui, app_state *s) {
-    cui_row(ui, .width = CUI_FILL, .pad_x = 32, .pad_top = 14, .gap = 28, .align = CUI_ALIGN_CENTER) {
+    static const char *tabs[] = { "Overview", "Accounts", "Payments", "Cards", "Insights" };
+    bool narrow = compact(ui);
+    cui_row(ui, .width = CUI_FILL, .pad_x = narrow ? 16 : 32, .pad_top = 14, .gap = narrow ? 12 : 28, .align = CUI_ALIGN_CENTER) {
         cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
             cui_box(ui, .width = CUI_PX(26), .height = CUI_PX(26), .radius = 13, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
@@ -68,22 +74,22 @@ static void topbar(cui_ctx *ui, app_state *s) {
             }
             cui_text(ui, "Halden", .font = CUI_FONT_DISPLAY, .size = 17);
         }
-        static const char *tabs[] = { "Overview", "Accounts", "Payments", "Cards", "Insights" };
-        cui_tabs(ui, "nav", tabs, 5, &s->tab);
+        if (!narrow) cui_tabs(ui, "nav", tabs, 5, &s->tab);
         cui_spacer(ui);
-        cui_search(ui, "search", s->search, sizeof s->search, .placeholder = "Search", .width = CUI_PX(220));
+        cui_box(ui, .width = CUI_GROW(4), .max_width = 220) { cui_search(ui, "search", s->search, sizeof s->search, .placeholder = "Search"); }
         cui_icon_button(ui, CUI_ICON_BELL, .tooltip = "Notifications");
         cui_avatar(ui, "Mara Quinn", .size = 32, .status = "online");
     }
+    if (narrow) cui_box(ui, .width = CUI_FILL, .pad_x = 16, .pad_top = 6) { cui_tabs(ui, "nav", tabs, 5, &s->tab); }
 }
 
 static void balance_card(cui_ctx *ui, app_state *s) {
     static const char *months[] = { "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov" };
     static const float balance[] = { 31.2f, 32.8f, 32.1f, 34.6f, 36.0f, 35.2f, 38.4f, 40.1f, 39.3f, 42.8f, 45.1f, 48.2f };
     static const float spent[] = { 4.1f, 3.8f, 4.4f, 3.9f, 4.2f, 4.6f, 3.7f, 4.0f, 4.5f, 3.6f, 3.9f, 3.4f };
-    cui_card(ui, .gap = 18, .width = CUI_GROW(2)) {
-        cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_START) {
-            cui_column(ui, .gap = 6, .width = CUI_FILL) {
+    cui_card(ui, .gap = 18, .width = CUI_GROW(2), .min_width = 300) {
+        cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_START, .wrap = true, .gap = 12) {
+            cui_column(ui, .gap = 6, .width = CUI_FILL, .min_width = 240) {
                 cui_text(ui, "Total balance", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
                 cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER) {
                     cui_text(ui, "$48,250.32", .font = CUI_FONT_DISPLAY, .size = 38, .tabular = true);
@@ -102,7 +108,7 @@ static void balance_card(cui_ctx *ui, app_state *s) {
 }
 
 static void card_panel(cui_ctx *ui, app_state *s) {
-    cui_card(ui, .gap = 18, .width = CUI_GROW(1)) {
+    cui_card(ui, .gap = 18, .width = CUI_GROW(1), .min_width = 280) {
         cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
             cui_label(ui, "My cards");
             cui_spacer(ui);
@@ -127,7 +133,7 @@ static void card_panel(cui_ctx *ui, app_state *s) {
 }
 
 static void spending_card(cui_ctx *ui) {
-    cui_card(ui, .gap = 20, .width = CUI_GROW(1)) {
+    cui_card(ui, .gap = 20, .width = CUI_GROW(1), .min_width = 260) {
         cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
             cui_column(ui, .gap = 2, .width = CUI_FILL) {
                 cui_label(ui, "Spending");
@@ -152,7 +158,7 @@ static void budgets_card(cui_ctx *ui) {
         { "Transport", CUI_ICON_MAP_PIN, 96, 250 },
         { "Entertainment", CUI_ICON_MUSIC, 186, 200 },
     };
-    cui_card(ui, .gap = 16, .width = CUI_GROW(1)) {
+    cui_card(ui, .gap = 16, .width = CUI_GROW(1), .min_width = 260) {
         cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
             cui_column(ui, .gap = 2, .width = CUI_FILL) {
                 cui_label(ui, "Budgets");
@@ -182,7 +188,7 @@ static void budgets_card(cui_ctx *ui) {
 }
 
 static void goals_card(cui_ctx *ui) {
-    cui_card(ui, .gap = 18, .width = CUI_GROW(1)) {
+    cui_card(ui, .gap = 18, .width = CUI_GROW(1), .min_width = 260) {
         cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
             cui_column(ui, .gap = 2, .width = CUI_FILL) {
                 cui_label(ui, "Savings goals");
@@ -235,7 +241,7 @@ static void transactions_card(cui_ctx *ui) {
                     cui_text(ui, t->merchant, .font = CUI_FONT_MEDIUM, .nowrap = true);
                     cui_text(ui, t->when, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .nowrap = true);
                 }
-                cui_badge(ui, t->category);
+                if (cui_viewport_size(ui).x >= 560) cui_badge(ui, t->category);   /* a phone keeps the merchant and the amount */
                 char a[32];
                 snprintf(a, sizeof a, "%s$%.2f", t->amount < 0 ? "-" : "+", (double)(t->amount < 0 ? -t->amount : t->amount));
                 cui_text(ui, a, .font = CUI_FONT_MEDIUM, .tabular = true, .width = CUI_PX(110), .align = CUI_TEXT_RIGHT,
@@ -252,9 +258,10 @@ static void frame(cui_ctx *ui, void *user) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND) {
         topbar(ui, s);
         cui_separator(ui);
-        cui_scroll(ui, .id = "main", .pad = 32, .gap = 20, .fade_edges = true) {
-            cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_END) {
-                cui_column(ui, .gap = 4, .width = CUI_FILL) {
+        bool narrow = compact(ui);
+        cui_scroll(ui, .id = "main", .pad = narrow ? 16 : 32, .gap = narrow ? 16 : 20, .fade_edges = true) {
+            cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_END, .wrap = true, .gap = 12) {
+                cui_column(ui, .gap = 4, .width = CUI_FILL, .min_width = 240) {
                     cui_text(ui, "Overview", .font = CUI_FONT_DISPLAY, .size = 28);
                     cui_text(ui, "Four accounts, synced at 6:42 pm", .color = CUI_COLOR_TEXT_SECONDARY);
                 }
@@ -263,11 +270,11 @@ static void frame(cui_ctx *ui, void *user) {
                     cui_button(ui, "Move money", .icon = CUI_ICON_SEND, .variant = CUI_BUTTON_PRIMARY);
                 }
             }
-            cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_STRETCH) {
+            cui_row(ui, .width = CUI_FILL, .gap = narrow ? 16 : 20, .align = CUI_ALIGN_STRETCH, .wrap = true) {
                 balance_card(ui, s);
                 card_panel(ui, s);
             }
-            cui_row(ui, .width = CUI_FILL, .gap = 20, .align = CUI_ALIGN_STRETCH) {
+            cui_row(ui, .width = CUI_FILL, .gap = narrow ? 16 : 20, .align = CUI_ALIGN_STRETCH, .wrap = true) {
                 spending_card(ui);
                 budgets_card(ui);
                 goals_card(ui);

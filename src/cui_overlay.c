@@ -359,7 +359,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
     n->h = CUI_PX(h);
-    n->w = col >= 0 ? CUI_FILL : (o->width.kind ? o->width : CUI_PX(220));
+    if (col >= 0) n->w = CUI_FILL; else cui__soft_width(n, o->width, 220);
     n->pad[1] = CUI__FIELD_PAD_ICON; n->pad[3] = CUI__FIELD_PAD;
     n->radius = CUI_CORNERS(CUI__R_CONTROL(ui, h));
     n->bg = CUI_C(ui, SURFACE);
@@ -1105,7 +1105,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
     n->h = CUI_PX(h);
-    n->w = col >= 0 ? CUI_FILL : (o->width.kind ? o->width : CUI_PX(220));
+    if (col >= 0) n->w = CUI_FILL; else cui__soft_width(n, o->width, 220);
     n->pad[1] = CUI__FIELD_PAD; n->pad[3] = CUI__FIELD_PAD_ICON;
     n->radius = CUI_CORNERS(CUI__R_CONTROL(ui, h));
     n->bg = CUI_C(ui, SURFACE);

@@ -34,6 +34,7 @@ typedef struct gallery {
     int tab, tab2, page_index, step;
     /* overlays */
     bool dialog_open, sheet_open, palette_open, confirm_open;
+    bool drawer;            /* the page list on a narrow window */
     /* data */
     bool acc[3];
     bool tree_src, tree_ui, tree_assets;

@@ -380,8 +380,10 @@ typedef struct cui_box {
     cui_size width, height;    /* default: fit content (columns stretch children horizontally) */
     float min_width, max_width, min_height, max_height;
     float pad, pad_x, pad_y, pad_top, pad_right, pad_bottom, pad_left;
-    float gap;                 /* space between children */
-    int columns;               /* CUI_GRID only */
+    float gap;                 /* space between children (and between wrapped lines) */
+    int columns;               /* CUI_GRID: column count (with min_column_width: the most columns) */
+    float min_column_width;    /* CUI_GRID: as many columns as fit at this width, at least one */
+    bool wrap;                 /* CUI_ROW: children that do not fit move to a new line */
     cui_align align;           /* cross axis alignment of children */
     cui_justify justify;       /* main axis distribution */
     cui_color bg;              /* background */
@@ -408,9 +410,11 @@ typedef struct cui_card_opts {
     int _;
     const char *id;
     cui_size width, height;
+    float min_width, max_width;  /* e.g. CUI_FILL up to max_width: fills narrow screens, stops on wide ones */
     float pad, pad_x, pad_y, gap;
     cui_dir dir;
     cui_align align;
+    bool wrap;                 /* CUI_ROW cards: children that do not fit move to a new line */
     bool hoverable;            /* lifts slightly on hover and returns clicks */
     bool muted;                /* muted surface, no border */
     bool selected;             /* accent border */

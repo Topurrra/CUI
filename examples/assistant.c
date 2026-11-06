@@ -1,5 +1,7 @@
 /* Assistant: a chat app with reasoning, tool calls, a plan, sources and a
- * composer. Sending a message plays a short scripted answer. Dark by default. */
+ * composer. Sending a message plays a short scripted answer. Dark by default.
+ * The workspace panel closes below 1180 points and the chat list becomes a
+ * drawer below 760. */
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 
@@ -17,6 +19,8 @@ typedef struct {
     const char *files[4];
     int file_count;
     int removed;
+    bool narrow;            /* a phone-sized window */
+    bool drawer;            /* the chat list on a narrow window */
 } app_state;
 
 static const cui_model models[] = {
@@ -37,8 +41,8 @@ static const char *answer =
     "Text is the expensive part, which is why glyphs are rasterized once into an atlas and reused. And motion "
     "feels quick when it is driven by springs that respond to input at once, instead of fixed length curves.";
 
-static void sidebar(cui_ctx *ui, app_state *s) {
-    cui_column(ui, .width = CUI_PX(264), .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
+static void sidebar(cui_ctx *ui, app_state *s, bool drawer) {
+    cui_column(ui, .width = drawer ? CUI_FILL : CUI_PX(264), .height = CUI_FILL, .bg = drawer ? CUI_TRANSPARENT : CUI_COLOR_SURFACE_MUTED, .pad = drawer ? 0 : 12, .gap = 2) {
         cui_row(ui, .gap = 10, .pad_x = 6, .pad_top = 4, .pad_bottom = 10, .align = CUI_ALIGN_CENTER) {
             cui_box(ui, .width = CUI_PX(28), .height = CUI_PX(28), .radius = 9, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
@@ -50,12 +54,12 @@ static void sidebar(cui_ctx *ui, app_state *s) {
         cui_nav_section(ui, "Today");
         static const char *today[] = { "Why immediate mode feels fast", "Quarterly report summary", "Spring presets for menus" };
         for (int i = 0; i < 3; i++)
-            if (cui_nav_item(ui, today[i], .icon = CUI_ICON_MESSAGE_SQUARE, .selected = s->chat == i, .group = "chats")) s->chat = i;
+            if (cui_nav_item(ui, today[i], .icon = CUI_ICON_MESSAGE_SQUARE, .selected = s->chat == i, .group = "chats")) { s->chat = i; s->drawer = false; }
         cui_box(ui, .height = CUI_PX(10)) {}
         cui_nav_section(ui, "Previous 7 days");
         static const char *week[] = { "Gantt chart layout ideas", "Kanban drag and drop", "Color palette for charts", "Release notes draft" };
         for (int i = 0; i < 4; i++)
-            if (cui_nav_item(ui, week[i], .icon = CUI_ICON_MESSAGE_SQUARE, .selected = s->chat == 3 + i, .group = "chats")) s->chat = 3 + i;
+            if (cui_nav_item(ui, week[i], .icon = CUI_ICON_MESSAGE_SQUARE, .selected = s->chat == 3 + i, .group = "chats")) { s->chat = 3 + i; s->drawer = false; }
         cui_spacer(ui);
         cui_card(ui, .pad = 14, .gap = 8) {
             cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
@@ -111,16 +115,18 @@ static void conversation(cui_ctx *ui, app_state *s) {
     double now = cui_time(ui);
     float t = s->started >= 0 ? (float)(now - s->started) : 99;
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) {
-        cui_row(ui, .width = CUI_FILL, .pad_x = 20, .pad_y = 12, .gap = 10, .align = CUI_ALIGN_CENTER) {
+        cui_row(ui, .width = CUI_FILL, .pad_x = s->narrow ? 12 : 20, .pad_y = 12, .gap = s->narrow ? 6 : 10, .align = CUI_ALIGN_CENTER) {
+            if (s->narrow && cui_icon_button(ui, CUI_ICON_MENU, .tooltip = "Chats")) s->drawer = true;
             cui_model_picker(ui, "model", models, 3, &s->model, .ghost = true, .placement = CUI_PLACE_BOTTOM_START);
             cui_spacer(ui);
             static const cui_viz_item parts[] = { { "Instructions", 3200 }, { "Files", 41800 }, { "Messages", 68400 } };
             cui_context_meter(ui, "ctx", 113400, 200000, .parts = parts, .part_count = 3);
-            cui_button(ui, "Share", .icon = CUI_ICON_SHARE_2, .variant = CUI_BUTTON_OUTLINE, .size = CUI_SIZE_SM);
+            if (s->narrow) cui_icon_button(ui, CUI_ICON_SHARE_2, .tooltip = "Share");
+            else cui_button(ui, "Share", .icon = CUI_ICON_SHARE_2, .variant = CUI_BUTTON_OUTLINE, .size = CUI_SIZE_SM);
         }
         cui_separator(ui);
         cui_scroll(ui, .id = "chat", .width = CUI_FILL, .height = CUI_FILL, .fade_edges = true) {
-            cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .pad_x = 24, .pad_y = 24) {
+            cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .pad_x = s->narrow ? 12 : 24, .pad_y = s->narrow ? 16 : 24) {
                 cui_column(ui, .width = CUI_FILL, .max_width = 760, .gap = 14) {
                     cui_chat_message(ui, "Why do immediate mode toolkits feel so fast? Cite a few sources.", .mine = true);
                     answer_block(ui, s, "first", t, false);
@@ -132,7 +138,7 @@ static void conversation(cui_ctx *ui, app_state *s) {
                 }
             }
         }
-        cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .pad_x = 24, .pad_bottom = 20) {
+        cui_row(ui, .width = CUI_FILL, .justify = CUI_JUSTIFY_CENTER, .pad_x = s->narrow ? 12 : 24, .pad_bottom = s->narrow ? 12 : 20) {
             cui_column(ui, .width = CUI_FILL, .max_width = 760, .gap = 8) {
                 bool busy = s->asked_once && t < 7.5f;
                 int ev = cui_chat_composer(ui, "composer", s->draft, sizeof s->draft, .placeholder = "Ask a follow up", .busy = busy,
@@ -194,13 +200,15 @@ static void side_panel(cui_ctx *ui, app_state *s) {
 
 static void frame(cui_ctx *ui, void *user) {
     app_state *s = user;
+    float vw = cui_viewport_size(ui).x;
+    s->narrow = vw < 760;
+    if (!s->narrow) s->drawer = false;
     cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_STRETCH, .bg = CUI_COLOR_BACKGROUND) {
-        sidebar(ui, s);
-        cui_separator(ui);
+        if (!s->narrow) { sidebar(ui, s, false); cui_separator(ui); }
         conversation(ui, s);
-        cui_separator(ui);
-        side_panel(ui, s);
+        if (vw >= 1180) { cui_separator(ui); side_panel(ui, s); }
     }
+    cui_sheet(ui, "Muse", &s->drawer, .side = CUI_SIDE_LEFT, .size = 300) { sidebar(ui, s, true); }
 }
 
 int main(void) {

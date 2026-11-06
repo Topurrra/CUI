@@ -1,5 +1,7 @@
 /* Issue tracker: grouped issue list, custom status and priority glyphs,
- * a detail pane with properties and activity. Dark by default. */
+ * a detail pane with properties and activity. Dark by default. Narrower
+ * windows open the detail in a sheet, and a phone keeps the sidebar in a
+ * drawer. */
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 
@@ -40,6 +42,8 @@ typedef struct {
     bool palette;
     char comment[256];
     bool subscribed;
+    int panes;              /* 3, 2 or 1, from the window width */
+    bool drawer, sheet;     /* the sidebar and the detail when they do not fit */
 } app_state;
 
 /* --- custom glyphs ------------------------------------------------------ */
@@ -146,8 +150,8 @@ static void team_dot(cui_ctx *ui, cui_color c) {
 
 /* --- panes -------------------------------------------------------------- */
 
-static void sidebar(cui_ctx *ui, app_state *s) {
-    cui_column(ui, .width = CUI_PX(240), .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
+static void sidebar(cui_ctx *ui, app_state *s, bool drawer) {
+    cui_column(ui, .width = drawer ? CUI_FILL : CUI_PX(240), .height = CUI_FILL, .bg = drawer ? CUI_TRANSPARENT : CUI_COLOR_SURFACE_MUTED, .pad = drawer ? 0 : 12, .gap = 2) {
         cui_row(ui, .gap = 10, .pad_x = 6, .pad_top = 4, .pad_bottom = 12, .align = CUI_ALIGN_CENTER) {
             cui_box(ui, .width = CUI_PX(26), .height = CUI_PX(26), .radius = 8, .bg = CUI_COLOR_ACCENT, .dir = CUI_STACK,
                     .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
@@ -161,13 +165,13 @@ static void sidebar(cui_ctx *ui, app_state *s) {
         static const char *main_badges[] = { "4", NULL, NULL };
         for (int i = 0; i < 3; i++)
             if (cui_nav_item(ui, main_items[i], .icon = main_icons[i], .badge = main_badges[i], .selected = s->nav == i, .group = "nav"))
-                s->nav = i;
+                { s->nav = i; s->drawer = false; }
         cui_box(ui, .height = CUI_PX(12)) {}
         cui_nav_section(ui, "Workspace");
         static const char *ws_items[] = { "Projects", "Cycles", "Roadmap" };
         static const char *ws_icons[] = { CUI_ICON_BOX, CUI_ICON_REFRESH_CW, CUI_ICON_MAP_PIN };
         for (int i = 0; i < 3; i++)
-            if (cui_nav_item(ui, ws_items[i], .icon = ws_icons[i], .selected = s->nav == 3 + i, .group = "nav")) s->nav = 3 + i;
+            if (cui_nav_item(ui, ws_items[i], .icon = ws_icons[i], .selected = s->nav == 3 + i, .group = "nav")) { s->nav = 3 + i; s->drawer = false; }
         cui_box(ui, .height = CUI_PX(12)) {}
         cui_nav_section(ui, "Teams");
         static const char *teams[] = { "Engine", "Design", "Platform" };
@@ -200,15 +204,17 @@ static void issue_row(cui_ctx *ui, app_state *s, int i) {
     const issue *it = &issues[i];
     cui_push_id_int(ui, i);
     cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL, .height = CUI_PX(44)) {
-        if (row_background(ui, "bg", s->selected == i, 8)) s->selected = i;
+        if (row_background(ui, "bg", s->selected == i, 8)) { s->selected = i; s->sheet = s->panes < 3; }
         cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .pad_x = 12, .gap = 12, .align = CUI_ALIGN_CENTER) {
             priority_icon(ui, "prio", it->priority);
             cui_text(ui, it->key, .font = CUI_FONT_MONO, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(62), .nowrap = true);
             status_icon(ui, "status", it->status);
             cui_text(ui, it->title, .width = CUI_FILL, .nowrap = true);
-            for (int l = 0; l < 2; l++)
-                if (it->labels[l]) cui_badge(ui, it->labels[l], .tone = it->label_tones[l]);
-            cui_text(ui, it->date, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(46), .align = CUI_TEXT_RIGHT, .nowrap = true);
+            if (s->panes > 1) {   /* a phone keeps the title, the status and who has it */
+                for (int l = 0; l < 2; l++)
+                    if (it->labels[l]) cui_badge(ui, it->labels[l], .tone = it->label_tones[l]);
+                cui_text(ui, it->date, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .width = CUI_PX(46), .align = CUI_TEXT_RIGHT, .nowrap = true);
+            }
             cui_avatar(ui, it->assignee, .size = 22);
         }
     }
@@ -217,15 +223,22 @@ static void issue_row(cui_ctx *ui, app_state *s, int i) {
 
 static void issue_list(cui_ctx *ui, app_state *s) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) {
-        cui_row(ui, .width = CUI_FILL, .pad_x = 24, .pad_y = 14, .gap = 12, .align = CUI_ALIGN_CENTER) {
+        bool phone = s->panes == 1;
+        cui_row(ui, .width = CUI_FILL, .pad_x = phone ? 12 : 24, .pad_y = 14, .gap = phone ? 6 : 12, .align = CUI_ALIGN_CENTER) {
+            if (phone && cui_icon_button(ui, CUI_ICON_MENU, .tooltip = "Menu")) s->drawer = true;
             static const char *crumbs[] = { "Engine", "Issues" };
             cui_breadcrumb(ui, crumbs, 2);
             cui_spacer(ui);
-            cui_button(ui, "Filter", .icon = CUI_ICON_FILTER, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST);
-            cui_button(ui, "Display", .icon = CUI_ICON_SLIDERS_HORIZONTAL, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST);
-            cui_button(ui, "New issue", .icon = CUI_ICON_PLUS, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_PRIMARY);
+            if (phone) {
+                cui_icon_button(ui, CUI_ICON_FILTER, .tooltip = "Filter");
+                cui_icon_button(ui, CUI_ICON_PLUS, .variant = CUI_BUTTON_PRIMARY, .size = CUI_SIZE_SM, .tooltip = "New issue");
+            } else {
+                cui_button(ui, "Filter", .icon = CUI_ICON_FILTER, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST);
+                cui_button(ui, "Display", .icon = CUI_ICON_SLIDERS_HORIZONTAL, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST);
+                cui_button(ui, "New issue", .icon = CUI_ICON_PLUS, .size = CUI_SIZE_SM, .variant = CUI_BUTTON_PRIMARY);
+            }
         }
-        cui_row(ui, .width = CUI_FILL, .pad_x = 24, .pad_bottom = 12, .align = CUI_ALIGN_CENTER) {
+        cui_row(ui, .width = CUI_FILL, .pad_x = phone ? 12 : 24, .pad_bottom = 12, .align = CUI_ALIGN_CENTER) {
             static const char *tabs[] = { "All issues", "Active", "Backlog" };
             cui_tabs(ui, "views", tabs, 3, &s->tab, .variant = CUI_TABS_PILL);
             cui_spacer(ui);
@@ -233,7 +246,7 @@ static void issue_list(cui_ctx *ui, app_state *s) {
             cui_avatar_group(ui, people, 5, 4, 24);
         }
         cui_separator(ui);
-        cui_scroll(ui, .id = "issues", .pad = 12, .gap = 2, .fade_edges = true) {
+        cui_scroll(ui, .id = "issues", .pad = phone ? 4 : 12, .gap = 2, .fade_edges = true) {
             static const int order[] = { ST_PROGRESS, ST_REVIEW, ST_TODO, ST_DONE };
             for (int g = 0; g < 4; g++) {
                 int st = order[g], count = 0;
@@ -260,10 +273,10 @@ static void property(cui_ctx *ui, const char *name) {
     cui_text(ui, name, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_PX(96), .nowrap = true);
 }
 
-static void detail(cui_ctx *ui, app_state *s) {
+static void detail(cui_ctx *ui, app_state *s, bool in_sheet) {
     const issue *it = &issues[s->selected];
-    cui_column(ui, .width = CUI_PX(380), .height = CUI_FILL, .bg = CUI_COLOR_SURFACE) {
-        cui_row(ui, .width = CUI_FILL, .pad_x = 20, .pad_y = 14, .gap = 6, .align = CUI_ALIGN_CENTER) {
+    cui_column(ui, .width = in_sheet ? CUI_FILL : CUI_PX(380), .height = CUI_FILL, .bg = in_sheet ? CUI_TRANSPARENT : CUI_COLOR_SURFACE) {
+        if (!in_sheet) cui_row(ui, .width = CUI_FILL, .pad_x = 20, .pad_y = 14, .gap = 6, .align = CUI_ALIGN_CENTER) {
             cui_text(ui, it->key, .font = CUI_FONT_MONO, .size = 12, .color = CUI_COLOR_TEXT_SECONDARY);
             cui_copy_button(ui, "copy", it->key);
             cui_spacer(ui);
@@ -276,8 +289,8 @@ static void detail(cui_ctx *ui, app_state *s) {
                 cui_menu_item(ui, "Delete issue", .icon = CUI_ICON_TRASH_2, .danger = true);
             }
         }
-        cui_separator(ui);
-        cui_scroll(ui, .id = "detail", .pad = 20, .gap = 18, .fade_edges = true) {
+        if (!in_sheet) cui_separator(ui);
+        cui_scroll(ui, .id = "detail", .pad = in_sheet ? 0 : 20, .gap = 18, .fade_edges = true) {
             cui_text(ui, it->title, .font = CUI_FONT_DISPLAY, .size = 20, .line_height = 1.3f);
             cui_text(ui, "Typing quickly into a focused field sometimes loses the final keystroke when the frame "
                          "that receives it also changes focus. Repro: type and press Tab in the same frame.",
@@ -325,7 +338,7 @@ static void detail(cui_ctx *ui, app_state *s) {
             }
         }
         cui_separator(ui);
-        cui_row(ui, .width = CUI_FILL, .pad = 16, .gap = 8, .align = CUI_ALIGN_CENTER) {
+        cui_row(ui, .width = CUI_FILL, .pad = in_sheet ? 0 : 16, .pad_top = 16, .gap = 8, .align = CUI_ALIGN_CENTER) {
             cui_input(ui, "comment", s->comment, sizeof s->comment, .placeholder = "Leave a comment", .width = CUI_FILL);
             cui_icon_button(ui, CUI_ICON_SEND, .variant = CUI_BUTTON_PRIMARY, .tooltip = "Send");
         }
@@ -335,13 +348,17 @@ static void detail(cui_ctx *ui, app_state *s) {
 static void frame(cui_ctx *ui, void *user) {
     app_state *s = user;
     if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_K)) s->palette = true;
+    float vw = cui_viewport_size(ui).x;
+    s->panes = vw < 760 ? 1 : vw < 1200 ? 2 : 3;
+    if (s->panes > 1) s->drawer = false;
+    if (s->panes == 3) s->sheet = false;
     cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_STRETCH, .bg = CUI_COLOR_BACKGROUND) {
-        sidebar(ui, s);
-        cui_separator(ui);
+        if (s->panes > 1) { sidebar(ui, s, false); cui_separator(ui); }
         issue_list(ui, s);
-        cui_separator(ui);
-        detail(ui, s);
+        if (s->panes == 3) { cui_separator(ui); detail(ui, s, false); }
     }
+    cui_sheet(ui, "Orbit", &s->drawer, .side = CUI_SIDE_LEFT, .size = 280) { sidebar(ui, s, true); }
+    cui_sheet(ui, issues[s->selected].key, &s->sheet, .size = s->panes == 1 ? vw : 420) { detail(ui, s, true); }
     static const cui_command cmds[] = {
         { "Create issue", CUI_ICON_PLUS, "Issues", "C" },
         { "Assign to me", CUI_ICON_USER, "Issues", "I" },

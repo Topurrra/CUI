@@ -67,9 +67,10 @@ static void paint_swatch(cui_ctx *ui, cui_rect r, void *user) {
     cui_draw_circle(ui, c, r.w / 2 - 4, d->color);
 }
 
-static void sidebar(cui_ctx *ui, gallery *g) {
-    cui_column(ui, .width = CUI_PX(240), .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_MUTED, .pad = 12, .gap = 2) {
-        cui_row(ui, .gap = 10, .pad_x = 8, .pad_top = 6, .pad_bottom = 18) {
+static void sidebar(cui_ctx *ui, gallery *g, bool drawer) {
+    cui_column(ui, .width = drawer ? CUI_FILL : CUI_PX(240), .height = CUI_FILL, .bg = drawer ? CUI_TRANSPARENT : CUI_COLOR_SURFACE_MUTED,
+               .pad = drawer ? 0 : 12, .gap = 2) {
+        if (!drawer) cui_row(ui, .gap = 10, .pad_x = 8, .pad_top = 6, .pad_bottom = 18) {
             cui_box(ui, .width = CUI_PX(28), .height = CUI_PX(28), .radius = 9, .bg = CUI_COLOR_FOREGROUND,
                     .dir = CUI_STACK, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
                 cui_text(ui, "C", .font = CUI_FONT_DISPLAY, .size = 16, .color = CUI_COLOR_BACKGROUND, .line_height = 1.0f);
@@ -83,6 +84,7 @@ static void sidebar(cui_ctx *ui, gallery *g) {
             for (int i = 0; i < PAGE_COUNT; i++) {
                 if (cui_nav_item(ui, page_names[i], .icon = page_icons[i], .selected = g->page == i, .group = "pages")) {
                     g->page = i;
+                    g->drawer = false;
                     cui_scroll_to(ui, "main", 0);
                 }
             }
@@ -91,6 +93,7 @@ static void sidebar(cui_ctx *ui, gallery *g) {
             for (int i = 0; i < gallery_more_count(); i++) {
                 if (cui_nav_item(ui, gallery_more_name(i), .icon = gallery_more_icon(i), .selected = g->page == PAGE_COUNT + i, .group = "pages")) {
                     g->page = PAGE_COUNT + i;
+                    g->drawer = false;
                     cui_scroll_to(ui, "main", 0);
                 }
             }
@@ -125,18 +128,18 @@ static void page_overview(cui_ctx *ui, gallery *g) {
         cui_heading(ui, "Components for C", 1);
         cui_text(ui, "Forms, tables, charts, planning boards and chat pieces that draw themselves the same way on Windows, macOS and Linux. Every one works from the keyboard.",
                  .color = CUI_COLOR_TEXT_SECONDARY, .size = 15);
-        cui_row(ui, .gap = 8, .pad_top = 6) {
+        cui_row(ui, .gap = 8, .pad_top = 6, .wrap = true) {
             if (cui_button(ui, "Browse components", .variant = CUI_BUTTON_PRIMARY, .icon_right = CUI_ICON_ARROW_RIGHT)) g->page = PAGE_BUTTONS;
             if (cui_button(ui, "Open command palette", .variant = CUI_BUTTON_OUTLINE, .icon = CUI_ICON_COMMAND)) g->palette_open = true;
         }
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 3, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 3, .min_column_width = 200, .gap = 16) {
         static const float s2[] = { 9, 7, 8, 6, 5, 6, 4, 4, 3 };
         cui_metric(ui, "Components", "150", .icon = CUI_ICON_BOX);
         cui_metric(ui, "Frame time", "0.4 ms", .delta = -18.0f, .delta_label = "-18% vs v0.9", .lower_is_better = true, .spark = s2, .spark_count = 9, .icon = CUI_ICON_ZAP);
         cui_metric(ui, "Dependencies", "0", .icon = CUI_ICON_PACKAGE);
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_card(ui, .gap = 16) {
             cui_column(ui, .gap = 4) {
                 cui_heading(ui, "Create a workspace", 4);
@@ -177,7 +180,7 @@ static void page_overview(cui_ctx *ui, gallery *g) {
 static void page_buttons(cui_ctx *ui, gallery *g) {
     section(ui, "Variants", "One primary action per view. Secondary for everything else.");
     cui_card(ui) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             cui_button(ui, "Primary", .variant = CUI_BUTTON_PRIMARY);
             cui_button(ui, "Secondary");
             cui_button(ui, "Outline", .variant = CUI_BUTTON_OUTLINE);
@@ -188,12 +191,12 @@ static void page_buttons(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Sizes and icons", NULL);
     cui_card(ui, .gap = 16) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             cui_button(ui, "Small", .size = CUI_SIZE_SM);
             cui_button(ui, "Medium");
             cui_button(ui, "Large", .size = CUI_SIZE_LG);
         }
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             cui_button(ui, "New project", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_PLUS);
             cui_button(ui, "Download", .icon = CUI_ICON_DOWNLOAD);
             cui_button(ui, "Continue", .variant = CUI_BUTTON_OUTLINE, .icon_right = CUI_ICON_ARROW_RIGHT);
@@ -205,7 +208,7 @@ static void page_buttons(cui_ctx *ui, gallery *g) {
     }
     section(ui, "States", "Loading keeps the label so the layout does not jump.");
     cui_card(ui) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             if (cui_button(ui, g->loading ? "Saving" : "Save changes", .variant = CUI_BUTTON_PRIMARY, .loading = g->loading)) g->loading = true;
             if (cui_button(ui, "Reset##loading")) g->loading = false;
             cui_button(ui, "Disabled", .disabled = true);
@@ -214,7 +217,7 @@ static void page_buttons(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Groups, copy and hold to confirm", "Hold the button until it fills to confirm a destructive action.");
     cui_card(ui) {
-        cui_row(ui, .gap = 12) {
+        cui_row(ui, .gap = 12, .wrap = true) {
             cui_button_group(ui) {
                 cui_button(ui, "Bold##group", .icon = CUI_ICON_BOLD);
                 cui_button(ui, "Italic##group", .icon = CUI_ICON_ITALIC);
@@ -237,7 +240,7 @@ static void page_buttons(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Dropdown menu", NULL);
     cui_card(ui) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             cui_menu(ui, "Options", .icon = CUI_ICON_SETTINGS) {
                 cui_menu_label(ui, "Project");
                 cui_menu_item(ui, "Rename", .icon = CUI_ICON_PENCIL, .shortcut = "F2");
@@ -257,7 +260,7 @@ static void page_buttons(cui_ctx *ui, gallery *g) {
 static void page_inputs(cui_ctx *ui, gallery *g) {
     section(ui, "Text fields", "Labels above, hints and errors below.");
     cui_card(ui, .gap = 16) {
-        cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+        cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
             cui_input(ui, "name", g->name, sizeof g->name, .label = "Full name", .placeholder = "Maya Okafor");
             cui_input(ui, "email", g->email, sizeof g->email, .label = "Email", .icon = CUI_ICON_AT_SIGN, .hint = "We never share your email.");
             cui_input(ui, "password", g->password, sizeof g->password, .label = "Password", .password = true, .placeholder = "At least 8 characters",
@@ -280,7 +283,7 @@ static void page_inputs(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Pickers", NULL);
     cui_card(ui, .gap = 16) {
-        cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+        cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
             static const char *countries[] = { "Canada", "Denmark", "Germany", "Iran", "Japan", "Kenya", "Netherlands", "Portugal", "United States" };
             cui_select(ui, "country", countries, 9, &g->country, .label = "Country");
             static const char *frameworks[] = { "C99", "C11", "C17", "C23", "C++17", "Objective-C", "Zig", "Odin", "Rust" };
@@ -296,7 +299,7 @@ static void page_inputs(cui_ctx *ui, gallery *g) {
 }
 
 static void page_selection(cui_ctx *ui, gallery *g) {
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_column(ui, .gap = 12) {
             section(ui, "Checkbox", NULL);
             cui_card(ui, .gap = 14) {
@@ -337,7 +340,7 @@ static void page_selection(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Chips and rating", NULL);
     cui_card(ui, .gap = 16) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             static const char *chips[6] = { "Design", "Engineering", "Marketing", "Sales", "Support", "Finance" };
             for (int i = 0; i < 6; i++) cui_chip(ui, chips[i], &g->chips[i]);
         }
@@ -369,7 +372,7 @@ static void page_navigation(cui_ctx *ui, gallery *g) {
     cui_card(ui, .gap = 18) {
         const char *steps[4] = { "Account", "Workspace", "Invite team", "Done" };
         cui_stepper(ui, steps, 4, g->step);
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             if (cui_button(ui, "Back", .disabled = g->step == 0)) g->step--;
             if (cui_button(ui, g->step >= 3 ? "Finish" : "Next", .variant = CUI_BUTTON_PRIMARY, .icon_right = CUI_ICON_ARROW_RIGHT)) {
                 if (g->step < 3) g->step++;
@@ -382,7 +385,7 @@ static void page_navigation(cui_ctx *ui, gallery *g) {
 static void page_overlays(cui_ctx *ui, gallery *g) {
     section(ui, "Dialogs and sheets", "Esc or a click outside closes them. Focus stays inside.");
     cui_card(ui) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             if (cui_button(ui, "Edit profile", .icon = CUI_ICON_PENCIL)) g->dialog_open = true;
             if (cui_button(ui, "Open sheet", .icon = CUI_ICON_PANEL_LEFT)) g->sheet_open = true;
             if (cui_button(ui, "Delete project", .variant = CUI_BUTTON_DANGER, .icon = CUI_ICON_TRASH_2)) g->confirm_open = true;
@@ -392,7 +395,7 @@ static void page_overlays(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Popover and context menu", NULL);
     cui_card(ui, .gap = 16) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             if (cui_button(ui, "Filters", .icon = CUI_ICON_FILTER)) cui_popover_toggle(ui, "filters");
             cui_popover(ui, "filters", .width = 280) {
                 cui_label(ui, "Filter results");
@@ -418,7 +421,7 @@ static void page_overlays(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Toasts", "They stack, expand on hover and pause while you read.");
     cui_card(ui) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             if (cui_button(ui, "Save profile")) cui_toast(ui, "Changes saved", .description = "Your profile is up to date.", .tone = CUI_TONE_SUCCESS);
             if (cui_button(ui, "Upload a 30 MB file")) cui_toast(ui, "Upload failed", .description = "The file is larger than 25 MB.", .tone = CUI_TONE_DANGER);
             if (cui_button(ui, "Archive a message")) cui_toast(ui, "Message archived", .action = "Undo");
@@ -427,7 +430,7 @@ static void page_overlays(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Tooltips", NULL);
     cui_card(ui) {
-        cui_row(ui, .gap = 4) {
+        cui_row(ui, .gap = 4, .wrap = true) {
             cui_icon_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .shortcut = "Ctrl B");
             cui_icon_button(ui, CUI_ICON_ITALIC, .tooltip = "Italic", .shortcut = "Ctrl I");
             cui_icon_button(ui, CUI_ICON_UNDERLINE, .tooltip = "Underline", .shortcut = "Ctrl U");
@@ -447,13 +450,13 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
         cui_alert(ui, "Storage almost full", .description = "You have used 92% of your plan.", .tone = CUI_TONE_WARNING, .dismissible = true);
         cui_alert(ui, "Build failed", .description = "Missing symbol cui_frame in main.c line 42.", .tone = CUI_TONE_DANGER);
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_card(ui, .gap = 18) {
             cui_heading(ui, "Progress", 4);
             cui_progress(ui, 0.68f, .label = "Uploading assets", .show_value = true);
             cui_progress(ui, 0.0f, .label = "Indexing", .indeterminate = true);
             cui_meter(ui, "Storage", 18.4f, 20, "GB");
-            cui_row(ui, .gap = 16) {
+            cui_row(ui, .gap = 16, .wrap = true) {
                 cui_spinner(ui, 16);
                 cui_spinner(ui, 22);
                 cui_spinner(ui, 28);
@@ -461,7 +464,7 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
         }
         cui_card(ui, .gap = 14) {
             cui_heading(ui, "Loading", 4);
-            cui_row(ui, .gap = 12) {
+            cui_row(ui, .gap = 12, .wrap = true) {
                 cui_skeleton(ui, CUI_PX(40), 40);
                 cui_column(ui, .gap = 8, .width = CUI_FILL) {
                     cui_skeleton(ui, CUI_PCT(70), 12);
@@ -473,7 +476,7 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_skeleton(ui, CUI_PCT(60), 12);
         }
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_card(ui, .gap = 14) {
             cui_heading(ui, "Activity", 4);
             cui_timeline_item(ui, "Deployed to production", .time = "2m ago", .description = "Release 1.0.3 is live in all regions.", .icon = CUI_ICON_ROCKET, .tone = CUI_TONE_SUCCESS);
@@ -490,7 +493,7 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
     }
     section(ui, "Badges and avatars", NULL);
     cui_card(ui, .gap = 16) {
-        cui_row(ui, .gap = 8) {
+        cui_row(ui, .gap = 8, .wrap = true) {
             cui_badge(ui, "Draft");
             cui_badge(ui, "Recommended", .tone = CUI_TONE_ACCENT);
             cui_badge(ui, "Active", .tone = CUI_TONE_SUCCESS, .dot = true);
@@ -499,7 +502,7 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_badge(ui, "Beta", .tone = CUI_TONE_VIOLET);
             cui_badge(ui, "New", .tone = CUI_TONE_INFO, .solid = true);
         }
-        cui_row(ui, .gap = 16) {
+        cui_row(ui, .gap = 16, .wrap = true) {
             cui_avatar(ui, "Sam Whitfield", .size = 40, .status = "online");
             cui_avatar(ui, "Daniel Mensah", .size = 40, .status = "busy");
             cui_avatar(ui, "Rosa Delgado", .size = 40, .square = true);
@@ -558,7 +561,7 @@ static void page_data(cui_ctx *ui, gallery *g) {
             cui_table_cell_text(ui, r->amount);
         }
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_column(ui, .gap = 12) {
             section(ui, "Tree view", NULL);
             cui_card(ui, .pad = 10, .gap = 1) {
@@ -658,7 +661,7 @@ static void page_charts(cui_ctx *ui, gallery *g) {
         cui_series s[2] = { { "Revenue", revenue, 12, { 0 } }, { "Costs", costs, 12, { 0 } } };
         cui_line_chart(ui, "revenue", s, 2, .labels = months, .label_count = 12, .area = true, .smooth = true, .height = 240, .format = "$%.0fk");
     }
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_column(ui, .gap = 12) {
             section(ui, "Bar chart", NULL);
             cui_card(ui) {
@@ -678,7 +681,7 @@ static void page_charts(cui_ctx *ui, gallery *g) {
         }
     }
     section(ui, "Stacked bars and gauges", NULL);
-    cui_box(ui, .dir = CUI_GRID, .columns = 2, .gap = 16) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_card(ui) {
             static const float x[8] = { 112, 124, 131, 128, 140, 152, 149, 161 };   /* test runs per week */
             static const float y[8] = { 9, 11, 8, 12, 10, 9, 13, 8 };
@@ -756,12 +759,18 @@ void gallery_frame(cui_ctx *ui, gallery *g) {
         if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_K)) g->palette_open = !g->palette_open;
         if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_J)) { g->dark = !g->dark; cui_set_theme(ui, g->dark ? CUI_THEME_DARK : CUI_THEME_LIGHT); }
     }
+    /* below 760 points the page list moves into a drawer behind a menu button */
+    bool narrow = cui_viewport_size(ui).x < 760;
+    if (!narrow) g->drawer = false;
     cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_STRETCH, .bg = CUI_COLOR_BACKGROUND) {
-        sidebar(ui, g);
-        cui_separator(ui);
+        if (!narrow) { sidebar(ui, g, false); cui_separator(ui); }
         cui_scroll(ui, .id = "main", .width = CUI_FILL, .fade_edges = true) {
             cui_row(ui, .justify = CUI_JUSTIFY_CENTER, .align = CUI_ALIGN_START) {
-                cui_column(ui, .width = CUI_FILL, .max_width = 920, .pad_x = 40, .pad_top = 36, .pad_bottom = 64, .gap = 20) {
+                cui_column(ui, .width = CUI_FILL, .max_width = 920, .pad_x = narrow ? 16 : 40, .pad_top = narrow ? 12 : 36, .pad_bottom = 64, .gap = 20) {
+                    if (narrow) cui_row(ui, .gap = 8, .width = CUI_FILL) {
+                        if (cui_icon_button(ui, CUI_ICON_MENU, .tooltip = "Components")) g->drawer = true;
+                        cui_text(ui, "CUI", .font = CUI_FONT_MEDIUM, .size = 15);
+                    }
                     if (g->page != PAGE_OVERVIEW) {
                         cui_column(ui, .gap = 6, .pad_bottom = 8) {
                             cui_heading(ui, g->page < PAGE_COUNT ? page_names[g->page] : gallery_more_name(g->page - PAGE_COUNT), 2);
@@ -783,5 +792,6 @@ void gallery_frame(cui_ctx *ui, gallery *g) {
             }
         }
     }
+    cui_sheet(ui, "CUI", &g->drawer, .side = CUI_SIDE_LEFT, .size = 280) { sidebar(ui, g, true); }
     dialogs(ui, g);
 }

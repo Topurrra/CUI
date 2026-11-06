@@ -187,7 +187,10 @@ enum {
     CUI_NF_HIT_OPAQUE  = 1 << 11,  /* catches clicks (e.g. popover background) */
     CUI_NF_PAINT_AFTER = 1 << 12,  /* paint callback runs after children */
     CUI_NF_ABSOLUTE    = 1 << 13,  /* positioned at (fx, fy) inside the parent, out of flow */
-    CUI_NF_ON_TOP      = 1 << 14   /* painted after its siblings */
+    CUI_NF_ON_TOP      = 1 << 14,  /* painted after its siblings */
+    CUI_NF_ROW_WRAP    = 1 << 15,  /* row that breaks children onto new lines */
+    CUI_NF_LINE_START  = 1 << 16,  /* computed: first child of a wrapped line */
+    CUI_NF_KEEP_W      = 1 << 17   /* never shrinks below its preferred width (its siblings give way) */
 };
 
 struct cui_node;
@@ -211,6 +214,8 @@ typedef struct cui_node {
     float pad[4];             /* top, right, bottom, left */
     float gap;
     int columns;
+    float col_min;            /* grid: minimum column width, 0 = fixed column count */
+    float pref_hint;          /* preferred width of a fit node that may shrink (0 = from content) */
 
     /* text */
     const char *text;
@@ -255,6 +260,7 @@ typedef struct cui_node {
     float content_w, content_h;
     int text_lines;
     cui_text_layout_line *lines;
+    int grid_cols;            /* grid: columns used by the latest layout */
 } cui_node;
 
 /* self_align value for intrinsic size components: never stretched, otherwise
@@ -284,6 +290,10 @@ void cui__close(cui_ctx *ui);
 int cui__current(cui_ctx *ui);
 void cui__apply_box(cui_ctx *ui, cui_node *n, const cui_box *b);
 int cui__leaf(cui_ctx *ui, cui_id id, cui_size w, cui_size h);
+/* Width for a component with a default size: `requested` when the caller set
+ * one, otherwise `def` points while there is room, shrinking toward the
+ * content minimum in a narrower container (never stretched). */
+void cui__soft_width(cui_node *n, cui_size requested, float def);
 int cui__text_node(cui_ctx *ui, const char *text, int len, cui_font font, float size, cui_color color, bool wrap);
 void cui__layout(cui_ctx *ui);
 void cui__paint(cui_ctx *ui);

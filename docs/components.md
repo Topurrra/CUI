@@ -250,7 +250,7 @@ cui_tabs(ui, "account", items, 3, &sel, .variant = CUI_TABS_PILL, .icons = icons
 switch (tab) { /* content */ }
 ```
 
-The underline slides to the active tab. Keyboard: Left and Right.
+The underline slides to the active tab. Keyboard: Left and Right. Tabs never truncate their labels: when they are wider than their container the strip scrolls sideways, fades at the edge that has more, and brings a newly selected tab into view.
 
 ## Sidebar navigation
 
@@ -422,7 +422,7 @@ cui_metric(ui, "Median build", "3m 42s", .delta = -17.6f, .lower_is_better = tru
 
 The arrow follows the sign of `delta`; the color says whether that is good. Set `lower_is_better` for times, errors and costs.
 
-Cards rest on a hairline border with no shadow. Card options: `pad` (24), `pad_x`, `pad_y`, `gap`, `dir`, `align`, `width`, `height`, `hoverable`, `muted`, `selected`.
+Cards rest on a hairline border with no shadow. Card options: `pad` (24), `pad_x`, `pad_y`, `gap`, `dir`, `align`, `width`, `height`, `min_width`, `max_width`, `wrap` (row cards), `hoverable`, `muted`, `selected`. `.width = CUI_FILL, .max_width = 520` fills a phone and stops at 520 on a wide window.
 
 ## Empty state
 
@@ -458,7 +458,7 @@ cui_table(ui, "orders", cols, 3, .sort = &sort, .selectable = true, .height = CU
 }
 ```
 
-Cells hold any components. Clicking a sortable header updates `sort` (column and direction); you sort your data. With `height` the body scrolls under a fixed header. Options: `sort`, `height`, `striped`, `compact`, `selectable`.
+Cells hold any components. Clicking a sortable header updates `sort` (column and direction); you sort your data. With `height` the body scrolls under a fixed header. When the container is narrower than the fixed columns plus 96 points for each flexible one, the table scrolls sideways instead of squeezing cells. Options: `sort`, `height`, `striped`, `compact`, `selectable`.
 
 ## List and tree
 

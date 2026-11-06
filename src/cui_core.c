@@ -501,18 +501,27 @@ void cui__set_cursor(cui_ctx *ui, cui_cursor c) { ui->cursor = c; }
 static void cui__compute_hot(cui_ctx *ui) {
     ui->hot = 0; ui->hot_layer = 0; ui->scroll_target = 0;
     if (!ui->mouse_inside) return;
-    bool found_hot = false;
+    bool found_hot = false, fits = false;
+    /* the wheel goes to the innermost scroll area that can move that way, so a
+     * sideways strip (tabs, a board) inside a page does not swallow the page scroll */
+    bool want_x = ui->scroll_dx != 0 || ((ui->mods & CUI_MOD_SHIFT) && ui->scroll_dy != 0), want_y = ui->scroll_dy != 0 && !want_x;
     for (int i = ui->prev_hit_count - 1; i >= 0; i--) {
         cui_hit *h = &ui->prev_hits[i];
         if (!cui__rect_contains(h->rect, ui->mx, ui->my)) continue;
-        if ((h->flags & (CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) && !ui->scroll_target) ui->scroll_target = h->id;
+        if ((h->flags & (CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) && !fits) {
+            cui_scroll_state *ss = cui_state(ui, h->id, sizeof *ss);
+            bool can = (want_x && (h->flags & CUI_NF_SCROLL_X) && ss->content_w > ss->view_w + 0.5f) ||
+                       (want_y && (h->flags & CUI_NF_SCROLL_Y) && ss->content_h > ss->view_h + 0.5f);
+            if (!ui->scroll_target || can) ui->scroll_target = h->id;
+            fits = can || (!want_x && !want_y);
+        }
         if (!found_hot && (h->flags & (CUI_NF_INTERACTIVE | CUI_NF_BLOCKER | CUI_NF_HIT_OPAQUE))) {
             if (h->flags & CUI_NF_INTERACTIVE) ui->hot = h->id;
             ui->hot_layer = h->layer;
             found_hot = true;
         }
         if (h->flags & CUI_NF_BLOCKER) break;
-        if (found_hot && ui->scroll_target) break;
+        if (found_hot && fits) break;
     }
 }
 
