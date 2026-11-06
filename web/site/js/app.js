@@ -117,7 +117,7 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 // C syntax highlighting: comments, strings, numbers, keywords, CUI_ constants, cui_ calls, .fields
 const KW = new Set('static const int float double bool char void if else for while do return switch case break continue default struct typedef sizeof unsigned signed enum true false NULL long short uint8_t uint32_t size_t'.split(' '));
 function highlight(src) {
-  const re = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*")|('(?:[^'\\\n]|\\.)*')|(\b\d+(?:\.\d+)?f?\b|\b0x[0-9a-fA-F]+\b)|(\.[a-z_][a-z0-9_]*(?=\s*=))|(\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
+  const re = /(\/\*[\s\S]*?\*\/|(?<!:)\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*")|('(?:[^'\\\n]|\\.)*')|(\b\d+(?:\.\d+)?f?\b|\b0x[0-9a-fA-F]+\b)|(\.[a-z_][a-z0-9_]*(?=\s*=))|(\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
   let out = '', last = 0, m;
   while ((m = re.exec(src))) {
     out += esc(src.slice(last, m.index));
@@ -197,8 +197,10 @@ const staticThumb = (img) => {
   const name = img.dataset.thumb, dark = isDark();
   if (!name || img.dataset.module !== 'scenes' || img.dataset.live || (prefs.accentTouched && prefs.accent)) return false;
   const dir = CAT.showcase.some((x) => x.id === name) ? 'showcase' : 'components';
+  const file = `${dir}/${name}${dark ? '-dark' : ''}`;
+  if (CAT.shots && !CAT.shots.includes(file)) return false;
   img.onerror = () => { img.onerror = null; img.dataset.live = '1'; loadThumb(img); };
-  img.src = `images/${dir}/${name}${dark ? '-dark' : ''}.png`;
+  img.src = `images/${file}.png`;
   img.dataset.state = `${dark ? 1 : 0}:-1`;
   return true;
 };
@@ -499,7 +501,14 @@ $('#filter').addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------- views
 const main = $('#main');
 function setNav(which) {
-  document.querySelectorAll('#topnav a').forEach((a) => a.setAttribute('aria-current', a.dataset.nav === which ? 'page' : 'false'));
+  const nav = $('#topnav');
+  nav.querySelectorAll('a').forEach((a) => a.setAttribute('aria-current', a.dataset.nav === which ? 'page' : 'false'));
+  // on a phone the links scroll sideways: keep the current one in view
+  const cur = nav.querySelector('a[aria-current="page"]');
+  if (cur && nav.scrollWidth > nav.clientWidth) {
+    const l = cur.offsetLeft - nav.offsetLeft, r = l + cur.offsetWidth;
+    if (l < nav.scrollLeft || r > nav.scrollLeft + nav.clientWidth - 24) nav.scrollLeft = Math.max(0, r - nav.clientWidth + 32);
+  }
 }
 
 const FIRST_WINDOW = `#include <cui/cui.h>
@@ -742,7 +751,7 @@ function viewGuide(id, sec) {
   });
   const toc = g.sections.length > 2 ? h('nav', { class: 'toc', 'aria-label': 'On this page' }, h('div', { class: 'toc-title' }, 'On this page'),
     g.sections.map((x) => h('a', { href: `#/guide/${g.id}/${x.id}`, 'data-sec': x.id }, x.title))) : null;
-  const pager = (it2, dir) => pagerLink(it2, dir, `#/guide/${it2?.id}`);
+  const pager = (it2, dir) => pagerLink(it2, dir, `#/guide/${it2?.id}`, dir === 'prev' ? '[' : ']');
   const page = h('div', { class: 'page guide-page' },
     h('div', { class: 'guide-main' },
       h('div', { class: 'crumbs' }, h('a', { href: '#/guide/getting-started' }, 'Guide'), '/', h('span', {}, g.title)),
