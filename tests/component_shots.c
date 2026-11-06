@@ -23,7 +23,12 @@ static bool open_true = true;
  * frame margin tightens on a phone. */
 #define UPTO(w) .width = CUI_FILL, .max_width = (w)
 #define FLEX(lo, hi) .width = CUI_FILL, .min_width = (lo), .max_width = (hi)
-static float frame_pad(cui_ctx *ui) { return cui_viewport_size(ui).x < 360 ? 16 : 28; }
+/* the scene's documented width; the frame tightens only when a scene is shown narrower than that, on a phone */
+static float g_scene_w = 0;
+static float frame_pad(cui_ctx *ui) {
+    float vw = cui_viewport_size(ui).x;
+    return vw < 360 && (g_scene_w <= 0 || vw < g_scene_w - 0.5f) ? 16 : 28;
+}
 
 static void frame_wrap(cui_ctx *ui, void (*body)(cui_ctx *ui)) {
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = frame_pad(ui), .gap = 16, .align = CUI_ALIGN_START, .justify = CUI_JUSTIFY_CENTER) {
@@ -122,7 +127,7 @@ SCENE(tabs) {
     }
 }
 SCENE(navigation) {
-    cui_column(ui, .gap = 18) {
+    cui_column(ui, .gap = 18, .width = CUI_FILL) {
         const char *c[] = { "Home", "Projects", "CUI" };
         cui_breadcrumb(ui, c, 3);
         cui_pagination(ui, "p", &i_page, 10);
@@ -1057,7 +1062,7 @@ SCENE(player) {
     static cui_now_playing np = { "Low Tide", "Marlow Avenue", 0, { 0xc8, 0x55, 0x3d, 255 }, 76, 222, true };
     for (int k = 0; k < 96; k++) peaks[k] = 0.18f + 0.8f * fabsf(sinf(k * 0.37f) * sinf(k * 0.11f + 1.3f));
     static const cui_tab_bar_item tabs[] = { { CUI_ICON_HOUSE, "Home", 0 }, { CUI_ICON_SEARCH, "Search", 0 }, { CUI_ICON_INBOX, "Inbox", 4 }, { CUI_ICON_USER, "Profile", 0 } };
-    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .wrap = true) {
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_START, .wrap = true, .width = CUI_FILL) {
         cui_column(ui, .gap = 16) {
             cui_now_playing(ui, "np", &np);
             cui_card(ui, .pad = 14, .gap = 8, UPTO(360)) {
@@ -1461,16 +1466,13 @@ static void stage(cui_ctx *ui, const stage_look *look, void (*body)(cui_ctx *ui)
     }
 }
 
-/* a window frame with traffic light dots, up to `w` wide */
+/* a titled panel up to `w` wide: it rests on the stage, so an edge and no shadow */
 #define CUI_MIN_W(w) ((w) < 300 ? (w) : 300)
 static void window_begin(cui_ctx *ui, const char *title, float w) {
-    cui_box_begin(ui, &(cui_box){ .width = CUI_FILL, .min_width = CUI_MIN_W(w), .max_width = w, .radius = 22, .bg = CUI_COLOR_SURFACE, .border = 1, .border_color = CUI_COLOR_BORDER,
-                                  .elevation = CUI_ELEVATION_FLOATING, .clip = true });
-    cui_row(ui, .width = CUI_FILL, .pad_x = 16, .pad_y = 12, .gap = 8, .align = CUI_ALIGN_CENTER) {
-        static const unsigned dots[3] = { 0xff5f57, 0xfebc2e, 0x28c840 };
-        for (int k = 0; k < 3; k++) cui_box(ui, .width = CUI_PX(11), .height = CUI_PX(11), .radius = 6, .bg = CUI_RGB(dots[k])) {}
-        cui_text(ui, title, .size = 12.5f, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_FILL, .align = CUI_TEXT_CENTER);
-        cui_box(ui, .width = CUI_PX(49)) {}
+    cui_box_begin(ui, &(cui_box){ .width = CUI_FILL, .min_width = CUI_MIN_W(w), .max_width = w, .radius = 18, .bg = CUI_COLOR_SURFACE, .border = 1, .border_color = CUI_COLOR_BORDER,
+                                  .clip = true });
+    cui_row(ui, .width = CUI_FILL, .pad_x = 20, .pad_y = 14, .align = CUI_ALIGN_CENTER) {
+        cui_text(ui, title, .size = 13.5f, .font = CUI_FONT_MEDIUM, .width = CUI_FILL);
     }
     cui_separator(ui);
 }
@@ -1767,6 +1769,7 @@ static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *
                                              .accent = s->accent });
     cui_set_viewport(ui, s->w, s->h, 2);
     cui_input_mouse_leave(ui);
+    g_scene_w = s->w;
     for (int f = 0; f < 70; f++) { s->fn(ui, -(f + 1)); cui_begin_frame(ui, 1.0f / 60.0f); s->fn(ui, f); cui_end_frame(ui); }
     const cui_draw_data *dd = cui_get_draw_data(ui);
     unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);

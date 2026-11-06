@@ -499,10 +499,37 @@ void cui_donut_chart_ex(cui_ctx *ui, const char *id_str, const float *values, co
     cui__tween(ui, &st->hover_t, hover >= 0 ? 1.0f : 0.0f, CUI__T_HOVER);
     if (hover >= 0) st->hover = hover;
     float size = o->height > 0 ? o->height : 180;
+    /* The row takes the width it is given; the legend sits beside the donut,
+     * and moves below it only when last frame's width left no room for it. */
+    bool legend = !o->no_legend && labels;
+    cui_rect prev = cui__prev_rect(ui, id);
+    bool stack = false;
+    float fs = cui__fs(ui, ui->theme.text_body);
+    float legend_w = 0, full = size;
+    {
+        if (legend) {
+            float ml = 0, mv = 0;
+            for (int k = 0; k < count; k++) {
+                ml = CUI_MAX(ml, cui__text_width(ui, CUI_FONT_BODY, fs, labels[k] ? labels[k] : "", -1, false));
+                const char *v = cui__frame_printf(ui, "%.0f%%", total > 0 ? (double)(values[k] / total * 100) : 0.0);
+                mv = CUI_MAX(mv, cui__text_width(ui, CUI_FONT_MEDIUM, fs, v, -1, true));
+            }
+            legend_w = 8 + 8 + ml + 8 + 16 + 8 + mv + 2;
+        }
+    }
+    if (prev.w > 0) {
+        /* narrower: the donut shrinks first, then the legend moves below it */
+        float room = legend ? prev.w - 24 - legend_w : prev.w;
+        if (room >= 120) size = CUI_MIN(size, room);
+        else if (legend) { stack = true; size = CUI_MIN(size, CUI_MAX(120.0f, prev.w)); }
+        else size = CUI_MAX(80.0f, room);
+    }
     int row = cui__node_new(ui, id);
-    ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 24; ui->nodes[row].align = CUI_ALIGN_CENTER;
-    ui->nodes[row].w = o->width.kind ? o->width : CUI_FIT;
-    ui->nodes[row].flags |= CUI_NF_ROW_WRAP;   /* the legend moves below the donut when there is no room beside it */
+    ui->nodes[row].dir = stack ? CUI_COLUMN : CUI_ROW; ui->nodes[row].gap = stack ? 16 : 24;
+    ui->nodes[row].align = stack ? CUI_ALIGN_START : CUI_ALIGN_CENTER;
+    /* it always asks for the side by side width, so a container that fits its
+     * content offers that room again as soon as it has it */
+    cui__soft_width(&ui->nodes[row], o->width, legend ? full + 24 + legend_w : full);
     cui__open(ui, row);
     int dn = cui__leaf(ui, did, CUI_PX(size), CUI_PX(size));
     cui__mark_interactive(ui, dn, 0);
@@ -521,21 +548,25 @@ void cui_donut_chart_ex(cui_ctx *ui, const char *id_str, const float *values, co
     }
     ui->nodes[dn].paint = cui__paint_donut;
     ui->nodes[dn].paint_data = p;
-    if (!o->no_legend && labels) {
+    if (legend) {
         int col = cui__node_new(ui, 0);
         ui->nodes[col].gap = 10;
         cui__open(ui, col);
         for (int k = 0; k < count; k++) {
             int it = cui__node_new(ui, 0);
-            ui->nodes[it].dir = CUI_ROW; ui->nodes[it].gap = 8;
+            /* rows as wide as the widest one, values pushed to its right edge: the
+             * percentages line up without padding the legend to a fixed width */
+            ui->nodes[it].dir = CUI_ROW; ui->nodes[it].gap = 8; ui->nodes[it].w = CUI_FILL;
             ui->nodes[it].opacity = (p->hover >= 0 && p->hover != k) ? 1.0f - 0.4f * p->hover_t : 1.0f;
             cui__open(ui, it);
             int sw = cui__leaf(ui, 0, CUI_PX(8), CUI_PX(8));
             ui->nodes[sw].bg = ui->theme.colors[CUI_TOKEN_SERIES_1 + (k % 6)];
             ui->nodes[sw].radius = CUI_CORNERS(2.5f);
-            int t = cui__text_node(ui, labels[k], -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, TEXT_SECONDARY), false);
+            int t = cui__text_node(ui, labels[k], -1, CUI_FONT_BODY, fs, CUI_C(ui, TEXT_SECONDARY), false);
             ui->nodes[t].line_height = 1.3f;
-            ui->nodes[t].min_w = 80;
+            ui->nodes[t].flags |= CUI_NF_KEEP_W;   /* a legend never truncates its names */
+            int gapn = cui__leaf(ui, 0, CUI_GROW(1), CUI_PX(1));
+            ui->nodes[gapn].min_w = 16;
             int v = cui__text_node(ui, cui__frame_printf(ui, "%.0f%%", total > 0 ? (double)(values[k] / total * 100) : 0.0), -1,
                                    CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
             ui->nodes[v].line_height = 1.3f;

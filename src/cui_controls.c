@@ -574,7 +574,7 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
     }
     cui__open(ui, row);
     if (have && st->init) {
-        int hl = cui__absolute(ui, 0, st->x.x, kind == 0 ? 3 : (kind == 2 ? 2 : 0), st->w.x, kind == 1 ? h : inner_h);
+        int hl = cui__absolute(ui, 0, st->x.x, kind == 0 ? 3 : 0, st->w.x, kind == 1 ? h : inner_h);   /* pill tabs have no inset: the highlight sits on the tab */
         cui__hl_paint *p = cui__frame_alloc(ui, sizeof *p);
         if (kind == 0) {
             /* the selected segment has to stand off the track in both modes */
