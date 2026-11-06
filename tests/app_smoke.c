@@ -21,8 +21,11 @@ int main(int argc, char **argv) {
     bool switched = false;
     while (cui_app_frame(app)) {
         cui_ctx *ui = cui_app_ui(app);
-        /* click the Bluetooth switch after the layout settled */
-        if (frame == 20) { cui_input_mouse_move(ui, 700, 198); }
+        /* click the Bluetooth switch after the layout settled, wherever the gallery put it.
+         * The position goes in again with the press and the release, so a real pointer
+         * moving over the window in between cannot pull the click away. */
+        float cx = g.bluetooth_rect.x + g.bluetooth_rect.w * 0.5f, cy = g.bluetooth_rect.y + g.bluetooth_rect.h * 0.5f;
+        if (frame >= 20 && frame <= 24) cui_input_mouse_move(ui, cx, cy);
         if (frame == 22) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
         if (frame == 24) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
         bool before = g.bluetooth;
@@ -36,7 +39,8 @@ int main(int argc, char **argv) {
     int w = dd->width_px, h = dd->height_px;
     unsigned char *px = malloc((size_t)w * h * 4);
     bool ok = cui_app_screenshot(app, px, w, h) && cui_write_png(out, px, w, h, w * 4);
-    printf("size=%.0fx%.0f screenshot=%s switch_clicked=%s\n", sz.x, sz.y, ok ? out : "failed", switched ? "yes" : "no");
+    printf("size=%.0fx%.0f screenshot=%s switch_clicked=%s (switch at %.0f,%.0f %.0fx%.0f)\n", sz.x, sz.y, ok ? out : "failed", switched ? "yes" : "no",
+           g.bluetooth_rect.x, g.bluetooth_rect.y, g.bluetooth_rect.w, g.bluetooth_rect.h);
     free(px);
     cui_app_destroy(app);
     return (ok && switched) ? 0 : 1;

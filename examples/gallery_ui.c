@@ -313,6 +313,7 @@ static void page_selection(cui_ctx *ui, gallery *g) {
             cui_card(ui, .gap = 14) {
                 cui_switch(ui, "Wi-Fi", &g->wifi);
                 cui_switch(ui, "Bluetooth", &g->bluetooth);
+                g->bluetooth_rect = cui_last_rect(ui);
                 cui_switch(ui, "Airplane mode", &g->airplane, .description = "Turns off all radios.");
             }
         }

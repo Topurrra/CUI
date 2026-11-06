@@ -21,6 +21,7 @@ typedef struct gallery {
     cui_color color;
     /* selection */
     bool terms, newsletter, marketing, wifi, bluetooth, airplane;
+    cui_rect bluetooth_rect;   /* where the Bluetooth switch landed, so the smoke test can click it */
     int plan;
     float volume, brightness, lo, hi;
     int rating;
