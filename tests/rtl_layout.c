@@ -184,9 +184,32 @@ static void placeholder_direction(cui_sw_renderer *sw, const char *font) {
     free(pixels);
     printf("LTR/RTL placeholders: 0 differing pixels between opposite context directions\n");
 }
+static void intrinsic_direction(cui_sw_renderer *sw, const char *font) {
+    for (int rtl = 0; rtl < 2; rtl++) for (int wrap = 0; wrap < 2; wrap++) {
+        cui_ctx *ui = context(sw, rtl ? CUI_DIRECTION_LTR : CUI_DIRECTION_RTL, font);
+        const char *text = "T. سلام";
+        for (int frame = 0; frame < 2; frame++) {
+            cui_begin_frame(ui, 1.0f/60);
+            cui_row(ui, .direction = rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR, .width = CUI_FILL) {
+                cui_text(ui, text, .size = 32, .nowrap = !wrap);
+            }
+            cui_end_frame(ui);
+            cui_node *n = &ui->nodes[2];
+            cui_ctx *reference = context(sw, rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR, font);
+            float width = cui_measure_text(reference, CUI_FONT_BODY, 32, text, -1).width;
+            float minimum = cui__text_min_width(reference, CUI_FONT_BODY, 32, text, (int)strlen(text));
+            CHECK(fabsf(n->pref_w - ceilf(width*4)/4) < .001f, "intrinsic width used context instead of resolved node direction");
+            if (wrap) CHECK(fabsf(n->minc_w - ceilf(minimum*4)/4) < .001f, "minimum width used context instead of resolved node direction");
+            cui_destroy(reference);
+        }
+        cui_destroy(ui);
+    }
+    printf("intrinsic widths: opposite context, LTR/RTL, FIT/nowrap and wrap, repeated frames passed\n");
+}
 int main(int argc,char **argv) {
     dark=argc>3;
     cui_sw_renderer *sw=cui_sw_create();
+    intrinsic_direction(sw, argc>1?argv[1]:NULL);
     left_alignment(sw); scroll_overflow(sw); popover_direction(sw);
     placeholder_direction(sw, argc>1?argv[1]:NULL);
     cui_ctx *ltr=context(sw,CUI_DIRECTION_LTR,argc>1?argv[1]:NULL);

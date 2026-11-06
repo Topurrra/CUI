@@ -274,9 +274,15 @@ static void cui__measure_w(cui_ctx *ui, int i) {
     n = &ui->nodes[i];
     float pref = 0, minc = 0;
     if (n->flags & CUI_NF_TEXT) {
+#ifdef CUI_TEXT_SHAPING
+        ui->text_direction = n->rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR;
+#endif
         pref = cui__text_width(ui, n->font, n->font_size, n->text, n->text_len, (n->flags & CUI_NF_TABULAR) != 0);
         if (n->flags & CUI_NF_WRAP) minc = cui__text_min_width(ui, n->font, n->font_size, n->text, n->text_len);
         else minc = CUI_MIN(pref, n->font_size * 2.5f);   /* single lines can shrink and show an ellipsis */
+#ifdef CUI_TEXT_SHAPING
+        ui->text_direction = 0;
+#endif
         pref = ceilf(pref * 4) / 4;
         minc = ceilf(minc * 4) / 4;
     } else {
