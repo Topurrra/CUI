@@ -206,7 +206,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 4;
         cn->w = CUI_PX(st->widths[k] + (k == ncols - 1 ? b->extra : 0)); cn->h = CUI_FILL;
         cn->pad[1] = cn->pad[3] = 12;
-        cn->justify = c->align == CUI_TEXT_RIGHT ? CUI_JUSTIFY_END : c->align == CUI_TEXT_CENTER ? CUI_JUSTIFY_CENTER : CUI_JUSTIFY_START;
+        cn->text_align = (uint8_t)c->align;
         cn->bg = cui_alpha(CUI_C(ui, HOVER), *hv);
         cn->flags |= CUI_NF_CLIP;
         if (c->sortable) { cui__mark_interactive(ui, cell, CUI_IF_FOCUSABLE); if (hr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND); }
@@ -343,7 +343,7 @@ void cui_data_grid_cell(cui_ctx *ui) {
     cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 8;
     cn->w = CUI_PX(b->st->widths[b->col] + (b->col == b->ncols - 1 ? b->extra : 0)); cn->h = CUI_FILL;
     cn->pad[1] = cn->pad[3] = 12;
-    cn->justify = c->align == CUI_TEXT_RIGHT ? CUI_JUSTIFY_END : c->align == CUI_TEXT_CENTER ? CUI_JUSTIFY_CENTER : CUI_JUSTIFY_START;
+    cn->text_align = (uint8_t)c->align;
     cn->flags |= CUI_NF_CLIP;
     b->col++;
     cui__open(ui, cell);

@@ -680,6 +680,12 @@ static void cui__resolve_direction(cui_ctx *ui, int i, bool inherited) {
     if (d == CUI_DIRECTION_AUTO) d = cui__first_strong(ui, i);
 #endif
     n->rtl = d == CUI_DIRECTION_RTL || (!d && inherited);
+    /* Cell content alignment needs the resolved direction, including AUTO. */
+    if (!(n->flags & CUI_NF_TEXT) && n->text_align != CUI_TEXT_START) {
+        if (n->text_align == CUI_TEXT_CENTER) n->justify = CUI_JUSTIFY_CENTER;
+        else if (n->text_align == CUI_TEXT_END) n->justify = CUI_JUSTIFY_END;
+        else n->justify = (n->text_align == CUI_TEXT_RIGHT) != n->rtl ? CUI_JUSTIFY_END : CUI_JUSTIFY_START;
+    }
     for (int c = n->first; c >= 0; c = ui->nodes[c].next) cui__resolve_direction(ui, c, n->rtl);
     for (int c = n->abs_first; c >= 0; c = ui->nodes[c].next) cui__resolve_direction(ui, c, n->rtl);
 }

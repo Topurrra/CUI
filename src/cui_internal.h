@@ -228,7 +228,7 @@ typedef struct cui_node {
     cui_font font;
     float font_size;
     float line_height;        /* multiplier */
-    uint8_t text_align;
+    uint8_t text_align;      /* text or row-cell content alignment */
     cui_color text_color;
 
     /* style */

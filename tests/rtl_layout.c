@@ -242,7 +242,7 @@ static void split_direction(cui_sw_renderer *sw) {
         rtl |= directions[mode] == CUI_DIRECTION_AUTO;
 #endif
         CHECK((ratio < .3f) == (rtl && !vertical), "split ratio used wrong origin");
-        cui_input_mouse_move(ui, vertical ? 250 : 0, vertical ? 0 : 250);
+        cui_input_mouse_move(ui, vertical ? 250.0f : 0.0f, vertical ? 0.0f : 250.0f);
         split_frame(ui, &ratio, vertical, directions[mode]);
         CHECK(fabsf(ratio - (rtl && !vertical ? .78f : .14f)) < .001f, "split minimum sizes use wrong direction");
         cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); split_frame(ui, &ratio, vertical, directions[mode]);
@@ -250,9 +250,70 @@ static void split_direction(cui_sw_renderer *sw) {
     }
     printf("split press, drag and minimums: LTR/RTL/inherited/AUTO, horizontal/vertical passed\n");
 }
+static void column_alignment(cui_sw_renderer *sw) {
+    const cui_text_align aligns[] = { CUI_TEXT_START, CUI_TEXT_END, CUI_TEXT_LEFT, CUI_TEXT_RIGHT, CUI_TEXT_CENTER };
+    const cui_direction directions[] = { CUI_DIRECTION_INHERIT, CUI_DIRECTION_RTL, CUI_DIRECTION_LTR, CUI_DIRECTION_AUTO };
+    for (int root_rtl = 0; root_rtl < 2; root_rtl++) for (int mode = 0; mode < 4; mode++) for (int grid = 0; grid < 2; grid++) {
+        cui_ctx *ui = context(sw, root_rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR, NULL);
+        cui_set_viewport(ui, 800, 400, 1);
+        const char *title = directions[mode] == CUI_DIRECTION_AUTO ? "سلام" : "Header";
+        cui_table_column table_cols[5]; cui_grid_column grid_cols[5];
+        memset(table_cols, 0, sizeof table_cols); memset(grid_cols, 0, sizeof grid_cols);
+        for (int k = 0; k < 5; k++) {
+            table_cols[k].title = grid_cols[k].title = title;
+            table_cols[k].align = grid_cols[k].align = aligns[k];
+            table_cols[k].width = CUI_PX(140); grid_cols[k].width = 140; grid_cols[k].fixed = true;
+            table_cols[k].sortable = grid_cols[k].sortable = true;
+        }
+        cui_table_sort sort = {0};
+        int first, last;
+        cui_begin_frame(ui, 1.0f/60);
+        cui_column(ui, .direction = directions[mode], .width = CUI_PX(750), .height = CUI_PX(300)) {
+            if (grid) {
+                CHECK(cui_data_grid_begin_ex(ui, "grid", grid_cols, 5, 1, &first, &last, &(cui_grid_opts){ .height = CUI_PX(200), .sort = &sort }), "grid missing");
+                cui_data_grid_row(ui, 0);
+                for (int k = 0; k < 5; k++) cui_data_grid_cell_text(ui, "Cell");
+                cui_data_grid_end(ui);
+            } else {
+                CHECK(cui_table_begin_ex(ui, "table", table_cols, 5, &(cui_table_opts){ .sort = &sort }), "table missing");
+                cui_table_row(ui, false);
+                for (int k = 0; k < 5; k++) cui_table_cell_text(ui, "Cell");
+                cui_table_end(ui);
+            }
+        }
+        cui_end_frame(ui);
+        int header = 0, body = 0;
+        bool rtl = directions[mode] == CUI_DIRECTION_RTL || (directions[mode] == CUI_DIRECTION_INHERIT && root_rtl);
+#ifdef CUI_TEXT_SHAPING
+        rtl |= directions[mode] == CUI_DIRECTION_AUTO;
+#endif
+        for (int i = 0; i < ui->node_count; i++) {
+            cui_node *text = &ui->nodes[i];
+            if (!(text->flags & CUI_NF_TEXT) || text->font == CUI_FONT_ICONS) continue;
+            bool heading = !strcmp(text->text, title);
+            if (!heading && strcmp(text->text, "Cell")) continue;
+            int k = heading ? header++ : body++;
+            cui_node *cell = &ui->nodes[text->parent];
+            float left = text->rect.x, right = left + text->rect.w;
+            for (int c = cell->first; c >= 0; c = ui->nodes[c].next) {
+                left = CUI_MIN(left, ui->nodes[c].rect.x);
+                right = CUI_MAX(right, ui->nodes[c].rect.x + ui->nodes[c].rect.w);
+            }
+            bool right_aligned = aligns[k] == CUI_TEXT_RIGHT || (aligns[k] == CUI_TEXT_START && rtl) || (aligns[k] == CUI_TEXT_END && !rtl);
+            float expected = aligns[k] == CUI_TEXT_CENTER ? cell->rect.x + (cell->rect.w - (right-left))/2 :
+                right_aligned ? cell->rect.x + cell->rect.w - cell->pad[1] - (right-left) : cell->rect.x + cell->pad[3];
+            CHECK(cell->rtl == rtl, "column inherited wrong direction");
+            CHECK(fabsf(left-expected) < .01f, "table/grid header or cell violated physical/logical alignment");
+        }
+        CHECK(header == 5 && body == 5, "column alignment coverage missing");
+        cui_destroy(ui);
+    }
+    printf("table/grid headers (with sort icons) and cells: all five alignments, inherited/explicit/AUTO passed\n");
+}
 int main(int argc,char **argv) {
     dark=argc>3;
     cui_sw_renderer *sw=cui_sw_create();
+    column_alignment(sw);
     split_direction(sw);
     intrinsic_direction(sw, argc>1?argv[1]:NULL);
     left_alignment(sw); scroll_overflow(sw); popover_direction(sw);
