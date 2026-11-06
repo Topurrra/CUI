@@ -29,14 +29,11 @@ const I = {
   copy: svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
   check: svg('<path d="M20 6 9 17l-5-5"/>'),
   split: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
-  frame: svg('<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>'),
   grip: svg('<path d="M21 15l-6 6M21 9 9 21"/>'),
   arrow: svg('<path d="M5 12h14M13 6l6 6-6 6"/>'),
   left: svg('<path d="M19 12H5M11 18l-6-6 6-6"/>'),
   wrap: svg('<path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7"/><path d="m16 16-2 2 2 2"/>'),
-  note: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
-  circleCheck: svg('<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>'),
   monitor: svg('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>'),
 };
 const ACCENTS = [
@@ -55,12 +52,6 @@ const prefs = { theme: saved.theme || 'system', accent: saved.accent ?? 0, accen
                 renderer: saved.renderer || 'gpu', speed: saved.speed || 1, reducedMotion: !!saved.reducedMotion,
                 pixelRatio: saved.pixelRatio || 'auto', pair: !!saved.pair, wrap: !!saved.wrap };
 const savePrefs = () => store.set('cui-web-settings', prefs);
-const reviewOn = () => !!prefs.review;
-function applyReview() { document.body.classList.toggle('review-mode', reviewOn()); }
-let notes = store.get('cui-web-notes', {});     // id -> { text, updated, context }
-let reviewed = store.get('cui-web-reviewed', {});   // id -> timestamp
-const saveNotes = () => { store.set('cui-web-notes', notes); updateCounts(); };
-const saveReviewed = () => { store.set('cui-web-reviewed', reviewed); updateCounts(); };
 
 const media = matchMedia('(prefers-color-scheme: dark)');
 const isDark = () => prefs.theme === 'dark' || (prefs.theme === 'system' && media.matches);
@@ -226,7 +217,6 @@ function previewBlock(opts) {
   const codeHost = h('div', { class: 'hidden' });
   let mode = 'preview';
   let pair = opts.bare ? false : (opts.pair ?? (prefs.pair && !opts.fill && !sc?.dark_only));
-  let showEdge = false;
 
   const tabs = h('div', { class: 'tabs', role: 'tablist' },
     h('button', { role: 'tab', 'aria-selected': 'true', html: I.eye + 'Preview', onclick: () => setMode('preview') }),
@@ -234,12 +224,10 @@ function previewBlock(opts) {
   const tool = (icon, label, fn, pressed, cls) => h('button', { class: 'icon-btn' + (cls ? ' ' + cls : ''), title: label, 'aria-label': label, html: icon, onclick: fn,
                                                           'aria-pressed': pressed === undefined ? null : String(pressed) });
   const pairBtn = tool(I.split, 'Light and dark side by side', () => { pair = !pair; pairBtn.setAttribute('aria-pressed', String(pair)); remount(); }, pair);
-  const edgeBtn = tool(I.frame, 'Show the canvas edge', () => { showEdge = !showEdge; stage.classList.toggle('show-edge', showEdge); edgeBtn.setAttribute('aria-pressed', String(showEdge)); }, false, 'review-only');
   const codeBtn = opts.leading ? tool(I.code, 'Show the code', () => setMode(mode === 'code' ? 'preview' : 'code'), false) : null;
   const tools = h('div', { class: 'pv-tools' },
     codeBtn,
     opts.fill || sc?.dark_only ? null : pairBtn,
-    opts.fill ? null : edgeBtn,
     opts.fill && sc?.dark_only ? null : h('span', { class: 'sep' }),
     tool(I.reset, 'Reset: restart this preview from its first frame', () => { remount(); toast('Preview reset'); }),
     tool(I.camera, 'Save a PNG of this preview', async () => {
@@ -249,9 +237,8 @@ function previewBlock(opts) {
       const a = h('a', { href: URL.createObjectURL(blob), download: `${opts.content || opts.module}${p.dark ? '-dark' : ''}.png` });
       a.click();
     }),
-    tool(I.copy, 'Copy a reference to this preview', () => copy(reference(opts, block.previews[0]), 'Reference copied'), undefined, 'review-only'),
     tool(I.expand, 'Full screen', () => { if (document.fullscreenElement) document.exitFullscreen(); else root.requestFullscreen?.(); }));
-  const bar = h('div', { class: 'pv-bar' }, opts.leading || tabs, opts.title ? h('span', { class: 'pv-name review-only' }, opts.title) : null, tools);
+  const bar = h('div', { class: 'pv-bar' }, opts.leading || tabs, tools);
   if (opts.bare) root.append(stage); else root.append(bar, stage, codeHost);
 
   function setMode(m) {
@@ -333,7 +320,7 @@ function previewBlock(opts) {
     if (block.mounted) return;
     block.mounted = true;
     stage.replaceChildren();
-    stage.className = 'stage' + (opts.fill ? ' flush' : '') + (pair ? ' pair' : '') + (showEdge ? ' show-edge' : '');
+    stage.className = 'stage' + (opts.fill ? ' flush' : '') + (pair ? ' pair' : '');
     if (pair) {
       const wide = sc && sc.w > 520;
       stage.classList.toggle('stack', wide);
@@ -376,16 +363,6 @@ function previewBlock(opts) {
   blocks.push(block);
   if (opts.mode === 'code') setMode('code');
   return root;
-}
-
-function reference(opts, p) {
-  const sc = opts.module === 'scenes' ? CAT.scenes[opts.content] : null;
-  const parts = [];
-  if (sc) parts.push(`scene "${opts.content}" (${sc.file}:${sc.line})`);
-  else parts.push(`${opts.title || opts.module} app (${opts.codeFile})`);
-  if (opts.docRef) parts.push(`docs ${opts.docRef}`);
-  if (p && p.inst) parts.push(`${p.dark ? 'dark' : 'light'}, ${ACCENTS[p.mod.exports.inst_get_accent(p.inst)]?.[0].toLowerCase()} accent, ${p.w}×${p.h}`);
-  return `CUI ${opts.item ? opts.item + ': ' : ''}${parts.join('; ')}`;
 }
 
 /* word wrap for code: one preference for the whole site, a toggle on every code block */
@@ -470,27 +447,13 @@ function renderNav(filter = '') {
     const items = c.items.map((id) => CAT.items[id]).filter(match);
     if (!items.length) continue;
     sections.push(h('div', { class: 'nav-section' },
-      h('div', { class: 'nav-title' }, c.title, (() => {
-        const done = reviewOn() ? items.filter((i) => reviewed[i.id]).length : 0;
-        return reviewOn() ? h('span', { class: 'tabular' + (done && done === items.length ? ' all' : '') }, `${done}/${items.length}`) : null;
-      })()),
+      h('div', { class: 'nav-title' }, c.title),
       items.map((it) => h('a', { href: `#/c/${it.id}`, 'aria-current': route === `#/c/${it.id}` ? 'page' : null },
-        h('span', { class: 'label' }, it.title),
-        reviewOn() && notes[it.id]?.text ? h('i', { class: 'note-dot', title: 'Has a note' }) : null,
-        reviewOn() && reviewed[it.id] ? h('span', { class: 'mark', html: I.check, title: 'Reviewed' }) : null))));
+        h('span', { class: 'label' }, it.title)))));
   }
   nav.replaceChildren(...(sections.length ? sections : [h('div', { class: 'empty' }, `Nothing matches “${filter}”.`)]));
   const cur = nav.querySelector('[aria-current="page"]');
   if (cur && !filter) cur.scrollIntoView({ block: 'nearest' });
-}
-function updateCounts() {
-  const n = Object.values(notes).filter((x) => x.text?.trim()).length;
-  $('#notes-count').textContent = n ? ` ${n}` : '';
-  const total = order.length, done = order.filter((id) => reviewed[id]).length;
-  $('#review-progress').replaceChildren(
-    h('div', {}, `Reviewed ${done} of ${total}`),
-    h('div', { class: 'bar' }, h('i', { style: `width:${(done / total * 100).toFixed(1)}%` })));
-  renderNav($('#filter').value);
 }
 $('#filter').addEventListener('input', (e) => renderNav(e.target.value));
 $('#filter').addEventListener('keydown', (e) => {
@@ -727,7 +690,7 @@ function viewComponents() {
         const it = CAT.items[id];
         return h('a', { class: 'card', href: `#/c/${id}` },
           h('div', { class: 'thumb' }, thumb(it.scenes[0])),
-          h('div', { class: 'body' }, h('h3', {}, it.title, reviewOn() && reviewed[id] ? h('span', { class: 'mark', html: I.circleCheck, title: 'Reviewed' }) : null),
+          h('div', { class: 'body' }, h('h3', {}, it.title),
             h('p', {}, it.summary)));
       })));
   }
@@ -786,7 +749,6 @@ function viewItem(id) {
     h('div', { class: 'title-row' },
       h('div', {}, h('h1', {}, it.title), it.summary ? h('p', { class: 'lede' }, it.summary) : null),
       h('div', { class: 'title-actions' },
-        reviewToggle(id),
         h('button', { class: 'btn sm', html: I.copy + 'Copy page', title: 'Copy this page as text', onclick: () => copy(pageText(it), 'Page copied') }),
         prev ? h('a', { class: 'icon-btn framed', href: `#/c/${prev.id}`, title: `Previous: ${prev.title}`, 'aria-label': `Previous: ${prev.title}`, html: I.left }) : h('span', { class: 'icon-btn framed disabled', html: I.left }),
         next ? h('a', { class: 'icon-btn framed', href: `#/c/${next.id}`, title: `Next: ${next.title}`, 'aria-label': `Next: ${next.title}`, html: I.arrow }) : h('span', { class: 'icon-btn framed disabled', html: I.arrow }))),
@@ -809,7 +771,6 @@ function viewItem(id) {
   }
   if (it.scenes.length) showScene(it.scenes[0]);
   page.append(pv);
-  page.append(reviewBox(id, it, docRef));
   const docs = h('div', { class: 'docs' },
     h('div', { class: 'doc', html: it.html }));
   for (const im of it.images) {
@@ -847,81 +808,6 @@ function pageText(it) {
   const tmp = h('div', { html: it.html });
   tmp.querySelectorAll('pre').forEach((p) => { p.textContent = '\n```c\n' + p.textContent.trim() + '\n```\n'; });
   return `# ${it.title}\n\n${it.summary || ''}\n\n${tmp.innerText.trim()}\n`;
-}
-
-function reviewToggle(id) {
-  const b = h('button', { class: 'btn sm review-toggle review-only', 'aria-pressed': String(!!reviewed[id]), title: 'Mark this component as reviewed' });
-  const paint = () => { const on = !!reviewed[id]; b.setAttribute('aria-pressed', String(on)); b.innerHTML = (on ? I.circleCheck : I.check) + (on ? 'Reviewed' : 'Mark reviewed'); };
-  b.onclick = () => { if (reviewed[id]) delete reviewed[id]; else reviewed[id] = Date.now(); saveReviewed(); paint(); };
-  paint();
-  return b;
-}
-
-function reviewBox(id, it, docRef) {
-  const n = notes[id] || {};
-  const ta = h('textarea', { rows: 3, placeholder: 'What looks wrong or should change? Collect notes here, then copy them all from the Notes page.' });
-  ta.value = n.text || '';
-  const when = h('span', {}, n.updated ? `Saved ${new Date(n.updated).toLocaleString()}` : 'Not saved yet');
-  let timer = 0;
-  ta.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      const p = blocks[0]?.previews[0];
-      const ctx = p && p.inst ? { theme: p.dark ? 'dark' : 'light', accent: ACCENTS[p.mod.exports.inst_get_accent(p.inst)]?.[0], size: `${p.w}×${p.h}` } : null;
-      if (ta.value.trim()) notes[id] = { text: ta.value, updated: Date.now(), context: ctx };
-      else delete notes[id];
-      saveNotes();
-      when.textContent = notes[id] ? `Saved ${new Date().toLocaleTimeString()}` : 'Cleared';
-    }, 400);
-  });
-  const box = h('div', { class: 'review-box review-only' + (n.text ? ' open' : '') },
-    h('header', {},
-      h('button', { class: 'review-open', 'aria-expanded': String(!!n.text), html: I.note + '<span>' + (n.text ? 'Note' : 'Add a note') + '</span>',
-        onclick: (e) => { const open = !box.classList.contains('open'); box.classList.toggle('open', open); e.currentTarget.setAttribute('aria-expanded', String(open)); if (open) ta.focus(); } }),
-      h('span', { class: 'spacer' }),
-      h('button', { class: 'btn ghost sm review-copy', html: I.copy + 'Copy as Markdown', onclick: () => copy(noteMarkdown(id), 'Note copied') })),
-    h('div', { class: 'review-body' }, ta,
-      h('footer', {}, when, h('span', { class: 'spacer' }), h('span', {}, 'Stays in this browser, with the preview’s theme, accent and size'))));
-  return box;
-}
-
-function noteMarkdown(id) {
-  const it = CAT.items[id], n = notes[id];
-  if (!it) return '';
-  const where = [`docs: ${it.doc.file}:${it.doc.line}`, ...it.scenes.map((s) => `scene "${s}": ${CAT.scenes[s].file}:${CAT.scenes[s].line}`)];
-  let md = `## ${it.title}\n\n- Where: ${where.join('; ')}\n`;
-  if (n?.context) md += `- Seen in: ${n.context.theme} theme, ${n.context.accent?.toLowerCase()} accent, ${n.context.size}\n`;
-  md += `\n${(n?.text || '').trim()}\n`;
-  return md;
-}
-
-function viewNotes() {
-  setNav('notes');
-  const ids = order.filter((id) => notes[id]?.text?.trim());
-  const all = () => `# CUI review notes\n\nCollected in the live component preview.\n\n${ids.map(noteMarkdown).join('\n')}`;
-  const page = h('div', { class: 'page' },
-    h('div', { class: 'title-row' },
-      h('div', {}, h('h1', {}, 'Notes'),
-        h('p', { class: 'lede' }, 'Everything you wrote while reviewing, with the files and lines each component lives in. Copy it all and paste it into a request for changes.')),
-      ids.length ? h('button', { class: 'btn primary', html: I.copy + 'Copy all as Markdown', onclick: () => copy(all(), `Copied ${ids.length} notes`) }) : null),
-    h('div', { class: 'meta' },
-      h('span', { class: 'chip' }, `${ids.length} with notes`),
-      h('span', { class: 'chip' }, `${order.filter((id) => reviewed[id]).length} of ${order.length} reviewed`),
-      Object.keys(reviewed).length ? h('button', { class: 'chip', onclick: () => { if (confirm('Clear every reviewed mark? Notes stay.')) { reviewed = {}; saveReviewed(); route(); } } }, 'Clear reviewed marks') : null));
-  if (!ids.length) {
-    page.append(h('div', { class: 'empty-state' }, h('h3', {}, 'No notes yet'),
-      h('p', {}, 'Open a component, try it, and write what should change in the box under its preview.'),
-      h('a', { class: 'btn', href: `#/c/${order[0]}` }, 'Start with the first component')));
-    return page;
-  }
-  page.append(h('div', { class: 'notes-list' }, ids.map((id) => {
-    const it = CAT.items[id], n = notes[id];
-    return h('article', { class: 'note-item' },
-      h('header', {}, h('a', { href: `#/c/${id}` }, it.title), h('span', { class: 'where' }, `${it.doc.file}:${it.doc.line}`),
-        h('span', { class: 'spacer' }), h('span', { class: 'muted', style: 'font-size:12px' }, new Date(n.updated).toLocaleString())),
-      h('div', { class: 'text' }, n.text));
-  })));
-  return page;
 }
 
 function viewShowcase() {
@@ -1016,7 +902,6 @@ function route() {
   else if (kind === 'accents') view = viewAccents();
   else if (kind === 'apps') view = viewApps();
   else if (kind === 'app') view = viewApp(decodeURIComponent(id));
-  else if (kind === 'notes' && reviewOn()) view = viewNotes();
   else view = viewMissing();
   document.body.classList.toggle('app-mode', kind === 'app');
   document.body.classList.toggle('home-mode', !kind || kind === 'home');
@@ -1064,8 +949,7 @@ function openSettings(anchor) {
     h('div', { class: 'row' }, h('span', {}, 'Motion speed'), seg('Motion speed', [['1×', 1], ['½×', 0.5], ['¼×', 0.25], ['⅒×', 0.1]], prefs.speed, (v) => { prefs.speed = v; savePrefs(); syncSettings(); })),
     h('div', { class: 'row' }, h('span', {}, 'Pixel ratio'), seg('Pixel ratio', [['Auto', 'auto'], ['1×', 1], ['2×', 2]], prefs.pixelRatio, (v) => { prefs.pixelRatio = v; rebuild(); })),
     h('div', { class: 'row' }, h('span', {}, 'Reduced motion'), sw(prefs.reducedMotion, (v) => { prefs.reducedMotion = v; savePrefs(); syncSettings(); allLive().forEach((p) => p.setReducedMotion(v)); })),
-    h('div', { class: 'row' }, h('span', {}, 'Light and dark side by side'), sw(prefs.pair, (v) => { prefs.pair = v; rebuild(); })),
-    h('div', { class: 'row' }, h('span', {}, 'Review tools', h('small', {}, 'Notes, reviewed marks and canvas tools')), sw(prefs.review, (v) => { prefs.review = v; savePrefs(); applyReview(); updateCounts(); route(); })));
+    h('div', { class: 'row' }, h('span', {}, 'Light and dark side by side'), sw(prefs.pair, (v) => { prefs.pair = v; rebuild(); })));
   document.body.append(pop);
   renderAccents();
   const r = anchor.getBoundingClientRect();
@@ -1151,6 +1035,5 @@ document.addEventListener('keydown', (e) => {
 window.cuiDebug = { allLive, blocks: () => blocks, settings };
 applyTheme();
 applyWrap();
-applyReview();
-updateCounts();
+renderNav($('#filter').value);
 route();

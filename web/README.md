@@ -37,8 +37,7 @@ can then be served by any static file server.
 Settings (top right) switch the theme and accent, the renderer (WebGL2 or
 software), slow motion down for inspecting animations, force reduced motion
 and set the pixel ratio. Every code block has a wrap toggle, and the choice is
-remembered for the whole site. **Review tools** adds notes and reviewed marks per
-component, kept in your browser only, for reviewing changes to the library.
+remembered for the whole site.
 
 ## How it works
 

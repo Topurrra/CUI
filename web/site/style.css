@@ -208,9 +208,6 @@ kbd {
 .filter:focus { border-color: var(--border-strong); }
 .filter-wrap { position: relative; }
 .filter-wrap svg { position: absolute; left: 10px; top: 8.5px; width: 15px; height: 15px; color: var(--text-3); pointer-events: none; }
-.review-progress { display: grid; gap: 6px; font-size: 12px; color: var(--text-3); padding: 0 2px; font-variant-numeric: tabular-nums; }
-.review-progress .bar { height: 3px; background: var(--border-subtle); border-radius: 3px; overflow: hidden; }
-.review-progress .bar i { display: block; height: 100%; background: var(--fg); border-radius: 4px; transition: width 320ms var(--ease); }
 .nav { overflow-y: auto; padding: 4px 12px 32px; flex: 1; }
 .nav-section { margin-top: 18px; }
 .nav-section:first-child { margin-top: 4px; }
@@ -219,8 +216,6 @@ kbd {
   font-size: 13px; font-weight: 400; color: var(--text-3);
   padding: 6px 4px 8px;
 }
-.nav-title .tabular { font-weight: 400; color: var(--text-3); }
-.nav-title .tabular.all { color: var(--success); opacity: 1; }
 .nav a {
   display: flex; align-items: center; gap: 8px;
   text-decoration: none; color: var(--text-2);
@@ -236,8 +231,6 @@ kbd {
   content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--fg);
 }
 .nav a .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav a .mark { width: 14px; height: 14px; flex: none; color: var(--success); }
-.nav a .note-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); flex: none; }
 .nav .empty { padding: 12px 10px; color: var(--text-3); font-size: 13px; }
 
 .main { flex: 1; min-width: 0; background: var(--bg); min-height: calc(100vh - var(--topbar-h)); }
@@ -265,9 +258,6 @@ h3 { font-size: 15px; }
 .variant-tabs button:hover { color: var(--fg); }
 .variant-tabs button[aria-selected="true"] { background: var(--hover); color: var(--fg); }
 
-.review-toggle { flex: none; }
-.review-toggle svg { width: 14px; height: 14px; }
-.review-toggle[aria-pressed="true"] { color: var(--success); border-color: color-mix(in oklab, var(--success) 35%, var(--border)); background: color-mix(in oklab, var(--success) 7%, var(--surface)); }
 .api-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 14px; }
 .api-label { font-size: 12px; color: var(--text-3); margin-right: 4px; }
 .api {
@@ -323,7 +313,6 @@ button.chip:hover { background: var(--active); color: var(--fg); }
 .tabs button[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.06); }
 :root[data-theme="dark"] .tabs button[aria-selected="true"] { background: #2c2c2c; box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.1); }
 .tabs button svg { width: 14px; height: 14px; }
-.pv-name { font: 400 12px var(--font-mono); color: var(--text-3); }
 .pv-tools { display: flex; gap: 2px; align-items: center; margin-left: auto; }
 .pv-tools .icon-btn { width: 30px; height: 30px; }
 .pv-tools .icon-btn svg { width: 15px; height: 15px; }
@@ -350,8 +339,6 @@ button.chip:hover { background: var(--active); color: var(--fg); }
 .canvas-wrap { position: relative; line-height: 0; flex: none; max-width: 100%; }
 .canvas-wrap canvas { display: block; outline: none; border-radius: 2px; touch-action: none; }
 .canvas-wrap canvas:focus, .canvas-wrap canvas:focus-visible { outline: none; box-shadow: none; }
-.canvas-wrap .edge { position: absolute; inset: -1px; border: 1px dashed transparent; pointer-events: none; border-radius: 2px; }
-.stage.show-edge .canvas-wrap .edge { border-color: var(--border-strong); }
 .resize {
   position: absolute; right: -14px; bottom: -14px; width: 22px; height: 22px;
   cursor: nwse-resize; display: grid; place-items: center; color: var(--text-3);
@@ -454,39 +441,10 @@ pre.code:hover .code-tools, .install-code:hover .code-tools, .code-tools:focus-w
 .pager.next:hover .pager-dir svg { transform: translateX(2px); }
 .pager-title { font-weight: 500; font-size: 15px; }
 
-/* ---------------------------------------------------------------- notes panel */
-.review-box {
-  margin-top: 16px; border: 1px solid transparent; border-radius: var(--radius-panel);
-  padding: 4px; display: grid; gap: 0;
-  transition: border-color var(--t-state), background-color var(--t-state);
-}
-.review-box.open { border-color: var(--border); background: var(--surface); padding: 8px 12px 12px; gap: 10px; }
-.review-box header { display: flex; align-items: center; gap: 10px; }
-.review-open {
-  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 8px; margin-left: -4px;
-  border: 0; border-radius: var(--radius-item); background: transparent; color: var(--text-2);
-  font-size: 13px; font-weight: 500; cursor: pointer;
-  transition: background-color var(--t-hover), color var(--t-hover);
-}
-.review-open:hover { background: var(--hover); color: var(--fg); }
-.review-open svg { width: 15px; height: 15px; }
-.review-box:not(.open) .review-body, .review-box:not(.open) .review-copy { display: none; }
-.review-body { display: grid; gap: 8px; }
-.review-box textarea {
-  width: 100%; min-height: 76px; resize: vertical;
-  border: 1px solid var(--border); border-radius: var(--radius-control); padding: 9px 12px;
-  background: var(--bg); outline: none; line-height: 1.5;
-}
-.review-box textarea:focus { border-color: var(--border-strong); }
-.review-box footer { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-3); }
-.review-box footer .spacer { flex: 1; }
-.check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--fg); user-select: none; }
-.check input { width: 16px; height: 16px; accent-color: var(--fg); margin: 0; }
 
 /* ---------------------------------------------------------------- overview */
 .hero { display: grid; gap: 12px; }
 body.no-sidebar .sidebar { display: none; }
-body:not(.review-mode) .review-only { display: none !important; }
 
 /* landing: the hero is alone on the page, so it is centered */
 .home-shell { position: relative; isolation: isolate; }
@@ -646,7 +604,6 @@ body.reduce-motion :is(.page, .guide-main) > *, body.reduce-motion .page.home .h
 .card .thumb img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 .card .body { padding: 12px 14px 14px; display: grid; gap: 3px; align-content: start; }
 .card .body h3 { font-size: 14px; display: flex; align-items: center; gap: 6px; }
-.card .body h3 .mark { width: 14px; height: 14px; color: var(--success); }
 .card .body p { margin: 0; font-size: 12.5px; color: var(--text-3); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 .app-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
@@ -662,15 +619,6 @@ body.app-mode .sidebar { display: none; }
 .app-head h1 { font-size: 22px; }
 .app-head .lede { margin: 0; font-size: 13.5px; }
 
-/* notes page */
-.notes-list { display: grid; gap: 12px; margin-top: 24px; }
-.note-item { border: 1px solid var(--border); border-radius: var(--radius-panel); padding: 14px 16px; background: var(--surface); display: grid; gap: 6px; }
-.note-item header { display: flex; gap: 10px; align-items: baseline; }
-.note-item header a { font-weight: 500; text-decoration: none; }
-.note-item header a:hover { text-decoration: underline; }
-.note-item header .where { font: 12px var(--font-mono); color: var(--text-3); }
-.note-item header .spacer { flex: 1; }
-.note-item .text { white-space: pre-wrap; }
 .empty-state { text-align: center; padding: 64px 16px; color: var(--text-3); display: grid; gap: 8px; justify-items: center; }
 .empty-state h3 { color: var(--fg); }
 

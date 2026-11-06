@@ -56,9 +56,7 @@ export class Preview {
     this.canvas = document.createElement('canvas');
     this.canvas.tabIndex = 0;
     this.canvas.setAttribute('aria-label', `Live preview: ${opts.content}`);
-    this.edge = document.createElement('div');
-    this.edge.className = 'edge';
-    this.el.append(this.canvas, this.edge);
+    this.el.append(this.canvas);
     this.dirty = true;
     this.last = 0;
     this.visible = true;
