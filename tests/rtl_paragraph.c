@@ -102,7 +102,7 @@ int main(int argc,char **argv) {
             cui_end_frame(ui);char path[1024];snprintf(path,sizeof path,"%s-lines-%s.png",argv[2],mode?"auto":"rtl");png(ui,sw,path,900,640);cui_destroy(ui);
         }
         for(int k=0;k<3;k++) {
-            int width=(int[]){240,360,600}[k];cui_ctx *ui=context(sw,CUI_DIRECTION_RTL,argv[1]);cui_set_viewport(ui,width+48,1200,1);
+            int width=(int[]){240,360,600}[k];cui_ctx *ui=context(sw,CUI_DIRECTION_RTL,argv[1]);cui_set_viewport(ui,(float)(width+48),1200,1);
             paragraph_frame(ui,para,width,true);char path[1024];snprintf(path,sizeof path,"%s-wrap-%d.png",argv[2],width);png(ui,sw,path,width+48,1200);
             for(int i=0;i<ui->node_count;i++){cui_node *n=&ui->nodes[i];if(!n->lines)continue;
                 for(int j=0;j+1<n->text_lines;j++){int e=n->lines[j+1].start;while(e<n->text_len&&n->text[e]!=' ')e++;
