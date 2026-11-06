@@ -60,8 +60,7 @@ reachable in RTL: scrolling moves the content toward the right from its start.
 Floating layers inherit their opening container's resolved direction.
 
 Text defaults to `CUI_TEXT_START`; `CUI_TEXT_END` follows direction too.
-`CUI_TEXT_LEFT` and `CUI_TEXT_RIGHT` are physical. `CUI_TEXT_LEFT` now has enum value
-3; code should use the constants rather than persist their integer values.
+`CUI_TEXT_LEFT` and `CUI_TEXT_RIGHT` are physical.
 Explicit `CUI_TEXT_LEFT` keeps the same row centering as default text.
 Horizontal chevrons, double chevrons and horizontal arrows in icon nodes swap
 glyphs; checks and non-directional symbols do not. Raw `cui_draw_*` calls retain
@@ -76,6 +75,12 @@ uses the context direction; AUTO/INHERIT use first-strong, default LTR. Shaped
 wrapping preserves paragraph levels; see [integration](integration.md).
 Auto classification reuses CUI bidi's Unicode 17.0.0 data when shaping is enabled;
 the OFF build includes no Unicode direction table.
+
+**Compatibility:** the new `direction` fields change the sizes of `cui_ctx_desc`,
+`cui_box` and `cui_text_opts`. Shared-library users must rebuild the library and
+their applications against the updated header. Stored numeric `cui_text_align`
+values change meaning: 0 now means `CUI_TEXT_START`, and `CUI_TEXT_LEFT` is now 3.
+Use the named constants and update any saved numeric alignments.
 
 `cui_rtl_layout` checks every node rectangle and clicks six distinct RTL buttons.
 It also checks physical LEFT row alignment, horizontal overflow in both directions,
