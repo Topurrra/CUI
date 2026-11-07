@@ -201,6 +201,25 @@ export class Preview {
     this.poke();
     this.opts.onStats?.(this);
   }
+  // A device width preset: lays the scene out at `w` and grows its height to
+  // the content there, like the corner grip but in one step. 0 goes back to
+  // the natural size, which follows the container again.
+  setWidth(w) {
+    if (!this.inst) return;
+    const x = this.mod.exports, nat = this.natural;
+    if (!w) { this.resize(nat.w, nat.h); return; }
+    let h = nat.h;
+    if (x.inst_content_height) {
+      for (let pass = 0; pass < 3; pass++) {
+        x.inst_resize(this.inst, w, h, ratio());
+        x.inst_frame(this.inst, 0, 0);
+        const h2 = Math.max(nat.h, Math.ceil(x.inst_content_height(this.inst)));
+        if (h2 === h) break;
+        h = h2;
+      }
+    }
+    this.resize(w, h);
+  }
   refit() {
     if (!this.inst) return;
     if (!this.opts.fill && !this.userSized && this.autoWidth()) this.layoutAuto();

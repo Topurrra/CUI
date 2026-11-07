@@ -297,7 +297,15 @@ SCENE(kanban_live) {
     if (cui_kanban_end(ui, &mv)) web_kb_apply(&mv);
 }
 
+/* docking, live: the doc scene's warm-up holds a tab mid-drag for its screenshot;
+ * this variant skips the warm-up, so the page starts with nothing in hand */
+static void scene_docking_live(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    scene_docking(ui, f);
+}
+
 #define WEB_EXTRA_SCENES \
+    { "docking-live", scene_docking_live, 960, 560, true }, \
     { "text", scene_text, 640, 280, true }, { "icon-button", scene_icon_button, 420, 150, true }, \
     { "color-picker", scene_color_picker, 380, 420, true }, { "popover", scene_popover, 420, 300, true }, \
     { "sheet", scene_sheet, 820, 460, true }, { "image", scene_image, 520, 220, true }, \

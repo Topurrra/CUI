@@ -50,6 +50,7 @@ const I = {
   left: svg('<path d="M19 12H5M11 18l-6-6 6-6"/>'),
   wrap: svg('<path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7"/><path d="m16 16-2 2 2 2"/>'),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+  list: svg('<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>'),
   monitor: svg('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>'),
 };
 const ACCENTS = [
@@ -66,7 +67,8 @@ const store = {
 const saved = store.get('cui-web-settings', {});
 const prefs = { theme: saved.theme || 'system', accent: saved.accent ?? 0, accentTouched: !!saved.accentTouched,
                 renderer: saved.renderer || 'gpu', speed: saved.speed || 1, reducedMotion: !!saved.reducedMotion,
-                pixelRatio: saved.pixelRatio || 'auto', pair: !!saved.pair, wrap: !!saved.wrap };
+                pixelRatio: saved.pixelRatio || 'auto', pair: !!saved.pair, wrap: !!saved.wrap,
+                view: saved.view === 'list' ? 'list' : 'grid' };   // the components index: cards or compact rows
 const savePrefs = () => store.set('cui-web-settings', prefs);
 
 const media = matchMedia('(prefers-color-scheme: dark)');
@@ -88,6 +90,7 @@ function applyTheme() {
   thumbQueue.length = 0;
   document.querySelectorAll('img[data-thumb]').forEach((img) => { thumbIO?.unobserve(img); if (!staticThumb(img)) loadThumb(img); });
   document.querySelectorAll('.stage:not(.pair)').forEach((s) => { if (!s.dataset.fixedBg) s.style.setProperty('--stage-bg', dark ? BG.dark : BG.light); });
+  document.querySelectorAll('details.shots').forEach((d) => d.reload?.());
   renderAccents();
 }
 media.addEventListener('change', () => { if (prefs.theme === 'system') applyTheme(); });
@@ -219,6 +222,34 @@ const thumb = (name, module = 'scenes') => {
 
 // ---------------------------------------------------------------- preview blocks
 let blocks = [];
+
+// Full / Tablet / Phone for a preview: a radio group with one tab stop, arrows
+// move the choice. set(null) shows a size dragged by hand (none of the three).
+const DEVICE_WIDTHS = [['Full', 0, 'Natural size, following the page'], ['Tablet', 768, 'Tablet: 768 px wide'], ['Phone', 375, 'Phone: 375 px wide']];
+function widthPresets(onPick) {
+  const seg = h('div', { class: 'seg pv-width', role: 'radiogroup', 'aria-label': 'Preview width' });
+  const buttons = DEVICE_WIDTHS.map(([label, w, title]) => h('button', { type: 'button', role: 'radio', title, 'data-w': w, onclick: () => pick(w, true) }, label));
+  seg.append(...buttons);
+  const set = (w) => buttons.forEach((b, i) => {
+    const on = DEVICE_WIDTHS[i][1] === w;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on || (w === null && i === 0) ? 0 : -1;
+  });
+  const pick = (w, fire) => { set(w); if (fire) onPick(w); };
+  seg.addEventListener('keydown', (e) => {
+    const i = buttons.indexOf(document.activeElement);
+    if (i < 0) return;
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    const j = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : d ? (i + d + buttons.length) % buttons.length : -1;
+    if (j < 0) return;
+    e.preventDefault();
+    buttons[j].focus();
+    pick(DEVICE_WIDTHS[j][1], true);
+  });
+  set(0);
+  seg.set = set;
+  return seg;
+}
 function disposeBlocks() { blocks.forEach((b) => b.dispose()); blocks = []; }
 
 // A preview with a toolbar (Preview / Code) and tools.
@@ -239,9 +270,18 @@ function previewBlock(opts) {
     h('button', { role: 'tab', 'aria-selected': 'false', html: I.code + 'Code', onclick: () => setMode('code') }));
   const tool = (icon, label, fn, pressed, cls) => h('button', { class: 'icon-btn' + (cls ? ' ' + cls : ''), title: label, 'aria-label': label, html: icon, onclick: fn,
                                                           'aria-pressed': pressed === undefined ? null : String(pressed) });
-  const pairBtn = tool(I.split, 'Light and dark side by side', () => { pair = !pair; pairBtn.setAttribute('aria-pressed', String(pair)); remount(); }, pair);
+  const pairBtn = tool(I.split, 'Light and dark side by side', () => { pair = !pair; pairBtn.setAttribute('aria-pressed', String(pair)); widthBox?.classList.toggle('hidden', pair); remount(); }, pair);
   const codeBtn = opts.leading ? tool(I.code, 'Show the code', () => setMode(mode === 'code' ? 'preview' : 'code'), false) : null;
+  // device widths for one running preview: the same resize as the corner grip, in one step
+  const widthSeg = opts.fill || opts.bare || opts.widths === false ? null : widthPresets((w) => {
+    block.width = w;
+    const p = block.previews[0];
+    if (p && !pair) p.setWidth(w);
+  });
+  const widthBox = widthSeg ? h('div', { class: 'pv-width-box' + (pair ? ' hidden' : '') }, widthSeg,
+    codeBtn || !sc?.dark_only ? h('span', { class: 'sep' }) : null) : null;
   const tools = h('div', { class: 'pv-tools' },
+    widthBox,
     codeBtn,
     opts.fill || sc?.dark_only ? null : pairBtn,
     opts.fill && sc?.dark_only ? null : h('span', { class: 'sep' }),
@@ -300,7 +340,7 @@ function previewBlock(opts) {
       host.querySelector('.loading')?.remove();
       updateStatus(p);
       if (opts.fill) fitFill(p, host);
-      else if (!pair && !opts.bare) addResize(p);
+      else if (!pair && !opts.bare) { addResize(p); if (block.width) p.setWidth(block.width); }
     }).catch((e) => {
       console.error(e);
       host.querySelector('.loading')?.remove();
@@ -315,12 +355,12 @@ function previewBlock(opts) {
       e.preventDefault(); e.stopPropagation();
       grip.setPointerCapture(e.pointerId);
       const sx = e.clientX, sy = e.clientY, w0 = p.w, h0 = p.h, f = p.fit;
-      const move = (ev) => p.resize(w0 + (ev.clientX - sx) / f, h0 + (ev.clientY - sy) / f);
+      const move = (ev) => { p.resize(w0 + (ev.clientX - sx) / f, h0 + (ev.clientY - sy) / f); block.width = 0; widthSeg?.set(null); };
       const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); };
       grip.addEventListener('pointermove', move);
       grip.addEventListener('pointerup', up);
     });
-    grip.addEventListener('dblclick', () => p.resize(p.natural.w, p.natural.h));
+    grip.addEventListener('dblclick', () => { p.resize(p.natural.w, p.natural.h); block.width = 0; widthSeg?.set(0); });
   }
   function fitFill(p, host) {
     const ro = new ResizeObserver(() => {
@@ -427,7 +467,7 @@ function codeView(source, file, line) {
 // ---------------------------------------------------------------- sidebar
 const order = CAT.categories.flatMap((c) => c.items);
 function sidebarMode() {
-  const k = (location.hash.match(/^#\/?([^/]*)/) || [])[1] || '';
+  const k = (location.hash.match(/^#\/?([^/?]*)/) || [])[1] || '';
   return k === 'guide' ? 'guide' : (k === 'c' || k === 'components') ? 'components' : null;
 }
 function renderGuideNav(q) {
@@ -464,8 +504,8 @@ function renderNav(filter = '') {
     if (!items.length) continue;
     sections.push(h('div', { class: 'nav-section' },
       h('div', { class: 'nav-title' }, c.title),
-      items.map((it) => h('a', { href: `#/c/${it.id}`, 'aria-current': route === `#/c/${it.id}` ? 'page' : null },
-        h('span', { class: 'label' }, it.title)))));
+      items.map((it) => h('a', { href: `#/c/${it.id}`, 'aria-current': route === `#/c/${it.id}` || route.startsWith(`#/c/${it.id}/`) ? 'page' : null },
+        h('span', { class: 'label' }, it.title), newBadge(it.id, 'nav-new')))));
   }
   nav.replaceChildren(...(sections.length ? sections : [h('div', { class: 'empty' }, `Nothing matches “${filter}”.`)]));
   const cur = nav.querySelector('[aria-current="page"]');
@@ -597,7 +637,7 @@ function showcase() {
     if (root) dropBlock(root);
     const scene = items[i][0], sc = CAT.scenes[scene];
     root = previewBlock({ module: 'scenes', content: scene, title: scene, item: items[i][1], tight: true,
-                          codeSource: sc.source, codeFile: sc.file, codeLine: sc.line });
+                          codeSource: sc.source, codeFile: sc.file, codeLine: sc.line, widths: false });
     if (!first) root.classList.add('swap-in');
     host.replaceChildren(root);
   }
@@ -627,7 +667,7 @@ function playground() {
   const scene = CAT.scenes['stage-mosaic-pro'] ? 'stage-mosaic-pro' : 'stage-mosaic';
   const sc = CAT.scenes[scene];
   const root = previewBlock({ module: 'scenes', content: scene, title: scene, item: 'Overview', tight: true,
-                              codeSource: sc.source, codeFile: sc.file, codeLine: sc.line });
+                              codeSource: sc.source, codeFile: sc.file, codeLine: sc.line, widths: false });
   let dark = null, accent = -1;
   const apply = () => {
     const b = blocks.find((x) => x.root === root);
@@ -813,7 +853,7 @@ const DOC_REVEAL = ['.doc h2', '.doc pre.code', '.doc table', '.doc .doc-img', '
 const PAGE_REVEAL = {
   components: ['.section-title', '.grid > .card'],
   guide: DOC_REVEAL,
-  c: ['.previews', ...DOC_REVEAL],
+  c: ['.previews', ...DOC_REVEAL, '.kbd-list', '.opt-block', '.related-grid > .rel-card'],
   showcase: ['.previews > div'],
   accents: ['.accent-grid > *'],
   apps: ['.grid > .card'],
@@ -863,26 +903,233 @@ addEventListener('scroll', () => { if (!cueTick) { cueTick = true; requestAnimat
 function siteFooter() {
   return h('footer', { class: 'site-footer' },
     h('span', {}, 'CUI is MIT licensed. Every preview on this site is drawn by the library itself.'),
-    h('nav', {}, h('a', { href: '#/guide/getting-started' }, 'Guide'), h('a', { href: '#/components' }, 'Components'),
+    h('nav', {}, h('a', { href: '#/guide/getting-started' }, 'Guide'), h('a', { href: '#/components' }, 'Components'), h('a', { href: '#/changelog' }, 'Changelog'),
       h('a', { href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer' }, 'Source')));
 }
 
+// components added in the last two rounds; their cards and sidebar rows say "New".
+// Keep this to recent additions: drop ids from here once they have settled in.
+const NEW = new Set(['menu-bar', 'toolbar', 'status-bar', 'document-tabs', 'property-inspector', 'log-console',
+                     'node-editor', 'flame-graph', 'hex-viewer', 'curve-editor', 'gradient-editor',
+                     'markdown-view', 'code-editor', 'diff-viewer', 'docking', 'tree-table-and-path-bar', 'timeline-editor'].filter((id) => CAT.items[id]));
+const newBadge = (id, cls = 'new-badge') => (NEW.has(id) ? h('span', { class: cls, title: 'Recently added' }, 'New') : null);
+
+// the query part of a hash: #/components?q=grid&cat=charts
+const hashQuery = () => new URLSearchParams((location.hash.split('?')[1]) || '');
+const GITHUB = 'https://github.com/yappologistic/CUI/blob/master/';
+const ghLink = (file, line, label) => h('a', { href: `${GITHUB}${file}#L${line}`, target: '_blank', rel: 'noreferrer', title: `Open ${file}:${line} on GitHub` }, label ?? h('code', {}, `${file}:${line}`));
+
 function viewComponents() {
   setNav('components');
-  const page = h('div', { class: 'page' },
+  const hq = hashQuery();
+  let q = hq.get('q') || '', cat = CAT.categories.some((c) => c.id === hq.get('cat')) ? hq.get('cat') : '';
+  const hay = (it) => `${it.title} ${it.summary} ${it.apis.join(' ')}`.toLowerCase();
+  const input = h('input', { class: 'filter', type: 'search', placeholder: 'Filter components', 'aria-label': 'Filter components', autocomplete: 'off', value: q });
+  const chipAll = h('button', { class: 'cat-chip', 'aria-pressed': 'false', onclick: () => setCat('') });
+  const chips = CAT.categories.map((c) => h('button', { class: 'cat-chip', 'data-cat': c.id, 'aria-pressed': 'false', onclick: () => setCat(cat === c.id ? '' : c.id) }));
+  const viewSeg = h('div', { class: 'seg view-seg', role: 'radiogroup', 'aria-label': 'Layout' },
+    [['Grid', 'grid', I.grid], ['List', 'list', I.list]].map(([label, v, icon]) => h('button', {
+      type: 'button', role: 'radio', 'data-v': v, 'aria-checked': String(prefs.view === v), title: `Show as a ${label.toLowerCase()}`, html: icon + `<span>${label}</span>`,
+      onclick: () => { prefs.view = v; savePrefs(); settle(); page.dataset.view = v; viewSeg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.v === v))); },
+    })));
+  const empty = h('div', { class: 'empty-state hidden' });
+  const page = h('div', { class: 'page comp-index', 'data-view': prefs.view },
     h('h1', {}, 'Components'),
-    h('p', { class: 'lede' }, 'Each page shows the component running, the C that draws it, its options and its keyboard support.'));
+    h('p', { class: 'lede' }, 'Each page shows the component running, the C that draws it, its options and its keyboard support.'),
+    h('div', { class: 'comp-tools' },
+      h('div', { class: 'filter-wrap comp-filter', html: I.search }, input),
+      viewSeg),
+    h('div', { class: 'cat-chips', role: 'group', 'aria-label': 'Category' }, chipAll, chips));
+  const sections = [];
   for (const c of CAT.categories) {
-    page.append(h('div', { class: 'section-title' }, h('h2', {}, c.title), h('span', { class: 'count' }, `${c.items.length}`)),
-      h('div', { class: 'grid' }, c.items.map((id) => {
-        const it = CAT.items[id];
-        return h('a', { class: 'card', href: `#/c/${id}` },
-          h('div', { class: 'thumb' }, thumb(it.scenes[0])),
-          h('div', { class: 'body' }, h('h3', {}, it.title),
-            h('p', {}, it.summary)));
-      })));
+    const count = h('span', { class: 'count' }, `${c.items.length}`);
+    const cards = c.items.map((id) => {
+      const it = CAT.items[id];
+      const card = h('a', { class: 'card', href: `#/c/${id}` },
+        h('div', { class: 'thumb' }, thumb(it.scenes[0])),
+        h('div', { class: 'body' }, h('h3', {}, h('span', { class: 'card-title' }, it.title), newBadge(id)),
+          h('p', {}, it.summary),
+          it.apis[0] ? h('code', { class: 'card-api' }, it.apis[0]) : null));
+      card.hay = hay(it);
+      return card;
+    });
+    const sec = h('section', { class: 'comp-sec', 'data-cat': c.id },
+      h('div', { class: 'section-title' }, h('h2', {}, c.title), count),
+      h('div', { class: 'grid' }, cards));
+    sections.push({ c, sec, cards, count });
+    page.append(sec);
   }
+  page.append(empty);
+  function apply() {
+    const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    const per = {};
+    for (const { c, sec, cards, count } of sections) {
+      let n = 0;
+      for (const card of cards) {
+        const ok = terms.every((t) => card.hay.includes(t));
+        card.classList.toggle('hidden', !ok);
+        if (ok) n++;
+      }
+      per[c.id] = n;
+      count.textContent = terms.length ? `${n} of ${c.items.length}` : `${c.items.length}`;
+      const vis = n > 0 && (!cat || cat === c.id);
+      sec.classList.toggle('hidden', !vis);
+      if (vis) shown += n;
+    }
+    const total = Object.values(per).reduce((a, b) => a + b, 0);
+    chipAll.replaceChildren('All', h('span', { class: 'n' }, String(total)));
+    chipAll.setAttribute('aria-pressed', String(!cat));
+    chips.forEach((b, i) => {
+      const c = CAT.categories[i];
+      b.replaceChildren(c.title, h('span', { class: 'n' }, String(per[c.id])));
+      b.setAttribute('aria-pressed', String(cat === c.id));
+      b.classList.toggle('none', per[c.id] === 0);
+    });
+    const what = [q.trim() && `“${q.trim()}”`, cat && CAT.categories.find((c) => c.id === cat).title].filter(Boolean).join(' in ');
+    empty.replaceChildren(h('h3', {}, 'No components match'), h('p', {}, `Nothing matches ${what}.`),
+      h('button', { class: 'btn', onclick: () => { q = ''; cat = ''; input.value = ''; apply(); input.focus(); } }, 'Clear the filter'));
+    empty.classList.toggle('hidden', shown > 0);
+    // keep the address in step, without a new history entry or a re-render
+    const p = new URLSearchParams();
+    if (q.trim()) p.set('q', q.trim());
+    if (cat) p.set('cat', cat);
+    const want = '#/components' + (p.toString() ? `?${p}` : '');
+    if (location.hash !== want && location.hash.startsWith('#/components')) { history.replaceState(null, '', want); lastRoute = want; }
+  }
+  // once the reader filters, results show at once rather than lifting in on scroll
+  const settle = () => page.querySelectorAll('.reveal:not(.in)').forEach((el) => el.classList.add('in'));
+  function setCat(c) { cat = c; settle(); apply(); }
+  input.addEventListener('input', () => { q = input.value; settle(); apply(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (input.value || cat)) { e.preventDefault(); e.stopPropagation(); q = ''; input.value = ''; apply(); }
+    if (e.key === 'Enter') { const a = page.querySelector('.comp-sec:not(.hidden) .card:not(.hidden)'); if (a) location.hash = a.getAttribute('href'); }
+  });
+  apply();
   return page;
+}
+
+// the doc text of a component, split into its sections: the leading code is Usage, the rest Behavior
+function splitDoc(it) {
+  const tmp = h('div', { html: it.html });
+  const usage = [];
+  while (tmp.firstElementChild && tmp.firstElementChild.matches('pre.code')) usage.push(tmp.firstElementChild), tmp.firstElementChild.remove();
+  return { usage, rest: [...tmp.childNodes].filter((n) => n.nodeType === 1 || n.textContent.trim()) };
+}
+
+function optionsBlock(it) {
+  const many = it.options.length > 1;
+  const blocks = it.options.map((o) => h('div', { class: 'opt-block' },
+    many ? h('h3', { class: 'opt-fn' }, h('code', {}, o.fn.join(', ')), h('span', { class: 'opt-struct' }, ghLink('include/cui/cui.h', o.line, o.struct))) : null,
+    h('div', { class: 'opt-scroll' }, h('table', { class: 'opt-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Option'), h('th', {}, 'Type'), h('th', {}, 'Default'), h('th', {}, 'Description'))),
+      h('tbody', {}, o.fields.map((f) => h('tr', {},
+        h('td', {}, h('code', {}, `.${f.name}`)),
+        h('td', { class: 'opt-type' }, h('code', {}, f.type)),
+        h('td', { class: 'opt-def' + (f.default ? '' : ' none') }, f.default ? h('code', {}, f.default) : '—'),
+        h('td', { class: 'opt-doc', html: f.doc || '' }))))))));
+  const fn = it.options[0].fn[0];
+  return [...blocks, h('p', { class: 'opt-caption' }, 'Options are named arguments: ', h('code', {}, `${fn}(ui, ..., .field = value)`),
+    '. Unset options are zero, so — means 0, false or NULL.',
+    many ? null : [' Declared as ', ghLink('include/cui/cui.h', it.options[0].line, it.options[0].struct), ' in cui.h.'])];
+}
+
+function viewItem(id, sec) {
+  const it = CAT.items[id];
+  if (!it) return viewMissing();
+  setNav('components');
+  const cat = CAT.categories.find((c) => c.id === it.category);
+  const idx = order.indexOf(id);
+  const prev = CAT.items[order[idx - 1]], next = CAT.items[order[idx + 1]];
+  const docRef = `${it.doc.file}:${it.doc.line}`;
+  const main = h('div', { class: 'item-main' },
+    h('div', { class: 'crumbs' }, h('a', { href: '#/components' }, 'Components'), '/', h('a', { href: `#/components?cat=${it.category}` }, cat?.title || '')),
+    h('div', { class: 'title-row' },
+      h('div', {}, h('h1', {}, it.title, newBadge(id, 'new-badge lg')), it.summary ? h('p', { class: 'lede' }, it.summary) : null),
+      h('div', { class: 'title-actions' },
+        h('button', { class: 'btn sm', html: I.copy + 'Copy page', title: 'Copy this page as text', onclick: () => copy(pageText(it), 'Page copied') }),
+        prev ? h('a', { class: 'icon-btn framed', href: `#/c/${prev.id}`, title: `Previous: ${prev.title}`, 'aria-label': `Previous: ${prev.title}`, html: I.left }) : h('span', { class: 'icon-btn framed disabled', html: I.left }),
+        next ? h('a', { class: 'icon-btn framed', href: `#/c/${next.id}`, title: `Next: ${next.title}`, 'aria-label': `Next: ${next.title}`, html: I.arrow }) : h('span', { class: 'icon-btn framed disabled', html: I.arrow }))),
+    it.apis.length ? h('div', { class: 'api-line' },
+      h('span', { class: 'api-label' }, it.apis.length > 1 ? 'Functions' : 'Function'),
+      it.apis.slice(0, 8).map((a) => h('button', { class: 'api', title: `Copy ${a}`, onclick: () => copy(a, `${a} copied`) }, a))) : null);
+  const secs = [];
+  const section = (sid, title, ...kids) => {
+    const el = h('section', { class: 'item-sec', id: `s-${sid}` },
+      title ? h('h2', { class: 'sec-title' }, h('a', { class: 'anchor', href: `#/c/${id}/${sid}` }, title)) : null, ...kids);
+    secs.push({ id: sid, title: title || 'Example', el });
+    main.append(el);
+    return el;
+  };
+  // several scenes become variants of one preview, like tabs over a single stage
+  const pv = h('div', { class: 'previews' });
+  const vt = h('div', { class: 'variant-tabs', role: 'tablist', 'aria-label': 'Examples' });
+  const sceneLink = h('span', { class: 'scene-link' });
+  const showScene = (s) => {
+    const sc = CAT.scenes[s];
+    const old = pv.querySelector('.preview');
+    if (old) { vt.remove(); const b = blocks.find((x) => x.root === old); if (b) { b.dispose(); blocks.splice(blocks.indexOf(b), 1); } old.remove(); }
+    pv.append(previewBlock({ module: 'scenes', content: s, title: s, item: it.title, docRef, codeSource: sc.source, codeFile: sc.file, codeLine: sc.line, leading: vt }));
+    sceneLink.replaceChildren(' · Example scene ', ghLink(sc.file, sc.line));
+  };
+  if (it.scenes.length > 1) {
+    it.scenes.forEach((s, i) => vt.append(h('button', { role: 'tab', 'aria-selected': String(i === 0), onclick: (e) => {
+      vt.querySelectorAll('button').forEach((b) => b.setAttribute('aria-selected', String(b === e.currentTarget))); showScene(s);
+    } }, sceneLabel(s, it))));
+  }
+  if (it.scenes.length) { showScene(it.scenes[0]); section('example', null, pv); }
+
+  const { usage, rest } = splitDoc(it);
+  const docEl = (nodes) => { const d = h('div', { class: 'doc' }); d.append(...nodes); d.querySelectorAll('pre.code code').forEach((c) => { c.innerHTML = highlight(c.textContent); }); addCopy(d); return d; };
+  if (usage.length) section('usage', 'Usage', docEl(usage));
+  if (rest.length) section('behavior', usage.length ? 'Behavior' : 'Overview', docEl(rest));
+  if (it.keyboard?.length) section('keyboard', 'Keyboard', h('ul', { class: 'kbd-list' }, it.keyboard.map((k) => h('li', { html: k }))));
+  if (it.options?.length) section('options', 'Options', ...optionsBlock(it));
+  const rel = (it.related || []).map((r) => CAT.items[r]).filter(Boolean);
+  if (rel.length) section('related', 'Related', h('div', { class: 'related-grid' }, rel.map((r) => h('a', { class: 'rel-card', href: `#/c/${r.id}` },
+    h('span', { class: 'rel-title' }, r.title, newBadge(r.id)), h('span', { class: 'rel-text' }, r.summary), h('span', { class: 'rel-go', html: I.arrow })))));
+  if (it.images.length) {
+    const figs = it.images.map((im) => h('figure', { class: 'figure' }, h('img', { 'data-src': im.src, alt: im.alt, loading: 'lazy',
+      onerror: (e) => { if (!e.target.dataset.retry) { e.target.dataset.retry = 1; e.target.src = `${im.src}.png`; } } }),
+      h('figcaption', { title: `docs/${im.src}.png` }, im.alt, h('span', { class: 'fig-tag' }, 'Screenshot'))));
+    const det = h('details', { class: 'shots' }, h('summary', {}, `Screenshots`, h('span', { class: 'n' }, String(figs.length)),
+      h('span', { class: 'shots-note' }, 'The static images the docs use. The preview above is the same thing, live.')), figs);
+    // theme-aware like the rest of the page; loaded only when opened
+    const load = () => det.querySelectorAll('img[data-src]').forEach((img) => { delete img.dataset.retry; img.src = `${img.dataset.src}${isDark() ? '-dark' : ''}.png`; });
+    det.addEventListener('toggle', () => { if (det.open) load(); });
+    det.reload = () => { if (det.open) load(); };
+    section('screenshots', 'Screenshots', det).querySelector('h2').classList.add('hidden');
+    secs[secs.length - 1].el.classList.add('item-sec-shots');
+  }
+  main.append(h('p', { class: 'source-note' }, 'From ', ghLink(it.doc.file, it.doc.line), ' in the repository', sceneLink, '.'));
+  const pager = (it2, dir) => pagerLink(it2, dir, `#/c/${it2?.id}`, dir === 'prev' ? '[' : ']');
+  main.append(h('nav', { class: 'pagers', 'aria-label': 'Previous and next component' }, pager(prev, 'prev'), pager(next, 'next')));
+
+  const tocSecs = secs.filter((x) => x.id !== 'example' || secs.length > 1);
+  const toc = tocSecs.length > 2 ? h('nav', { class: 'toc', 'aria-label': 'On this page' }, h('div', { class: 'toc-title' }, 'On this page'),
+    tocSecs.map((x) => h('a', { href: `#/c/${id}/${x.id}`, 'data-sec': x.id }, x.title))) : null;
+  const page = h('div', { class: 'page item-page' + (toc ? '' : ' no-toc') }, main, toc);
+  if (toc) {
+    const io = new IntersectionObserver((es) => {
+      for (const e of es) if (e.isIntersecting) {
+        const sid = e.target.id.slice(2);
+        toc.querySelectorAll('a').forEach((a) => a.toggleAttribute('data-active', a.dataset.sec === sid));
+      }
+    }, { rootMargin: '-80px 0px -70% 0px' });
+    setTimeout(() => secs.forEach((x) => io.observe(x.el)));
+  }
+  if (sec) setTimeout(() => scrollToSection(sec, false));
+  return page;
+}
+
+// open a component page section (and the screenshots, if that is where it goes)
+function scrollToSection(sec, smooth) {
+  const el = document.getElementById(`s-${sec}`);
+  if (!el) return false;
+  const det = el.querySelector('details');
+  if (det && !det.open) det.open = true;
+  window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - 72, behavior: smooth && !motionOff() ? 'smooth' : 'auto' });
+  return true;
 }
 
 function viewGuide(id, sec) {
@@ -921,57 +1168,6 @@ function viewGuide(id, sec) {
     setTimeout(() => body.querySelectorAll('section[id]').forEach((el) => io.observe(el)));
   }
   if (sec) setTimeout(() => { const el = document.getElementById(`s-${sec}`); if (el) window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 72); });
-  return page;
-}
-
-function viewItem(id) {
-  const it = CAT.items[id];
-  if (!it) return viewMissing();
-  setNav('components');
-  const cat = CAT.categories.find((c) => c.id === it.category);
-  const idx = order.indexOf(id);
-  const prev = CAT.items[order[idx - 1]], next = CAT.items[order[idx + 1]];
-  const docRef = `${it.doc.file}:${it.doc.line}`;
-  const page = h('div', { class: 'page' },
-    h('div', { class: 'crumbs' }, h('a', { href: '#/components' }, 'Components'), '/', h('span', {}, cat?.title || '')),
-    h('div', { class: 'title-row' },
-      h('div', {}, h('h1', {}, it.title), it.summary ? h('p', { class: 'lede' }, it.summary) : null),
-      h('div', { class: 'title-actions' },
-        h('button', { class: 'btn sm', html: I.copy + 'Copy page', title: 'Copy this page as text', onclick: () => copy(pageText(it), 'Page copied') }),
-        prev ? h('a', { class: 'icon-btn framed', href: `#/c/${prev.id}`, title: `Previous: ${prev.title}`, 'aria-label': `Previous: ${prev.title}`, html: I.left }) : h('span', { class: 'icon-btn framed disabled', html: I.left }),
-        next ? h('a', { class: 'icon-btn framed', href: `#/c/${next.id}`, title: `Next: ${next.title}`, 'aria-label': `Next: ${next.title}`, html: I.arrow }) : h('span', { class: 'icon-btn framed disabled', html: I.arrow }))),
-    it.apis.length ? h('div', { class: 'api-line' },
-      h('span', { class: 'api-label' }, it.apis.length > 1 ? 'Functions' : 'Function'),
-      it.apis.slice(0, 8).map((a) => h('button', { class: 'api', title: `Copy ${a}`, onclick: () => copy(a, `${a} copied`) }, a))) : null);
-  // several scenes become variants of one preview, like tabs over a single stage
-  const pv = h('div', { class: 'previews' });
-  const vt = h('div', { class: 'variant-tabs', role: 'tablist', 'aria-label': 'Examples' });
-  const showScene = (s) => {
-    const sc = CAT.scenes[s];
-    const old = pv.querySelector('.preview');
-    if (old) { vt.remove(); const b = blocks.find((x) => x.root === old); if (b) { b.dispose(); blocks.splice(blocks.indexOf(b), 1); } old.remove(); }
-    pv.append(previewBlock({ module: 'scenes', content: s, title: s, item: it.title, docRef, codeSource: sc.source, codeFile: sc.file, codeLine: sc.line, leading: vt }));
-  };
-  if (it.scenes.length > 1) {
-    it.scenes.forEach((s, i) => vt.append(h('button', { role: 'tab', 'aria-selected': String(i === 0), onclick: (e) => {
-      vt.querySelectorAll('button').forEach((b) => b.setAttribute('aria-selected', String(b === e.currentTarget))); showScene(s);
-    } }, sceneLabel(s, it))));
-  }
-  if (it.scenes.length) showScene(it.scenes[0]);
-  page.append(pv);
-  const docs = h('div', { class: 'docs' },
-    h('div', { class: 'doc', html: it.html }));
-  for (const im of it.images) {
-    docs.append(h('figure', { class: 'figure' }, h('img', { src: `${im.src}${isDark() ? '-dark' : ''}.png`, alt: im.alt,
-      onerror: (e) => { if (!e.target.dataset.retry) { e.target.dataset.retry = 1; e.target.src = `${im.src}.png`; } } }),
-      h('figcaption', { title: `docs/${im.src}.png` }, im.alt, h('span', { class: 'fig-tag' }, 'Screenshot'))));
-  }
-  docs.querySelectorAll('pre.code code').forEach((c) => { c.innerHTML = highlight(c.textContent); });
-  addCopy(docs);
-  docs.append(h('p', { class: 'source-note' }, 'From ', h('code', {}, docRef), ' in the repository.'));
-  page.append(docs);
-  const pager = (it2, dir) => pagerLink(it2, dir, `#/c/${it2?.id}`, dir === 'prev' ? '[' : ']');
-  page.append(h('nav', { class: 'pagers', 'aria-label': 'Previous and next component' }, pager(prev, 'prev'), pager(next, 'next')));
   return page;
 }
 
@@ -1024,7 +1220,7 @@ function viewAccents() {
   for (const name of CAT.accents) {
     const sc = CAT.scenes[name];
     grid.append(previewBlock({ module: 'scenes', content: name, title: name.replace('accent-', ''), item: 'Accents',
-                               codeSource: sc.source, codeFile: sc.file, codeLine: sc.line, pair: false, fixedAccent: true }));
+                               codeSource: sc.source, codeFile: sc.file, codeLine: sc.line, pair: false, fixedAccent: true, widths: false }));
   }
   page.append(grid);
   return page;
@@ -1075,20 +1271,54 @@ function viewMissing() {
     h('p', {}, 'That page does not exist.'), h('a', { class: 'btn', href: '#/' }, 'Go to the overview')));
 }
 
+// the changelog: CHANGELOG.md, one section per release, newest first
+function viewChangelog(sec) {
+  setNav('changelog');
+  const cl = CAT.changelog || { lede: '', releases: [] };
+  const fmt = (d) => { const t = new Date(`${d}T00:00:00`); return isNaN(t) ? d : t.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); };
+  const body = h('article', { class: 'doc guide changelog' },
+    cl.releases.map((r, i) => h('section', { id: `s-${r.id}`, class: 'release' },
+      h('div', { class: 'release-meta' }, h('time', { datetime: r.date }, fmt(r.date)), i === 0 ? h('span', { class: 'release-latest' }, 'Latest') : null),
+      h('h2', {}, h('a', { class: 'anchor', href: `#/changelog/${r.id}` }, r.title)),
+      h('div', { html: r.html }))));
+  body.querySelectorAll('pre.code code').forEach((c) => { c.innerHTML = highlight(c.textContent); });
+  const toc = cl.releases.length > 1 ? h('nav', { class: 'toc', 'aria-label': 'Releases' }, h('div', { class: 'toc-title' }, 'Releases'),
+    cl.releases.map((r) => h('a', { href: `#/changelog/${r.id}`, 'data-sec': r.id }, r.title))) : null;
+  const page = h('div', { class: 'page guide-page' },
+    h('div', { class: 'guide-main' },
+      h('h1', {}, 'Changelog'),
+      cl.lede ? h('p', { class: 'lede' }, cl.lede) : null,
+      body,
+      h('p', { class: 'source-note' }, 'From ', h('a', { href: 'https://github.com/yappologistic/CUI/blob/master/CHANGELOG.md', target: '_blank', rel: 'noreferrer' }, h('code', {}, 'CHANGELOG.md')), ' in the repository.')),
+    toc);
+  if (toc) {
+    const io = new IntersectionObserver((es) => {
+      for (const e of es) if (e.isIntersecting) {
+        const sid = e.target.id.slice(2);
+        toc.querySelectorAll('a').forEach((a) => a.toggleAttribute('data-active', a.dataset.sec === sid));
+      }
+    }, { rootMargin: '-80px 0px -70% 0px' });
+    setTimeout(() => body.querySelectorAll('section[id]').forEach((el) => io.observe(el)));
+  }
+  if (sec) setTimeout(() => { const el = document.getElementById(`s-${sec}`); if (el) window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 72); });
+  return page;
+}
+
 // ---------------------------------------------------------------- router
 function route() {
   disposeBlocks();
   const hash = location.hash || '#/';
   lastRoute = hash;
-  const [, kind, id] = hash.match(/^#\/?([^/]*)\/?(.*)$/) || [];
+  const [, kind, id] = hash.split('?')[0].match(/^#\/?([^/]*)\/?(.*)$/) || [];
   let view;
   if (!kind) view = viewHome();
-  else if (kind === 'c') view = viewItem(decodeURIComponent(id));
+  else if (kind === 'c') { const [cid, sec] = id.split('/'); view = viewItem(decodeURIComponent(cid), sec); }
   else if (kind === 'components') view = viewComponents();
   else if (kind === 'guide') { const [gid, sec] = (id || 'getting-started').split('/'); view = viewGuide(decodeURIComponent(gid || 'getting-started'), sec); }
   else if (kind === 'showcase') view = viewShowcase();
   else if (kind === 'accents') view = viewAccents();
   else if (kind === 'apps') view = viewApps();
+  else if (kind === 'changelog') view = viewChangelog(id ? decodeURIComponent(id) : '');
   else if (kind === 'app') view = viewApp(decodeURIComponent(id));
   else view = viewMissing();
   document.body.classList.toggle('app-mode', kind === 'app');
@@ -1099,9 +1329,9 @@ function route() {
   pageMotion(view, kind);
   scrollCues();
   renderNav($('#filter').value);
-  const it = kind === 'c' && CAT.items[id];
+  const it = kind === 'c' && CAT.items[decodeURIComponent(id.split('/')[0])];
   const gd = kind === 'guide' && CAT.guides.find((g) => g.id === (id || 'getting-started').split('/')[0]);
-  document.title = it ? `${it.title} · CUI` : gd ? `${gd.title} · CUI` : kind === 'components' ? 'Components · CUI' : 'CUI';
+  document.title = it ? `${it.title} · CUI` : gd ? `${gd.title} · CUI` : kind === 'components' ? 'Components · CUI' : kind === 'changelog' ? 'Changelog · CUI' : 'CUI';
 }
 let lastRoute = '';
 window.addEventListener('hashchange', () => {
@@ -1109,6 +1339,19 @@ window.addEventListener('hashchange', () => {
   if (m && p && m[1] === p[1]) {
     const el = document.getElementById(`s-${m[2]}`);
     if (el) { window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - 72, behavior: prefs.reducedMotion ? 'auto' : 'smooth' }); lastRoute = location.hash; renderNav($('#filter').value); return; }
+  }
+  const lm = location.hash.match(/^#\/changelog\/(.+)$/);
+  if (lm && /^#\/changelog/.test(lastRoute)) {
+    const el = document.getElementById(`s-${decodeURIComponent(lm[1])}`);
+    if (el) { window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - 72, behavior: prefs.reducedMotion ? 'auto' : 'smooth' }); lastRoute = location.hash; return; }
+  }
+  // a section of the component page already open: scroll, do not rebuild the live previews
+  const cm = location.hash.match(/^#\/c\/([^/]+)(?:\/(.*))?$/), cp = lastRoute.match(/^#\/c\/([^/]+)/);
+  if (cm && cp && cm[1] === cp[1]) {
+    if (!cm[2]) window.scrollTo({ top: 0, behavior: motionOff() ? 'auto' : 'smooth' });
+    else if (!scrollToSection(cm[2], true)) { route(); return; }
+    lastRoute = location.hash;
+    return;
   }
   route();
 });
@@ -1206,7 +1449,7 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); return; }
   if (typing) return;
   if (e.key === '/') { e.preventDefault(); openSearch(); }
-  const m = location.hash.match(/^#\/c\/(.+)$/);
+  const m = location.hash.match(/^#\/c\/([^/]+)/);
   if (m && (e.key === '[' || e.key === ']')) {
     const i = order.indexOf(decodeURIComponent(m[1])) + (e.key === ']' ? 1 : -1);
     if (order[i]) location.hash = `#/c/${order[i]}`;

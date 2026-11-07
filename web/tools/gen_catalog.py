@@ -291,7 +291,7 @@ EXTRA_FOR = {"Toast": ["toast-demo"], "Dialog": ["dialog-demo"],
              # the four chrome parts together in one window, after each part alone
              "Menu bar": ["app-chrome"], "Toolbar": ["app-chrome"], "Document tabs": ["app-chrome"], "Status bar": ["app-chrome"]}
 # live variants shown before the doc scene, when the doc scene only poses a moment
-PREPEND = {"Kanban board": ["kanban-live"]}
+PREPEND = {"Kanban board": ["kanban-live"], "Docking": ["docking-live"]}
 
 SHOWCASE = [
     ("hero-data", "Data grid", "Virtualized rows, filters, sorting, resizable columns and spreadsheet style selection."),
@@ -318,6 +318,248 @@ APPS = [
     ("tracker", "Tracker", "Orbit: an issue tracker with boards and filters.", "examples/tracker.c"),
     ("assistant", "Assistant", "Muse: an AI assistant with reasoning, tools and attachments.", "examples/assistant.c"),
 ]
+
+# ---------------------------------------------------------------- options (from the header)
+HEADER = "include/cui/cui.h"
+
+def strip_comments(s):
+    return re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", " ", s, flags=re.S))
+
+def header_index():
+    """Maps each public name (macro or function) to the options struct it takes,
+    and each options struct to its parsed fields."""
+    src = read(HEADER)
+    lines = src.split("\n")
+    fn_struct, line_of = {}, {}
+    # named-argument macros: #define cui_x(ui, ...) cui_x_ex(..., CUI__OPTS(cui_x_opts, __VA_ARGS__))
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        m = re.match(r"\s*#define\s+(cui_\w+)\(", ln)
+        if m:
+            body = ln
+            while body.rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1; body = body.rstrip()[:-1] + " " + lines[i]
+            o = re.search(r"CUI__OPTS\(\s*(cui_\w+)\s*,", body)
+            if o: fn_struct.setdefault(m.group(1), o.group(1))
+        i += 1
+    # functions whose last parameter is the options struct: cui_x_ex(..., const cui_x_opts *opts)
+    flat = strip_comments(src)
+    for m in re.finditer(r"CUI_API\b[^;{]*?\b(cui_\w+)\s*\(([^;{]*?)\)\s*(?:CUI_\w+\([^)]*\)\s*)?;", flat, re.S):
+        params = [p.strip() for p in m.group(2).split(",")]
+        last = params[-1] if params else ""
+        o = re.match(r"const\s+(cui_\w+)\s*\*\s*\w*$", last)
+        if o and (o.group(1).endswith("_opts") or "opts" in last.split()[-1]):
+            fn_struct.setdefault(m.group(1), o.group(1))
+    structs = {}
+    for m in re.finditer(r"typedef\s+struct\s+(cui_\w+)\s*\{", src):
+        end = brace_block(src, m.start())
+        body = src[src.index("{", m.start()) + 1:end - 1]
+        if not re.match(r"\s*int\s+_\s*;", body): continue   # only named-argument structs
+        structs[m.group(1)] = {"line": src.count("\n", 0, m.start()) + 1, "fields": parse_fields(body)}
+    return fn_struct, structs
+
+def comment_text(c):
+    c = re.sub(r"^\s*/\*+|\*+/\s*$|^\s*//", "", c.strip())
+    c = re.sub(r"\n\s*\*\s?", " ", c)
+    return re.sub(r"\s+", " ", c).strip()
+
+def comment_html(c):
+    parts = re.split(r"(`[^`]+`)", c)
+    return "".join(f"<code>{html.escape(p[1:-1])}</code>" if p.startswith("`") and p.endswith("`") and len(p) > 1
+                   else html.escape(p, quote=False) for p in parts)
+
+DEFAULT_RE = re.compile(r"(?<![\w_])(?<!the )(?<!by )[Dd]efaults?(?: to| is)?\s*[:=]?\s+")
+
+def default_of(doc):
+    """The value after "default" in a field comment: up to the end of its clause
+    (a ';' or a new sentence), keeping commas inside parentheses and quotes."""
+    m = re.search(r"([\w.\"%-]+)\s*\(default\)", doc)      # "8, 16 (default) or 32"
+    if m: return m.group(1)
+    m = DEFAULT_RE.search(doc)
+    if not m: return ""
+    rest, depth, quote, out = doc[m.end():], 0, False, ""
+    for k, c in enumerate(rest):
+        if c == '"': quote = not quote
+        elif not quote and c == "(": depth += 1
+        elif not quote and c == ")":
+            if depth == 0: break          # a parenthetical that opened before "default"
+            depth -= 1
+        elif not quote and depth == 0 and (c == ";" or (c == "." and re.match(r"\.\s+[A-Z]", rest[k:]))): break
+        out += c
+    d = out.strip().rstrip(".").strip()
+    return d if d and len(d) <= 60 else ""
+
+def parse_decl(decl):
+    """One declaration without its ';' -> [(name, type)], or [] when it is not a plain field."""
+    decl = re.sub(r"\s+", " ", decl).strip()
+    if not decl or "{" in decl or "}" in decl or decl.startswith("#"): return []
+    fp = re.match(r"^(.*?)\(\s*\*\s*(\w+)\s*\)\s*\((.*)\)$", decl)
+    if fp:
+        return [(fp.group(2), f"{fp.group(1).strip()} (*)({fp.group(3).strip()})")]
+    m = re.match(r"^((?:(?:const|unsigned|signed|struct|enum|volatile)\s+)*\w+(?:\s+const\b)?)\s*(.+)$", decl)
+    if not m: return []
+    base, rest = m.group(1).strip(), m.group(2)
+    out = []
+    for d in rest.split(","):
+        dm = re.match(r"^\s*((?:\*\s*(?:const\b\s*)?)*)\s*(\w+)\s*((?:\[[^\]]*\])*)\s*$", d)
+        if not dm: return []
+        stars = re.sub(r"\s+", "", dm.group(1)).replace("const", "const ").strip()
+        out.append((dm.group(2), (f"{base} {stars}".strip() if stars else base) + dm.group(3)))
+    return out
+
+def parse_fields(body):
+    fields, pending, depth = [], "", 0
+    lines = body.split("\n")
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        # a block comment that runs on to later lines
+        while ln.count("/*") > ln.count("*/") and i + 1 < len(lines):
+            i += 1; ln += "\n" + lines[i]
+        i += 1
+        comments = re.findall(r"/\*.*?\*/|//[^\n]*", ln, re.S)
+        code = strip_comments(ln).strip()
+        doc = " ".join(comment_text(c) for c in comments).strip()
+        if not code:
+            if not ln.strip(): pending = ""
+            elif doc: pending = doc
+            continue
+        opens, closes = code.count("{"), code.count("}")
+        if depth or opens or closes:
+            # nested struct or union: skip it rather than guess at its fields
+            depth += opens - closes
+            pending = ""
+            continue
+        decls = [d for d in code.split(";") if d.strip()]
+        line_doc = doc or pending
+        pending = ""
+        single = len(decls) > 1        # one-line struct: a trailing comment belongs to the last field
+        for k, d in enumerate(decls):
+            for name, ctype in parse_decl(d):
+                if name == "_": continue
+                fdoc = line_doc if (not single or k == len(decls) - 1) else ""
+                fields.append({"name": name, "type": ctype, "default": default_of(fdoc), "doc": comment_html(fdoc)})
+    return fields
+
+def api_tokens(api):
+    s = re.sub(r"_(ex|begin|end)$", "", api[4:])
+    s = re.sub(r"_(ex|begin|end)$", "", s)
+    return s.split("_")
+
+def api_owners(items):
+    """The items each api belongs to: the ones whose id shares the most words
+    with its name (Button owns cui_button; Text only mentions it). Ties share it.
+    An api only one page uses belongs to it; one several pages use and no name
+    matches has no owner."""
+    mentions = {}
+    for it in items.values():
+        for a in it["apis"]: mentions.setdefault(a, []).append(it["id"])
+    owners = {}
+    for a, ids in mentions.items():
+        toks = api_tokens(a)
+        def score(iid):
+            words, joined = set(iid.split("-")), iid.replace("-", "")
+            if "-".join(toks) == iid: return 10
+            hit = lambda t: (t in words or t + "s" in words or (len(t) >= 4 and any(w.startswith(t) for w in words))
+                             or (len(t) >= 6 and t in joined))
+            return sum(1 for t in toks if hit(t)) / len(toks)
+        best = max(score(i) for i in ids)
+        if best > 0: owners[a] = {i for i in ids if score(i) == best}
+        elif len(ids) == 1: owners[a] = set(ids)     # only one page uses it
+        else: owners[a] = set()
+    return owners
+
+def field_mentions(fields, body_html, item_id):
+    """How many of these fields the prose names in code spans, or the title names
+    (code blocks do not count: an example may set a layout box's options without
+    being about them)."""
+    names = {f["name"] for f in fields}
+    prose = re.sub(r"<pre\b.*?</pre>", "", body_html, flags=re.S)
+    found = set(re.findall(r"<code>\.?(\w+)(?: = [^<]*)?</code>", prose)) | set(item_id.split("-"))
+    return len(names & found)
+
+# layout containers an example happens to build with; their options belong to the Layout guide
+LAYOUT_STRUCTS = {"cui_box", "cui_scroll_opts", "cui_split_opts"}
+
+def item_options(it, owners, fn_struct, structs):
+    """One table per options struct the item's own functions take: functions it
+    owns, or functions nobody owns whose options its prose talks about."""
+    by_struct = {}
+    for a in it["apis"]:
+        cands = [a, a + "_ex", a + "_begin", a + "_begin_ex"]
+        if a.endswith("_begin"): cands.append(a + "_ex")
+        st = next((fn_struct[c] for c in cands if c in fn_struct and fn_struct[c] in structs), None)
+        if not st or not structs[st]["fields"]: continue
+        if st in LAYOUT_STRUCTS and not a.startswith(("cui_" + it["id"].replace("-", "_"))): continue
+        own = owners.get(a, set())
+        if it["id"] not in own and (own or field_mentions(structs[st]["fields"], it["html"], it["id"]) < 2): continue
+        by_struct.setdefault(st, [])
+        if a not in by_struct[st]: by_struct[st].append(a)
+    return [{"fn": fns, "struct": st, "line": structs[st]["line"], "fields": structs[st]["fields"]}
+            for st, fns in by_struct.items()]
+
+# ---------------------------------------------------------------- keyboard (from the doc prose)
+KEY = (r"Tab|Enter|Return|Esc|Escape|Space|Home|End|Page ?Up|Page ?Down|PgUp|PgDn|Delete|Backspace|Insert"
+       r"|Up|Down|Left|Right|F(?:[1-9]|1[0-2])|Ctrl|Cmd|Shift|Alt|Option")
+MOD = r"(?:Ctrl|Cmd|Shift|Alt|Option)"
+# a key on its own, or a combo: Ctrl+A, Ctrl+Shift+Z, Shift+arrows
+KEY_RE = re.compile(rf"(?<![\w-])(?:{MOD}\+)*(?:{KEY}|(?<=\+)(?:[A-Z0-9]|arrows|click|drag|wheel|scroll))(?![\w-])")
+# "arrows" counts as keys only where it reads that way ("the arrows move", "Shift+arrows"), not "elbow arrows"
+TRIGGER_RE = re.compile(rf"(?<![\w-])(?:(?:{MOD})\+\w|(?:{KEY.replace('|Option', '')})(?![\w-]))|\barrow keys?\b"
+                        r"|(?:^|\bthe |: |\+|, )arrows\b|^Arrows\b")
+
+def kbd_wrap(s):
+    """Wraps key names in <kbd>, outside tags and code spans."""
+    parts = re.split(r"(<code>.*?</code>|<[^>]+>)", s)
+    def one(m):
+        keys = m.group(0).split("+")
+        return "+".join(f"<kbd>{k}</kbd>" if re.fullmatch(KEY, k) or len(k) == 1 else k for k in keys)
+    return "".join(p if p.startswith("<") else KEY_RE.sub(one, p) for p in parts)
+
+def keyboard_lines(body_html):
+    out = []
+    blocks = re.findall(r"<(p|li)>(.*?)</\1>", body_html, re.S)
+    for _, block in blocks:
+        # sentences end at . ! ? before a capital letter or a tag (not inside "e.g." or "1.2")
+        for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z<])", block):
+            plain = re.sub(r"<code>.*?</code>", " ", sent)
+            plain = html.unescape(re.sub(r"<[^>]+>", "", plain))
+            if not TRIGGER_RE.search(plain): continue
+            # "Keyboard: arrows move the selection." reads as the list item itself
+            s = re.sub(r"^\s*Keyboard:\s*", "", sent.strip())
+            if s != sent.strip() and s: s = s[0].upper() + s[1:]
+            s = kbd_wrap(s)
+            if s and s not in out: out.append(s)
+    return out
+
+# ---------------------------------------------------------------- related components
+def related_items(it, items, cats_order, owners):
+    rel = []
+    def add(i):
+        if i != it["id"] and i in items and i not in rel and len(rel) < 4: rel.append(i)
+    # 1. linked from the doc text
+    for m in re.finditer(r'href="#/c/([\w-]+)"', it["html"]): add(m.group(1))
+    # 2. another component named in the prose, then one whose function the prose names
+    prose = re.sub(r"<pre\b.*?</pre>", " ", it["html"], flags=re.S)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", prose)).lower()
+    for o in items.values():
+        t = o["title"].lower()
+        if o["id"] != it["id"] and " " in t and re.search(r"(?<![\w-])" + re.escape(t) + r"s?(?![\w-])", text): add(o["id"])
+    for a in re.findall(r"<code>(cui_\w+)", prose):
+        for o in sorted(owners.get(a, ())): add(o)
+    # ... or one whose function the example builds with (not the basics every example uses)
+    for a in it["apis"]:
+        for o in sorted(owners.get(a, ())):
+            if items[o]["category"] != "basics": add(o)
+    # 3. the nearest neighbours in the same category
+    same = cats_order.get(it["category"], [])
+    if it["id"] in same:
+        k = same.index(it["id"])
+        for d in range(1, len(same)):
+            for j in (k + d, k - d):
+                if 0 <= j < len(same): add(same[j])
+    return rel
 
 def main():
     table = scene_table()
@@ -373,6 +615,16 @@ def main():
                       "scenes": ["icons"], "images": statics, "apis": ["cui_icon"]}
     cats["basics"].insert(1, "icons")
 
+    # options from the header, keys from the prose, and nearby components
+    fn_struct, structs = header_index()
+    owners = api_owners(items)
+    cats_order = {c: ids for c, ids in cats.items()}
+    for it in items.values():
+        it["options"] = item_options(it, owners, fn_struct, structs)
+        it["keyboard"] = keyboard_lines(it["html"])
+    for it in items.values():
+        it["related"] = related_items(it, items, cats_order, owners)
+
     guides = []
     for gid in GUIDES:
         lines = read(f"docs/{gid}.md").split("\n")
@@ -398,6 +650,26 @@ def main():
         if m: lede = html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip()
         guides.append({"id": gid, "title": title, "file": f"docs/{gid}.md", "intro": ih + figs(ist), "lede": lede, "sections": out_secs})
 
+    # the changelog: each "## date · title" is a release, newest first
+    changelog = {"lede": "", "releases": []}
+    if os.path.exists(os.path.join(ROOT, "CHANGELOG.md")):
+        lines = read("CHANGELOG.md").split("\n")
+        intro, cur = [], None
+        for n, ln in enumerate(lines, 1):
+            if ln.startswith("# "): continue
+            if ln.startswith("## "):
+                if cur: changelog["releases"].append(cur)
+                head = ln[3:].strip()
+                date, _, name = head.partition(" · ")
+                cur = {"date": date.strip(), "title": (name or head).strip(), "id": slug(head), "line": n, "body": []}
+                continue
+            (cur["body"] if cur else intro).append(ln)
+        if cur: changelog["releases"].append(cur)
+        ih, _, _ = md_to_html(intro, anchors, {})
+        changelog["lede"] = html.unescape(re.sub(r"<[^>]+>", "", ih)).strip()
+        for r in changelog["releases"]:
+            r["html"], _, _ = md_to_html(r.pop("body"), anchors, {})
+
     showcase = []
     for name, title, desc in SHOWCASE:
         if name in srcs: showcase.append({"id": name, "title": title, "summary": desc, "scenes": [name]})
@@ -414,6 +686,7 @@ def main():
         "scenes": srcs,
         "unlisted": unlisted,
         "guides": guides,
+        "changelog": changelog,
         # the doc images that exist, so thumbnails only ask for real files
         "shots": sorted(f"{d}/{n[:-4]}" for d in ("components", "showcase")
                         for n in os.listdir(os.path.join(ROOT, "docs", "images", d)) if n.endswith(".png")),
@@ -425,6 +698,10 @@ def main():
     n_scn = sum(1 for it in items.values() if it["scenes"])
     print(f"  catalog: {len(items)} components ({n_scn} with live scenes), {len(showcase)} showcase, {len(APPS)} apps, "
           f"{len(srcs)} scenes; unlisted scenes: {', '.join(unlisted) or 'none'}")
+    n_opt = sum(1 for it in items.values() if it["options"])
+    n_key = sum(1 for it in items.values() if it["keyboard"])
+    print(f"  options tables: {n_opt} components ({sum(len(it['options']) for it in items.values())} tables); "
+          f"keyboard lists: {n_key}; header: {len(structs)} options structs, {len(fn_struct)} functions")
     missing = [it["title"] for it in items.values() if not it["scenes"]]
     if missing: print("  no live scene:", ", ".join(missing))
 
