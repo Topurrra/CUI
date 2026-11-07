@@ -9,7 +9,7 @@
 
 **Native UI components for C.**
 
-About 150 components with spring motion and full keyboard support.<br>
+About 160 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies, about 250 KB.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/yappologistic/CUI/ci.yml?branch=master&label=CI&style=flat-square&labelColor=24292f)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
@@ -92,7 +92,7 @@ int main(void) {
 
 **A complete library**
 
-Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtualized data grid, kanban boards, calendars, gantt charts, about a dozen kinds of chart and AI chat components. They are designed together and look finished without styling.
+Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtualized data grid, kanban boards, gantt charts, a dozen kinds of chart, AI chat components, and tool panels such as docking, a node editor, a code editor and a flame graph. They are designed together and look finished without styling.
 
 </td>
 <td width="50%" valign="top">
@@ -150,13 +150,16 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 | Group | Components |
 |---|---|
 | **Actions** | button, icon button, button group, split button, toggle group, copy button, hold to confirm, segmented control, menus, command palette |
+| **App chrome** | menu bar, toolbar, status bar, document tabs, docking layout with saved layouts |
 | **Inputs** | text field, password, search, text area, number, money and scrub fields, tag input, one time code, select, combobox, multi-select, shortcut recorder |
 | **Pickers** | date and date range, time, wheel and dial pickers, calendar, color picker, ruler and histogram sliders |
 | **Selection** | checkbox, switch, radio group and cards, sliders, chips, rating |
 | **Navigation** | tabs, sidebar, breadcrumb, pagination, stepper, table of contents, dock, tab bar |
 | **Overlays** | dialog, sheet, popover, hover card, tooltip, toast stack, confirm popover |
 | **Feedback** | alert, banner, progress bar and ring, meter, spinner, skeleton, badge, avatar, empty state, timeline |
-| **Data** | card, metric, table, virtualized data grid, list, tree, accordion, code block, JSON viewer, filter bar |
+| **Data** | card, metric, table, virtualized data grid, tree table, path bar, list, tree, accordion, filter bar |
+| **Code** | code block, code editor, diff viewer, markdown view, JSON viewer |
+| **Tool panels** | property inspector, log console, node editor, flame graph, hex viewer, curve and gradient editors, timeline editor |
 | **Charts** | line, area, bar, donut, sparkline, gauge, heatmap, treemap, radar, funnel, sankey, waffle, scatter and more |
 | **Planning** | kanban board, week calendar, gantt chart with dependencies |
 | **AI** | reasoning, tool calls, agent plan, sources and citations, context meter, prompt suggestions, model picker, chat composer |
@@ -180,6 +183,12 @@ Capture (dropzone with real file drops, avatar upload, signature pad), conversat
 ## Showcase
 
 <table>
+<tr>
+<td colspan="2"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/components/docking-dark.png"><img src="docs/images/components/docking.png" alt="A docked workspace with a scene tree, a viewport, a log console and a property inspector, with a tab being dragged to a new place"></picture></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Docking</b>: drag a tab to stack it or split any side; the layout saves as a short string · <a href="docs/components-more.md#docking">docs</a></sub></td>
+</tr>
 <tr>
 <td colspan="2"><img src="docs/images/showcase/hero-data.png" alt="A data grid with a filter bar, two selected rows, team tags and score bars"></td>
 </tr>
@@ -325,7 +334,7 @@ Set `CUI_RENDERER=software` to force the software renderer and `CUI_SCALE=2` to 
 
 ## Status and limitations
 
-CUI 1.0 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
+CUI 1.1 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
 
 - **Screen readers.** There is no accessibility tree yet. Keyboard navigation and focus are complete.
 - **Complex scripts.** Text is UTF-8 with kerning and font fallback. The optional `CUI_TEXT_SHAPING` CMake option adds Arabic-script shaping, Unicode bidi and shaped paragraph wrapping for static text (see [integration](docs/integration.md#optional-arabic-script-text-shaping)). Explicit embeddings, overrides and isolates are unsupported. It is off by default. Editing and other complex scripts remain outside this experimental path. CJK works once you add a fallback font.

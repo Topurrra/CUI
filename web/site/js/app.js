@@ -603,7 +603,7 @@ const C_LOGO = `<svg class="c-logo" viewBox="-14 -14 388 432" role="img" aria-la
 </g></svg>`;
 // the landing page: the hero's controls, the showcase, the bento and the
 // playground are all the library itself, compiled to WebAssembly
-const STRIP = [['~150', 'components'], ['~250 KB', 'a complete app'], ['< 0.25 ms', 'per frame'], ['Win · Mac · Linux', 'one C99 codebase'], ['0', 'dependencies']];
+const STRIP = [['~160', 'components'], ['~250 KB', 'a complete app'], ['< 0.25 ms', 'per frame'], ['Win · Mac · Linux', 'one C99 codebase'], ['0', 'dependencies']];
 const SHOWCASE = [['stage-mosaic', 'Overview', 'layers'], ['app-chrome', 'Editor', 'window'], ['hero-data', 'Data', 'table'],
                   ['hero-plan', 'Planning', 'kanban'], ['hero-ai', 'Assistant', 'message'], ['hero-charts', 'Charts', 'chart']];
 const BENTO = [

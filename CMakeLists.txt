@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 
 project(cui
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "Modern native UI components for C"
     LANGUAGES C)
 

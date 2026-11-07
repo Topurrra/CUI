@@ -2,7 +2,7 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
-## 2026-11-07 · Text, code and workspace
+## 2026-11-07 · 1.1: text, code and workspace
 
 ### Added
 
@@ -20,6 +20,8 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - A focused editor can keep the Tab key for indenting; Esc gives Tab back to focus movement.
 - **Data grid**: columns can declare a priority and hide on narrow widths, rows can select without a checkbox column, a cursor set from code scrolls into view, and truncated cells show their full text on hover.
 - **Changelog**: this page, also on the docs site.
+- The README lists every component group, including the new app chrome, code and tool panels, and leads its showcase with docking.
+- Version 1.1.0, with about 160 components.
 
 ### Fixed
 
