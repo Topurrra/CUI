@@ -1833,6 +1833,233 @@ typedef struct cui_log_view_opts {
  * clears the selection, End follows again. */
 CUI_API void cui_log_view_ex(cui_ctx *ui, const char *id, cui_log_buffer *buf, const cui_log_view_opts *opts);
 
+/* ---- Hex viewer ---- */
+
+/* Hex viewer: offsets, bytes in hex and the same bytes as ASCII, in the code
+ * font, for binary tools, emulators and debuggers. You own the bytes (they
+ * are read during the call, never kept) and, optionally, the selection:
+ *
+ *     static cui_hex_selection sel;
+ *     static const cui_hex_range marks[] = {
+ *         { 0, 8, CUI_TONE_INFO, "PNG signature" },
+ *         { 8, 25, CUI_TONE_VIOLET, "IHDR chunk" },
+ *     };
+ *     cui_hex_result r = cui_hex_view(ui, "hex", file, file_size, &sel,
+ *                                     .base = 0x80000000u, .ranges = marks, .range_count = 2);
+ *     if (r.selection_changed) show_inspector(file + sel.start, sel.length);
+ *
+ * Only the rows in view are built, so a file of many megabytes scrolls as
+ * fast as a short one (the scroll position is kept in rows, so very large
+ * files stay exact). Rows hold 16 bytes (8 or 32 with bytes_per_row) with a
+ * small gap every 8. When the view is too narrow it drops to fewer bytes per
+ * row (down to 8), then hides the ASCII column, then tightens its margins,
+ * then shows 4 bytes per row; it never scrolls sideways. Hovering a byte marks it in both columns, and a
+ * byte inside a highlighted range shows the range's label as a tooltip.
+ *
+ * Click a byte to select it, drag or Shift+click for a range. With the view
+ * focused: arrows move the cursor byte, Shift+arrows extend, Page Up/Down
+ * move by a screen, Home/End go to the start/end of the row and Ctrl+Home/End
+ * to the start/end of the data, Ctrl+A selects everything, Esc clears the
+ * selection. Ctrl+C copies the selection as hex ("89 50 4E 47") and
+ * Ctrl+Shift+C as ASCII (other bytes as '.'), up to 4 MiB of bytes.
+ *
+ * With .edit set the view is editable: typing hex digits overwrites the byte
+ * at the cursor, high digit first, then moves on. Edits never change the size. */
+typedef struct cui_hex_range {
+    size_t offset, length;
+    cui_tone tone;             /* tints the range's background */
+    const char *label;         /* tooltip for the range; may be NULL */
+} cui_hex_range;
+/* The selected bytes. length 0 means nothing is selected; cursor is the byte
+ * the keys move from and is one end of a selection. Set it yourself to select
+ * from code. */
+typedef struct cui_hex_selection { size_t start, length, cursor; } cui_hex_selection;
+typedef struct cui_hex_view_opts {
+    int _;
+    cui_size width;            /* default fill */
+    float height;              /* default: the rows, up to 320; negative fills the space */
+    uint64_t base;             /* address shown for byte 0 in the offset column */
+    int bytes_per_row;         /* 8, 16 (default) or 32 */
+    const cui_hex_range *ranges; int range_count;   /* drawn in order, later ones on top */
+    uint8_t *edit;             /* writable bytes to show and overwrite instead of data (usually the same memory), or NULL for read only */
+    bool no_ascii;             /* hide the ASCII column */
+    bool no_header;            /* hide the column header (00 01 .. 0F) */
+    float size;                /* font size, default 12 */
+} cui_hex_view_opts;
+typedef struct cui_hex_result {
+    cui_hex_selection selection;   /* after this frame (the same as *sel when you pass one) */
+    bool selection_changed;        /* by the pointer, the keys or cui_hex_view_goto */
+    bool edited;                   /* bytes in .edit were overwritten this frame */
+    size_t edit_offset, edit_length;
+    int64_t hovered;               /* byte under the pointer, or -1 */
+    bool copied;                   /* Ctrl+C or Ctrl+Shift+C put the selection on the clipboard */
+} cui_hex_result;
+/* sel may be NULL: the view then keeps the selection itself. */
+CUI_API cui_hex_result cui_hex_view_ex(cui_ctx *ui, const char *id, const uint8_t *data, size_t size, cui_hex_selection *sel, const cui_hex_view_opts *opts);
+/* Go to offset: on the view's next frame its cursor moves to offset, that byte
+ * becomes the selection and it scrolls into view (to the middle when it was
+ * out of sight). Wire a "Go to" field to it; it is safe to call every frame. */
+CUI_API void cui_hex_view_goto(cui_ctx *ui, const char *id, size_t offset);
+/* ---- Flame graph ---- */
+
+/* Flame graph / profiler timeline: time runs left to right, call depth top to
+ * bottom (row d holds the spans at depth d). You own the spans, the view and
+ * the selection; the component pans and zooms *view and writes *selected.
+ *
+ *     static cui_flame_view view;              (zeroed: fits every span)
+ *     static int selected = -1;
+ *     cui_flame_sort(spans, count);            (once, after recording)
+ *     cui_flame_result r = cui_flame_graph(ui, "profile", spans, count, &view, &selected);
+ *     if (r.selection_changed && selected >= 0) show_details(&spans[selected]);
+ *
+ * Times are seconds (any origin; the ruler counts from the earliest span).
+ * Spans must be sorted by depth, then start (cui_flame_sort does it), and
+ * spans of one depth must not overlap: a child lies within its parent. Only
+ * the spans in view are visited (binary searches per row), so captures of
+ * 100k spans stay fast; spans thinner than a pixel merge into a neutral run.
+ * The spans need to be valid only during the call. color_key picks the color
+ * (0: hashed from the name), so the same function keeps its color.
+ *
+ * Mouse: the wheel zooms around the pointer, Shift+wheel or a sideways scroll
+ * pans, drag pans (sideways and, for deep stacks, up and down). Click selects
+ * a span (empty space clears), double-click zooms to fit it (on empty space:
+ * fits everything). Hover shows a tooltip: name, duration and its share of
+ * the parent (or of the view, at depth 0).
+ * Keys when focused: Left/Right move to the previous/next span in the row,
+ * Up to the parent, Down to the first child (the view follows); Shift+Left/
+ * Right pan; + and - zoom; Enter or Space zooms to the selection; Home or F
+ * fits everything; Esc fits everything, or when already fitted clears the
+ * selection. Zooming to a span or fitting animates (snaps with reduced
+ * motion). Not included: an aggregated (merged call tree) flame graph mode. */
+typedef struct cui_flame_span {
+    const char *name;
+    double start, end;         /* seconds, end >= start */
+    int depth;                 /* row, 0 = top */
+    uint32_t color_key;        /* 0: hashed from name */
+} cui_flame_span;
+typedef struct cui_flame_view {
+    double start, end;         /* visible time range; end <= start fits every span */
+    float scroll;              /* rows scrolled off the top, in points */
+} cui_flame_view;
+typedef struct cui_flame_opts {
+    int _;
+    cui_size width;            /* default fill */
+    float height;              /* default: fits the rows (up to 360) */
+    float row_height;          /* default 20 */
+    double min_range;          /* deepest zoom in seconds, default 1e-8 */
+} cui_flame_opts;
+typedef struct cui_flame_result {
+    bool selection_changed;    /* *selected changed (click or keys) */
+    bool view_changed;         /* *view changed (zoom, pan, fit, animation) */
+    int hovered;               /* span under the pointer, or -1 */
+    int zoomed;                /* span zoomed to this frame (double-click, Enter), or -1 */
+} cui_flame_result;
+/* selected: index into spans, -1 for none (may be NULL). */
+CUI_API cui_flame_result cui_flame_graph_ex(cui_ctx *ui, const char *id, const cui_flame_span *spans, int count,
+                                            cui_flame_view *view, int *selected, const cui_flame_opts *opts);
+/* Sorts spans into the order the graph needs: by depth, then start (longer
+ * first on ties). */
+CUI_API void cui_flame_sort(cui_flame_span *spans, int count);
+/* Where a span was drawn in the latest frame, in points (zero size when out
+ * of view). flame is the graph's id: cui_last_id(ui) right after the call. */
+CUI_API cui_rect cui_flame_span_rect(cui_ctx *ui, cui_id flame, const cui_flame_span *span);
+/* ---- Curve and gradient editors ---- */
+
+/* Curve editor: keyframes on a plot, for easing, animation timing and
+ * response curves. You own the array of keys, sorted by x; the editor edits
+ * it in place (moves, handles, modes, adds and removes) and reports what it
+ * did in the result, so data you keep beside each key can follow:
+ *
+ *     static cui_curve_key ease[8] = { { 0, 0 }, { 0.42f, 0.1f }, { 1, 1 } };
+ *     static int n = 3, sel = -1;
+ *     cui_curve_result r = cui_curve_editor(ui, "ease", ease, &n, 8, .selected = &sel);
+ *     if (r.added >= 0) insert_my_data(r.added);
+ *     if (r.removed >= 0) remove_my_data(r.removed);
+ *     ...
+ *     float y = cui_curve_eval(ease, n, t);   (the same curve the editor draws)
+ *
+ * The mode of a key shapes the segment that leaves it: SMOOTH and FREE are
+ * cubic beziers, LINEAR a straight line, STEP holds the key's value until the
+ * next key. A SMOOTH key computes its tangents (no overshoot, flat at the
+ * ends and at peaks); a FREE key uses its handles, which are relative to the
+ * key in curve units (in_dx <= 0, out_dx >= 0) and are shortened to the
+ * neighbouring key so the curve never folds back. The incoming segment of a
+ * LINEAR or STEP key arrives with an automatic tangent. Before the first key
+ * the curve holds the first value, after the last key the last value.
+ *
+ * Drag a key to move it (x stays between its neighbours, both axes inside the
+ * range); drag the handles of the selected key (a SMOOTH key becomes FREE);
+ * Shift or `snap` snaps a drag to the grid. Double click empty space to add
+ * a key (on the curve when the click is near it), Delete or Backspace removes
+ * the selected key (never fewer than two). Keys are focusable: Tab moves
+ * through them, the arrows nudge (Shift for fine steps). Hovering shows the
+ * value under the pointer. The row under the plot sets the selected key's
+ * mode and exact position (its fields stack on a narrow editor). */
+typedef enum cui_curve_mode {
+    CUI_CURVE_SMOOTH = 0,      /* automatic tangents */
+    CUI_CURVE_FREE,            /* the key's own handles */
+    CUI_CURVE_LINEAR,          /* a straight line to the next key */
+    CUI_CURVE_STEP             /* hold this value until the next key */
+} cui_curve_mode;
+typedef struct cui_curve_key {
+    float x, y;
+    float in_dx, in_dy;        /* handle toward the previous key, relative to the key (FREE) */
+    float out_dx, out_dy;      /* handle toward the next key, relative to the key (FREE) */
+    uint8_t mode;              /* cui_curve_mode */
+} cui_curve_key;
+typedef struct cui_curve_opts {
+    int _;
+    float x_min, x_max;        /* plotted range; both 0 = 0..1. Keys stay inside it */
+    float y_min, y_max;        /* both 0 = 0..1; leave room above and below for overshoot */
+    cui_size width;            /* default fill */
+    float height;              /* plot height, default 220 */
+    const char *x_format, *y_format;   /* printf formats for labels and readouts, default from the grid step */
+    const char *x_label, *y_label;     /* readout names, default "X" and "Y" (e.g. "Time", "Value") */
+    int *selected;             /* the selected key or -1, kept by you; NULL keeps it in the editor */
+    bool snap;                 /* drags always snap to the grid (otherwise hold Shift) */
+    bool show_playhead;        /* a marker at x = playhead */
+    float playhead;
+} cui_curve_opts;
+typedef struct cui_curve_result {
+    bool changed;              /* a key moved, a handle or mode changed, or a key was added or removed */
+    int added;                 /* index of the key added this frame, or -1 */
+    int removed;               /* index the removed key had, or -1 */
+    int selected;              /* the selected key, or -1 */
+    bool hovered;              /* the pointer is over the plot: */
+    float hover_x, hover_y;    /* the x under it and the curve's value there */
+} cui_curve_result;
+CUI_API cui_curve_result cui_curve_editor_ex(cui_ctx *ui, const char *id, cui_curve_key *keys, int *count, int capacity, const cui_curve_opts *opts);
+/* The curve's value at x: exactly what the editor draws. keys sorted by x. */
+CUI_API float cui_curve_eval(const cui_curve_key *keys, int count, float x);
+
+/* Gradient editor: a color ramp over a checkerboard (so alpha shows) with
+ * the stops underneath. You own the stops; the editor edits them in place
+ * and keeps them sorted by position. Drag a stop to move it (it may pass its
+ * neighbours), drag it off the ramp or press Delete to remove it (never
+ * fewer than two), click the ramp or the empty track to add a stop with the
+ * color found there. Double click a stop (or Enter on a focused one) to open
+ * the color picker; the row under the ramp shows the selected stop's color,
+ * location and opacity. Stops are focusable: Tab moves through them, Left and
+ * Right nudge (Shift for fine steps). */
+typedef struct cui_gradient_stop { float pos; cui_color color; } cui_gradient_stop;   /* pos 0..1 */
+typedef struct cui_gradient_opts {
+    int _;
+    cui_size width;            /* default fill */
+    float height;              /* ramp height, default 28 */
+    int *selected;             /* the selected stop, kept by you; NULL keeps it in the editor */
+} cui_gradient_opts;
+typedef struct cui_gradient_result {
+    bool changed;              /* a stop moved, changed color, or was added or removed */
+    int added;                 /* index of the stop added this frame, or -1 */
+    int removed;               /* index the removed stop had, or -1 */
+    int selected;              /* the selected stop */
+} cui_gradient_result;
+CUI_API cui_gradient_result cui_gradient_editor_ex(cui_ctx *ui, const char *id, cui_gradient_stop *stops, int *count, int capacity, const cui_gradient_opts *opts);
+/* The color at t: exactly what the ramp shows (each channel, alpha too,
+ * interpolated in sRGB between the stops on either side; the end colors
+ * continue past the first and last stop). */
+CUI_API cui_color cui_gradient_eval(const cui_gradient_stop *stops, int count, float t);
+
 /* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
@@ -2076,6 +2303,12 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_prop_vec3(ui, label, v, ...)    cui_prop_vec_ex((ui), (label), (v), 3, CUI__OPTS(cui_prop_opts, __VA_ARGS__))
 #define cui_prop_vec4(ui, label, v, ...)    cui_prop_vec_ex((ui), (label), (v), 4, CUI__OPTS(cui_prop_opts, __VA_ARGS__))
 #define cui_log_view(ui, id, buf, ...)      cui_log_view_ex((ui), (id), (buf), CUI__OPTS(cui_log_view_opts, __VA_ARGS__))
+#define cui_hex_view(ui, id, data, size, sel, ...) cui_hex_view_ex((ui), (id), (data), (size), (sel), CUI__OPTS(cui_hex_view_opts, __VA_ARGS__))
+#define cui_flame_graph(ui, id, spans, count, view, selected, ...) \
+    cui_flame_graph_ex((ui), (id), (spans), (count), (view), (selected), CUI__OPTS(cui_flame_opts, __VA_ARGS__))
+/* curve and gradient editors */
+#define cui_curve_editor(ui, id, keys, count, cap, ...) cui_curve_editor_ex((ui), (id), (keys), (count), (cap), CUI__OPTS(cui_curve_opts, __VA_ARGS__))
+#define cui_gradient_editor(ui, id, stops, count, cap, ...) cui_gradient_editor_ex((ui), (id), (stops), (count), (cap), CUI__OPTS(cui_gradient_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 
 #ifdef __cplusplus

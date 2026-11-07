@@ -809,6 +809,109 @@ SCENE(log_console) {
     if (!filled) { fill_build_log(); filled = true; }
     cui_log_view(ui, "log", &g_log, .height = 352, .timestamps = true);
 }
+/* the first 2 KB of a PNG: signature, IHDR, tEXt, pHYs, an IDAT of
+ * compressed looking bytes and IEND, with real chunk CRCs */
+static uint8_t g_png[2048];
+static size_t g_png_n;
+static uint32_t png_crc(const uint8_t *p, size_t n) {
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; i++) {
+        c ^= p[i];
+        for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+    }
+    return c ^ 0xFFFFFFFFu;
+}
+static void png_u32(uint32_t v) { for (int k = 3; k >= 0; k--) g_png[g_png_n++] = (uint8_t)(v >> (8 * k)); }
+static void png_chunk(const char *type, const uint8_t *data, uint32_t len) {
+    png_u32(len);
+    size_t at = g_png_n;
+    memcpy(g_png + g_png_n, type, 4); g_png_n += 4;
+    if (len) { memcpy(g_png + g_png_n, data, len); g_png_n += len; }
+    png_u32(png_crc(g_png + at, len + 4));
+}
+static void fill_png(void) {
+    static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    static const uint8_t ihdr[13] = { 0, 0, 0x05, 0x00, 0, 0, 0x02, 0xD0, 8, 6, 0, 0, 0 };   /* 1280 x 720, 8 bit RGBA */
+    static const uint8_t text[] = "Software\0CUI 1.0";
+    static const uint8_t phys[9] = { 0, 0, 0x0B, 0x13, 0, 0, 0x0B, 0x13, 1 };              /* 2835 px/m: 72 dpi */
+    static uint8_t idat[2048];
+    memcpy(g_png, sig, 8); g_png_n = 8;
+    png_chunk("IHDR", ihdr, 13);
+    png_chunk("tEXt", text, (uint32_t)sizeof text - 1);
+    png_chunk("pHYs", phys, 9);
+    uint32_t n = (uint32_t)(sizeof g_png - g_png_n - 12 - 12);
+    uint32_t x = 0x9E3779B9u;
+    idat[0] = 0x78; idat[1] = 0x9C;   /* zlib header */
+    for (uint32_t i = 2; i < n; i++) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; idat[i] = (uint8_t)(x >> 7); }
+    png_chunk("IDAT", idat, n);
+    png_chunk("IEND", NULL, 0);
+}
+static void scene_hex_viewer(cui_ctx *ui, int f) {
+    static cui_hex_selection sel = { 0x10, 8, 0x17 };   /* IHDR width and height */
+    static char go[20];
+    static char edited[48];
+    static const cui_hex_range marks[] = {
+        { 0, 8, CUI_TONE_INFO, "PNG signature" },
+        { 8, 25, CUI_TONE_VIOLET, "IHDR chunk, 1280 by 720 RGBA" },
+        { 33, 28, CUI_TONE_TEAL, "tEXt chunk, Software" },
+    };
+    if (!g_png_n) fill_png();
+    if (f < 0) {
+        /* the pointer rests on a byte of the tEXt chunk, so its label shows */
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "hex"));
+        if (-f - 1 == 3 && r.w > 0) cui_input_mouse_move(ui, r.x + 265, r.y + 96);
+        return;
+    }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = frame_pad(ui), .gap = 12, .justify = CUI_JUSTIFY_CENTER) {
+        /* editable: the live page writes typed hex digits into this copy */
+        cui_hex_result r = cui_hex_view(ui, "hex", g_png, g_png_n, &sel, .ranges = marks, .range_count = 3, .edit = g_png, .height = 300);
+        if (r.edited) snprintf(edited, sizeof edited, "Edited %u byte%s at %04X", (unsigned)r.edit_length, r.edit_length == 1 ? "" : "s", (unsigned)r.edit_offset);
+        cui_row(ui, .width = CUI_FILL, .gap = 12, .align = CUI_ALIGN_CENTER, .wrap = true) {
+            if (cui_input(ui, "goto", go, sizeof go, .placeholder = "Go to offset", .size = CUI_SIZE_SM, .width = CUI_PX(150)) & CUI_SUBMITTED)
+                cui_hex_view_goto(ui, "hex", (size_t)strtoul(go, NULL, 16));
+            char status[64];
+            if (sel.length) snprintf(status, sizeof status, "%04X to %04X, %u byte%s selected", (unsigned)sel.start,
+                                     (unsigned)(sel.start + sel.length - 1), (unsigned)sel.length, sel.length == 1 ? "" : "s");
+            else snprintf(status, sizeof status, "Cursor at %04X", (unsigned)sel.cursor);
+            cui_text(ui, status, .size = 12.5f, .tabular = true, .color = CUI_COLOR_TEXT_SECONDARY);
+            if (edited[0]) cui_text(ui, edited, .size = 12.5f, .tabular = true, .color = CUI_COLOR_TEXT_MUTED);
+        }
+    }
+}
+/* curve and gradient editors: the arrays and selections are static, so the
+ * live page keeps what you drag, add and remove (the editors edit in place) */
+static cui_curve_key cv_keys[16] = {
+    { 0.00f, 0.00f, 0, 0, 0, 0, CUI_CURVE_SMOOTH },
+    { 0.55f, 0.66f, -0.22f, -0.42f, 0.24f, 0.46f, CUI_CURVE_FREE },
+    { 1.20f, 1.08f, 0, 0, 0, 0, CUI_CURVE_SMOOTH },
+    { 2.00f, 1.00f, 0, 0, 0, 0, CUI_CURVE_SMOOTH },
+};
+static int cv_n = 4, cv_sel = 1;
+static void body_curve_editor(cui_ctx *ui);
+static void scene_curve_editor(cui_ctx *ui, int f) {
+    if (f < 0) {   /* hover the curve late in the overshoot, away from the keys */
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "ease"));
+        if (-f - 1 == 4 && r.w > 0) cui_input_mouse_move(ui, r.x + r.w * 0.8f, r.y + 120);
+        return;
+    }
+    frame_wrap(ui, body_curve_editor);
+}
+static void body_curve_editor(cui_ctx *ui) {
+    cui_box(ui, UPTO(620)) {
+        cui_curve_editor(ui, "ease", cv_keys, &cv_n, 16, .x_max = 2, .y_max = 1.2f, .x_label = "Time", .y_label = "Value", .selected = &cv_sel);
+    }
+}
+static cui_gradient_stop gr_stops[12] = {
+    { 0.00f, { 0xFF, 0xF1, 0xC1, 0xFF } }, { 0.24f, { 0xFF, 0xB1, 0x4A, 0xFF } },
+    { 0.58f, { 0xE2, 0x55, 0x2B, 0xFF } }, { 1.00f, { 0x5C, 0x1F, 0x16, 0x00 } },
+};
+static int gr_n = 4, gr_sel = 2;
+SCENE(gradient_editor) {
+    cui_column(ui, UPTO(560), .gap = 10) {
+        cui_text(ui, "Flame color over lifetime", .font = CUI_FONT_MEDIUM, .size = 13);
+        cui_gradient_editor(ui, "flame", gr_stops, &gr_n, 12, .selected = &gr_sel);
+    }
+}
 SCENE(json_view) {
     cui_json_view(ui, "json",
         "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
@@ -1070,6 +1173,145 @@ static void body_node_editor(cui_ctx *ui) {
         while (cui_node_deleted(ui, &id))
             if (id >= 0 && id < 6) ne_alive[id] = false;
         cui_node_editor_end(ui);
+    }
+}
+
+/* ---- flame graph: two game frames from a profiler capture ---- */
+static cui_flame_span fl_spans[2400];
+static int fl_n, fl_sel = -1, fl_hover = -1;
+static cui_flame_view fl_view;   /* zeroed: fits the capture */
+static cui_id fl_id;
+static unsigned fl_seed = 41;
+static double fl_rand(void) { fl_seed = fl_seed * 1103515245u + 12345u; return (double)((fl_seed >> 16) & 0x7fff) / 32767.0; }
+static void fl_add(const char *name, double s, double e, int depth, uint32_t key) {
+    if (fl_n < (int)(sizeof fl_spans / sizeof fl_spans[0])) fl_spans[fl_n++] = (cui_flame_span){ name, s * 1e-3, e * 1e-3, depth, key };
+}
+/* n children of [s, e] (milliseconds) named name, filling about `fill` of it */
+static void fl_split(const char *name, double s, double e, int depth, int n, double fill) {
+    double slot = (e - s) / n;
+    for (int k = 0; k < n; k++) {
+        double w = slot * fill * (0.55 + 0.45 * fl_rand());
+        double a = s + k * slot + (slot - w) * fl_rand();
+        fl_add(name, a, a + w, depth, 0);
+    }
+}
+/* named children laid end to end with small gaps; weights give their share */
+static void fl_seq(double s, double e, int depth, int n, const char *const *names, const double *w, double *out) {
+    double tot = 0, x = s;
+    for (int k = 0; k < n; k++) tot += w[k];
+    double gap = (e - s) * 0.012;
+    double len = (e - s) - gap * (n + 1);
+    for (int k = 0; k < n; k++) {
+        double a = x + gap, b = a + len * w[k] / tot;
+        fl_add(names[k], a, b, depth, 0);
+        out[2 * k] = a; out[2 * k + 1] = b;
+        x = b;
+    }
+}
+static void fl_frame(const char *title, double f0, double len) {
+    double o[16];
+    fl_add(title, f0, f0 + len, 0, 3);   /* frames share a color */
+    static const char *const top[] = { "Update", "Render", "Present" };
+    double tw[] = { 7.1, 7.6, 1.3 }, t3[6];
+    fl_seq(f0, f0 + len, 1, 3, top, tw, t3);
+    /* update */
+    static const char *const upd[] = { "Input", "Animation", "Physics", "AI", "Scripts" };
+    double uw[] = { 0.4, 1.5, 3.2, 1.1, 0.9 }, u[10];
+    fl_seq(t3[0], t3[1], 2, 5, upd, uw, u);
+    fl_split("Poll devices", u[0], u[1], 3, 3, 0.7);
+    static const char *const anim[] = { "Blend tree", "Skinning" };
+    double aw[] = { 0.45, 0.55 };
+    fl_seq(u[2], u[3], 3, 2, anim, aw, o);
+    fl_split("Evaluate clip", o[0], o[1], 4, 9, 0.8);
+    fl_split("Skin mesh", o[2], o[3], 4, 24, 0.75);
+    static const char *const phys[] = { "Broadphase", "Narrowphase", "Solver" };
+    double pw[] = { 0.6, 0.9, 1.5 }, ph[6];
+    fl_seq(u[4], u[5], 3, 3, phys, pw, ph);
+    fl_split("Sweep axis", ph[0], ph[1], 4, 3, 0.85);
+    fl_split("Collide pair", ph[2], ph[3], 4, 46, 0.7);
+    double sw[8] = { 1.3, 1, 0.8, 1.1, 0.7, 0.9, 1.2, 0.6 }, is[16];
+    static const char *const isl[] = { "Island 0", "Island 1", "Island 2", "Island 3", "Island 4", "Island 5", "Island 6", "Island 7" };
+    fl_seq(ph[4], ph[5], 4, 8, isl, sw, is);
+    for (int k = 0; k < 8; k++) {
+        static const char *const st[] = { "Contacts", "Integrate" };
+        double stw[] = { 0.6, 0.4 }, so[4];
+        fl_seq(is[2 * k], is[2 * k + 1], 5, 2, st, stw, so);
+        fl_split("Body", so[2], so[3], 6, 6, 0.8);
+    }
+    static const char *const ai[] = { "Perception", "Pathfinding" };
+    double aiw[] = { 0.35, 0.65 }, ao[4];
+    fl_seq(u[6], u[7], 3, 2, ai, aiw, ao);
+    fl_split("A* search", ao[2], ao[3], 4, 6, 0.85);
+    fl_split("OnUpdate", u[8], u[9], 3, 28, 0.7);
+    /* render */
+    static const char *const ren[] = { "Cull", "Shadow pass", "GBuffer", "Lighting", "Post" };
+    double rw[] = { 0.8, 1.9, 2.6, 1.3, 0.8 }, r[10];
+    fl_seq(t3[2], t3[3], 2, 5, ren, rw, r);
+    fl_split("Frustum test", r[0], r[1], 3, 4, 0.8);
+    static const char *const cas[] = { "Cascade 0", "Cascade 1", "Cascade 2", "Cascade 3" };
+    double cw[] = { 1.4, 1.1, 0.9, 0.7 }, co[8];
+    fl_seq(r[2], r[3], 3, 4, cas, cw, co);
+    for (int k = 0; k < 4; k++) fl_split("Draw", co[2 * k], co[2 * k + 1], 4, 22, 0.7);
+    static const char *const gb[] = { "Opaque", "Decals" };
+    double gw[] = { 0.8, 0.2 }, go[4];
+    fl_seq(r[4], r[5], 3, 2, gb, gw, go);
+    double bo[24], bw[12];
+    static const char *const batch[] = { "Batch", "Batch", "Batch", "Batch", "Batch", "Batch", "Batch", "Batch", "Batch", "Batch", "Batch", "Batch" };
+    for (int k = 0; k < 12; k++) bw[k] = 0.6 + fl_rand();
+    fl_seq(go[0], go[1], 4, 12, batch, bw, bo);
+    for (int k = 0; k < 12; k++) fl_split("Draw", bo[2 * k], bo[2 * k + 1], 5, 8, 0.75);
+    static const char *const li[] = { "Light culling", "Deferred shading" };
+    double lw[] = { 0.35, 0.65 }, lo[4];
+    fl_seq(r[6], r[7], 3, 2, li, lw, lo);
+    static const char *const post[] = { "Bloom", "Tone map", "TAA" };
+    double pow3[] = { 0.4, 0.2, 0.4 }, po[6];
+    fl_seq(r[8], r[9], 3, 3, post, pow3, po);
+    /* present */
+    static const char *const pre[] = { "Swap buffers" };
+    double prw[] = { 1 }, pr[2];
+    fl_seq(t3[4], t3[5], 2, 1, pre, prw, pr);
+    static const char *const wt[] = { "Wait for GPU" };
+    fl_seq(pr[0], pr[1], 3, 1, wt, prw, o);
+}
+static void fl_build(void) {
+    if (fl_n) return;
+    fl_frame("Frame 4812", 0.0, 16.4);
+    fl_frame("Frame 4813", 16.6, 16.9);
+    cui_flame_sort(fl_spans, fl_n);
+    for (int i = 0; i < fl_n; i++) {   /* select Physics in the second frame, hover Lighting in the first */
+        if (!strcmp(fl_spans[i].name, "Physics") && fl_spans[i].start > 0.0166) fl_sel = i;
+        if (!strcmp(fl_spans[i].name, "Lighting") && fl_spans[i].start < 0.0166) fl_hover = i;
+    }
+}
+static void body_flame(cui_ctx *ui);
+static void scene_flame(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int t = -f - 1;
+        if (t == 3 && fl_id && fl_hover >= 0) {
+            cui_rect r = cui_flame_span_rect(ui, fl_id, &fl_spans[fl_hover]);
+            if (r.w > 0) cui_input_mouse_move(ui, r.x + r.w * 0.5f, r.y + r.h * 0.5f);
+        }
+        return;
+    }
+    frame_wrap(ui, body_flame);
+}
+static void body_flame(cui_ctx *ui) {
+    fl_build();
+    cui_column(ui, .width = CUI_FILL, .gap = 10) {
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {
+            cui_text(ui, "Frames 4812 to 4813", .font = CUI_FONT_MEDIUM, .size = 13);
+            /* the selection is ours: the graph writes fl_sel and we show it */
+            if (fl_sel >= 0) {
+                const cui_flame_span *s = &fl_spans[fl_sel];
+                char line[96];
+                snprintf(line, sizeof line, "%s, %.2f ms", s->name, (s->end - s->start) * 1e3);
+                cui_text(ui, line, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .tabular = true);
+            } else {
+                cui_text(ui, "Click a span to select it", .size = 13, .color = CUI_COLOR_TEXT_MUTED);
+            }
+        }
+        cui_flame_graph(ui, "capture", fl_spans, fl_n, &fl_view, &fl_sel);
+        fl_id = cui_last_id(ui);
     }
 }
 
@@ -2278,10 +2520,13 @@ int main(int argc, char **argv) {
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "json-view", scene_json_view, 560, 330, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "chat", scene_chat, 560, 440, true },
+        { "hex-viewer", scene_hex_viewer, 760, 420, true },
+        { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
         { "comments", scene_comments, 600, 370, true }, { "presence-ticker", scene_presence_ticker, 640, 170, true },
         { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },
         { "kanban", scene_kanban, 920, 480, true }, { "week-calendar", scene_week_calendar, 960, 520, true },
         { "gantt", scene_gantt, 1000, 360, true }, { "node-editor", scene_node_editor, 1000, 540, true },
+        { "flame-graph", scene_flame, 1000, 300, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
         { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },

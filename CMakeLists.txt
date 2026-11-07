@@ -46,6 +46,7 @@ set(CUI_CORE_SOURCES
     src/cui_grid.c
     src/cui_code.c
     src/cui_tools.c
+    src/cui_hex.c
     src/cui_social.c
     src/cui_media.c
     src/cui_planning.c
@@ -55,6 +56,8 @@ set(CUI_CORE_SOURCES
     src/cui_ai.c
     src/cui_image.c
     src/cui_nodes.c
+    src/cui_flame.c
+    src/cui_curves.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)
 

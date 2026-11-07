@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int g_failed, g_checks;
 #define CHECK(cond) do { g_checks++; if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
@@ -15,7 +16,8 @@ static int g_failed, g_checks;
 
 static cui_sw_renderer *g_sw;
 static char g_clip[1024];
-static void clip_set(void *u, const char *s) { (void)u; snprintf(g_clip, sizeof g_clip, "%s", s); }
+static size_t g_clip_len;   /* the whole length, when g_clip holds only the start */
+static void clip_set(void *u, const char *s) { (void)u; g_clip_len = strlen(s); snprintf(g_clip, sizeof g_clip, "%s", s); }
 static const char *clip_get(void *u) { (void)u; return g_clip; }
 
 static cui_ctx *new_ctx(void) {
@@ -2194,6 +2196,380 @@ static void test_node_editor(void) {
     cui_destroy(ui);
 }
 
+/* curve and gradient editors ------------------------------------------- */
+
+typedef struct {
+    cui_curve_key keys[16];
+    int n, sel;
+    bool snap;
+    cui_curve_result r;
+    int added, removed, last_added, last_removed;
+} curve_ctx;
+
+static void build_curve(cui_ctx *ui, void *u) {
+    curve_ctx *a = u;
+    cui_column(ui, .width = CUI_PX(600), .pad = 20) {
+        a->r = cui_curve_editor(ui, "cv", a->keys, &a->n, 16, .height = 300, .selected = &a->sel, .snap = a->snap);
+    }
+    if (a->r.added >= 0) { a->added++; a->last_added = a->r.added; }
+    if (a->r.removed >= 0) { a->removed++; a->last_removed = a->r.removed; }
+}
+
+static unsigned char *render_px(cui_ctx *ui, int *w, int *h) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = calloc((size_t)dd->width_px * dd->height_px, 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    *w = dd->width_px; *h = dd->height_px;
+    return px;
+}
+
+/* the y center of the ink in one pixel column (curve pixels stand out from
+ * the white surface and the faint grid), or -1 */
+static float ink_center(const unsigned char *px, int w, int x, int y0, int y1) {
+    double sum = 0, wsum = 0;
+    for (int y = y0; y < y1; y++) {
+        const unsigned char *p = px + ((size_t)y * w + x) * 4;
+        int mn = p[0] < p[1] ? p[0] : p[1];
+        if (p[2] < mn) mn = p[2];
+        float k = 255.0f - (float)mn;
+        if (k < 60) continue;
+        sum += (y + 0.5) * k; wsum += k;
+    }
+    return wsum > 0 ? (float)(sum / wsum) : -1.0f;
+}
+
+static void curve_key(cui_curve_key *k, float x, float y, int mode) { memset(k, 0, sizeof *k); k->x = x; k->y = y; k->mode = (uint8_t)mode; }
+static void key_press(cui_ctx *ui, build_fn fn, void *u, cui_key key, int mods) {
+    cui_input_key(ui, key, true, mods); cui_input_key(ui, key, false, mods);
+    run(ui, fn, u, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+}
+static void drag_path(cui_ctx *ui, build_fn fn, void *u, float x0, float y0, float x1, float y1) {
+    cui_input_mouse_move(ui, x0, y0);
+    run(ui, fn, u, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, fn, u, 1);
+    for (int k = 1; k <= 6; k++) { cui_input_mouse_move(ui, x0 + (x1 - x0) * k / 6.0f, y0 + (y1 - y0) * k / 6.0f); run(ui, fn, u, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, fn, u, 2);
+}
+static void double_click(cui_ctx *ui, build_fn fn, void *u, float x, float y) {
+    cui_input_mouse_move(ui, x, y);
+    run(ui, fn, u, 1);
+    for (int k = 0; k < 2; k++) {
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, fn, u, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, fn, u, 1);
+    }
+}
+
+static void test_curve_eval(void) {
+    printf("curve eval: smooth, free, linear, step, ends and out of range\n");
+    cui_curve_key k[4];
+    /* two smooth keys: flat ends, evenly spaced handles, so y = smoothstep(x) */
+    curve_key(&k[0], 0, 0, CUI_CURVE_SMOOTH); curve_key(&k[1], 1, 1, CUI_CURVE_SMOOTH);
+    CHECK_NEAR(cui_curve_eval(k, 2, 0.25f), 0.15625, 1e-5);
+    CHECK_NEAR(cui_curve_eval(k, 2, 0.5f), 0.5, 1e-5);
+    CHECK_NEAR(cui_curve_eval(k, 2, 0.9f), 0.9 * 0.9 * (3 - 2 * 0.9), 1e-5);
+    CHECK_NEAR(cui_curve_eval(k, 2, -3), 0, 0);       /* before the first key: its value */
+    CHECK_NEAR(cui_curve_eval(k, 2, 7), 1, 0);        /* after the last key: its value */
+    CHECK_NEAR(cui_curve_eval(k, 2, NAN), 0, 0);
+    CHECK_NEAR(cui_curve_eval(k, 1, 0.5f), 0, 0);     /* one key is a constant */
+    CHECK_NEAR(cui_curve_eval(NULL, 0, 0.5f), 0, 0);
+    /* free handles: control points (0,0) (0.5,0) (0.5,1) (1,1); at t = 0.25 the
+     * bezier is at x = 0.296875, y = 0.15625 */
+    k[0].mode = k[1].mode = CUI_CURVE_FREE;
+    k[0].out_dx = 0.5f; k[1].in_dx = -0.5f;
+    CHECK_NEAR(cui_curve_eval(k, 2, 0.296875f), 0.15625, 1e-5);
+    CHECK_NEAR(cui_curve_eval(k, 2, 0.5f), 0.5, 1e-5);
+    /* a handle longer than its segment is shortened along its direction */
+    cui_curve_key a[2], b[2];
+    curve_key(&a[0], 0, 0, CUI_CURVE_FREE); curve_key(&a[1], 1, 0.5f, CUI_CURVE_FREE);
+    memcpy(b, a, sizeof a);
+    a[0].out_dx = 5; a[0].out_dy = 5;
+    b[0].out_dx = 1; b[0].out_dy = 1;
+    bool same = true;
+    for (int i = 0; i <= 20; i++) if (fabsf(cui_curve_eval(a, 2, i / 20.0f) - cui_curve_eval(b, 2, i / 20.0f)) > 1e-5f) same = false;
+    CHECK(same);
+    /* linear and step segments */
+    curve_key(&k[0], 0, 0, CUI_CURVE_LINEAR); curve_key(&k[1], 2, 1, CUI_CURVE_SMOOTH);
+    CHECK_NEAR(cui_curve_eval(k, 2, 0.5f), 0.25, 1e-6);
+    CHECK_NEAR(cui_curve_eval(k, 2, 1.5f), 0.75, 1e-6);
+    curve_key(&k[0], 0, 0.2f, CUI_CURVE_STEP); curve_key(&k[1], 1, 0.8f, CUI_CURVE_STEP); curve_key(&k[2], 2, 0.5f, CUI_CURVE_SMOOTH);
+    CHECK_NEAR(cui_curve_eval(k, 3, 0.99f), 0.2, 1e-6);
+    CHECK_NEAR(cui_curve_eval(k, 3, 1.0f), 0.8, 1e-6);   /* the jump happens at the key */
+    CHECK_NEAR(cui_curve_eval(k, 3, 1.7f), 0.8, 1e-6);
+    CHECK_NEAR(cui_curve_eval(k, 3, 2.5f), 0.5, 1e-6);
+    /* smooth keys never overshoot: a plateau stays flat */
+    curve_key(&k[0], 0, 0, 0); curve_key(&k[1], 0.4f, 1, 0); curve_key(&k[2], 0.6f, 1, 0); curve_key(&k[3], 1, 0, 0);
+    float mx = 0;
+    for (int i = 0; i <= 200; i++) mx = fmaxf(mx, cui_curve_eval(k, 4, i / 200.0f));
+    CHECK(mx <= 1.0f + 1e-5f);
+}
+
+/* screen position of curve units: x from the hover readout, y from where
+ * the flat ends of the curve are drawn */
+typedef struct { float ax, bx, ay, by; } curve_map;
+static curve_map curve_calibrate(cui_ctx *ui, curve_ctx *a) {
+    curve_map m = { 0, 1, 0, 1 };
+    curve_key(&a->keys[0], 0.2f, 0, CUI_CURVE_SMOOTH); curve_key(&a->keys[1], 0.8f, 1, CUI_CURVE_SMOOTH);
+    a->n = 2; a->sel = -1;
+    run(ui, build_curve, a, 3);
+    cui_rect er = cui_get_rect(ui, cui_make_id(ui, "cv"));
+    float X1 = er.x + er.w * 0.35f, X2 = er.x + er.w * 0.75f, Y = er.y + 60;
+    cui_input_mouse_move(ui, X1, Y); run(ui, build_curve, a, 2);
+    CHECK(a->r.hovered);
+    float h1 = a->r.hover_x;
+    CHECK_NEAR(a->r.hover_y, cui_curve_eval(a->keys, a->n, h1), 1e-6);
+    cui_input_mouse_move(ui, X2, Y); run(ui, build_curve, a, 2);
+    float h2 = a->r.hover_x;
+    m.bx = (X2 - X1) / (h2 - h1); m.ax = X1 - m.bx * h1;
+    cui_input_mouse_move(ui, 790, 590); run(ui, build_curve, a, 2);
+    int w, h;
+    unsigned char *px = render_px(ui, &w, &h);
+    int y0 = (int)er.y + 4, y1 = (int)(er.y + 300 - 20);
+    float c0 = ink_center(px, w, (int)(m.ax + m.bx * 0.1f), y0, y1);   /* left of the first key: y = 0 */
+    float c1 = ink_center(px, w, (int)(m.ax + m.bx * 0.9f), y0, y1);   /* right of the last key: y = 1 */
+    CHECK(c0 > 0 && c1 > 0 && c0 > c1 + 100);
+    m.ay = c0; m.by = c1 - c0;
+    /* what is drawn is what cui_curve_eval returns, through every kind of segment */
+    curve_key(&a->keys[0], 0.1f, 0, CUI_CURVE_SMOOTH); curve_key(&a->keys[1], 0.35f, 0.45f, CUI_CURVE_FREE);
+    a->keys[1].in_dx = -0.05f; a->keys[1].in_dy = 0.2f; a->keys[1].out_dx = 0.1f; a->keys[1].out_dy = -0.3f;
+    curve_key(&a->keys[2], 0.55f, 0.3f, CUI_CURVE_LINEAR); curve_key(&a->keys[3], 0.7f, 0.9f, CUI_CURVE_STEP);
+    curve_key(&a->keys[4], 0.8f, 0.6f, CUI_CURVE_SMOOTH); curve_key(&a->keys[5], 0.95f, 1, CUI_CURVE_SMOOTH);
+    a->n = 6;
+    run(ui, build_curve, a, 2);
+    free(px);
+    px = render_px(ui, &w, &h);
+    static const float xs[] = { 0.03f, 0.18f, 0.27f, 0.42f, 0.5f, 0.63f, 0.75f, 0.86f, 0.9f, 0.98f };
+    int good = 0;
+    for (int i = 0; i < (int)(sizeof xs / sizeof xs[0]); i++) {
+        int col = (int)(m.ax + m.bx * xs[i]);
+        float x = ((float)col + 0.5f - m.ax) / m.bx;
+        float c = ink_center(px, w, col, y0, y1);
+        float want = m.ay + m.by * cui_curve_eval(a->keys, a->n, x);
+        if (c > 0 && fabsf(c - want) < 1.6f) good++;
+        else printf("  curve at x %.3f drawn at %.2f, eval says %.2f\n", x, c, want);
+    }
+    CHECK(good == (int)(sizeof xs / sizeof xs[0]));
+    free(px);
+    return m;
+}
+
+static void test_curve_editor(void) {
+    printf("curve editor: drawn = eval, select, drag with clamping, handles, add, delete, keys, snap\n");
+    cui_ctx *ui = new_ctx();
+    curve_ctx a;
+    memset(&a, 0, sizeof a);
+    curve_map m = curve_calibrate(ui, &a);
+#define SX(x) (m.ax + m.bx * (x))
+#define SY(y) (m.ay + m.by * (y))
+    curve_key(&a.keys[0], 0.2f, 0, 0); curve_key(&a.keys[1], 0.4f, 0.5f, 0); curve_key(&a.keys[2], 0.6f, 0.6f, 0); curve_key(&a.keys[3], 0.8f, 1, 0);
+    a.n = 4; a.sel = -1;
+    run(ui, build_curve, &a, 2);
+    /* click selects */
+    click_at(ui, build_curve, &a, SX(0.4f), SY(0.5f));
+    CHECK(a.sel == 1 && a.r.selected == 1);
+    /* drag: x stops at the neighbour, y follows */
+    drag_path(ui, build_curve, &a, SX(0.4f), SY(0.5f), SX(0.75f), SY(0.45f));
+    CHECK_NEAR(a.keys[1].x, 0.6f, 1e-5);
+    CHECK_NEAR(a.keys[1].y, 0.45f, 0.01);
+    CHECK(a.keys[1].x <= a.keys[2].x);
+    /* and both stay in the range */
+    drag_path(ui, build_curve, &a, SX(a.keys[1].x), SY(a.keys[1].y), SX(0.5f), SY(-0.5f));
+    CHECK_NEAR(a.keys[1].y, 0, 1e-6);
+    CHECK_NEAR(a.keys[1].x, 0.5f, 0.01);
+    /* the out handle of a smooth key: it shows its automatic tangent, and
+     * dragging it makes the key free with that tangent baked in */
+    curve_key(&a.keys[1], 0.4f, 0.5f, 0);
+    run(ui, build_curve, &a, 2);
+    float before = cui_curve_eval(a.keys, a.n, 0.45f);
+    float hx = SX(0.4f + 0.2f / 3), hy = SY(0.5f + 1.5f * 0.2f / 3);   /* slope 1.5 (limited by the flat side) */
+    drag_path(ui, build_curve, &a, hx, hy, hx, SY(0.8f));
+    CHECK(a.keys[1].mode == CUI_CURVE_FREE);
+    CHECK_NEAR(a.keys[1].out_dx, 0.2f / 3, 0.01);
+    CHECK_NEAR(a.keys[1].out_dy, 0.3f, 0.01);
+    CHECK_NEAR(a.keys[1].in_dx, -0.2f / 3, 1e-4);
+    CHECK_NEAR(a.keys[1].in_dy, -0.1f, 1e-4);
+    CHECK(cui_curve_eval(a.keys, a.n, 0.45f) > before + 0.02f);
+    /* the in handle drags on its own side */
+    float ix = SX(0.4f - 0.2f / 3), iy = SY(0.4f);
+    drag_path(ui, build_curve, &a, ix, iy, SX(0.3f), SY(0.2f));
+    CHECK_NEAR(a.keys[1].in_dx, -0.1f, 0.01);
+    CHECK_NEAR(a.keys[1].in_dy, -0.3f, 0.01);
+    CHECK_NEAR(a.keys[1].out_dy, 0.3f, 1e-4);
+    /* double click in empty space adds a key there (reported, selected) */
+    int n0 = a.n;
+    double_click(ui, build_curve, &a, SX(0.3f), SY(0.9f));
+    CHECK(a.added == 1 && a.last_added == 1 && a.n == n0 + 1 && a.sel == 1);
+    CHECK_NEAR(a.keys[1].x, 0.3f, 0.01);
+    CHECK_NEAR(a.keys[1].y, 0.9f, 0.01);
+    CHECK(a.keys[0].x < a.keys[1].x && a.keys[1].x < a.keys[2].x);
+    /* near the curve, the key lands on it */
+    float on = cui_curve_eval(a.keys, a.n, 0.7f);
+    double_click(ui, build_curve, &a, SX(0.7f), SY(on) + 4);
+    CHECK(a.added == 2 && a.n == n0 + 2);
+    int j = a.last_added;
+    CHECK(j >= 0 && j < a.n);
+    CHECK_NEAR(a.keys[j].x, 0.7f, 0.01);
+    CHECK_NEAR(a.keys[j].y, cui_curve_eval(a.keys, a.n, a.keys[j].x), 1e-3);
+    /* Delete removes the selected key (reported) */
+    float gone_x = a.keys[j].x;
+    key_press(ui, build_curve, &a, CUI_KEY_DELETE, 0);
+    CHECK(a.removed == 1 && a.last_removed == j && a.n == n0 + 1);
+    bool still = false;
+    for (int i = 0; i < a.n; i++) if (fabsf(a.keys[i].x - gone_x) < 1e-6f) still = true;
+    CHECK(!still);
+    /* arrows nudge the focused key, Shift for fine steps */
+    click_at(ui, build_curve, &a, SX(a.keys[0].x), SY(a.keys[0].y));
+    CHECK(a.sel == 0);
+    float kx = a.keys[0].x, ky = a.keys[0].y;
+    key_press(ui, build_curve, &a, CUI_KEY_RIGHT, 0);
+    CHECK_NEAR(a.keys[0].x, kx + 0.01f, 1e-5);
+    key_press(ui, build_curve, &a, CUI_KEY_UP, CUI_MOD_SHIFT);
+    CHECK_NEAR(a.keys[0].y, ky + 0.001f, 1e-5);
+    key_press(ui, build_curve, &a, CUI_KEY_DOWN, 0);
+    CHECK_NEAR(a.keys[0].y, ky, 1e-5);   /* y = 0 is the bottom of the range */
+    /* snapping puts a dragged key on the grid */
+    a.snap = true;
+    int s = a.n > 2 ? 2 : 1;
+    drag_path(ui, build_curve, &a, SX(a.keys[s].x), SY(a.keys[s].y), SX(a.keys[s].x - 0.013f), SY(a.keys[s].y + 0.037f));
+    CHECK(fabsf(a.keys[s].x * 40 - roundf(a.keys[s].x * 40)) < 1e-3f || a.keys[s].x == a.keys[s - 1].x);
+    CHECK(fabsf(a.keys[s].y * 40 - roundf(a.keys[s].y * 40)) < 1e-3f);
+    a.snap = false;
+    /* never fewer than two keys */
+    curve_key(&a.keys[0], 0.2f, 0, 0); curve_key(&a.keys[1], 0.8f, 1, 0);
+    a.n = 2; a.removed = 0;
+    run(ui, build_curve, &a, 2);
+    click_at(ui, build_curve, &a, SX(0.8f), SY(1));
+    key_press(ui, build_curve, &a, CUI_KEY_DELETE, 0);
+    CHECK(a.n == 2 && a.removed == 0);
+    /* a full array takes no more keys */
+    int cap_n = a.n;
+    for (int i = a.n; i < 16; i++) curve_key(&a.keys[i], 0.8f + 0.001f * (float)i, 1, 0);
+    a.n = 16; a.added = 0;
+    double_click(ui, build_curve, &a, SX(0.3f), SY(0.9f));
+    CHECK(a.n == 16 && a.added == 0);
+    (void)cap_n;
+#undef SX
+#undef SY
+    cui_destroy(ui);
+}
+
+typedef struct {
+    cui_gradient_stop stops[8];
+    int n, sel;
+    cui_gradient_result r;
+    int added, removed, last_added, last_removed;
+    cui_id trigger;
+} grad_ctx;
+
+static void build_grad(cui_ctx *ui, void *u) {
+    grad_ctx *a = u;
+    cui_column(ui, .width = CUI_PX(520), .pad = 20) {
+        a->r = cui_gradient_editor(ui, "grad", a->stops, &a->n, 8, .selected = &a->sel);
+    }
+    cui_push_id(ui, "grad");
+    a->trigger = cui_make_id(ui, "##color");   /* the color picker it reuses */
+    cui_pop_id(ui);
+    if (a->r.added >= 0) { a->added++; a->last_added = a->r.added; }
+    if (a->r.removed >= 0) { a->removed++; a->last_removed = a->r.removed; }
+}
+
+static void test_gradient(void) {
+    printf("gradient editor: eval, drawn = eval, add, drag past, remove, keys, picker\n");
+    /* eval */
+    cui_gradient_stop g[3] = { { 0.2f, { 200, 0, 100, 255 } }, { 0.6f, { 0, 100, 200, 55 } }, { 1.0f, { 255, 255, 255, 255 } } };
+    cui_color c = cui_gradient_eval(g, 3, 0);
+    CHECK(c.r == 200 && c.g == 0 && c.b == 100 && c.a == 255);   /* before the first stop */
+    c = cui_gradient_eval(g, 3, 0.4f);
+    CHECK(c.r == 100 && c.g == 50 && c.b == 150 && c.a == 155);  /* halfway, alpha too */
+    c = cui_gradient_eval(g, 3, 0.6f);
+    CHECK(c.r == 0 && c.g == 100 && c.b == 200 && c.a == 55);
+    c = cui_gradient_eval(g, 3, 2);
+    CHECK(c.r == 255 && c.a == 255);
+    cui_gradient_stop u[3] = { g[2], g[0], g[1] };                /* order does not matter */
+    c = cui_gradient_eval(u, 3, 0.4f);
+    CHECK(c.r == 100 && c.g == 50 && c.b == 150 && c.a == 155);
+    c = cui_gradient_eval(g, 0, 0.5f);
+    CHECK(c.a == 0);
+    c = cui_gradient_eval(g, 1, 0.9f);
+    CHECK(c.r == 200);
+
+    cui_ctx *ui = new_ctx();
+    grad_ctx a;
+    memset(&a, 0, sizeof a);
+    a.stops[0] = (cui_gradient_stop){ 0.0f, { 20, 40, 200, 255 } };
+    a.stops[1] = (cui_gradient_stop){ 0.5f, { 240, 180, 20, 255 } };
+    a.stops[2] = (cui_gradient_stop){ 1.0f, { 200, 30, 60, 255 } };
+    a.n = 3;
+    run(ui, build_grad, &a, 3);
+    CHECK(a.sel == 0);
+    /* the ramp sits 9 pt in from each side (room for the end markers), the stops under it */
+    cui_rect o = cui_get_rect(ui, cui_make_id(ui, "grad"));
+    float x0 = o.x + 9, w = o.w - 18, ramp_y = o.y + 14, track_y = o.y + 28 + 13;
+#define GX(t) (x0 + (t) * w)
+    /* what the ramp shows is what cui_gradient_eval returns */
+    int pw, ph;
+    unsigned char *px = render_px(ui, &pw, &ph);
+    static const float ts[] = { 0.06f, 0.2f, 0.33f, 0.5f, 0.71f, 0.94f };
+    bool match = true;
+    for (int i = 0; i < 6; i++) {
+        int col = (int)GX(ts[i]);
+        cui_color want = cui_gradient_eval(a.stops, a.n, ((float)col + 0.5f - x0) / w);
+        const unsigned char *p = px + ((size_t)(int)ramp_y * pw + col) * 4;
+        if (abs(p[0] - want.r) > 4 || abs(p[1] - want.g) > 4 || abs(p[2] - want.b) > 4) {
+            match = false;
+            printf("  ramp at %.2f shows %d %d %d, eval says %d %d %d\n", ts[i], p[0], p[1], p[2], want.r, want.g, want.b);
+        }
+    }
+    CHECK(match);
+    free(px);
+    /* a click on the ramp adds a stop with the color found there */
+    cui_color there = cui_gradient_eval(a.stops, a.n, 0.25f);
+    click_at(ui, build_grad, &a, GX(0.25f), ramp_y);
+    CHECK(a.added == 1 && a.last_added == 1 && a.n == 4 && a.sel == 1);
+    CHECK_NEAR(a.stops[1].pos, 0.25f, 0.01);
+    CHECK(abs(a.stops[1].color.r - there.r) <= 2 && abs(a.stops[1].color.g - there.g) <= 2 && abs(a.stops[1].color.b - there.b) <= 2);
+    CHECK(a.stops[1].color.r != a.stops[0].color.r);   /* interpolated, not a copy of a neighbour */
+    /* drag a stop past its neighbour: the array stays sorted, the selection follows */
+    cui_color moved = a.stops[1].color;
+    drag_path(ui, build_grad, &a, GX(0.25f), track_y, GX(0.7f), track_y);
+    CHECK_NEAR(a.stops[2].pos, 0.7f, 0.01);
+    CHECK(a.sel == 2 && memcmp(&a.stops[2].color, &moved, sizeof moved) == 0);
+    bool sorted = true;
+    for (int i = 1; i < a.n; i++) if (a.stops[i].pos < a.stops[i - 1].pos) sorted = false;
+    CHECK(sorted);
+    /* arrows nudge the focused stop, Shift for fine steps */
+    float p0 = a.stops[2].pos;
+    key_press(ui, build_grad, &a, CUI_KEY_RIGHT, 0);
+    CHECK_NEAR(a.stops[2].pos, p0 + 0.01f, 1e-5);
+    key_press(ui, build_grad, &a, CUI_KEY_LEFT, CUI_MOD_SHIFT);
+    CHECK_NEAR(a.stops[2].pos, p0 + 0.009f, 1e-5);
+    /* Delete removes the focused stop */
+    key_press(ui, build_grad, &a, CUI_KEY_DELETE, 0);
+    CHECK(a.removed == 1 && a.last_removed == 2 && a.n == 3);
+    /* dragging a stop off the ramp removes it on release */
+    drag_path(ui, build_grad, &a, GX(a.stops[1].pos), track_y, GX(a.stops[1].pos), track_y + 70);
+    CHECK(a.removed == 2 && a.n == 2);
+    /* but never below two */
+    drag_path(ui, build_grad, &a, GX(a.stops[1].pos), track_y, GX(a.stops[1].pos), track_y + 70);
+    CHECK(a.n == 2 && a.removed == 2);
+    click_at(ui, build_grad, &a, GX(a.stops[0].pos), track_y);
+    key_press(ui, build_grad, &a, CUI_KEY_DELETE, 0);
+    CHECK(a.n == 2 && a.removed == 2);
+    /* double click a stop: the existing color picker opens for it */
+    cui_id pop = a.trigger ^ 0xC010Eu;   /* the picker's popover (cui_color_picker) */
+    CHECK(cui_get_rect(ui, pop).w == 0);
+    a.stops[0].color.a = 128;
+    double_click(ui, build_grad, &a, GX(a.stops[0].pos), track_y);
+    run(ui, build_grad, &a, 2);
+    CHECK(a.sel == 0);
+    CHECK(cui_get_rect(ui, pop).w > 100);
+    CHECK(a.stops[0].color.a == 128);   /* the picker leaves opacity alone */
+#undef GX
+    cui_destroy(ui);
+}
+
 static void test_planning(void) {
     printf("planning: kanban drag between and within columns, week calendar move and resize, gantt reschedule\n");
     cui_ctx *ui = new_ctx();
@@ -3007,6 +3383,549 @@ static void test_tools(void) {
     cui_destroy(ui);
 }
 
+/* hex viewer ------------------------------------------------------------ */
+
+typedef struct {
+    const uint8_t *data; size_t size;
+    uint8_t *edit;
+    cui_hex_selection sel;
+    cui_hex_result res;
+    const cui_hex_range *ranges; int nranges;
+    float width;
+    int bpr;
+    bool own_sel;      /* pass NULL: the view keeps the selection */
+} hex_ctx;
+static void build_hex(cui_ctx *ui, void *u) {
+    hex_ctx *h = u;
+    cui_column(ui, .pad = 20, .width = CUI_FILL) {
+        h->res = cui_hex_view(ui, "hex", h->data, h->size, h->own_sel ? NULL : &h->sel, .height = 300, .ranges = h->ranges,
+                              .range_count = h->nranges, .edit = h->edit, .bytes_per_row = h->bpr,
+                              .width = h->width > 0 ? CUI_PX(h->width) : CUI_FILL);
+    }
+}
+/* centre of byte column `col` in visible row `vrow` (rows counted from the top of the view) */
+static float g_hex_cw;
+static int g_hex_digits = 4;   /* offset digits: 4 up to 64 KiB, 6 up to 16 MiB */
+static cui_vec2 hex_cell(cui_ctx *ui, int col, int vrow, bool ascii) {
+    cui_rect r = rect_of(ui, cui_make_id(ui, "hex"));
+    float cw = g_hex_cw, x_hex = 12 + (g_hex_digits + 2) * cw;   /* the offsets and a 2 character gap */
+    float x = ascii ? x_hex + 15 * 3 * cw + cw + 2 * cw + 2 * cw + col * cw + cw * 0.5f : x_hex + col * 3 * cw + (col / 8) * cw + cw;
+    cui_vec2 p = { r.x + 1 + x, r.y + 1 + 21 + 4 + vrow * 20 + 10 };
+    return p;
+}
+static void hex_mods(cui_ctx *ui, int mods) { cui_input_key(ui, CUI_KEY_NONE, false, mods); }
+
+static void test_hex_view(void) {
+    printf("hex viewer: selection, keys, copy, ranges, virtualization, editing\n");
+    cui_ctx *ui = new_ctx();
+    g_hex_cw = cui_measure_text(ui, CUI_FONT_MONO, 12, "0000000000000000", 16).width / 16;
+    static uint8_t small[4096];
+    for (int i = 0; i < 4096; i++) small[i] = (uint8_t)i;
+    static const cui_hex_range ranges[] = { { 0x40, 0x10, CUI_TONE_INFO, "Header" }, { 0x80, 4, CUI_TONE_VIOLET, NULL } };
+    hex_ctx h;
+    memset(&h, 0, sizeof h);
+    h.data = small; h.size = sizeof small; h.ranges = ranges; h.nranges = 2;
+    run(ui, build_hex, &h, 3);
+    cui_rect hr = rect_of(ui, cui_make_id(ui, "hex"));
+    CHECK_NEAR(hr.h, 300, 0.5);
+    CHECK(h.res.selection.length == 0 && h.res.hovered == -1);
+
+    /* click, Shift+click, drag, and the ASCII column */
+    cui_vec2 p = hex_cell(ui, 3, 2, false);
+    click_at(ui, build_hex, &h, p.x, p.y);
+    CHECK(h.sel.start == 0x23 && h.sel.length == 1 && h.sel.cursor == 0x23);
+    hex_mods(ui, CUI_MOD_SHIFT);
+    p = hex_cell(ui, 0, 3, false);
+    click_at(ui, build_hex, &h, p.x, p.y);
+    hex_mods(ui, 0);
+    CHECK(h.sel.start == 0x23 && h.sel.length == 14 && h.sel.cursor == 0x30);
+    cui_vec2 a = hex_cell(ui, 5, 0, false), b = hex_cell(ui, 4, 1, false);
+    drag2(ui, build_hex, &h, a.x, a.y, b.x, b.y, 6);
+    CHECK(h.sel.start == 5 && h.sel.length == 16 && h.sel.cursor == 0x14);
+    p = hex_cell(ui, 15, 1, true);
+    click_at(ui, build_hex, &h, p.x, p.y);
+    CHECK(h.sel.start == 0x1F && h.sel.length == 1);
+    /* hovering marks the byte under the pointer */
+    p = hex_cell(ui, 9, 4, false);
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &h, 2);
+    CHECK(h.res.hovered == 0x49);
+    p = hex_cell(ui, 9, 4, true);
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &h, 2);
+    CHECK(h.res.hovered == 0x49);
+
+    /* keys: arrows, Shift extends, Home/End, page and data ends */
+    key(ui, build_hex, &h, CUI_KEY_RIGHT, 0);
+    CHECK(h.sel.cursor == 0x20 && h.sel.start == 0x20 && h.sel.length == 1);
+    CHECK(h.res.selection_changed);
+    key(ui, build_hex, &h, CUI_KEY_DOWN, 0);
+    CHECK(h.sel.cursor == 0x30);
+    key(ui, build_hex, &h, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    key(ui, build_hex, &h, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    CHECK(h.sel.start == 0x30 && h.sel.length == 3 && h.sel.cursor == 0x32);
+    key(ui, build_hex, &h, CUI_KEY_LEFT, CUI_MOD_SHIFT);
+    CHECK(h.sel.start == 0x30 && h.sel.length == 2 && h.sel.cursor == 0x31);
+    key(ui, build_hex, &h, CUI_KEY_END, 0);
+    CHECK(h.sel.cursor == 0x3F && h.sel.length == 1);
+    key(ui, build_hex, &h, CUI_KEY_HOME, CUI_MOD_SHIFT);
+    CHECK(h.sel.start == 0x30 && h.sel.length == 16 && h.sel.cursor == 0x30);
+    key(ui, build_hex, &h, CUI_KEY_END, CUI_MOD_CTRL);
+    CHECK(h.sel.cursor == 4095 && h.sel.length == 1);
+    key(ui, build_hex, &h, CUI_KEY_DOWN, 0);
+    CHECK(h.sel.cursor == 4095);
+    run(ui, build_hex, &h, 2);
+    /* the last row is in view: a click on the bottom row lands near the end */
+    p = hex_cell(ui, 15, 12, false);
+    click_at(ui, build_hex, &h, p.x, p.y);
+    CHECK(h.sel.cursor > 4095 - 16 * 3 && (h.sel.cursor & 15) == 15);
+    key(ui, build_hex, &h, CUI_KEY_HOME, CUI_MOD_CTRL);
+    CHECK(h.sel.cursor == 0);
+    key(ui, build_hex, &h, CUI_KEY_RIGHT, 0);
+    key(ui, build_hex, &h, CUI_KEY_PAGE_DOWN, 0);
+    size_t page = h.sel.cursor - 1;
+    CHECK(page >= 16 * 8 && page % 16 == 0);
+    key(ui, build_hex, &h, CUI_KEY_PAGE_DOWN, CUI_MOD_SHIFT);
+    CHECK(h.sel.cursor == 1 + 2 * page && h.sel.start == 1 + page && h.sel.length == page + 1);
+    key(ui, build_hex, &h, CUI_KEY_PAGE_UP, 0);
+    key(ui, build_hex, &h, CUI_KEY_PAGE_UP, 0);
+    key(ui, build_hex, &h, CUI_KEY_PAGE_UP, 0);
+    CHECK(h.sel.cursor == 1);
+    key(ui, build_hex, &h, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(h.sel.start == 0 && h.sel.length == 4096);
+    key(ui, build_hex, &h, CUI_KEY_ESCAPE, 0);
+    CHECK(h.sel.length == 0);
+
+    /* copy: hex text, and ASCII with Shift */
+    g_clip[0] = 0;
+    key(ui, build_hex, &h, CUI_KEY_C, CUI_MOD_PRIMARY);   /* nothing selected: nothing copied */
+    CHECK(g_clip[0] == 0 && !h.res.copied);
+    h.sel.start = 0x0E; h.sel.length = 4; h.sel.cursor = 0x11;   /* the caller sets the selection */
+    key(ui, build_hex, &h, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "0E 0F 10 11") == 0 && h.res.copied);
+    key(ui, build_hex, &h, CUI_KEY_RIGHT, CUI_MOD_SHIFT);    /* the anchor stays at 0x0E */
+    CHECK(h.sel.start == 0x0E && h.sel.length == 5);
+    h.sel.start = 0x3F; h.sel.length = 5; h.sel.cursor = 0x3F;
+    key(ui, build_hex, &h, CUI_KEY_C, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    CHECK(strcmp(g_clip, "?@ABC") == 0);
+    h.sel.start = 0x7E; h.sel.length = 3; h.sel.cursor = 0x80;
+    key(ui, build_hex, &h, CUI_KEY_C, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    CHECK(strcmp(g_clip, "~..") == 0);
+    h.sel.start = 5000; h.sel.length = 9; h.sel.cursor = 9999;   /* out of range: kept inside the data */
+    run(ui, build_hex, &h, 1);
+    CHECK(h.sel.length == 0 && h.sel.cursor == 4095);
+
+    /* a labelled range shows its label on hover, an unlabelled one does not */
+    key(ui, build_hex, &h, CUI_KEY_HOME, CUI_MOD_CTRL);
+    run(ui, build_hex, &h, 3);
+    p = hex_cell(ui, 2, 5, false);   /* 0x52: no range */
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &h, 70);
+    int plain = cui_get_draw_data(ui)->vertex_count;
+    p = hex_cell(ui, 3, 4, false);   /* 0x43: in "Header" */
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &h, 70);
+    CHECK(h.res.hovered == 0x43);
+    int tipped = cui_get_draw_data(ui)->vertex_count;
+    CHECK(tipped > plain + 40);   /* the tooltip's text and panel */
+    p = hex_cell(ui, 2, 8, false);   /* 0x82: a range without a label */
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &h, 70);
+    CHECK(h.res.hovered == 0x82);
+    CHECK(cui_get_draw_data(ui)->vertex_count < tipped - 40);
+
+    /* go to offset scrolls the byte into view and selects it */
+    cui_hex_view_goto(ui, "hex", 0x900);
+    run(ui, build_hex, &h, 2);
+    CHECK(h.sel.start == 0x900 && h.sel.length == 1 && h.sel.cursor == 0x900);
+    p = hex_cell(ui, 0, 6, false);   /* the middle of the view */
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &h, 2);
+    CHECK(h.res.hovered >= 0x900 - 16 * 2 && h.res.hovered <= 0x900 + 16 * 2);
+    cui_hex_view_goto(ui, "hex", 1u << 30);   /* past the end: the last byte */
+    run(ui, build_hex, &h, 2);
+    CHECK(h.sel.cursor == 4095);
+
+    /* the wheel scrolls the view */
+    key(ui, build_hex, &h, CUI_KEY_HOME, CUI_MOD_CTRL);
+    run(ui, build_hex, &h, 20);
+    p = hex_cell(ui, 0, 0, false);
+    cui_input_mouse_move(ui, p.x, p.y);
+    cui_input_scroll(ui, 0, -2);
+    run(ui, build_hex, &h, 20);
+    CHECK(h.res.hovered == 16 * 6);
+    cui_destroy(ui);
+
+    /* virtualization: an 8 MiB buffer builds only the rows in view */
+    ui = new_ctx();
+    size_t big_n = (size_t)8 << 20;
+    uint8_t *big = malloc(big_n);
+    for (size_t i = 0; i < big_n; i++) big[i] = (uint8_t)(i * 7u);
+    hex_ctx hb;
+    memset(&hb, 0, sizeof hb);
+    hb.data = small; hb.size = sizeof small;
+    run(ui, build_hex, &hb, 3);
+    int small_vtx = cui_get_draw_data(ui)->vertex_count;
+    hb.data = big; hb.size = big_n;
+    g_hex_digits = 6;
+    run(ui, build_hex, &hb, 3);
+    int big_vtx = cui_get_draw_data(ui)->vertex_count;
+    CHECK(big_vtx < small_vtx * 2 && big_vtx > small_vtx / 2);
+    p = hex_cell(ui, 0, 0, false);
+    click_at(ui, build_hex, &hb, p.x, p.y);
+    key(ui, build_hex, &hb, CUI_KEY_END, CUI_MOD_CTRL);
+    CHECK(hb.sel.cursor == big_n - 1);
+    run(ui, build_hex, &hb, 3);
+    /* rows stay exact at the far end: the bottom row holds the last bytes */
+    p = hex_cell(ui, 15, 12, false);
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &hb, 2);
+    CHECK(hb.res.hovered >= 0 && (size_t)hb.res.hovered > big_n - 16 * 3 && (hb.res.hovered & 15) == 15);
+    g_clip[0] = 0;
+    key(ui, build_hex, &hb, CUI_KEY_C, CUI_MOD_PRIMARY);
+    char want[4];
+    snprintf(want, sizeof want, "%02X", (unsigned)big[big_n - 1]);
+    CHECK(strcmp(g_clip, want) == 0);
+    key(ui, build_hex, &hb, CUI_KEY_PAGE_UP, CUI_MOD_SHIFT);
+    key(ui, build_hex, &hb, CUI_KEY_UP, CUI_MOD_SHIFT);
+    CHECK(hb.sel.cursor < big_n - 16 * 8 && hb.sel.length > 16 * 8);
+    key(ui, build_hex, &hb, CUI_KEY_A, CUI_MOD_PRIMARY);   /* copying everything stops at 4 MiB */
+    key(ui, build_hex, &hb, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(hb.res.copied && strncmp(g_clip, "00 07 0E 15", 11) == 0);
+    CHECK(g_clip_len == ((size_t)4 << 20) * 3 - 1);
+    hb.own_sel = true;   /* no selection passed: the view keeps its own */
+    run(ui, build_hex, &hb, 2);
+    key(ui, build_hex, &hb, CUI_KEY_END, 0);
+    CHECK(hb.res.selection.length == 1 && hb.res.selection.cursor % 16 == 15);
+    free(big);
+    g_hex_digits = 4;
+
+    /* size 0, and no data at all */
+    hb.own_sel = false;
+    hb.data = small; hb.size = 0;
+    memset(&hb.sel, 0, sizeof hb.sel);
+    hb.sel.cursor = 12;
+    run(ui, build_hex, &hb, 3);
+    CHECK(hb.res.selection.length == 0 && hb.res.selection.cursor == 0 && hb.res.hovered == -1);
+    key(ui, build_hex, &hb, CUI_KEY_END, CUI_MOD_CTRL);
+    key(ui, build_hex, &hb, CUI_KEY_A, CUI_MOD_PRIMARY);
+    key(ui, build_hex, &hb, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(hb.sel.length == 0 && !hb.res.copied);
+    hb.data = NULL; hb.size = 100;
+    run(ui, build_hex, &hb, 2);
+    CHECK(hb.res.selection.length == 0);
+
+    /* a size that is not a multiple of the row */
+    hb.data = small; hb.size = 37;
+    run(ui, build_hex, &hb, 3);
+    p = hex_cell(ui, 6, 1, false);
+    click_at(ui, build_hex, &hb, p.x, p.y);
+    CHECK(hb.sel.cursor == 0x16);
+    key(ui, build_hex, &hb, CUI_KEY_DOWN, 0);
+    CHECK(hb.sel.cursor == 36);   /* no byte below: the last one */
+    key(ui, build_hex, &hb, CUI_KEY_HOME, 0);
+    key(ui, build_hex, &hb, CUI_KEY_END, 0);
+    CHECK(hb.sel.cursor == 36);
+    key(ui, build_hex, &hb, CUI_KEY_RIGHT, 0);
+    CHECK(hb.sel.cursor == 36);
+    p = hex_cell(ui, 10, 2, false);   /* past the last byte */
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &hb, 2);
+    CHECK(hb.res.hovered == -1);
+    p = hex_cell(ui, 4, 2, false);
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_hex, &hb, 2);
+    CHECK(hb.res.hovered == 36);
+    CHECK_NEAR(rect_of(ui, cui_make_id(ui, "hex")).h, 300, 0.5);
+    cui_destroy(ui);
+
+    /* editing: hex digits overwrite at the cursor, high digit first */
+    ui = new_ctx();
+    static uint8_t buf[64];
+    memset(buf, 0, sizeof buf);
+    hex_ctx he;
+    memset(&he, 0, sizeof he);
+    he.data = buf; he.size = sizeof buf; he.edit = buf;
+    run(ui, build_hex, &he, 3);
+    p = hex_cell(ui, 0, 1, false);
+    click_at(ui, build_hex, &he, p.x, p.y);
+    CHECK(he.sel.cursor == 0x10);
+    cui_input_text(ui, "a");
+    run(ui, build_hex, &he, 1);
+    CHECK(buf[0x10] == 0xA0 && he.res.edited && he.res.edit_offset == 0x10 && he.res.edit_length == 1 && he.sel.cursor == 0x10);
+    cui_input_text(ui, "5");
+    run(ui, build_hex, &he, 1);
+    CHECK(buf[0x10] == 0xA5 && he.sel.cursor == 0x11 && he.sel.start == 0x11 && he.sel.length == 1);
+    cui_input_text(ui, "zq");
+    run(ui, build_hex, &he, 1);
+    CHECK(!he.res.edited && buf[0x11] == 0);
+    cui_input_text(ui, "1F2");
+    run(ui, build_hex, &he, 1);
+    CHECK(buf[0x11] == 0x1F && buf[0x12] == 0x20 && he.res.edit_offset == 0x11 && he.res.edit_length == 2);
+    key(ui, build_hex, &he, CUI_KEY_LEFT, 0);   /* moving drops the half typed byte */
+    cui_input_text(ui, "7");
+    run(ui, build_hex, &he, 1);
+    CHECK(buf[0x11] == 0x7F && buf[0x12] == 0x20);
+    key(ui, build_hex, &he, CUI_KEY_END, CUI_MOD_CTRL);
+    hex_mods(ui, 0);   /* Ctrl released: typing with Ctrl held is a shortcut, not an edit */
+    cui_input_text(ui, "beef");
+    run(ui, build_hex, &he, 1);
+    CHECK(buf[63] == 0xEF && he.sel.cursor == 63);   /* the last byte takes every digit */
+    /* read only: typing changes nothing */
+    he.edit = NULL;
+    run(ui, build_hex, &he, 1);
+    cui_input_text(ui, "00");
+    run(ui, build_hex, &he, 1);
+    CHECK(buf[63] == 0xEF && !he.res.edited);
+    cui_destroy(ui);
+
+    /* narrow views drop bytes per row, then the ASCII column, then go to 4 */
+    ui = new_ctx();
+    cui_set_viewport(ui, 1200, 600, 1);
+    hex_ctx hn;
+    memset(&hn, 0, sizeof hn);
+    hn.data = small; hn.size = sizeof small; hn.bpr = 32;
+    int steps[3];
+    float widths[3] = { 1100, 300, 200 };
+    for (int k = 0; k < 3; k++) {
+        hn.width = widths[k];
+        run(ui, build_hex, &hn, 3);
+        p = hex_cell(ui, 0, 0, false);
+        click_at(ui, build_hex, &hn, p.x, p.y);
+        key(ui, build_hex, &hn, CUI_KEY_DOWN, 0);
+        steps[k] = (int)hn.sel.cursor;
+        key(ui, build_hex, &hn, CUI_KEY_HOME, CUI_MOD_CTRL);
+    }
+    CHECK(steps[0] == 32 && steps[1] == 8 && steps[2] == 4);
+    cui_destroy(ui);
+}
+
+/* flame graph ------------------------------------------------------------ */
+
+typedef struct {
+    const cui_flame_span *s; int n;
+    cui_flame_view view; int sel;
+    cui_flame_result last;
+    int sel_changes, zooms;
+    float height;
+    cui_id id;
+} flame_ctx;
+static void build_flame(cui_ctx *ui, void *u) {
+    flame_ctx *f = u;
+    cui_column(ui, .pad = 20) {
+        f->last = cui_flame_graph(ui, "fg", f->s, f->n, &f->view, &f->sel, .width = CUI_PX(600), .height = f->height);
+        f->id = cui_last_id(ui);
+    }
+    if (f->last.selection_changed) f->sel_changes++;
+    if (f->last.zoomed >= 0) f->zooms++;
+}
+static cui_vec2 flame_at(flame_ctx *f, cui_ctx *ui, int i) { return center(cui_flame_span_rect(ui, f->id, &f->s[i])); }
+
+static void test_flame(void) {
+    printf("flame graph: fit, select, keys, zoom about the pointer, pan, zoom to span, reset, tooltip, 100k spans, empty\n");
+    static const cui_flame_span small[] = {
+        { "frame", 0.000, 0.010, 0, 0 },
+        { "update", 0.000, 0.004, 1, 0 }, { "render", 0.005, 0.009, 1, 0 },
+        { "physics", 0.0005, 0.003, 2, 0 }, { "draw", 0.006, 0.007, 2, 0 },
+    };
+    /* sorting puts any order into depth, then start */
+    cui_flame_span shuf[5] = { small[4], small[1], small[3], small[0], small[2] };
+    cui_flame_sort(shuf, 5);
+    bool same = true;
+    for (int i = 0; i < 5; i++) same = same && shuf[i].start == small[i].start && shuf[i].depth == small[i].depth;
+    CHECK(same);
+
+    cui_ctx *ui = new_ctx();
+    flame_ctx f;
+    memset(&f, 0, sizeof f);
+    f.s = small; f.n = 5; f.sel = 99; f.height = 200;   /* out of range: becomes -1 */
+    run(ui, build_flame, &f, 3);
+    CHECK(f.sel == -1 && f.sel_changes == 1);   /* the clamp is reported */
+    f.sel_changes = 0;
+    CHECK_NEAR(f.view.start, 0, 1e-12);
+    CHECK_NEAR(f.view.end, 0.010, 1e-12);
+    cui_rect fr = cui_flame_span_rect(ui, f.id, &small[0]);
+    CHECK(fr.w > 560 && fr.w < 600 && fr.h > 15);
+    float px = fr.x, pw = fr.w;
+    /* click selects, and focuses the graph */
+    cui_vec2 c = flame_at(&f, ui, 3);
+    click_at(ui, build_flame, &f, c.x, c.y);
+    CHECK(f.sel == 3 && f.sel_changes == 1);
+    /* empty space clears the selection */
+    click_at(ui, build_flame, &f, c.x, fr.y + 150);
+    CHECK(f.sel == -1);
+    click_at(ui, build_flame, &f, c.x, c.y);
+    CHECK(f.sel == 3);
+    click_at(ui, build_flame, &f, c.x, fr.y - 17);   /* the ruler: the selection stays */
+    CHECK(f.sel == 3);
+    /* arrows walk the tree: parent, child, siblings */
+    key(ui, build_flame, &f, CUI_KEY_UP, 0);    CHECK(f.sel == 1);
+    key(ui, build_flame, &f, CUI_KEY_UP, 0);    CHECK(f.sel == 0);
+    key(ui, build_flame, &f, CUI_KEY_UP, 0);    CHECK(f.sel == 0);
+    key(ui, build_flame, &f, CUI_KEY_DOWN, 0);  CHECK(f.sel == 1);
+    key(ui, build_flame, &f, CUI_KEY_RIGHT, 0); CHECK(f.sel == 2);
+    key(ui, build_flame, &f, CUI_KEY_RIGHT, 0); CHECK(f.sel == 2);
+    key(ui, build_flame, &f, CUI_KEY_DOWN, 0);  CHECK(f.sel == 4);
+    key(ui, build_flame, &f, CUI_KEY_LEFT, 0);  CHECK(f.sel == 3);
+    CHECK_NEAR(f.view.end - f.view.start, 0.010, 1e-12);   /* all in view: nothing moved */
+    /* the wheel zooms, and the time under the pointer stays under it */
+    float mx = px + pw * 0.3f, my = c.y - 20;
+    cui_input_mouse_move(ui, mx, my);
+    run(ui, build_flame, &f, 1);
+    double t_before = f.view.start + (mx - px) / pw * (f.view.end - f.view.start);
+    cui_input_scroll(ui, 0, 3);
+    run(ui, build_flame, &f, 1);
+    double range = f.view.end - f.view.start;
+    CHECK_NEAR(range, 0.010 / pow(1.12, 3), 1e-9);
+    CHECK_NEAR(f.view.start + (mx - px) / pw * range, t_before, 1e-9);
+    CHECK(f.last.view_changed || f.view.start > 0);
+    /* drag pans by the pointer travel, and does not select */
+    double s0 = f.view.start;
+    drag(ui, build_flame, &f, mx, my, mx - 100, 5);
+    CHECK_NEAR(f.view.start - s0, 100.0 / pw * range, 1e-9);
+    CHECK_NEAR(f.view.end - f.view.start, range, 1e-12);
+    CHECK(f.sel == 3);
+    /* Shift+wheel pans too */
+    s0 = f.view.start;
+    cui_input_key(ui, CUI_KEY_NONE, true, CUI_MOD_SHIFT);
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_flame, &f, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_flame, &f, 1);
+    CHECK(f.view.start > s0);
+    CHECK_NEAR(f.view.end - f.view.start, range, 1e-12);
+    /* F fits everything again (reduced motion: no animation) */
+    key(ui, build_flame, &f, CUI_KEY_F, 0);
+    CHECK_NEAR(f.view.start, 0, 1e-12);
+    CHECK_NEAR(f.view.end, 0.010, 1e-12);
+    /* double-click zooms to fit a span */
+    c = flame_at(&f, ui, 2);
+    click_at(ui, build_flame, &f, c.x, c.y);
+    click_at(ui, build_flame, &f, c.x, c.y);
+    CHECK(f.sel == 2 && f.zooms == 1);
+    CHECK_NEAR(f.view.start, 0.005 - 0.0002, 1e-9);
+    CHECK_NEAR(f.view.end, 0.009 + 0.0002, 1e-9);
+    cui_rect zr = cui_flame_span_rect(ui, f.id, &small[2]);
+    CHECK_NEAR(zr.w, pw / 1.1, 1.0);
+    /* Esc fits; Esc again clears the selection */
+    key(ui, build_flame, &f, CUI_KEY_ESCAPE, 0);
+    CHECK_NEAR(f.view.end - f.view.start, 0.010, 1e-12);
+    CHECK(f.sel == 2);
+    key(ui, build_flame, &f, CUI_KEY_ESCAPE, 0);
+    CHECK(f.sel == -1);
+    /* the selection is the caller's: set it, Enter zooms to it */
+    f.sel = 1;
+    key(ui, build_flame, &f, CUI_KEY_ENTER, 0);
+    CHECK_NEAR(f.view.start, 0.0, 1e-9);   /* clamped to the data */
+    CHECK_NEAR(f.view.end, 0.0044, 1e-9);
+    CHECK(f.zooms == 2);
+    /* Shift+Right pans a tenth of the view; - zooms out around the middle */
+    s0 = f.view.start;
+    range = f.view.end - f.view.start;
+    key(ui, build_flame, &f, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    CHECK_NEAR(f.view.start - s0, range * 0.1, 1e-9);
+    CHECK(f.sel == 1);
+    key(ui, build_flame, &f, CUI_KEY_MINUS, 0);
+    CHECK_NEAR(f.view.end - f.view.start, range * 1.25, 1e-9);
+    key(ui, build_flame, &f, CUI_KEY_HOME, 0);
+    CHECK_NEAR(f.view.end - f.view.start, 0.010, 1e-12);
+    /* with motion on, zooming to a span animates and settles on the same view */
+    cui_set_reduced_motion(ui, false);
+    f.sel = 2;
+    key(ui, build_flame, &f, CUI_KEY_ENTER, 0);
+    double mid = f.view.end - f.view.start;
+    CHECK(mid < 0.010 && mid > 0.0044 + 1e-6);   /* on its way */
+    run(ui, build_flame, &f, 90);
+    CHECK_NEAR(f.view.start, 0.005 - 0.0002, 1e-9);
+    CHECK_NEAR(f.view.end, 0.009 + 0.0002, 1e-9);
+    key(ui, build_flame, &f, CUI_KEY_HOME, 0);
+    run(ui, build_flame, &f, 90);
+    CHECK_NEAR(f.view.end - f.view.start, 0.010, 1e-12);
+    cui_set_reduced_motion(ui, true);
+    /* hover: the span is reported and a tooltip appears after the delay */
+    cui_input_mouse_move(ui, 790, 590);
+    run(ui, build_flame, &f, 70);
+    CHECK(f.last.hovered == -1);
+    int idle = cui_get_draw_data(ui)->vertex_count;
+    run(ui, build_flame, &f, 70);
+    CHECK(cui_get_draw_data(ui)->vertex_count == idle);   /* not hovering: no tooltip */
+    c = flame_at(&f, ui, 4);
+    cui_input_mouse_move(ui, c.x, c.y);
+    run(ui, build_flame, &f, 3);
+    CHECK(f.last.hovered == 4);
+    int before = cui_get_draw_data(ui)->vertex_count;
+    run(ui, build_flame, &f, 70);
+    CHECK(cui_get_draw_data(ui)->vertex_count > before);
+    /* empty space in the graph: nothing hovered, the tooltip leaves */
+    cui_input_mouse_move(ui, c.x, fr.y + 150);
+    run(ui, build_flame, &f, 70);
+    CHECK(f.last.hovered == -1);
+    int gone = cui_get_draw_data(ui)->vertex_count;
+    run(ui, build_flame, &f, 30);
+    CHECK(cui_get_draw_data(ui)->vertex_count == gone);
+    cui_destroy(ui);
+
+    /* 100k spans: only what is in view is visited, thin spans merge */
+    int big_n = 1 + 1000 + 100000;
+    cui_flame_span *big = malloc(sizeof *big * (size_t)big_n);
+    big[0] = (cui_flame_span){ "capture", 0, 1.0, 0, 0 };
+    for (int i = 0; i < 1000; i++) {
+        big[1 + i] = (cui_flame_span){ "frame", i * 1e-3, i * 1e-3 + 0.9e-3, 1, 0 };
+        for (int j = 0; j < 100; j++) {
+            double a = i * 1e-3 + j * 9e-6;
+            big[1001 + i * 100 + j] = (cui_flame_span){ (j % 3) ? "job" : "wait", a, a + 8e-6, 2, 0 };
+        }
+    }
+    ui = new_ctx();
+    memset(&f, 0, sizeof f);
+    f.s = big; f.n = big_n; f.sel = -1;
+    clock_t t0 = clock();
+    run(ui, build_flame, &f, 3);
+    CHECK_NEAR(f.view.end, 1.0, 1e-12);
+    CHECK(cui_get_draw_data(ui)->vertex_count < 60000);   /* bounded by pixels, not spans */
+    fr = cui_flame_span_rect(ui, f.id, &big[0]);
+    cui_input_mouse_move(ui, fr.x + fr.w * 0.5f, fr.y + 50);
+    for (int k = 0; k < 40; k++) { cui_input_scroll(ui, 0, 2); run(ui, build_flame, &f, 1); }
+    CHECK(f.view.end - f.view.start < 2e-4);
+    c = flame_at(&f, ui, 1001 + 500 * 100 + 1);   /* a job in the middle frame, now wide enough to click */
+    CHECK(c.x > fr.x && c.x < fr.x + fr.w);
+    click_at(ui, build_flame, &f, c.x, c.y);
+    CHECK(f.sel == 1001 + 500 * 100 + 1);
+    for (int k = 0; k < 40; k++) { cui_input_scroll(ui, 0, -2); run(ui, build_flame, &f, 1); }
+    double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    CHECK_NEAR(f.view.end - f.view.start, 1.0, 1e-9);
+    CHECK(secs < 5.0);
+    printf("  100k spans: %d frames in %.3f s\n", 3 + 80 + 3, secs);
+    cui_destroy(ui);
+    free(big);
+
+    /* no data, and unsorted data, are safe */
+    ui = new_ctx();
+    memset(&f, 0, sizeof f);
+    f.s = NULL; f.n = 0; f.sel = 2;
+    run(ui, build_flame, &f, 3);
+    CHECK(f.sel == -1 && f.last.hovered == -1);
+    fr = rect_of(ui, f.id);
+    CHECK(fr.w > 500 && fr.h > 40);
+    cui_input_mouse_move(ui, fr.x + 100, fr.y + 40);
+    cui_input_scroll(ui, 0, 2);
+    run(ui, build_flame, &f, 1);
+    click_at(ui, build_flame, &f, fr.x + 100, fr.y + 40);
+    key(ui, build_flame, &f, CUI_KEY_DOWN, 0);
+    key(ui, build_flame, &f, CUI_KEY_F, 0);
+    CHECK(f.sel == -1 && f.last.hovered == -1);
+    cui_flame_span rev[5];
+    for (int i = 0; i < 5; i++) rev[i] = small[4 - i];
+    f.s = rev; f.n = 5;
+    run(ui, build_flame, &f, 3);
+    cui_input_scroll(ui, 0, 2);
+    run(ui, build_flame, &f, 1);
+    key(ui, build_flame, &f, CUI_KEY_RIGHT, 0);
+    key(ui, build_flame, &f, CUI_KEY_UP, 0);
+    CHECK(f.sel >= -1 && f.sel < 5);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -3032,8 +3951,13 @@ int main(void) {
     test_checklist();
     test_data_grid();
     test_tools();
+    test_hex_view();
     test_planning();
     test_node_editor();
+    test_flame();
+    test_curve_eval();
+    test_curve_editor();
+    test_gradient();
     test_media();
     test_viz();
     test_motion();

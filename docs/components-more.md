@@ -464,6 +464,101 @@ A log view for many thousands of lines, with level filters, search, follow and c
 
 Each line shows its level as a quiet tag (warnings and errors also tint their row), an optional `HH:MM:SS.mmm` time and the text in the code font. The toolbar filters by level (warning and error counts appear on their toggles, which shorten to initials when the console is narrow), searches as you type (matches are marked and the field counts the lines found), and Follow keeps the newest line in view: scrolling up turns it off, coming back to the bottom turns it on. Copy takes the selected lines or, with no selection, every line shown; Clear empties the buffer. Click a line to select it, drag or Shift+click for a range. With the list focused, the arrows move through lines, Shift+arrows extend the selection, Page Up, Page Down and Home jump, End returns to following, Ctrl+A selects all, Ctrl+C copies and Esc clears the selection.
 
+### Hex viewer
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hex-viewer-dark.png"><img src="images/components/hex-viewer.png" alt="Hex viewer"></picture>
+
+```c
+static cui_hex_selection sel;                         /* yours: read it, or set it to select from code */
+static const cui_hex_range marks[] = {
+    { 0, 8, CUI_TONE_INFO, "PNG signature" },
+    { 8, 25, CUI_TONE_VIOLET, "IHDR chunk" },
+};
+static char go[20];
+
+cui_hex_result r = cui_hex_view(ui, "hex", rom, rom_size, &sel, .base = 0x80000000u,
+                                .ranges = marks, .range_count = 2, .edit = rom);   /* .edit: optional */
+if (r.selection_changed) show_value(rom + sel.start, sel.length);
+if (r.edited) mark_dirty(r.edit_offset, r.edit_length);
+if (cui_input(ui, "goto", go, sizeof go, .placeholder = "Go to offset") & CUI_SUBMITTED)
+    cui_hex_view_goto(ui, "hex", (size_t)strtoull(go, NULL, 16));
+```
+
+Bytes of a file or of memory, for binary tools, emulators and debuggers: an offset column, the bytes in hex and the same bytes as ASCII (printable characters, a dot for the rest), all in the code font under a header of column offsets. You own the bytes; they are read during the call and never kept. `.base` is the address shown for the first byte, and the offset column is as wide as the last address needs. Rows hold 16 bytes with a small gap after every 8 (`.bytes_per_row` 8 or 32). Only the rows in view are built and the scroll position is kept in rows, so a file of many megabytes scrolls like a short one. The view never scrolls sideways: when it is narrower than its rows it drops to fewer bytes per row (down to 8), then hides the ASCII column, then tightens its margins, then shows 4 bytes per row. Zero bytes and the dots for other characters step back in a quieter color.
+
+Hovering a byte marks it in both columns and lights its column in the header. Highlighted ranges (`.ranges`, an array of offset, length, tone and label) are drawn as quiet tints in the theme's tones, later ones on top, and hovering a byte in a range shows its label and size as a tooltip. Click a byte to select it, drag or Shift+click for a range; the selection is drawn in both columns and written to your `cui_hex_selection` (start, length and the cursor byte), or kept by the view when you pass NULL. The result also reports whether it changed, the byte under the pointer and whether anything was copied. With the view focused, the arrows move the cursor byte, Shift+arrows extend the selection, Page Up and Page Down move by a screen, Home and End go to the start and end of the row, Ctrl+Home and Ctrl+End to the start and end of the data, Ctrl+A selects everything and Esc clears the selection. Ctrl+C copies the selection as hex text (`89 50 4E 47`) and Ctrl+Shift+C copies it as ASCII, both up to 4 MiB of bytes. `cui_hex_view_goto` moves the cursor to an offset, selects that byte and scrolls it into view (to the middle when it was out of sight) on the view's next frame; call it from the same id scope as the view.
+
+The view is read only unless you pass `.edit`, a writable buffer of the same size (usually the same memory as the data), which it shows instead. Typing hex digits then overwrites the byte at the cursor, high digit first (a block over the low digit shows the byte is half typed), and moves to the next byte; the result reports the bytes written that frame. Edits never change the size, and the ASCII column is not typed into.
+### Flame graph
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/flame-graph-dark.png"><img src="images/components/flame-graph.png" alt="Flame graph"></picture>
+
+```c
+static cui_flame_span spans[MAX_SPANS];   /* from your profiler: name, start, end (seconds), depth */
+static int span_count;
+static cui_flame_view view;               /* zeroed: fits every span */
+static int selected = -1;
+
+cui_flame_sort(spans, span_count);        /* once per capture: by depth, then start */
+
+cui_flame_result r = cui_flame_graph(ui, "capture", spans, span_count, &view, &selected, .height = 240);
+if (r.selection_changed && selected >= 0)
+    show_details(&spans[selected]);       /* name, duration, children... */
+```
+
+A profiler timeline: time runs left to right and call depth top to bottom, so each span sits in the row of its depth, under its parent. A time ruler along the top picks its unit from the zoom (s, ms, µs or ns) and thins its ticks on a narrow panel; faint lines carry the ticks down through the rows. Spans take their color from the series palette, hashed from the name (or from `color_key` when you set one) so a function keeps its color across frames; the selected span gets the accent outline. Labels show inside spans that have room and are cut with an ellipsis, staying in the visible part of a span that runs off the edge. Spans thinner than a point are merged with their neighbours into a quiet gray run, so a capture zoomed out never turns into noise.
+
+The wheel zooms around the pointer, Shift+wheel or a sideways scroll pans, and dragging pans sideways and, for stacks deeper than the panel, up and down. Click a span to select it (empty space clears the selection); double-click it to zoom until it fills the view, or double-click empty space to fit everything. Hovering a span shows its name, its duration and its share of its parent (or of the view, for the top row). With the graph focused, Left and Right move to the previous or next span in the row, Up to the parent and Down to the first child, and the view follows the selection; Shift+Left and Right pan, + and - zoom, Enter or Space zooms to the selection, Home or F fits everything, and Esc fits everything or, when everything is already in view, clears the selection. Zooming to a span and fitting animate, and snap with reduced motion.
+
+You own the data: the spans need to be valid only during the call, and the graph writes the view and the selection you pass. Spans must be sorted by depth and then start (`cui_flame_sort` does it), and spans of one depth must not overlap, which holds for any call tree since a child lies within its parent. With that order every lookup is a binary search: the graph visits only the rows and spans in view and skips through dense regions a pixel at a time, so a capture of 100,000 spans pans and zooms as smoothly as a small one. `cui_flame_span_rect` returns where a span was drawn, to anchor a popover or a menu on it. An aggregated flame graph (identical stacks merged and sorted by total time) is not included; build the merged tree yourself and pass it as spans if you need one.
+### Curve editor
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/curve-editor-dark.png"><img src="images/components/curve-editor.png" alt="Curve editor"></picture>
+
+```c
+static cui_curve_key ease[16] = {
+    { 0.0f, 0.0f },                                                  /* zeroed fields: CUI_CURVE_SMOOTH */
+    { 0.55f, 0.66f, -0.22f, -0.42f, 0.24f, 0.46f, CUI_CURVE_FREE },  /* x, y, in handle, out handle, mode */
+    { 1.2f, 1.08f },
+    { 2.0f, 1.0f },
+};
+static int count = 4, selected = -1;
+cui_curve_result r = cui_curve_editor(ui, "ease", ease, &count, 16, .x_max = 2, .y_max = 1.2f,
+                                      .x_label = "Time", .y_label = "Value", .selected = &selected,
+                                      .show_playhead = playing, .playhead = t);
+if (r.added >= 0) insert_track_data(r.added);     /* keys you mirror elsewhere follow along */
+if (r.removed >= 0) remove_track_data(r.removed);
+
+/* at runtime: the same curve the editor draws */
+float y = cui_curve_eval(ease, count, t);
+```
+
+Keyframes on a plot, for easing, animation timing and response curves. You own the array of `cui_curve_key` (kept sorted by x) and its capacity; the editor edits it in place, moving keys, setting handles and modes, inserting and removing keys, and the result says what changed this frame (`added` and `removed` are indices, or -1) so data you keep beside each key can follow. Pass `.selected` to keep the selection yourself. The plot shows the range you give (`x_min` to `x_max`, `y_min` to `y_max`, 0 to 1 by default) on a quiet grid with labels that thin out on a narrow plot; leave room above or below the keys for curves that overshoot.
+
+A key's mode shapes the segment that leaves it. `CUI_CURVE_SMOOTH` computes the tangents (they never overshoot the keys, and they are flat at the ends and at peaks), `CUI_CURVE_FREE` uses the key's own handles (relative to the key in curve units, `in_dx` at most 0 and `out_dx` at least 0, shortened to the neighbouring key so the curve never folds back), `CUI_CURVE_LINEAR` runs straight to the next key and `CUI_CURVE_STEP` holds its value until the next key. Before the first key the curve keeps the first value, after the last key the last value. `cui_curve_eval` is the math the editor draws with, so the value an app reads at runtime is the one on screen.
+
+Drag a key to move it: x stays between its neighbours and both coordinates stay inside the range. The selected key shows its handles; dragging one turns a smooth key into a free one with the tangent it had. Hold Shift (or set `.snap`) to snap a drag to the grid. Double click empty space to add a key, placed on the curve when the click is near it; Delete or Backspace removes the selected key, never leaving fewer than two. Hovering the plot shows the value under the pointer in a tooltip, and hovering a key shows its coordinates. Keys are focusable: Tab moves through them, the arrows nudge the focused key by a hundredth of the range (Shift for a thousandth). The row under the plot sets the selected key's mode and its exact position, and removes it; on a narrow editor its fields stack instead of cutting their labels. `.show_playhead` draws a marker at `.playhead` with the curve's value there.
+
+### Gradient editor
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gradient-editor-dark.png"><img src="images/components/gradient-editor.png" alt="Gradient editor"></picture>
+
+```c
+static cui_gradient_stop flame[12] = {
+    { 0.00f, { 0xFF, 0xF1, 0xC1, 0xFF } }, { 0.24f, { 0xFF, 0xB1, 0x4A, 0xFF } },
+    { 0.58f, { 0xE2, 0x55, 0x2B, 0xFF } }, { 1.00f, { 0x5C, 0x1F, 0x16, 0x00 } },   /* fades out */
+};
+static int count = 4, selected = 0;
+if (cui_gradient_editor(ui, "flame", flame, &count, 12, .selected = &selected).changed) upload_ramp();
+
+/* at runtime: the color the ramp shows at t */
+cui_color c = cui_gradient_eval(flame, count, particle_age / lifetime);
+```
+
+A color ramp with its stops underneath, over a checkerboard so transparent stops read as transparent. You own the array of `cui_gradient_stop` and its capacity; the editor edits it in place and keeps it sorted by position, and the result reports `added`, `removed` and `selected` like the curve editor. `cui_gradient_eval` interpolates each channel, alpha included, between the stops on either side of t, exactly as the ramp is drawn; the end colors continue past the first and last stop.
+
+Drag a stop to move it; it may pass its neighbours, and the selection follows it. Click the ramp or the empty track to add a stop with the color found there (keep the button down to drag it straight away). Drag a stop well off the ramp, or press Delete, to remove it; there are never fewer than two. Double click a stop, or press Enter on a focused one, to open the color picker for it. The row under the ramp shows the selected stop's color (the same color picker, which leaves opacity alone), its location and its opacity as scrub fields, and a button to remove it; on a narrow editor the fields stack. Stops are focusable: Tab moves through them, Left and Right nudge by 1% (Shift for 0.1%).
+
 ## Conversation
 
 ### Chat

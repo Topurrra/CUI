@@ -1208,6 +1208,17 @@ static void cui__paint_hue(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_rect_border(ui, th, CUI_CORNERS(4), cui__hsv(h, 1, 1), cui__rgba(255, 255, 255, 255), 2);
 }
 
+/* Opens the popover of the color picker with this id from code (a double
+ * click on a gradient stop), in sync with the color it will edit. */
+void cui__color_picker_open(cui_ctx *ui, cui_id id, cui_color value) {
+    cui__color_state *st = cui_state(ui, id, sizeof *st);
+    cui__rgb_to_hsv(value, &st->h, &st->s, &st->v);
+    st->init = true;
+    cui__popup_set(ui, id ^ 0xC010Eu, true);
+    cui_popup *p = cui__popup_get(ui, id ^ 0xC010Eu, false);
+    if (p) p->at_mouse = false;
+}
+
 bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
     cui_id id = cui_make_id(ui, id_str);
     cui_id pid = id ^ 0xC010Eu;
