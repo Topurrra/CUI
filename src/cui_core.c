@@ -672,7 +672,9 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
 
     /* Tab navigation (uses last frame's focus order; stays inside an open modal).
      * Ctrl+Tab is left to the app: it switches documents, as in a browser. */
-    if (cui_key_pressed(ui, CUI_KEY_TAB) && !(ui->mods & CUI_MOD_CTRL) && ui->prev_focus_count > 0) {
+    bool tab_kept = ui->tab_owner && ui->tab_owner == ui->focus;   /* a code editor types the Tab */
+    ui->tab_owner = 0;
+    if (cui_key_pressed(ui, CUI_KEY_TAB) && !(ui->mods & CUI_MOD_CTRL) && ui->prev_focus_count > 0 && !tab_kept) {
         int n = 0, cur = -1;
         cui_id *cand = cui__frame_alloc(ui, sizeof(cui_id) * (size_t)ui->prev_focus_count);
         for (int i = 0; i < ui->prev_focus_count; i++) {

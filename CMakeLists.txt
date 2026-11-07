@@ -44,13 +44,18 @@ set(CUI_CORE_SOURCES
     src/cui_pickers.c
     src/cui_disclosure.c
     src/cui_grid.c
+    src/cui_treetable.c
     src/cui_code.c
+    src/cui_markdown.c
+    src/cui_editor.c
+    src/cui_diff.c
     src/cui_tools.c
     src/cui_hex.c
     src/cui_social.c
     src/cui_media.c
     src/cui_planning.c
     src/cui_chrome.c
+    src/cui_dock.c
     src/cui_viz.c
     src/cui_motion.c
     src/cui_ai.c
@@ -58,6 +63,7 @@ set(CUI_CORE_SOURCES
     src/cui_nodes.c
     src/cui_flame.c
     src/cui_curves.c
+    src/cui_timeline.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)
 

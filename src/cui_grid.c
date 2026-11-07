@@ -25,6 +25,9 @@ struct cui_grid_build {
     cui__grid_state *st;
     float row_h, total_w, extra;
     int first, last;
+    bool hidden[CUI__GRID_COLS];   /* columns hidden by priority in a narrow grid */
+    int last_col;            /* the last shown column, which takes the spare width */
+    bool checks;             /* the checkbox column is shown */
     int row;                 /* current row, -1 outside */
     int col;                 /* next cell index */
     bool in_row;
@@ -92,10 +95,25 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         st->resizing = -1; st->edit_row = st->edit_col = -1; st->cursor = -1; st->anchor = -1;
         st->init = true;
     }
+    /* a cursor moved by the caller is scrolled into view below */
+    bool cursor_set = o->cursor && *o->cursor >= 0 && *o->cursor < nrows && st->cursor >= 0 && *o->cursor != st->cursor;
     if (o->cursor && *o->cursor >= 0) st->cursor = *o->cursor;
+    if (o->anchor && *o->anchor >= 0) st->anchor = *o->anchor;
     cui_scroll_state *ss = cui_state(ui, b->sid, sizeof *ss);
-    float total = o->selected ? CUI__GRID_CHECK : 0;
+    b->checks = o->selected && !o->hide_checkboxes;
+    float total = b->checks ? CUI__GRID_CHECK : 0;
     for (int k = 0; k < ncols; k++) total += st->widths[k];
+    /* too narrow: columns with a priority hide, the highest number first, until the rest fit */
+    for (int shown = ncols; ss->view_w > 0 && total > ss->view_w + 0.5f && shown > 1; shown--) {   /* one column always stays */
+        int h = -1;
+        for (int k = 0; k < ncols; k++)
+            if (!b->hidden[k] && cols[k].priority > 0 && (h < 0 || cols[k].priority >= cols[h].priority)) h = k;
+        if (h < 0) break;
+        b->hidden[h] = true;
+        total -= st->widths[h];
+    }
+    b->last_col = -1;
+    for (int k = 0; k < ncols; k++) if (!b->hidden[k]) b->last_col = k;
     /* the last column takes any spare width, so rows and header reach the edge */
     b->extra = ss->view_w > total ? ss->view_w - total : 0;
     total += b->extra;
@@ -108,6 +126,12 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     if (f > l) f = l;
     b->first = f; b->last = l;
     *first = f; *last = l;
+    if (cursor_set) {
+        float top = CUI__GRID_HEAD + st->cursor * b->row_h, bottom = top + b->row_h;
+        if (top - CUI__GRID_HEAD < ss->ty) ss->ty = top - CUI__GRID_HEAD;
+        if (bottom > ss->ty + view_h) ss->ty = bottom - view_h;
+        ui->animating = true;
+    }
     /* keyboard: the grid is one tab stop; arrows move the cursor row */
     cui_interact gr = cui__interact(ui, b->id, CUI_IF_FOCUSABLE);
     b->focused = ui->focus == b->id;
@@ -139,6 +163,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && o->selected) for (int r = 0; r < nrows; r++) o->selected[r] = false;
     }
     if (o->cursor) *o->cursor = st->cursor;
+    if (o->anchor) *o->anchor = st->anchor;
     /* frame */
     int outer = cui__node_new(ui, b->id);
     cui_node *on = &ui->nodes[outer];
@@ -160,7 +185,14 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     ui->nodes[content].w = CUI_PX(total);
     ui->nodes[content].gap = 0;
     cui__open(ui, content);
-    /* sticky header: laid out at the top of the content, pushed down by the scroll offset */
+    /* sticky header: laid out at the top of the content, pushed down by the scroll offset. The
+     * offset sits on a holder of no height: a node is culled by its rect before its own offset
+     * applies, and one of no height never is, so the header stays drawn and clickable */
+    int hold = cui__node_new(ui, 0);
+    ui->nodes[hold].w = CUI_PX(total); ui->nodes[hold].h = CUI_PX(0);
+    ui->nodes[hold].ty = ss->y;
+    ui->nodes[hold].flags |= CUI_NF_ON_TOP;
+    cui__open(ui, hold);
     int head = cui__node_new(ui, b->id ^ 0x4EADu);
     cui_node *hn = &ui->nodes[head];
     hn->dir = CUI_ROW; hn->align = CUI_ALIGN_CENTER;
@@ -168,8 +200,6 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     hn->bg = CUI_C(ui, SURFACE_MUTED);
     /* the header's fill follows the frame's top corners instead of poking past them */
     { float ir = CUI_MAX(0.0f, ui->theme.radius_control - 1); hn->radius = (cui_corners){ ss->x > 0.5f ? 0 : ir, ir, 0, 0 }; }
-    hn->ty = ss->y;
-    hn->flags |= CUI_NF_ON_TOP;
     cui__grid_row_paint *hp = cui__frame_alloc(ui, sizeof *hp);
     hp->line = CUI_C(ui, BORDER);
     hn->paint = cui__paint_grid_row;
@@ -177,7 +207,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     hn->flags |= CUI_NF_PAINT_AFTER;
     cui__open(ui, head);
     cui_push_id(ui, id_str);
-    if (o->selected) {
+    if (b->checks) {
         int n_sel = 0;
         for (int r = 0; r < nrows; r++) n_sel += o->selected[r] ? 1 : 0;
         int cell = cui__node_new(ui, 0);
@@ -192,6 +222,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         cui__close(ui);
     }
     for (int k = 0; k < ncols; k++) {
+        if (b->hidden[k]) continue;
         const cui_grid_column *c = &cols[k];
         cui_id hid = cui__hash(&k, sizeof k, b->id ^ 0x4E1u);
         cui_interact hr = cui__interact(ui, hid, c->sortable ? CUI_IF_FOCUSABLE : 0);
@@ -204,7 +235,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         int cell = cui__node_new(ui, hid);
         cui_node *cn = &ui->nodes[cell];
         cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 4;
-        cn->w = CUI_PX(st->widths[k] + (k == ncols - 1 ? b->extra : 0)); cn->h = CUI_FILL;
+        cn->w = CUI_PX(st->widths[k] + (k == b->last_col ? b->extra : 0)); cn->h = CUI_FILL;
         cn->pad[1] = cn->pad[3] = 12;
         cn->justify = c->align == CUI_TEXT_RIGHT ? CUI_JUSTIFY_END : c->align == CUI_TEXT_CENTER ? CUI_JUSTIFY_CENTER : CUI_JUSTIFY_START;
         cn->bg = cui_alpha(CUI_C(ui, HOVER), *hv);
@@ -247,6 +278,8 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     }
     cui_pop_id(ui);
     cui__close(ui);   /* header */
+    cui__close(ui);   /* holder */
+    cui__leaf(ui, 0, CUI_PX(total), CUI_PX(CUI__GRID_HEAD));   /* the header's place */
     if (f > 0) cui__leaf(ui, 0, CUI_PX(total), CUI_PX(f * b->row_h));
     if (b->focused) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
     ui->grid = b;
@@ -256,7 +289,8 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
 static void cui__grid_close_row(cui_ctx *ui, struct cui_grid_build *b) {
     if (!b->in_row) return;
     if (b->col > 0) cui__close(ui);
-    while (b->col < b->ncols) { cui__leaf(ui, 0, CUI_PX(b->st->widths[b->col] + (b->col == b->ncols - 1 ? b->extra : 0)), CUI_FILL); b->col++; }
+    for (; b->col < b->ncols; b->col++)
+        if (!b->hidden[b->col]) cui__leaf(ui, 0, CUI_PX(b->st->widths[b->col] + (b->col == b->last_col ? b->extra : 0)), CUI_FILL);
     cui_pop_id(ui);
     cui__close(ui);
     b->in_row = false;
@@ -291,6 +325,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
         }
         st->cursor = row;
         if (b->o.cursor) *b->o.cursor = row;
+        if (b->o.anchor) *b->o.anchor = st->anchor;
     }
     float *hv = cui_state(ui, rid, sizeof(float));
     cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
@@ -317,7 +352,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
     }
     cui_push_id_int(ui, row);
     b->row = row; b->col = 0; b->in_row = true;
-    if (b->o.selected) {
+    if (b->checks) {
         int cell = cui__node_new(ui, 0);
         ui->nodes[cell].w = CUI_PX(CUI__GRID_CHECK); ui->nodes[cell].h = CUI_FILL;
         ui->nodes[cell].dir = CUI_ROW; ui->nodes[cell].align = CUI_ALIGN_CENTER; ui->nodes[cell].justify = CUI_JUSTIFY_CENTER;
@@ -337,11 +372,20 @@ void cui_data_grid_cell(cui_ctx *ui) {
     if (!b || !b->in_row) return;
     if (b->col > 0) cui__close(ui);
     if (b->col >= b->ncols) { b->col++; int c = cui__node_new(ui, 0); cui__open(ui, c); return; }
+    if (b->hidden[b->col]) {
+        /* a hidden column still takes its content, in an empty clipping box */
+        int c = cui__node_new(ui, 0);
+        ui->nodes[c].w = CUI_PX(0); ui->nodes[c].h = CUI_PX(0);
+        ui->nodes[c].flags |= CUI_NF_CLIP;
+        b->col++;
+        cui__open(ui, c);
+        return;
+    }
     const cui_grid_column *c = &b->cols[b->col];
     int cell = cui__node_new(ui, 0);
     cui_node *cn = &ui->nodes[cell];
     cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 8;
-    cn->w = CUI_PX(b->st->widths[b->col] + (b->col == b->ncols - 1 ? b->extra : 0)); cn->h = CUI_FILL;
+    cn->w = CUI_PX(b->st->widths[b->col] + (b->col == b->last_col ? b->extra : 0)); cn->h = CUI_FILL;
     cn->pad[1] = cn->pad[3] = 12;
     cn->justify = c->align == CUI_TEXT_RIGHT ? CUI_JUSTIFY_END : c->align == CUI_TEXT_CENTER ? CUI_JUSTIFY_CENTER : CUI_JUSTIFY_START;
     cn->flags |= CUI_NF_CLIP;
@@ -353,9 +397,11 @@ void cui_data_grid_cell_text(cui_ctx *ui, const char *text) {
     cui_data_grid_cell(ui);
     struct cui_grid_build *b = ui->grid;
     bool right = b && b->col - 1 < b->ncols && b->cols[b->col - 1].align == CUI_TEXT_RIGHT;
-    int t = cui__text_node(ui, text ? text : "", -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
-    ui->nodes[t].line_height = 1.3f;
-    if (right) ui->nodes[t].flags |= CUI_NF_TABULAR;
+    /* single line text: cut short, it shows the whole value on hover */
+    cui_text_opts to;
+    memset(&to, 0, sizeof to);
+    to.nowrap = true; to.tabular = right; to.line_height = 1.3f;
+    cui_text_ex(ui, text ? text : "", &to);
 }
 
 bool cui_data_grid_cell_edit(cui_ctx *ui, char *buf, size_t cap) {

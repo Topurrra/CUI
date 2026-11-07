@@ -507,6 +507,7 @@ struct cui_ctx {
     bool tree_clicked;
     /* text editing */
     struct cui_edit_state *edit;   /* edit state of the focused text field */
+    cui_id tab_owner;              /* the focused control types Tab instead of moving focus (code editor); set every frame */
     double caret_time;
     /* table being built */
     struct cui_table_build *table;
@@ -601,7 +602,53 @@ void cui__paint_sheen(cui_ctx *ui, cui_node *n, void *data);   /* data: float st
 /* paint data helpers */
 #define CUI_PAINT_DATA(ui, type) ((type *)cui__frame_alloc((ui), sizeof(type)))
 
+/* ---- syntax highlighting (cui_code.c), shared with the diff viewer ---- */
+#define CUI__CODE_KINDS 10
+typedef struct cui__code_tok { int start, len; uint8_t kind; } cui__code_tok;
+/* Tokens of one line in lang (the code block's languages); *in_block carries
+ * an open block comment to the next line. At most cap (up to 256) tokens. */
+int cui__code_tokens(const char *lang, const char *s, int n, bool *in_block, cui__code_tok *out, int cap);
+void cui__code_colors(cui_ctx *ui, cui_color *colors);   /* CUI__CODE_KINDS colors, by token kind */
+
 cui_color cui__legible(cui_color fg, cui_color bg, float ratio);
 cui_color cui__shade(cui_color c, float L, float chroma_mul);
+
+/* ---- text editing primitives (cui_textedit.c), shared with the code editor ---- */
+#define CUI__UNDO_MAX 48
+typedef struct cui_edit_state {
+    int cursor, anchor;        /* byte offsets */
+    float scroll_x, scroll_y;  /* single line horizontal scroll / textarea vertical */
+    float preferred_x;         /* for up/down in text areas */
+    bool selecting;
+    float hover, focus;
+    char *undo[CUI__UNDO_MAX];
+    int undo_cursor[CUI__UNDO_MAX];
+    int undo_count, undo_pos;
+    double last_edit;
+    int last_kind;
+    int last_cursor;
+    bool had_focus;
+    bool init;
+    bool show_password;
+} cui_edit_state;
+void cui__edit_attach(cui_ctx *ui, cui_id id, cui_edit_state *e);   /* once per state: the history is freed with it */
+/* Snapshot before an edit. kind: 1 insert, 2 delete, 3 other; edits of the
+ * same kind at the caret within a second merge into one step. */
+void cui__edit_undo_push(cui_ctx *ui, cui_edit_state *e, const char *buf, int kind);
+bool cui__edit_undo_step(cui_ctx *ui, cui_edit_state *e, char *buf, size_t cap, bool redo);
+int cui__edit_insert(char *buf, int *len, size_t cap, int pos, const char *s, int n);   /* drops '\r'; what fits, never half a code point */
+void cui__edit_delete(char *buf, int *len, int a, int b);
+bool cui__edit_is_word(unsigned char c);
+int cui__edit_word_left(const char *s, int pos);
+int cui__edit_word_right(const char *s, int len, int pos);
+
+/* ---- syntax highlighting (cui_code.c), shared by the code block and the code editor ---- */
+typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types; } cui__lang;
+typedef struct { int start, len; uint8_t kind; } cui__tok;
+#define CUI__TK_COUNT 10   /* token kinds; colors from cui__syntax_colors */
+cui__lang cui__lang_for(const char *lang);
+/* Tokenize one line. *in_block carries an open block comment between lines. */
+int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap);
+void cui__syntax_colors(cui_ctx *ui, cui_color *c);
 
 #endif /* CUI_INTERNAL_H */

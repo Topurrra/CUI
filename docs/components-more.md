@@ -390,6 +390,55 @@ Only the rows in view are built, so the row count barely matters. Headers are st
 
 The filter bar keeps one bit mask per field in `selected`; each active field shows as a chip that opens its value list, "Filter" adds one and "Clear all" resets them. `cui_tree_cell` draws a disclosure chevron and indentation inside any table or grid cell for tree tables.
 
+### Tree table and path bar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tree-table-dark.png"><img src="images/components/tree-table.png" alt="Tree table and path bar"></picture>
+
+```c
+static cui_tree_node nodes[MAX_FILES];   /* yours: parent, first child, next sibling, flags */
+static const cui_grid_column cols[] = {
+    { "Name", 240, CUI_TEXT_LEFT, true }, { "Size", 96, CUI_TEXT_RIGHT, true, false, 1 },
+    { "Modified", 150, CUI_TEXT_LEFT, true, false, 2 }, { "Kind", 110, CUI_TEXT_LEFT, true, false, 3 },
+};
+static cui_table_sort sort = { 0, false };
+static int cursor = -1;
+
+cui_path_bar_result path = cui_path_bar(ui, "path", segments, depth, .icon = CUI_ICON_FOLDER, .menus = true);
+if (path.clicked >= 0) reveal(ancestor[path.clicked]);
+if (path.submitted) go_to(path.submitted);
+int seg;
+if (cui_path_bar_menu_begin(ui, "path", &seg)) {          /* the children of segment seg */
+    for (int c = nodes[ancestor[seg]].first_child; c >= 0; c = nodes[c].next_sibling)
+        if (cui_menu_item(ui, files[c].name, .icon = icon_of(c))) reveal(c);
+    cui_path_bar_menu_end(ui);
+}
+
+cui_tree_table_begin(ui, "files", cols, 4, nodes, count, .root = root, .sort = &sort, .cursor = &cursor, .guides = true, .label = name_of);
+int n;
+while ((n = cui_tree_table_row(ui)) >= 0) {
+    cui_tree_table_name(ui, files[n].name, icon_of(n));
+    cui_data_grid_cell_text(ui, files[n].size_text);
+    cui_data_grid_cell_text(ui, files[n].modified_text);
+    cui_data_grid_cell_text(ui, files[n].kind);
+}
+cui_tree_table_events ev = cui_tree_table_end(ui);
+for (int k = 0; k < ev.load_count; k++) start_listing(ev.load[k]);   /* clear CUI_TREE_LOADING when done */
+if (ev.sort_changed) root = cui_tree_sort(nodes, count, root, compare_by_sort, NULL);
+if (ev.activated >= 0) open_file(ev.activated);
+```
+
+A tree with columns for file explorers, scene graphs and debugger variables. It is a thin layer over the data grid, so it has the same sticky headers, resizable and sortable columns, row selection and virtual scrolling. You own the nodes: an array where each node names its `parent`, `first_child` and `next_sibling` by index, with `-1` for none, plus `CUI_TREE_*` flags. Every frame the table walks only the open part of the tree into a list of rows and builds just the rows in view. A tree of 100,000 nodes costs about as much as one screenful, and depth is not limited: the walk follows the links without recursion and stops on links that loop. The table sets `CUI_TREE_OPEN` and `CUI_TREE_SELECTED` on your nodes, so the state lives with your data. Build each row with `cui_tree_table_name` first (indentation, a chevron, an icon, and the name, which is cut short with a tooltip when it does not fit), then the other cells with the usual grid calls. `.guides` draws a quiet hairline for each indentation level. In a very deep tree the indentation stops growing once the name column is nearly full.
+
+Children can arrive later. A node with `CUI_TREE_HAS_CHILDREN` and no `first_child` shows a chevron. Opening it sets `CUI_TREE_LOADING` and reports the node once in `ev.load`, and a spinner row stands in for the children. Link the children and clear the flag when they are ready. A sortable header sets `sort` and reports `ev.sort_changed`. `cui_tree_sort` then re-sorts every sibling list with your comparator (a stable merge sort that relinks the nodes) and returns the new first top level node.
+
+With the table focused, Up and Down move and the selection follows. Right opens a node, or moves to its first child when it is already open. Left closes an open node, or moves to its parent. Home and End jump to the first and last row, Page Up and Page Down move a page, and Enter (or a double click) reports `ev.activated`. `*` opens every sibling of the current node. Typing a few letters jumps to the next name that starts with them, when you pass `.label`. Selection works as in the data grid, without a checkbox column: Shift+click or Shift+arrows select a range, Ctrl+click toggles a row, Ctrl+arrows move without selecting, Ctrl+A selects every row of the open tree and Esc clears. A plain click or arrow also drops any selected nodes inside closed folders.
+
+When the table is narrower than its columns, columns with a `priority` hide, the highest number first, until the rest fit. Columns with priority 0 always stay, and so does the last column left. This is a data grid feature (`cui_grid_column.priority`), so plain grids can use it too. In the explorer above, Kind (3) goes first, then Modified (2), then Size (1); at phone width only Name is left.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/path-bar-dark.png"><img src="images/components/path-bar.png" alt="Path bar"></picture>
+
+The path bar is a breadcrumb for file and scene paths, styled like `cui_breadcrumb`. Every segment except the last is a button that reports `clicked`; the last one is where you are. When the bar is too narrow, middle segments collapse into a "..." menu, starting after the first. If there is still not enough room, the first goes too, and the current segment is cut short last. With `.menus`, the chevron after a segment opens a menu that you fill between `cui_path_bar_menu_begin` and `cui_path_bar_menu_end` with that segment's children, which are the siblings of the next segment. To type a path, click the empty part of the bar or the current segment, or press Ctrl+L when no text field has the keyboard. The bar becomes a text field holding the whole path (`.text`, or the segments joined by "/"), all selected. Enter reports `submitted`; Esc or clicking away puts the segments back. `.no_edit` turns typing off.
+
 ## Code
 
 ### Code block
@@ -411,6 +460,77 @@ if (!cui_json_view(ui, "response", body, .expand_depth = 1)) { /* not valid JSON
 ```
 
 A collapsible tree with typed colors. Collapsed objects and arrays show their size; click a chevron to fold or unfold.
+
+### Markdown view
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/markdown-dark.png"><img src="images/components/markdown.png" alt="Markdown view"></picture>
+
+```c
+static char notes[4096] = "## Release 2.4\n\nRun `tern migrate` once. See the [upgrade guide](https://tern.dev/docs/upgrade).\n\n- [ ] Tag the release\n";
+static char status[160];
+
+cui_markdown_result r = cui_markdown(ui, "notes", notes);
+if (r.link) snprintf(status, sizeof status, "Opened: %s", r.link);   /* open it yourself, if you want to */
+cui_markdown_apply_task(notes, &r);                                  /* a task box was clicked: write it into the text */
+
+/* an AI reply that grows every frame */
+cui_markdown(ui, "reply", reply, .length = reply_len, .streaming = !reply_done);
+```
+
+Renders your markdown text as native content every frame, straight from your buffer: the view keeps no copy and allocates only from the frame arena. Supported: ATX headings (`#` to `######`) and setext headings, paragraphs (a single newline is a space; two trailing spaces, a trailing backslash or `<br>` break the line), `**bold**`, `*italic*`, `~~strikethrough~~`, `` `inline code` ``, `[links](url)` and `<https://...>` autolinks, bare `https://` and `www.` links, images (shown as a link to the image), backslash escapes and the common entities, bullet and ordered lists nested by indentation, task items (`- [ ]`, `- [x]`), block quotes, fenced code blocks with a language (drawn by the code block above, with its highlighter and copy button), indented code, horizontal rules and pipe tables with an alignment row (drawn with the table's styling). Everything else, such as HTML, reference links and footnotes, shows as plain text, and nothing a stray marker or a broken byte can do crashes the view. Headings use the theme's heading sizes, links the accent, code the code font, and italics are slanted from the regular face. `.compact` uses smaller headings and tighter spacing, and `.color` sets the text color for a colored surface (links then share it, underlined).
+
+The view wraps to whatever width it gets: words wrap between fonts, a word wider than the line breaks between characters, code blocks scroll sideways and tables let long cells wrap before they scroll sideways. With `.streaming` set, an unclosed `**`, `*`, `~~`, backtick or link at the very end renders as if it were closed, and markers that may still grow wait for the next characters, so a reply never flickers between styles as it arrives; an unclosed code fence runs to the end of the text. `cui_chat_message` renders its text this way with `.markdown = true`, sized to the content, and reports what was clicked through `.markdown_result`.
+
+Links are never opened for you. The result reports the URL of a link clicked or activated this frame (and the one under the pointer), and a link's URL also shows as its tooltip. A task box reports the byte offset of the character between its brackets, its line and the state it was toggled to; `cui_markdown_apply_task` writes that into your text, or you can edit it yourself. Tab moves through the links and task boxes; Enter opens the focused link and Space toggles a box. Text is not selectable, since CUI text has no selection yet; code blocks have their copy button.
+
+### Code editor
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-editor-dark.png"><img src="images/components/code-editor.png" alt="Code editor"></picture>
+
+```c
+static char src[64 * 1024] = "void main() {\n}\n";   /* yours: edited in place, NUL terminated */
+
+cui_code_editor_result r = cui_code_editor(ui, "shader", src, sizeof src, .lang = "c", .height = 360,
+                                           .placeholder = "Write a fragment shader");
+if (r.changed) recompile(src);
+if (r.refused) cui_toast(ui, "The shader is too long", .tone = CUI_TONE_WARNING);
+cui_textf(ui, "Ln %d, Col %d", r.line, r.column);
+
+if (error_line) cui_code_editor_goto(ui, "shader", error_line, error_column);   /* jump to a compile error */
+```
+
+Editable code for shader editors, script consoles and config files, with the code block's highlighting (C, C++, JavaScript, TypeScript, Python, Rust, Go, JSON and shell, or plain text with no `lang`), its surface and its monospace font. You own the text: a NUL terminated buffer and its capacity, edited in place. An edit that would not fit is refused whole, never cut in half, and the result reports it (`refused`) so you can say so. The result also gives the caret's line and column (columns count a tab to its stop), the selection as byte offsets, the line count, whether the text changed this frame and, with the find bar open, how many matches there are and which one is selected. A gutter on the left numbers the lines and marks the caret's line, which also gets a quiet band across the editor; the bracket beside the caret and its partner are boxed. Lines never wrap: long ones scroll sideways under the gutter, which stays, and a hairline marks the gutter's edge while the code is scrolled. Only the lines in view are tokenized and drawn, so a file of tens of thousands of lines scrolls and types like a short one. `.read_only` keeps selection, copy, find and go to line but refuses every edit; `.placeholder` shows while the text is empty; `.tab_size` (default 4) and `.use_tabs` choose how indentation is typed; `.height` defaults to 320 points and a negative height fills the space. `cui_code_editor_goto` puts the caret at a line and column, `cui_code_editor_select` selects bytes and `cui_code_editor_find` opens the find bar with a query; each focuses the editor and scrolls there on its next frame (call them from the same id scope).
+
+Mouse: click places the caret, Shift+click extends, drag selects (the view scrolls when the pointer leaves it), double-click selects a word, triple-click or a click in the gutter selects a line, and dragging after a double or triple click extends by words or lines. The wheel scrolls, Shift+wheel or a sideways scroll goes sideways, and the thin scrollbars that appear can be dragged. Keys, with the editor focused (on a Mac, Cmd for Ctrl and Option for the word moves):
+
+- Arrows move; Ctrl+Left and Ctrl+Right move by word; Up and Down keep the column; Page Up and Page Down move by a screen; Home goes to the first character of the line, then to column 0; End to the end of the line; Ctrl+Home and Ctrl+End to the start and end of the text. Shift with any of them extends the selection; Ctrl+A selects everything.
+- Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste; without a selection, copy and cut take the whole line. Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes; typing within a second is one step, and Enter, paste, cut and indentation are steps of their own.
+- Tab inserts spaces to the next tab stop; with a selection, Tab and Shift+Tab indent and outdent every selected line (Shift+Tab also outdents the caret's line). Backspace in the indentation goes back to the previous stop.
+- Enter starts the new line at this line's indentation, one level deeper after an opening bracket in C-like languages or a colon in Python; between a pair of brackets the closing one moves to a line of its own. A closing brace typed on a blank line steps back a level.
+- Ctrl+F opens the find bar with the selected text: the matches are boxed, Enter and Shift+Enter (or the arrows) go to the next and previous one, wrapping around, and the count shows which one is selected. Case is ignored. Ctrl+G opens go to line (`42` or `42:7`). Esc closes the bar and returns to the code.
+- Esc in the code closes the find bar, or else clears the selection; with neither, it lets the next Tab move focus out of the editor, since Tab otherwise types.
+
+### Diff viewer
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/diff-view-dark.png"><img src="images/components/diff-view.png" alt="Diff viewer"></picture>
+
+```c
+static int mode = 0, change = 0;   /* 0 split, 1 inline; the selected change */
+static const char *const modes[] = { "Split", "Inline" };
+cui_segmented(ui, "mode", modes, 2, &mode, .size = CUI_SIZE_SM);
+cui_diff_result r = cui_diff_view(ui, "diff", before, after, .mode = mode ? CUI_DIFF_INLINE : CUI_DIFF_SPLIT,
+                                  .current = &change, .language = "c",
+                                  .old_title = "config.c (main)", .new_title = "config.c");
+if (cui_icon_button(ui, CUI_ICON_ARROW_DOWN, .tooltip = "Next change", .shortcut = "N", .disabled = change >= r.changes - 1))
+    change++;   /* the view scrolls to it */
+cui_textf(ui, "+%d -%d", r.added, r.removed);
+```
+
+Compares two versions of a text line by line. Split mode puts the old text on the left and the new on the right, rows aligned with a quiet filler opposite added or removed lines; inline mode shows removed lines above the lines that replaced them. Below `split_min_width` (560 points by default) split shows inline, so the view reads on a phone, and `r.mode` says which mode is shown. Each side has its line numbers and a + or - sign, added lines are tinted with the success color and removed lines with the danger color, and the words that changed inside a replaced line get a stronger tint. With `.language` the code keeps its syntax colors. Lines longer than the view scroll sideways, both sides together.
+
+Unchanged stretches keep `.context` lines (3) next to each change and fold the rest into a "42 unchanged lines" row that opens on a click (`.no_fold` shows everything). With the view focused, N or Alt+Down goes to the next change and P or Alt+Up to the previous one, E opens every fold and Shift+E folds them again, arrows and Page Up/Down scroll, and clicking a change selects it. `.current` is read and written, so buttons only have to change the number; the result also has the `+added -removed` summary, the change count and whether the texts were diffed again this frame.
+
+The texts are copied and diffed only when one of them changes, and only the rows in sight are built. The diff is Myers' shortest edit script in linear memory; lines with no match in the other text are set aside first, which keeps large diffs fast and exact. Texts that would need a very long search (many repeated lines, rewritten throughout) stop after about 16 million steps and show the rest as replaced, still a correct diff, flagged by `r.approximate`. `cui_diff_compute` returns the hunks without a view, `cui_diff_words` the changed words of two lines, and `cui_diff_view_rows` the rows as shown, for line comments.
 
 ## Tool panels
 
@@ -559,6 +679,48 @@ A color ramp with its stops underneath, over a checkerboard so transparent stops
 
 Drag a stop to move it; it may pass its neighbours, and the selection follows it. Click the ramp or the empty track to add a stop with the color found there (keep the button down to drag it straight away). Drag a stop well off the ramp, or press Delete, to remove it; there are never fewer than two. Double click a stop, or press Enter on a focused one, to open the color picker for it. The row under the ramp shows the selected stop's color (the same color picker, which leaves opacity alone), its location and its opacity as scrub fields, and a button to remove it; on a narrow editor the fields stack. Stops are focusable: Tab moves through them, Left and Right nudge by 1% (Shift for 0.1%).
 
+### Timeline editor
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/timeline-editor-dark.png"><img src="images/components/timeline-editor.png" alt="Timeline editor"></picture>
+
+```c
+static cui_curve_key rot[32] = { { 0, 0 }, { 1.25f, -8 }, { 1.75f, 12 }, { 2.25f, 0 } };   /* x: seconds, y: value */
+static bool rot_sel[32];                                  /* the selection, beside the keys */
+static cui_timeline_clip sound[] = { { 0.375f, 2.25f, 0, "Footsteps" } };
+static cui_timeline_track tracks[] = {
+    { "Hero", CUI_ICON_USER, 0 },                         /* deeper tracks below it make it a group */
+    { "Rotation", NULL, 1, .keys = rot, .key_count = 4, .key_capacity = 32, .key_selected = rot_sel },
+    { "Sound", CUI_ICON_AUDIO_LINES, 0, .clips = sound, .clip_count = 1 },
+};
+static float t, in = 0.5f, out = 4.5f;
+static int cur_track = -1, cur_key = -1;
+static bool playing;
+
+if (playing) t += dt;                                     /* the editor asks, you advance the time */
+cui_timeline_editor_result r = cui_timeline_editor(ui, "shot", tracks, 3, &t, .end = 5, .fps = 24,
+                                                   .in = &in, .out = &out, .toggles = true,
+                                                   .current_track = &cur_track, .current_key = &cur_key);
+if (r.play_toggled) playing = !playing;
+
+/* the current track's curve: the same keys, so an edit in either shows in both */
+cui_timeline_track *tr = cur_track >= 0 ? &tracks[cur_track] : NULL;
+if (tr && tr->keys)
+    cui_curve_editor(ui, "curve", tr->keys, &tr->key_count, tr->key_capacity, .x_max = 5, .y_min = -20, .y_max = 20,
+                     .selected = &cur_key, .show_playhead = true, .playhead = t);
+
+float angle = cui_curve_eval(rot, tracks[1].key_count, t);   /* at runtime */
+```
+
+A dope sheet for animation, video and audio tools: a track list on the left, a time ruler along the top and a row per track with its keys as small marks. The mark's shape follows the key's interpolation: a diamond for smooth and free keys, a circle for linear, a square for step. Video and audio tracks can carry clips, drawn as rounded bars with their names. A track whose next tracks are deeper is a group; its chevron collapses it, and its row shows its tracks' keys as small dots so a closed group still says where things happen. Tracks take their colors from the series palette (`color` 1 to 6, or the group's color, or the next color at the top level); the selection and the playhead use the accent. The ruler counts frames, seconds or timecode (`.ruler`) and thins its labels as you zoom out or narrow the panel, with frame ticks once frames are wide enough to see. On a narrow editor the track list gets narrower, then shows only icons (or first letters) with the names as tooltips.
+
+You own the data, and the editor edits it in place. Keys are `cui_curve_key` values (x is the time in seconds, y the value), so a track's array is exactly what `cui_curve_editor` edits and `cui_curve_eval` reads at runtime, and the example above shows the current track's curve under the timeline with no copying. The selection is a `bool` array beside the keys (`key_selected`, which you keep) and a `selected` flag in each clip; tracks without a selection array show their keys but cannot edit them, and locked tracks are shown and never edited. Keys stay sorted by time and inside `start` to `end`, and clips stay sorted and never overlap. The result reports what happened this frame: whether anything changed, a key added by double click (`added_track`, `added_key`), how many keys and clips Delete removed, a clip moved or trimmed, a track whose collapsed, hidden or locked flag changed, the time moving and a play request. `current_track` and `current_key` say which key was last clicked or added (pass your own ints to keep them); give the same int to the curve editor as `.selected` and the two stay in step.
+
+Click the ruler to move the playhead there, or drag in it to scrub; the playhead lands on whole frames. Click a key to select it, Shift+click to add one, Ctrl+click to toggle one, or drag in empty space for a box selection (Shift or Ctrl add to the selection). Drag a selected key and every selected key moves with it, by whole frames; hold Shift during the drag to move freely, or set `.free_drag`. Keys may pass their neighbours (the arrays are re-sorted, the selection follows) and the block stops at the start and end of the sequence. Double click a row to add a key there, on the frame and on the curve so the motion stays as it was. Drag a clip to move it and its ends to trim it; trimming the start moves `offset` along so the media stays in place. Click a track name to select all its keys. With `.toggles` each row gets a hide and a lock button. With `.in` and `.out` the play range is shaded outside and its markers drag in the ruler. Hovering a key shows its track, its time and its value; hovering a clip shows its start and length.
+
+The wheel zooms time around the pointer, as in the flame graph and the node editor; Shift+wheel or a sideways scroll pans, the wheel over the track list scrolls the rows, and a middle-button drag pans both ways. Only the rows in view are visited and only the keys in view are searched, one mark per point at most, so thousands of tracks scroll and zoom as smoothly as a few. Pass a `cui_timeline_view` to keep the view yourself (zeroed, it fits the whole sequence). The view follows the playhead when it leaves the view, so playback pages along.
+
+With the editor focused, Left and Right step the playhead by a frame (Shift: ten frames), Alt+Left and Alt+Right move the selected keys by a frame (Shift: ten), Up and Down jump to the previous and next key on the visible tracks, Home and End go to the start and end, Space reports a play request (`play_toggled`; you advance the time), Delete or Backspace removes the selected keys and clips, Ctrl+A selects every key on the visible tracks, Esc clears the selection, + and - zoom around the playhead and F fits the whole sequence. Fitting animates and snaps with reduced motion.
+
 ## Conversation
 
 ### Chat
@@ -573,7 +735,7 @@ cui_chat_message(ui, "It did. 2,000 rows scroll at 60 fps on my laptop.", .mine 
 cui_typing_indicator(ui, "Jonas");
 ```
 
-Grouped messages stack tightly with the avatar on the last bubble and tighter inner corners. Your own messages sit on the right in the primary color. The typing dots bounce in sequence.
+Grouped messages stack tightly with the avatar on the last bubble and tighter inner corners. Your own messages sit on the right in the primary color. The typing dots bounce in sequence. With `.markdown = true` a message renders its text with the markdown view, so an assistant's reply can carry lists, code and links.
 
 ### Comments
 
@@ -1066,3 +1228,45 @@ cui_status_bar(ui, "status") {
 ```
 
 Items run left to right and `cui_status_bar_spacer` sends the rest to the right edge. Texts and items are 12 point with tabular figures, so a counting position keeps its width; give an item whose label changes a fixed key (`"Ln 12, Col 4###pos"`) so it keeps its hover and focus. Items are in the Tab order and return true when clicked. `tone` colors a message's icon. The progress bar is 64 points wide (`.width`) and fills with the accent; `.indeterminate` slides a segment along it, which stays still with reduced motion.
+
+### Docking
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/docking-dark.png"><img src="images/components/docking.png" alt="A dockspace with a scene tree, viewport, log and inspector; the Log tab is being dragged over the viewport, with drop targets and a preview of the right half"></picture>
+
+```c
+static bool show_tree = true, show_log = true, show_props = true;
+static char saved[1024];
+
+cui_dockspace(ui, "main", .layout = "dock1 h0.24([*Scene tree],v0.65([*Viewport],[*Log]))", .shortcuts = true) {
+    if (cui_dock_panel_begin(ui, "Scene tree", &show_tree, .icon = CUI_ICON_LAYERS)) {
+        scene_tree(ui);
+        cui_dock_panel_end(ui);
+    }
+    cui_dock_panel(ui, "Viewport", NULL, .icon = CUI_ICON_BOX) { viewport(ui); }      /* NULL: cannot be closed */
+    cui_dock_panel(ui, "Log", &show_log, .icon = CUI_ICON_SQUARE_TERMINAL) { cui_log_view(ui, "log", &log, .height = -1); }
+    cui_dock_panel(ui, "Inspector", &show_props) { inspector(ui); }   /* not in the layout: joins the largest leaf */
+}
+
+/* View menu: a closed panel comes back where it was */
+if (cui_menu_item(ui, "Log", .checked = show_log)) show_log = !show_log;
+
+/* on quit, and on the next start before the first frame */
+cui_dock_save(ui, "main", saved, sizeof saved);
+if (!cui_dock_load(ui, "main", saved)) { /* malformed: the default layout stays */ }
+```
+
+A dockspace fills its box with your panels, laid out in a tree of splits whose leaves hold one or more panels as document tabs. Submit every panel every frame between `cui_dockspace_begin` and `cui_dockspace_end` (or the `cui_dockspace` scope) in any order; the dockspace decides where each goes, and `cui_dock_panel_begin` returns true only for the panel whose tab is showing, so hidden tabs cost nothing. The splits are the split view: drag a divider to resize, and it stops where a panel would get smaller than `.min_panel_width` (120) or `.min_panel_height` (96). When the dockspace is too narrow for every panel's minimum, the splits share what there is, so panels shrink together and never overlap; on a phone, give the dockspace a stacked layout instead. The tab strips are the document tabs, so they look and behave the same: click to select, drag sideways to reorder, scroll when crowded, and the x closes.
+
+Drag a tab out of its strip to move it. A ghost of the tab follows the pointer and drop targets appear over the leaf under it: the middle one stacks the panel there as a tab and the four around it split the leaf, putting the panel on that side. Four more targets sit at the middle of the dockspace's outer edges and split the whole layout. Between the targets the pointer's position decides (near a side splits, the middle stacks), and over a tab strip the panel goes in at the slot under the pointer, marked with a line. A tinted preview in the accent shows where the panel will land; it glides between targets, and with reduced motion it simply appears. Release to drop it, or press Esc (or release outside the dockspace) to cancel. Dropping a panel onto its own leaf, when it is the only tab there, changes nothing. A leaf that loses its last panel collapses and its split merges back into the neighbour.
+
+The x on a tab (or a middle click, or Delete on the focused tab) sets the panel's `*open` to false and the panel stops being built. Set it back to true, from a View menu or a toolbar toggle, and the panel returns to its last place, selected, even if its leaf has been out of the layout since; a panel the layout has no place for joins the largest leaf as a tab. Pass `NULL` instead of a flag for a panel that cannot be closed. Panels are identified by their title, so titles must be unique within a dockspace; `"Log (3)###log"` keeps the identity while the label changes. A dockspace holds up to 48 panels.
+
+`cui_dock_save` writes the layout as one line of text, `cui_dock_load` restores it, and `.layout` gives the layout for the first run (until something is loaded). The format is
+
+```
+dock1 h0.22([*Scene tree,Assets],h0.6(v0.62([*Viewport],[*Log,-Console]),[*Inspector]))
+```
+
+after the `dock1` version word comes one node: `h` (side by side) or `v` (stacked) is a split, followed by the first child's share from 0 to 1 and the two children in parentheses; `[...]` is a leaf, its panel names in tab order, `*` marking the selected tab and `-` a closed panel. A backslash escapes `,` `[` `]` `(` `)`, a backslash, and a leading `*` or `-` in a name. Loading also sets each panel's `*open` from the text the next time the panel is submitted. Names the app has not submitted (yet) are kept in their place, so a layout saved with a plugin's panel survives a run without the plugin. Malformed text (bad syntax, a share outside 0 to 1, more than six decimals, a duplicate name, more than 48 panels or nesting deeper than 40) is refused: `cui_dock_load` returns false and the layout stays as it was. `cui_dock_save` returns the full length, like `snprintf`, and writes what fits. The dockspace's id is global: it does not depend on `cui_push_id`, so saving and loading work from anywhere.
+
+Keyboard: the selected tab of each strip is in the Tab order; Left and Right select along the strip, Home and End jump, Shift+Left and Shift+Right move the tab, and Delete closes it. With `.shortcuts = true`, Ctrl+Tab and Ctrl+Shift+Tab (or Ctrl+PageDown and PageUp) cycle the panels of the focused leaf, the one holding the keyboard focus or the last click, and Ctrl+W (Cmd+W on macOS) closes its selected panel. Esc cancels a drag. The layout uses the previous frame's size, so a panel that appears or reopens shows from the next frame (the dockspace asks for one). After `cui_dock_panel_begin`, `cui_last_rect` is the panel's tab, for a tooltip or a tour.

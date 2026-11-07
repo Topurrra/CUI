@@ -1158,6 +1158,389 @@ static void test_data_grid(void) {
     cui_destroy(ui);
 }
 
+/* tree table and path bar ---------------------------------------------------- */
+
+typedef struct {
+    cui_tree_node *nodes; int count, root, cursor;
+    cui_table_sort sort;
+    float height;
+    int seq[64], depth[64], nseq, rows_built;
+    int activated, expanded, collapsed, loads, load_node, sort_changes, sel_changes;
+    cui_id grid_id;
+    const char *const *names;
+} ttab_ctx;
+static const char *ttab_label(void *user, int n) { ttab_ctx *t = user; return t->names ? t->names[n] : NULL; }
+static void build_ttab(cui_ctx *ui, void *u) {
+    ttab_ctx *t = u;
+    cui_column(ui, .pad = 20, .width = CUI_FILL, .height = CUI_FILL) {
+        static const cui_grid_column cols[] = { { "Name", 240, CUI_TEXT_LEFT, true }, { "Value", 120, CUI_TEXT_RIGHT, true, false, 1 },
+                                                { "Type", 120, CUI_TEXT_LEFT, true, false, 2 } };
+        cui_tree_table_begin(ui, "tt", cols, 3, t->nodes, t->count, .height = CUI_PX(t->height > 0 ? t->height : 360), .root = t->root,
+                             .sort = &t->sort, .cursor = &t->cursor, .guides = true, .label = ttab_label, .user = t);
+        t->grid_id = cui_make_id(ui, "tt");
+        t->nseq = 0; t->rows_built = 0;
+        int n;
+        while ((n = cui_tree_table_row(ui)) >= 0) {
+            if (t->nseq < 64) { t->seq[t->nseq] = n; t->depth[t->nseq] = cui_tree_table_depth(ui); t->nseq++; }
+            t->rows_built++;
+            char name[24];
+            snprintf(name, sizeof name, "node %d", n);
+            cui_tree_table_name(ui, t->names ? t->names[n] : name, (t->nodes[n].flags & CUI_TREE_HAS_CHILDREN) ? CUI_ICON_FOLDER : CUI_ICON_FILE);
+            cui_data_grid_cell_text(ui, "42");
+            cui_data_grid_cell_text(ui, "int");
+        }
+        cui_tree_table_events ev = cui_tree_table_end(ui);
+        if (ev.activated >= 0) t->activated = ev.activated;
+        if (ev.expanded >= 0) t->expanded = ev.expanded;
+        if (ev.collapsed >= 0) t->collapsed = ev.collapsed;
+        t->loads += ev.load_count;
+        if (ev.load_count > 0) t->load_node = ev.load[0];
+        t->sort_changes += ev.sort_changed;
+        t->sel_changes += ev.selection_changed;
+    }
+}
+static void ttab_link(cui_tree_node *nd, int parent, const int *kids, int n) {
+    if (parent >= 0) nd[parent].first_child = n > 0 ? kids[0] : -1;
+    for (int k = 0; k < n; k++) { nd[kids[k]].parent = parent; nd[kids[k]].next_sibling = k + 1 < n ? kids[k + 1] : -1; }
+}
+static bool ttab_seq(const ttab_ctx *t, const int *want, int n) {
+    if (t->nseq != n) return false;
+    for (int k = 0; k < n; k++) if (t->seq[k] != want[k]) return false;
+    return true;
+}
+static int ttab_cmp_desc(void *user, int a, int b) { (void)user; return b - a; }
+static int ttab_cmp_parity(void *user, int a, int b) { (void)user; return (a & 1) - (b & 1); }   /* evens first, stable otherwise */
+static float ttab_row_y(cui_rect g, int i) { return g.y + 40 + 32 * i + 16; }
+static int ttab_selected(const ttab_ctx *t) { int c = 0; for (int k = 0; k < t->count; k++) c += (t->nodes[k].flags & CUI_TREE_SELECTED) != 0; return c; }
+
+typedef struct {
+    const char *const *segs; int count; float width; bool menus;
+    int clicked; char submitted[128]; int submits; bool editing;
+    cui_id bar, more, seg[16], sep[16];
+    int menu_seg, menu_chosen;
+} pbar_ctx;
+static void build_pbar(cui_ctx *ui, void *u) {
+    pbar_ctx *p = u;
+    cui_column(ui, .pad = 20, .gap = 12, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_path_bar_result r = cui_path_bar(ui, "pb", p->segs, p->count, .menus = p->menus, .icon = CUI_ICON_FOLDER,
+                                             .width = p->width > 0 ? CUI_PX(p->width) : CUI_FILL);
+        p->bar = cui_last_id(ui);
+        if (r.clicked >= 0) p->clicked = r.clicked;
+        if (r.submitted) { snprintf(p->submitted, sizeof p->submitted, "%s", r.submitted); p->submits++; }
+        p->editing = r.editing;
+        int seg;
+        if (cui_path_bar_menu_begin(ui, "pb", &seg)) {
+            p->menu_seg = seg;
+            if (cui_menu_item(ui, "Sibling one")) p->menu_chosen = 1;
+            if (cui_menu_item(ui, "Sibling two")) p->menu_chosen = 2;
+            cui_path_bar_menu_end(ui);
+        }
+        /* the ids the bar uses, rebuilt with the public id calls */
+        cui_push_id(ui, "pb");
+        p->more = cui_make_id(ui, "more");
+        for (int k = 0; k < p->count && k < 16; k++) {
+            cui_push_id_int(ui, k);
+            p->seg[k] = cui_make_id(ui, "seg");
+            p->sep[k] = cui_make_id(ui, "sep");
+            cui_pop_id(ui);
+        }
+        cui_pop_id(ui);
+        cui_button(ui, "Elsewhere");
+    }
+}
+
+static void test_tree_table(void) {
+    printf("tree table: flattening, keyboard, lazy children, 100k nodes, selection, sort; path bar\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 600, 1);
+    /* 0 A { 1 A1 { 3 A1a }, 2 A2 }, 4 B { 5 B1 }, 6 C (lazy) */
+    cui_tree_node nd[16];
+    for (int k = 0; k < 16; k++) { nd[k].parent = nd[k].first_child = nd[k].next_sibling = -1; nd[k].flags = 0; }
+    { int top[] = { 0, 4, 6 }, a[] = { 1, 2 }, a1[] = { 3 }, bb[] = { 5 };
+      ttab_link(nd, -1, top, 3); ttab_link(nd, 0, a, 2); ttab_link(nd, 1, a1, 1); ttab_link(nd, 4, bb, 1); }
+    nd[0].flags = nd[1].flags = nd[4].flags = nd[6].flags = CUI_TREE_HAS_CHILDREN;
+    static const char *const names[] = { "Alpha", "Apple", "Avocado", "Apricot", "Banana", "Blueberry", "Cherry", "Cranberry", "Currant" };
+    ttab_ctx t;
+    memset(&t, 0, sizeof t);
+    t.nodes = nd; t.count = 7; t.cursor = -1; t.names = names; t.sort.column = -1;
+    t.activated = t.expanded = t.collapsed = -1;
+    run(ui, build_ttab, &t, 3);
+    { int w[] = { 0, 4, 6 }; CHECK(ttab_seq(&t, w, 3)); }
+    /* flattening follows nested open and closed nodes */
+    nd[0].flags |= CUI_TREE_OPEN;
+    run(ui, build_ttab, &t, 1);
+    { int w[] = { 0, 1, 2, 4, 6 }; CHECK(ttab_seq(&t, w, 5)); }
+    nd[1].flags |= CUI_TREE_OPEN;
+    run(ui, build_ttab, &t, 1);
+    { int w[] = { 0, 1, 3, 2, 4, 6 }; CHECK(ttab_seq(&t, w, 6)); CHECK(t.depth[2] == 2 && t.depth[3] == 1 && t.depth[4] == 0); }
+    nd[0].flags &= ~(uint32_t)CUI_TREE_OPEN;
+    run(ui, build_ttab, &t, 1);
+    { int w[] = { 0, 4, 6 }; CHECK(ttab_seq(&t, w, 3)); }
+    nd[0].flags |= CUI_TREE_OPEN;   /* A1 stayed open inside */
+    run(ui, build_ttab, &t, 1);
+    { int w[] = { 0, 1, 3, 2, 4, 6 }; CHECK(ttab_seq(&t, w, 6)); }
+    nd[0].flags &= ~(uint32_t)CUI_TREE_OPEN; nd[1].flags &= ~(uint32_t)CUI_TREE_OPEN;
+    run(ui, build_ttab, &t, 1);
+    /* keyboard: click A, then Right opens, Right moves to the first child */
+    cui_rect g = rect_of(ui, t.grid_id);
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 0));
+    CHECK(t.cursor == 0 && (nd[0].flags & CUI_TREE_SELECTED));
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    CHECK((nd[0].flags & CUI_TREE_OPEN) && t.expanded == 0 && t.cursor == 0);
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.cursor == 1 && (nd[1].flags & CUI_TREE_SELECTED) && !(nd[0].flags & CUI_TREE_SELECTED));
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    CHECK((nd[1].flags & CUI_TREE_OPEN) && t.cursor == 1);
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.cursor == 3);
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);   /* a leaf: nothing */
+    CHECK(t.cursor == 3);
+    /* Left: a leaf moves to its parent, an open node closes, a closed one moves up */
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);
+    CHECK(t.cursor == 1);
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);
+    CHECK(!(nd[1].flags & CUI_TREE_OPEN) && t.collapsed == 1 && t.cursor == 1);
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);
+    CHECK(t.cursor == 0);
+    key(ui, build_ttab, &t, CUI_KEY_DOWN, 0);
+    CHECK(t.cursor == 1 && (nd[1].flags & CUI_TREE_SELECTED) && ttab_selected(&t) == 1);
+    /* Home, End, Enter */
+    key(ui, build_ttab, &t, CUI_KEY_END, 0);
+    CHECK(t.cursor == 6);
+    key(ui, build_ttab, &t, CUI_KEY_HOME, 0);
+    CHECK(t.cursor == 0);
+    key(ui, build_ttab, &t, CUI_KEY_ENTER, 0);
+    CHECK(t.activated == 0);
+    /* type-ahead jumps to a name; * opens every sibling */
+    type(ui, build_ttab, &t, "b");
+    CHECK(t.cursor == 4);
+    run(ui, build_ttab, &t, 70);   /* the typed prefix times out */
+    type(ui, build_ttab, &t, "c");
+    CHECK(t.cursor == 6);
+    /* lazy: opening C asks for its children once and shows a loading row */
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.loads == 1 && t.load_node == 6 && (nd[6].flags & CUI_TREE_LOADING) && (nd[6].flags & CUI_TREE_OPEN));
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    run(ui, build_ttab, &t, 2);
+    CHECK(t.loads == 1);   /* still loading: not asked again */
+    { int w[] = { 0, 1, 2, 4, 6 }; CHECK(ttab_seq(&t, w, 5)); }
+    /* move C to the top: the loading row sits between it and A */
+    { int top[] = { 6, 0, 4 }; ttab_link(nd, -1, top, 3); t.root = 6; }
+    nd[0].flags &= ~(uint32_t)CUI_TREE_OPEN;
+    run(ui, build_ttab, &t, 2);
+    { int w[] = { 6, 0, 4 }; CHECK(ttab_seq(&t, w, 3)); }
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 2));   /* row 1 is the loading row, row 2 is A */
+    CHECK(t.cursor == 0 && (nd[0].flags & CUI_TREE_SELECTED));
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 1));   /* the loading row selects nothing */
+    CHECK(ttab_selected(&t) == 0);
+    /* the children arrive */
+    { int kids[] = { 7, 8 }; ttab_link(nd, 6, kids, 2); t.count = 9; }
+    nd[6].flags &= ~(uint32_t)CUI_TREE_LOADING;
+    run(ui, build_ttab, &t, 2);
+    { int w[] = { 6, 7, 8, 0, 4 }; CHECK(ttab_seq(&t, w, 5)); }
+    /* * opens every sibling at the cursor's level */
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 3));
+    CHECK(t.cursor == 0);
+    type(ui, build_ttab, &t, "*");
+    CHECK((nd[0].flags & CUI_TREE_OPEN) && (nd[4].flags & CUI_TREE_OPEN));
+    /* selection: Shift+click a range, Ctrl+click toggles, a plain click resets (hidden nodes too) */
+    run(ui, build_ttab, &t, 1);
+    { int w[] = { 6, 7, 8, 0, 1, 2, 4, 5 }; CHECK(ttab_seq(&t, w, 8)); }
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 1));
+    cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_SHIFT);
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 4));
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    CHECK(ttab_selected(&t) == 4 && (nd[7].flags & CUI_TREE_SELECTED) && (nd[1].flags & CUI_TREE_SELECTED) && !(nd[6].flags & CUI_TREE_SELECTED));
+    cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_PRIMARY);
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 7));
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 2));
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    CHECK(ttab_selected(&t) == 4 && (nd[5].flags & CUI_TREE_SELECTED) && !(nd[8].flags & CUI_TREE_SELECTED));
+    /* Shift+Down extends from the anchor even after rows above it opened */
+    nd[6].flags &= ~(uint32_t)CUI_TREE_OPEN;   /* rows shift up by two; 7 (selected) is hidden */
+    run(ui, build_ttab, &t, 2);
+    CHECK(t.sel_changes > 0);
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 0));   /* a plain click: hidden 7 drops too */
+    CHECK(ttab_selected(&t) == 1 && (nd[6].flags & CUI_TREE_SELECTED) && !(nd[7].flags & CUI_TREE_SELECTED));
+    key(ui, build_ttab, &t, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+    key(ui, build_ttab, &t, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    CHECK(ttab_selected(&t) == 3 && (nd[0].flags & CUI_TREE_SELECTED) && (nd[1].flags & CUI_TREE_SELECTED));
+    key(ui, build_ttab, &t, CUI_KEY_ESCAPE, 0);
+    CHECK(ttab_selected(&t) == 0);
+    /* sort: the header reports it; the caller re-sorts each level */
+    click_at(ui, build_ttab, &t, g.x + 120, g.y + 20);
+    CHECK(t.sort_changes == 1 && t.sort.column == 0 && !t.sort.descending);
+    click_at(ui, build_ttab, &t, g.x + 120, g.y + 20);
+    CHECK(t.sort_changes == 2 && t.sort.descending);
+    t.root = cui_tree_sort(nd, t.count, t.root, ttab_cmp_desc, NULL);
+    run(ui, build_ttab, &t, 2);
+    { int w[] = { 6, 4, 5, 0, 2, 1 }; CHECK(t.root == 6 && ttab_seq(&t, w, 6)); }
+    t.root = cui_tree_sort(nd, t.count, t.root, ttab_cmp_parity, NULL);   /* stable: evens keep their order */
+    run(ui, build_ttab, &t, 2);
+    { int w[] = { 6, 4, 5, 0, 2, 1 }; CHECK(ttab_seq(&t, w, 6)); }
+    /* a narrow table hides the columns with the highest priority first */
+    cui_set_viewport(ui, 420, 600, 1);
+    run(ui, build_ttab, &t, 3);
+    click_at(ui, build_ttab, &t, rect_of(ui, t.grid_id).x + 300, rect_of(ui, t.grid_id).y + 20);   /* Value header: Type hid first */
+    CHECK(t.sort.column == 1);
+    cui_set_viewport(ui, 900, 600, 1);
+    run(ui, build_ttab, &t, 2);
+    cui_destroy(ui);
+
+    /* empty tree and a tree with bad links: nothing breaks */
+    ui = new_ctx();
+    memset(&t, 0, sizeof t);
+    t.cursor = 5; t.activated = -1;
+    run(ui, build_ttab, &t, 2);
+    key(ui, build_ttab, &t, CUI_KEY_DOWN, 0);
+    key(ui, build_ttab, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.rows_built == 0 && t.activated == -1);
+    { cui_tree_node bad[3] = { { -1, 1, 0, CUI_TREE_OPEN }, { 0, 1, 2, CUI_TREE_OPEN }, { 7, -1, 1, 0 } };   /* loops */
+      t.nodes = bad; t.count = 3;
+      run(ui, build_ttab, &t, 2);
+      CHECK(t.rows_built <= 8); }
+    cui_destroy(ui);
+
+    /* a name cut short shows the whole name on hover */
+    ui = new_ctx();
+    { static const char *const long_name[] = { "A folder name far too long for the name column of this table.txt" };
+      cui_tree_node one[1] = { { -1, -1, -1, 0 } };
+      memset(&t, 0, sizeof t);
+      t.nodes = one; t.count = 1; t.cursor = -1; t.names = long_name;
+      run(ui, build_ttab, &t, 60);   /* past the first moments, when tooltips show at once */
+      g = rect_of(ui, t.grid_id);
+      cui_input_mouse_move(ui, g.x + 160, ttab_row_y(g, 0));
+      run(ui, build_ttab, &t, 3);
+      int before = cui_get_draw_data(ui)->vertex_count;
+      run(ui, build_ttab, &t, 70);
+      CHECK(cui_get_draw_data(ui)->vertex_count > before); }
+    cui_destroy(ui);
+
+    /* a very deep tree: depth 200, all open */
+    ui = new_ctx();
+    cui_tree_node *deep = calloc(200, sizeof *deep);
+    for (int k = 0; k < 200; k++) {
+        deep[k].parent = k - 1; deep[k].first_child = k + 1 < 200 ? k + 1 : -1; deep[k].next_sibling = -1;
+        deep[k].flags = k + 1 < 200 ? CUI_TREE_HAS_CHILDREN | CUI_TREE_OPEN : 0;
+    }
+    memset(&t, 0, sizeof t);
+    t.nodes = deep; t.count = 200; t.cursor = -1; t.activated = -1;
+    run(ui, build_ttab, &t, 3);
+    g = rect_of(ui, t.grid_id);
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 0));
+    key(ui, build_ttab, &t, CUI_KEY_END, 0);
+    run(ui, build_ttab, &t, 30);
+    CHECK(t.cursor == 199 && t.nseq > 0 && t.seq[t.nseq - 1] == 199 && t.depth[t.nseq - 1] == 199);
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);
+    CHECK(t.cursor == 198);
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);   /* closes 198 */
+    CHECK(!(deep[198].flags & CUI_TREE_OPEN));
+    free(deep);
+    cui_destroy(ui);
+
+    /* 100k nodes: 1000 folders of 99 files, all open; only the rows in view are built */
+    ui = new_ctx();
+    int big_n = 100000;
+    cui_tree_node *big = malloc(sizeof *big * (size_t)big_n);
+    for (int f = 0; f < 1000; f++) {
+        int at = f * 100;
+        big[at].parent = -1; big[at].first_child = at + 1; big[at].next_sibling = f + 1 < 1000 ? at + 100 : -1;
+        big[at].flags = CUI_TREE_HAS_CHILDREN | CUI_TREE_OPEN;
+        for (int c = 1; c < 100; c++) {
+            big[at + c].parent = at; big[at + c].first_child = -1; big[at + c].next_sibling = c + 1 < 100 ? at + c + 1 : -1; big[at + c].flags = 0;
+        }
+    }
+    memset(&t, 0, sizeof t);
+    t.nodes = big; t.count = big_n; t.cursor = -1; t.activated = -1;
+    run(ui, build_ttab, &t, 3);
+    CHECK(t.rows_built > 5 && t.rows_built < 30);
+    CHECK(cui_get_draw_data(ui)->vertex_count < 20000);
+    clock_t c0 = clock();
+    run(ui, build_ttab, &t, 20);
+    double secs = (double)(clock() - c0) / CLOCKS_PER_SEC;
+    CHECK(secs < 5.0);   /* a sanity bound (sanitizer builds are slow); about 1 ms a frame in release */
+    g = rect_of(ui, t.grid_id);
+    click_at(ui, build_ttab, &t, g.x + 300, ttab_row_y(g, 0));
+    key(ui, build_ttab, &t, CUI_KEY_END, 0);
+    run(ui, build_ttab, &t, 40);
+    CHECK(t.cursor == big_n - 1 && t.nseq > 0 && t.seq[t.nseq - 1] == big_n - 1 && t.rows_built < 30);
+    key(ui, build_ttab, &t, CUI_KEY_LEFT, 0);   /* to the last folder */
+    run(ui, build_ttab, &t, 40);
+    CHECK(t.cursor == big_n - 100);
+    click_at(ui, build_ttab, &t, g.x + 120, g.y + 20);   /* the sticky header still sorts, scrolled far down */
+    CHECK(t.sort_changes == 1);
+    free(big);
+    cui_destroy(ui);
+
+    /* path bar: a segment click, the overflow menu, typing a path */
+    ui = new_ctx();
+    cui_set_viewport(ui, 1100, 400, 1);
+    static const char *const segs[] = { "home", "maya", "projects", "cui", "src", "render", "backends", "cui_render_sw.c" };
+    pbar_ctx p;
+    memset(&p, 0, sizeof p);
+    p.segs = segs; p.count = 8; p.clicked = -1; p.menus = true; p.menu_seg = -1;
+    run(ui, build_pbar, &p, 3);
+    CHECK(rect_of(ui, p.seg[2]).w > 0 && rect_of(ui, p.more).w == 0);   /* wide: everything shows */
+    cui_vec2 c = center(rect_of(ui, p.seg[2]));
+    click_at(ui, build_pbar, &p, c.x, c.y);
+    CHECK(p.clicked == 2);
+    /* a separator opens a menu of the next segment's siblings */
+    c = center(rect_of(ui, p.sep[3]));
+    click_at(ui, build_pbar, &p, c.x, c.y);
+    run(ui, build_pbar, &p, 20);
+    CHECK(p.menu_seg == 3);
+    key(ui, build_pbar, &p, CUI_KEY_DOWN, 0);
+    key(ui, build_pbar, &p, CUI_KEY_DOWN, 0);
+    key(ui, build_pbar, &p, CUI_KEY_ENTER, 0);
+    CHECK(p.menu_chosen == 2);
+    run(ui, build_pbar, &p, 20);
+    /* Ctrl+L types a path; Enter submits */
+    key(ui, build_pbar, &p, CUI_KEY_L, CUI_MOD_PRIMARY);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_pbar, &p, 1);
+    CHECK(p.editing && cui_wants_keyboard(ui));
+    type(ui, build_pbar, &p, "/tmp/build");   /* the whole path was selected: typing replaces it */
+    key(ui, build_pbar, &p, CUI_KEY_ENTER, 0);
+    CHECK(p.submits == 1 && strcmp(p.submitted, "/tmp/build") == 0 && !p.editing);
+    run(ui, build_pbar, &p, 2);
+    /* Esc cancels */
+    key(ui, build_pbar, &p, CUI_KEY_L, CUI_MOD_PRIMARY);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_pbar, &p, 1);
+    type(ui, build_pbar, &p, "nope");
+    key(ui, build_pbar, &p, CUI_KEY_ESCAPE, 0);
+    run(ui, build_pbar, &p, 1);
+    CHECK(!p.editing && p.submits == 1);
+    /* clicking the empty part edits; clicking away cancels */
+    cui_rect br = rect_of(ui, p.bar);
+    click_at(ui, build_pbar, &p, br.x + br.w - 20, br.y + br.h / 2);
+    run(ui, build_pbar, &p, 1);
+    CHECK(p.editing);
+    cui_rect er = rect_of(ui, p.bar);
+    click_at(ui, build_pbar, &p, er.x + 40, er.y + er.h + 60);
+    run(ui, build_pbar, &p, 1);
+    CHECK(!p.editing && p.submits == 1);
+    cui_destroy(ui);
+    /* narrow: the middle segments collapse into "..." and stay reachable */
+    ui = new_ctx();
+    cui_set_viewport(ui, 320, 400, 1);
+    memset(&p, 0, sizeof p);
+    p.segs = segs; p.count = 8; p.clicked = -1; p.menu_seg = -1;
+    run(ui, build_pbar, &p, 4);
+    cui_rect mr = rect_of(ui, p.more);
+    CHECK(mr.w > 0 && rect_of(ui, p.seg[7]).w > 0 && mr.x + mr.w <= rect_of(ui, p.seg[7]).x);
+    CHECK(rect_of(ui, p.seg[7]).x + rect_of(ui, p.seg[7]).w <= rect_of(ui, p.bar).x + rect_of(ui, p.bar).w + 0.5f);   /* nothing spills */
+    c = center(mr);
+    click_at(ui, build_pbar, &p, c.x, c.y);
+    run(ui, build_pbar, &p, 20);
+    key(ui, build_pbar, &p, CUI_KEY_DOWN, 0);
+    key(ui, build_pbar, &p, CUI_KEY_ENTER, 0);
+    CHECK(p.clicked >= 0 && p.clicked < 7);   /* a collapsed segment, chosen in the menu */
+    cui_destroy(ui);
+}
+
 static void test_text_capacity(void) {
     printf("text input: respects buffer capacity\n");
     cui_ctx *ui = new_ctx();
@@ -1649,6 +2032,418 @@ static void test_chrome(void) {
     empty = cui_doc_tabs(ui, "none", NULL, 0, NULL);
     cui_end_frame(ui);
     CHECK(empty.close == -1 && empty.move_from == -1 && !empty.changed);
+    cui_destroy(ui);
+}
+
+/* docking ---------------------------------------------------------------- */
+
+#define DK_N 4
+static const char *const dk_names[DK_N] = { "Files", "Editor", "Log", "Props" };
+typedef struct {
+    bool open[DK_N];
+    int built[DK_N];
+    cui_rect tab[DK_N];
+    cui_id body[DK_N];
+    const char *layout;
+    float w, h;
+    bool shortcuts;
+} dock_ctx;
+static void build_dock(cui_ctx *ui, void *u) {
+    dock_ctx *d = u;
+    cui_box(ui, .width = CUI_PX(d->w), .height = CUI_PX(d->h)) {
+        cui_dockspace(ui, "ds", .layout = d->layout, .shortcuts = d->shortcuts) {
+            for (int k = 0; k < DK_N; k++) {
+                bool shown = cui_dock_panel_begin(ui, dk_names[k], &d->open[k]);
+                d->tab[k] = cui_last_id(ui) ? cui_last_rect(ui) : (cui_rect){ 0, 0, 0, 0 };
+                if (!shown) continue;
+                d->built[k]++;
+                d->body[k] = cui_box_begin(ui, &(cui_box){ .id = "content", .width = CUI_FILL, .height = CUI_FILL });
+                cui_box_end(ui);
+                cui_dock_panel_end(ui);
+            }
+        }
+    }
+}
+static dock_ctx dock_new(const char *layout, float w, float h) {
+    dock_ctx d;
+    memset(&d, 0, sizeof d);
+    for (int k = 0; k < DK_N; k++) d.open[k] = true;
+    d.layout = layout; d.w = w; d.h = h;
+    return d;
+}
+static const char *dock_str(cui_ctx *ui) {
+    static char buf[1024];
+    cui_dock_save(ui, "ds", buf, sizeof buf);
+    return buf;
+}
+static cui_rect dock_body(cui_ctx *ui, dock_ctx *d, int k) { return d->body[k] ? cui_get_rect(ui, d->body[k]) : (cui_rect){ 0, 0, 0, 0 }; }
+/* press at a, travel to b in steps, release (or not) */
+static void dock_drag(cui_ctx *ui, dock_ctx *d, float ax, float ay, float bx, float by, bool release) {
+    cui_input_mouse_move(ui, ax, ay);
+    run(ui, build_dock, d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_dock, d, 1);
+    for (int s = 1; s <= 12; s++) {
+        float t = s / 12.0f;
+        cui_input_mouse_move(ui, ax + (bx - ax) * t, ay + (by - ay) * t);
+        run(ui, build_dock, d, 1);
+    }
+    if (!release) return;
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_dock, d, 3);
+}
+static void dock_drag_tab(cui_ctx *ui, dock_ctx *d, int k, float bx, float by) {
+    cui_rect t = d->tab[k];
+    dock_drag(ui, d, t.x + 16, t.y + t.h / 2, bx, by, true);
+}
+static bool dock_disjoint(cui_rect a, cui_rect b) {
+    return a.x + a.w <= b.x + 0.5f || b.x + b.w <= a.x + 0.5f || a.y + a.h <= b.y + 0.5f || b.y + b.h <= a.y + 0.5f;
+}
+
+static void test_dock(void) {
+    printf("docking\n");
+    static const char *const base = "dock1 h0.25([*Files],v0.6([*Editor,Log],[*Props]))";
+    cui_ctx *ui = new_ctx();
+    dock_ctx d = dock_new(base, 800, 560);
+    run(ui, build_dock, &d, 4);
+    CHECK(strcmp(dock_str(ui), base) == 0);
+    cui_rect ds = rect_of(ui, cui_make_id(ui, "ds"));
+    CHECK(ds.w == 800 && ds.h == 560);
+    cui_rect bf = dock_body(ui, &d, 0), be = dock_body(ui, &d, 1), bp = dock_body(ui, &d, 3);
+    CHECK(bf.w > 150 && bf.w < 250 && be.x > bf.x + bf.w && bp.y > be.y + be.h);
+    CHECK(d.tab[2].w > 0 && d.tab[2].x > d.tab[1].x);   /* Log is a tab beside Editor */
+    /* only the tab that shows builds its content */
+    int e0 = d.built[1];
+    run(ui, build_dock, &d, 3);
+    CHECK(d.built[1] == e0 + 3 && d.built[2] == 0);
+    click_at(ui, build_dock, &d, d.tab[2].x + 16, d.tab[2].y + d.tab[2].h / 2);
+    int l0 = d.built[2], e1 = d.built[1];
+    run(ui, build_dock, &d, 2);
+    CHECK(d.built[2] == l0 + 2 && d.built[1] == e1);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6([Editor,*Log],[*Props]))") == 0);
+
+    /* a divider resizes, and stops at the smallest panel size */
+    bf = dock_body(ui, &d, 0);
+    float dx = bf.x + bf.w + 0.5f, dy = bf.y + bf.h / 2;
+    dock_drag(ui, &d, dx, dy, 300, dy, true);
+    bf = dock_body(ui, &d, 0);
+    CHECK_NEAR(bf.w, 300, 2);
+    dock_drag(ui, &d, bf.x + bf.w + 0.5f, dy, 5, dy, true);
+    bf = dock_body(ui, &d, 0);
+    CHECK(bf.w >= 119.5f && bf.w <= 121);
+    dock_drag(ui, &d, bf.x + bf.w + 0.5f, dy, 795, dy, true);
+    be = dock_body(ui, &d, 2);
+    CHECK(be.w >= 119.5f && be.w <= 121 && be.x + be.w <= 800.5f);
+    cui_destroy(ui);
+
+    /* dragging a tab onto the middle of a leaf stacks it there */
+    ui = new_ctx();
+    d = dock_new(base, 800, 560);
+    run(ui, build_dock, &d, 4);
+    bp = dock_body(ui, &d, 3);
+    dock_drag_tab(ui, &d, 2, bp.x + bp.w / 2, bp.y + bp.h / 2);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6([*Editor],[Props,*Log]))") == 0);
+    /* onto a strip: at the slot under the pointer */
+    run(ui, build_dock, &d, 2);
+    dock_drag_tab(ui, &d, 0, d.tab[3].x + 4, d.tab[3].y + d.tab[3].h / 2);
+    CHECK(strcmp(dock_str(ui), "dock1 v0.6([*Editor],[*Files,Props,Log])") == 0);   /* the emptied leaf collapsed */
+    cui_destroy(ui);
+
+    /* each side of a leaf splits it; the outer edges split the whole dockspace */
+    static const struct { int zone, panel; const char *want; } sides[] = {
+        { 0, 2, "dock1 h0.25([*Files],v0.6([*Editor],h0.5([*Log],[*Props])))" },
+        { 1, 2, "dock1 h0.25([*Files],v0.6([*Editor],h0.5([*Props],[*Log])))" },
+        { 2, 2, "dock1 h0.25([*Files],v0.6([*Editor],v0.5([*Log],[*Props])))" },
+        { 3, 2, "dock1 h0.25([*Files],v0.6([*Editor],v0.5([*Props],[*Log])))" },
+        { 4, 2, "dock1 h0.25([*Log],h0.25([*Files],v0.6([*Editor],[*Props])))" },
+        { 5, 2, "dock1 h0.75(h0.25([*Files],v0.6([*Editor],[*Props])),[*Log])" },
+        /* the top tile sits in Editor's strip, so this one comes from below; Props' leaf collapses */
+        { 6, 3, "dock1 v0.25([*Props],h0.25([*Files],[*Editor,Log]))" },
+        { 7, 2, "dock1 v0.75(h0.25([*Files],v0.6([*Editor],[*Props])),[*Log])" },
+    };
+    for (int s = 0; s < 8; s++) {
+        ui = new_ctx();
+        d = dock_new(base, 800, 560);
+        run(ui, build_dock, &d, 4);
+        bp = dock_body(ui, &d, 3);
+        cui_vec2 c = center(bp);
+        float x = c.x, y = c.y;
+        if (sides[s].zone == 0) x = bp.x + 8;
+        if (sides[s].zone == 1) x = bp.x + bp.w - 8;
+        if (sides[s].zone == 2) y = bp.y + 6;
+        if (sides[s].zone == 3) y = bp.y + bp.h - 6;
+        if (sides[s].zone == 4) { x = 8 + 14; y = 560 / 2.0f; }        /* the outer tiles, 8 in from each edge */
+        if (sides[s].zone == 5) { x = 800 - 8 - 14; y = 560 / 2.0f; }
+        if (sides[s].zone == 6) { x = 400; y = 8 + 14; }
+        if (sides[s].zone == 7) { x = 400; y = 560 - 8 - 14; }
+        dock_drag_tab(ui, &d, sides[s].panel, x, y);
+        CHECK(strcmp(dock_str(ui), sides[s].want) == 0);
+        /* the new leaf is laid out where the preview said */
+        cui_rect bl = dock_body(ui, &d, sides[s].panel), bo = dock_body(ui, &d, sides[s].panel == 3 ? 1 : 3);
+        CHECK(bl.w > 100 && bl.h > 50 && dock_disjoint(bl, bo));
+        if (sides[s].zone == 0 || sides[s].zone == 4) CHECK(bl.x < bo.x);
+        if (sides[s].zone == 1 || sides[s].zone == 5) CHECK(bl.x > bo.x);
+        if (sides[s].zone == 2 || sides[s].zone == 6) CHECK(bl.y < bo.y);
+        if (sides[s].zone == 3 || sides[s].zone == 7) CHECK(bl.y > bo.y);
+        cui_destroy(ui);
+    }
+
+    /* back onto the middle of its own leaf: nothing moves (its sides still split it) */
+    ui = new_ctx();
+    d = dock_new(base, 800, 560);
+    run(ui, build_dock, &d, 4);
+    be = dock_body(ui, &d, 1);
+    dock_drag_tab(ui, &d, 2, be.x + be.w / 2, be.y + be.h / 2);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6([Editor,*Log],[*Props]))") == 0);
+    be = dock_body(ui, &d, 2);
+    dock_drag_tab(ui, &d, 2, be.x + be.w - 6, be.y + be.h / 2);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6(h0.5([*Editor],[*Log]),[*Props]))") == 0);
+    cui_destroy(ui);
+
+    /* the last tab out of a leaf collapses it; onto its own lone leaf nothing happens */
+    ui = new_ctx();
+    d = dock_new(base, 800, 560);
+    run(ui, build_dock, &d, 4);
+    bf = dock_body(ui, &d, 0);
+    dock_drag_tab(ui, &d, 0, bf.x + bf.w / 2, bf.y + bf.h / 2);
+    CHECK(strcmp(dock_str(ui), base) == 0);
+    bp = dock_body(ui, &d, 3);
+    dock_drag_tab(ui, &d, 0, bp.x + bp.w / 2, bp.y + bp.h / 2);
+    CHECK(strcmp(dock_str(ui), "dock1 v0.6([*Editor,Log],[Props,*Files])") == 0);
+    be = dock_body(ui, &d, 1);
+    CHECK(be.x < 1 && be.w > 790);
+    /* Esc cancels a drag */
+    run(ui, build_dock, &d, 2);
+    be = dock_body(ui, &d, 1);
+    dock_drag(ui, &d, d.tab[2].x + 16, d.tab[2].y + d.tab[2].h / 2, be.x + 20, be.y + be.h / 2, false);
+    key(ui, build_dock, &d, CUI_KEY_ESCAPE, 0);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_dock, &d, 3);
+    CHECK(strcmp(dock_str(ui), "dock1 v0.6([Editor,*Log],[Props,*Files])") == 0);   /* the press selected Log, nothing moved */
+    /* released outside the dockspace: nothing moves */
+    dock_drag_tab(ui, &d, 2, 400, 590);
+    CHECK(strcmp(dock_str(ui), "dock1 v0.6([Editor,*Log],[Props,*Files])") == 0);
+    cui_destroy(ui);
+
+    /* close and reopen in the last place */
+    ui = new_ctx();
+    d = dock_new(base, 800, 560);
+    run(ui, build_dock, &d, 4);
+    cui_rect tp = d.tab[3];
+    click_at(ui, build_dock, &d, tp.x + tp.w - 6 - 10, tp.y + tp.h / 2);
+    CHECK(!d.open[3]);
+    run(ui, build_dock, &d, 2);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6([*Editor,Log],[*-Props]))") == 0);
+    be = dock_body(ui, &d, 1);
+    CHECK(be.h > 500);   /* Props' leaf left the layout: Editor takes the column */
+    int p0 = d.built[3];
+    run(ui, build_dock, &d, 2);
+    CHECK(d.built[3] == p0);
+    d.open[3] = true;
+    run(ui, build_dock, &d, 3);
+    CHECK(strcmp(dock_str(ui), base) == 0);
+    CHECK(d.built[3] > p0);
+    /* a hidden tab reopens selected */
+    d.open[2] = false;
+    run(ui, build_dock, &d, 2);
+    d.open[2] = true;
+    run(ui, build_dock, &d, 3);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6([Editor,*Log],[*Props]))") == 0);
+    cui_destroy(ui);
+
+    /* no layout: panels stack as tabs in the largest leaf; unplaced panels too */
+    ui = new_ctx();
+    d = dock_new(NULL, 800, 560);
+    run(ui, build_dock, &d, 6);
+    CHECK(strncmp(dock_str(ui), "dock1 [", 7) == 0);
+    CHECK(strstr(dock_str(ui), "Files") && strstr(dock_str(ui), "Props"));
+    cui_destroy(ui);
+
+    /* save, load and save again gives the same text; a fresh context reproduces the layout */
+    ui = new_ctx();
+    d = dock_new(base, 800, 560);
+    run(ui, build_dock, &d, 4);
+    bp = dock_body(ui, &d, 3);
+    dock_drag_tab(ui, &d, 2, bp.x + bp.w - 8, bp.y + bp.h / 2);
+    bf = dock_body(ui, &d, 0);
+    dock_drag(ui, &d, bf.x + bf.w + 0.5f, bf.y + 40, 333, bf.y + 40, true);
+    char s1[512], s2[512];
+    cui_dock_save(ui, "ds", s1, sizeof s1);
+    CHECK(cui_dock_load(ui, "ds", s1));
+    run(ui, build_dock, &d, 3);
+    cui_dock_save(ui, "ds", s2, sizeof s2);
+    CHECK(strcmp(s1, s2) == 0);
+    cui_rect r1[DK_N];
+    for (int k = 0; k < DK_N; k++) r1[k] = dock_body(ui, &d, k);
+    cui_ctx *ui2 = new_ctx();
+    dock_ctx d2 = dock_new(s1, 800, 560);
+    run(ui2, build_dock, &d2, 4);
+    cui_dock_save(ui2, "ds", s2, sizeof s2);
+    CHECK(strcmp(s1, s2) == 0);
+    for (int k = 0; k < DK_N; k++) {
+        cui_rect a = r1[k], b2 = dock_body(ui2, &d2, k);
+        CHECK(fabsf(a.x - b2.x) < 1.5f && fabsf(a.w - b2.w) < 1.5f && fabsf(a.y - b2.y) < 1.5f && fabsf(a.h - b2.h) < 1.5f);
+    }
+    cui_destroy(ui2);
+    /* the length is reported like snprintf, and a short buffer stays terminated */
+    char tiny[8];
+    size_t need = cui_dock_save(ui, "ds", tiny, sizeof tiny);
+    CHECK(need == strlen(s1) && strlen(tiny) == 7);
+    CHECK(cui_dock_save(ui, "nothing", tiny, sizeof tiny) == 0 && tiny[0] == 0);
+    /* names with the format's own characters are escaped */
+    {
+        cui_ctx *u3 = new_ctx();
+        const char *odd = "dock1 h0.5([*a\\,b\\]c,\\-dash],[*x\\\\y])";
+        CHECK(cui_dock_load(u3, "odd", odd));
+        char o3[128];
+        cui_dock_save(u3, "odd", o3, sizeof o3);
+        CHECK(strcmp(o3, odd) == 0);
+        cui_destroy(u3);
+    }
+
+    /* malformed text is refused and leaves the layout alone */
+    static const char *const bad[] = {
+        "", "dock1", "dock1 ", "dock2 [a]", "dock1 []", "dock1 [a", "dock1 [a,]", "dock1 [,a]", "dock1 h0.5([a])",
+        "dock1 h0.5([a],[b]", "dock1 h0.5([a],[b]))", "dock1 h2([a],[b])", "dock1 h1.5([a],[b])", "dock1 h-0.5([a],[b])",
+        "dock1 h0.([a],[b])", "dock1 h0.1234567([a],[b])", "dock1 h99999999999999999999([a],[b])", "dock1 x0.5([a],[b])",
+        "dock1 h0.5([a],[a])", "dock1 [*a,*b]", "dock1 [a\\", "dock1 [a]x", "dock1 [a(b]", "dock1 [a\nb]",
+        "dock1 h0.5[a],[b]", "dock1 [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+    };
+    cui_dock_save(ui, "ds", s1, sizeof s1);
+    for (int k = 0; k < (int)(sizeof bad / sizeof bad[0]); k++) {
+        bool ok = cui_dock_load(ui, "ds", bad[k]);
+        CHECK(!ok);
+        if (ok) printf("    accepted: %s\n", bad[k]);
+    }
+    CHECK(!cui_dock_load(ui, "ds", NULL));
+    /* every prefix of a good layout but the whole is refused */
+    for (size_t n = 0; n < strlen(s1); n++) {
+        char cut[512];
+        memcpy(cut, s1, n);
+        cut[n] = 0;
+        CHECK(!cui_dock_load(ui, "ds", cut));
+    }
+    /* nesting deeper than the limit, and more leaves than there is room for */
+    {
+        static char deep[4096];
+        size_t p = (size_t)snprintf(deep, sizeof deep, "dock1 ");
+        for (int k = 0; k < 60; k++) p += (size_t)snprintf(deep + p, sizeof deep - p, "h0.5([n%d],", k);
+        p += (size_t)snprintf(deep + p, sizeof deep - p, "[end]");
+        for (int k = 0; k < 60; k++) deep[p++] = ')';
+        deep[p] = 0;
+        CHECK(!cui_dock_load(ui, "ds", deep));
+    }
+    cui_dock_save(ui, "ds", s2, sizeof s2);
+    CHECK(strcmp(s1, s2) == 0);
+    /* random text and random mutations of a good layout: never a crash, and a refusal changes nothing */
+    srand(1234);
+    for (int it = 0; it < 4000; it++) {
+        char fz[160];
+        int n = rand() % 150;
+        if (it % 2) {
+            static const char alpha[] = "dock1 hv0.123456789()[],*-\\ab";
+            for (int k = 0; k < n; k++) fz[k] = alpha[rand() % (int)(sizeof alpha - 1)];
+            fz[n] = 0;
+            if (it % 4 == 1) memcpy(fz, "dock1 ", n >= 6 ? 6 : (size_t)n);
+        } else {
+            snprintf(fz, sizeof fz, "%s", s1);
+            int len = (int)strlen(fz);
+            for (int m = 0; m < 1 + rand() % 3 && len > 0; m++) fz[rand() % len] = (char)(1 + rand() % 255);
+        }
+        char before[512], after[512];
+        cui_dock_save(ui, "ds", before, sizeof before);
+        if (!cui_dock_load(ui, "ds", fz)) {
+            cui_dock_save(ui, "ds", after, sizeof after);
+            CHECK(strcmp(before, after) == 0);
+        }
+        if (it % 200 == 0) run(ui, build_dock, &d, 1);
+    }
+    CHECK(cui_dock_load(ui, "ds", base));
+    run(ui, build_dock, &d, 3);
+    CHECK(strcmp(dock_str(ui), base) == 0);
+    cui_destroy(ui);
+
+    /* names the app has not shown yet are kept, and take their place when they appear */
+    ui = new_ctx();
+    d = dock_new("dock1 h0.4([*Files,Ghost],[*Editor,Log,Props])", 800, 560);
+    run(ui, build_dock, &d, 4);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.4([*Files,Ghost],[*Editor,Log,Props])") == 0);
+    bf = dock_body(ui, &d, 0);
+    CHECK_NEAR(bf.w, 0.4f * 799, 2);
+    CHECK(cui_dock_load(ui, "ds", "dock1 h0.5([*Files],[*Ghost])"));
+    run(ui, build_dock, &d, 4);
+    /* Ghost alone is never shown, so its leaf stays out of the layout; the others land in the largest leaf */
+    CHECK(strstr(dock_str(ui), "Ghost") != NULL);
+    bf = dock_body(ui, &d, 0);
+    CHECK(bf.w > 790);
+    /* a closed panel in a loaded layout closes the app's flag */
+    CHECK(cui_dock_load(ui, "ds", "dock1 h0.5([*Files,-Log],[*Editor,Props])"));
+    run(ui, build_dock, &d, 3);
+    CHECK(!d.open[2] && d.open[0]);
+    cui_destroy(ui);
+
+    /* the keyboard: arrows move along a focused strip, Ctrl+Tab cycles the focused leaf (opt in) */
+    ui = new_ctx();
+    d = dock_new(base, 800, 560);
+    d.shortcuts = true;
+    run(ui, build_dock, &d, 4);
+    click_at(ui, build_dock, &d, d.tab[1].x + 16, d.tab[1].y + d.tab[1].h / 2);
+    key(ui, build_dock, &d, CUI_KEY_RIGHT, 0);
+    run(ui, build_dock, &d, 1);
+    CHECK(strcmp(dock_str(ui), "dock1 h0.25([*Files],v0.6([Editor,*Log],[*Props]))") == 0);
+    key(ui, build_dock, &d, CUI_KEY_TAB, CUI_MOD_CTRL);
+    run(ui, build_dock, &d, 1);
+    CHECK(strcmp(dock_str(ui), base) == 0);
+    /* the x (and Ctrl+W) closes; Delete on the focused tab too */
+    key(ui, build_dock, &d, CUI_KEY_W, CUI_MOD_PRIMARY);
+    run(ui, build_dock, &d, 1);
+    CHECK(!d.open[1]);
+    cui_destroy(ui);
+
+    /* narrow: splits share what there is, nothing overlaps or leaves the dockspace */
+    for (int wv = 0; wv < 3; wv++) {
+        static const float widths[] = { 280, 340, 200 };
+        ui = new_ctx();
+        d = dock_new("dock1 h0.3([*Files],h0.5([*Editor,Log],[*Props]))", widths[wv], 420);
+        run(ui, build_dock, &d, 5);
+        cui_rect r[3] = { dock_body(ui, &d, 0), dock_body(ui, &d, 1), dock_body(ui, &d, 3) };
+        for (int k = 0; k < 3; k++) {
+            CHECK(r[k].w > 20 && r[k].x >= -0.5f && r[k].x + r[k].w <= widths[wv] + 0.5f);
+            for (int j = k + 1; j < 3; j++) CHECK(dock_disjoint(r[k], r[j]));
+        }
+        /* each gets an equal share of the minimum when the minimums do not fit */
+        if (widths[wv] < 3 * 120 + 2) CHECK(fabsf(r[0].w - r[1].w) < 3 && fabsf(r[1].w - r[2].w) < 3);
+        /* a divider drag in a narrow dockspace still clamps */
+        dock_drag(ui, &d, r[0].x + r[0].w + 0.5f, r[0].y + 30, 2, r[0].y + 30, true);
+        cui_rect r0 = dock_body(ui, &d, 0);
+        CHECK(r0.w > 20);
+        cui_destroy(ui);
+    }
+
+    /* random drags, drops, closes and loads */
+    ui = new_ctx();
+    d = dock_new(base, 640, 480);
+    run(ui, build_dock, &d, 4);
+    srand(99);
+    for (int it = 0; it < 300; it++) {
+        int a = rand() % 6;
+        if (a == 0) d.open[rand() % DK_N] ^= 1;
+        else if (a == 1) { char t[512]; cui_dock_save(ui, "ds", t, sizeof t); CHECK(cui_dock_load(ui, "ds", t)); }
+        else if (a == 2) d.w = (float)(160 + rand() % 700);
+        else {
+            int k = rand() % DK_N;
+            if (d.tab[k].w <= 0) { run(ui, build_dock, &d, 1); continue; }
+            float bx = (float)(rand() % 700), by = (float)(rand() % 500);
+            dock_drag(ui, &d, d.tab[k].x + 10, d.tab[k].y + 10, bx, by, rand() % 8 != 0);
+            if (rand() % 3 == 0) key(ui, build_dock, &d, CUI_KEY_ESCAPE, 0);
+            cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        }
+        run(ui, build_dock, &d, 2);
+        char t[512];
+        cui_dock_save(ui, "ds", t, sizeof t);
+        CHECK(strncmp(t, "dock1 ", 6) == 0);
+        for (int k = 0; k < DK_N; k++) CHECK(strstr(t, dk_names[k]) != NULL || !d.open[k]);
+    }
     cui_destroy(ui);
 }
 
@@ -2567,6 +3362,437 @@ static void test_gradient(void) {
     CHECK(cui_get_rect(ui, pop).w > 100);
     CHECK(a.stops[0].color.a == 128);   /* the picker leaves opacity alone */
 #undef GX
+    cui_destroy(ui);
+}
+
+/* timeline editor ---------------------------------------------------------- */
+
+typedef struct {
+    cui_timeline_track tr[4]; int n;
+    cui_curve_key keys[4][16]; bool sel[4][16];
+    cui_timeline_clip clips[4];
+    cui_timeline_track *big; int big_n;
+    float time, in, out, width;
+    bool range, toggles, free_drag;
+    cui_timeline_view view;
+    int cur_t, cur_k;
+    cui_timeline_editor_result r;
+    int added, removed, plays, moved, scrubs, toggled;
+    bool changed;
+    cui_id id;
+} tl_ctx;
+static void build_tl(cui_ctx *ui, void *u) {
+    tl_ctx *a = u;
+    cui_column(ui, .pad = 20) {
+        a->r = cui_timeline_editor(ui, "tl", a->big ? a->big : a->tr, a->big ? a->big_n : a->n, &a->time, .end = 4, .fps = 24,
+                                   .view = &a->view, .current_track = &a->cur_t, .current_key = &a->cur_k, .width = CUI_PX(a->width),
+                                   .in = a->range ? &a->in : NULL, .out = a->range ? &a->out : NULL, .toggles = a->toggles,
+                                   .free_drag = a->free_drag);
+        a->id = cui_last_id(ui);
+    }
+    if (a->r.added_key >= 0) a->added++;
+    a->removed += a->r.removed_keys;
+    if (a->r.play_toggled) a->plays++;
+    if (a->r.keys_moved) a->moved++;
+    if (a->r.scrubbing) a->scrubs++;
+    if (a->r.toggled >= 0) a->toggled = a->r.toggled;
+    if (a->r.changed) a->changed = true;
+}
+static void tl_setup(tl_ctx *a) {
+    memset(a, 0, sizeof *a);
+    a->width = 760; a->cur_t = a->cur_k = -1;
+    static const float px[3][2] = { { 0, 0 }, { 1, 100 }, { 2, 50 } }, rot[3][2] = { { 0.5f, 0 }, { 1.5f, 30 }, { 3, -10 } };
+    for (int i = 0; i < 3; i++) {
+        curve_key(&a->keys[1][i], px[i][0], px[i][1], CUI_CURVE_SMOOTH);
+        curve_key(&a->keys[2][i], rot[i][0], rot[i][1], i == 1 ? CUI_CURVE_STEP : CUI_CURVE_LINEAR);
+    }
+    a->clips[0] = (cui_timeline_clip){ 1.0f, 2.5f, 0, "Theme", false };
+    a->tr[0] = (cui_timeline_track){ .name = "Hero", .depth = 0 };
+    a->tr[1] = (cui_timeline_track){ .name = "Position X", .depth = 1, .keys = a->keys[1], .key_count = 3, .key_capacity = 16, .key_selected = a->sel[1] };
+    a->tr[2] = (cui_timeline_track){ .name = "Rotation", .depth = 1, .keys = a->keys[2], .key_count = 3, .key_capacity = 16, .key_selected = a->sel[2] };
+    a->tr[3] = (cui_timeline_track){ .name = "Audio", .depth = 0, .clips = a->clips, .clip_count = 1 };
+    a->n = 4;
+}
+/* where things are: the list is 184 wide at this size (40 on a narrow editor),
+ * the time axis is inset 10 from the time area, rows are 26 below a 28 ruler */
+typedef struct { float px, pw, by, rx, ry; } tl_map;
+static tl_map tl_map_of(cui_ctx *ui, tl_ctx *a) {
+    cui_rect r = cui_get_rect(ui, a->id);
+    float lw = r.w >= 552 ? 184 : r.w >= 380 ? fmaxf(120.0f, fminf(184.0f, r.w * 0.32f)) : 40;
+    tl_map m = { r.x + lw + 10, r.w - lw - 20, r.y + 29, r.x, r.y };
+    return m;
+}
+static float tl_x(const tl_map *m, const tl_ctx *a, float t) { return m->px + (t - a->view.start) / (a->view.end - a->view.start) * m->pw; }
+static float tl_y(const tl_map *m, const tl_ctx *a, int row) { return m->by + row * 26 + 13 - a->view.scroll; }
+static int tl_selected(const tl_ctx *a) {
+    int c = 0;
+    for (int t = 0; t < 4; t++) for (int k = 0; k < 16; k++) c += a->sel[t][k];
+    return c;
+}
+static void tl_mods(cui_ctx *ui, int mods) { cui_input_key(ui, CUI_KEY_NONE, mods != 0, mods); }
+static unsigned tl_rand(unsigned *s) { *s ^= *s << 13; *s ^= *s >> 17; *s ^= *s << 5; return *s; }
+
+static void test_timeline(void) {
+    printf("timeline editor: scrub, frame keys, select, box select, snapped drags, add, delete, zoom, fit, groups, clips, 2000 tracks, empty\n");
+    cui_ctx *ui = new_ctx();
+    static tl_ctx a;
+    tl_setup(&a);
+    run(ui, build_tl, &a, 3);
+    CHECK(a.view.start == 0 && a.view.end == 4);   /* zeroed view: fits the sequence */
+    tl_map m = tl_map_of(ui, &a);
+    CHECK(m.pw > 500);
+    float ruler_y = m.ry + 14;
+    /* a click on the ruler jumps there, on a frame */
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 49.2f / 24.0f), ruler_y);
+    CHECK(a.time == 49.0f / 24.0f);
+    CHECK(a.r.time_changed || a.time == 49.0f / 24.0f);
+    /* dragging in the ruler scrubs, snapped to frames */
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.0f), ruler_y, tl_x(&m, &a, 72.3f / 24.0f), 6);
+    CHECK(a.time == 3.0f);
+    CHECK(a.scrubs >= 5);
+    /* Shift while scrubbing: free */
+    tl_mods(ui, CUI_MOD_SHIFT);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.0f), ruler_y, tl_x(&m, &a, 1.0f + 0.4f / 24.0f), 4);
+    tl_mods(ui, 0);
+    CHECK(fabsf(a.time * 24 - roundf(a.time * 24)) > 0.1f);
+    /* frame keys: the click focused the editor */
+    key_press(ui, build_tl, &a, CUI_KEY_HOME, 0);  CHECK(a.time == 0);
+    key_press(ui, build_tl, &a, CUI_KEY_RIGHT, 0); CHECK(a.time == 1.0f / 24.0f);
+    key_press(ui, build_tl, &a, CUI_KEY_RIGHT, CUI_MOD_SHIFT); CHECK(a.time == 11.0f / 24.0f);
+    key_press(ui, build_tl, &a, CUI_KEY_LEFT, 0);  CHECK(a.time == 10.0f / 24.0f);
+    key_press(ui, build_tl, &a, CUI_KEY_END, 0);   CHECK(a.time == 4.0f);
+    key_press(ui, build_tl, &a, CUI_KEY_RIGHT, 0); CHECK(a.time == 4.0f);   /* stays inside */
+    key_press(ui, build_tl, &a, CUI_KEY_HOME, 0);
+    /* Up and Down jump between keys of the visible tracks */
+    key_press(ui, build_tl, &a, CUI_KEY_DOWN, 0);  CHECK(a.time == 0.5f);
+    key_press(ui, build_tl, &a, CUI_KEY_DOWN, 0);  CHECK(a.time == 1.0f);
+    key_press(ui, build_tl, &a, CUI_KEY_UP, 0);    CHECK(a.time == 0.5f);
+    /* Space is a play request; the caller advances time */
+    key_press(ui, build_tl, &a, CUI_KEY_SPACE, 0);
+    CHECK(a.plays == 1 && a.time == 0.5f);
+
+    /* click selects a key, Shift adds, Ctrl toggles */
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 1.0f), tl_y(&m, &a, 1));
+    CHECK(a.sel[1][1] && tl_selected(&a) == 1 && a.cur_t == 1 && a.cur_k == 1);
+    CHECK(a.r.current_track == 1 && a.r.current_key == 1);
+    tl_mods(ui, CUI_MOD_SHIFT);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 1.5f), tl_y(&m, &a, 2));
+    tl_mods(ui, 0);
+    CHECK(a.sel[1][1] && a.sel[2][1] && tl_selected(&a) == 2 && a.cur_t == 2);
+    tl_mods(ui, CUI_MOD_PRIMARY);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 1.0f), tl_y(&m, &a, 1));
+    tl_mods(ui, 0);
+    CHECK(!a.sel[1][1] && a.sel[2][1] && tl_selected(&a) == 1);
+    /* a click on empty space clears */
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 3.6f), tl_y(&m, &a, 1));
+    CHECK(tl_selected(&a) == 0 && a.cur_k == -1 && a.cur_t == 1);
+    /* box selection over two rows */
+    drag2(ui, build_tl, &a, tl_x(&m, &a, 0.25f), tl_y(&m, &a, 1) - 6, tl_x(&m, &a, 2.2f), tl_y(&m, &a, 2) + 6, 6);
+    CHECK(a.sel[1][1] && a.sel[1][2] && a.sel[2][0] && a.sel[2][1] && !a.sel[1][0] && !a.sel[2][2] && tl_selected(&a) == 4);
+    CHECK(a.time == 0.5f);   /* box selection leaves the playhead alone */
+    /* Esc clears, Ctrl+A selects every key */
+    key_press(ui, build_tl, &a, CUI_KEY_ESCAPE, 0);
+    CHECK(tl_selected(&a) == 0);
+    key_press(ui, build_tl, &a, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(tl_selected(&a) == 6);
+    key_press(ui, build_tl, &a, CUI_KEY_ESCAPE, 0);
+
+    /* dragging a key snaps it to whole frames */
+    float k0 = a.keys[1][1].x;
+    CHECK(k0 == 1.0f);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.0f), tl_y(&m, &a, 1), tl_x(&m, &a, 1.0f + 10.3f / 24.0f), 6);
+    CHECK(a.keys[1][1].x == 34.0f / 24.0f);
+    CHECK(a.sel[1][1] && tl_selected(&a) == 1 && a.moved > 0);
+    /* several selected keys move together, each landing on a frame */
+    tl_mods(ui, CUI_MOD_SHIFT);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 1.5f), tl_y(&m, &a, 2));
+    tl_mods(ui, 0);
+    CHECK(tl_selected(&a) == 2);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.5f), tl_y(&m, &a, 2), tl_x(&m, &a, 1.5f + 5.2f / 24.0f), 6);
+    CHECK(a.keys[1][1].x == 39.0f / 24.0f);
+    CHECK(a.keys[2][1].x == 41.0f / 24.0f);
+    CHECK(a.sel[1][1] && a.sel[2][1] && tl_selected(&a) == 2);   /* a drag keeps the selection */
+    /* Alt+arrows nudge the selection by a frame */
+    key_press(ui, build_tl, &a, CUI_KEY_RIGHT, CUI_MOD_ALT);
+    CHECK(a.keys[1][1].x == 40.0f / 24.0f && a.keys[2][1].x == 42.0f / 24.0f);
+    key_press(ui, build_tl, &a, CUI_KEY_LEFT, CUI_MOD_ALT | CUI_MOD_SHIFT);
+    CHECK(a.keys[1][1].x == 30.0f / 24.0f && a.keys[2][1].x == 32.0f / 24.0f);
+    CHECK(a.time == 0.5f);
+    /* the block stays inside the sequence */
+    for (int i = 0; i < 12; i++) key_press(ui, build_tl, &a, CUI_KEY_LEFT, CUI_MOD_ALT | CUI_MOD_SHIFT);
+    CHECK(a.keys[1][0].x == 0 && a.keys[1][1].x == 0 && a.sel[1][1]);
+    CHECK(a.keys[2][0].x == 2.0f / 24.0f && a.sel[2][0] && a.keys[2][1].x == 0.5f && !a.sel[2][1]);   /* passed a key: re-sorted */
+    CHECK(a.cur_t == 2 && a.cur_k == 0);
+    bool sorted = true;
+    for (int t = 1; t < 3; t++) for (int i = 1; i < a.tr[t].key_count; i++) sorted = sorted && a.keys[t][i - 1].x <= a.keys[t][i].x;
+    CHECK(sorted);
+    /* passing a neighbour re-sorts the keys; the selection follows */
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 3.0f), tl_y(&m, &a, 2));
+    CHECK(a.cur_t == 2 && a.cur_k == 2 && tl_selected(&a) == 1);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 3.0f), tl_y(&m, &a, 2), tl_x(&m, &a, 0.25f), 8);
+    CHECK(a.keys[2][1].x == 0.25f && a.sel[2][1] && a.cur_k == 1);
+    CHECK(a.keys[2][0].x == 2.0f / 24.0f && a.keys[2][2].x == 0.5f);
+    /* free drags: Shift during the drag, or .free_drag */
+    a.free_drag = true;
+    drag(ui, build_tl, &a, tl_x(&m, &a, 0.25f), tl_y(&m, &a, 2), tl_x(&m, &a, 0.25f + 2.3f / 24.0f), 4);
+    CHECK(fabsf(a.keys[2][1].x * 24 - roundf(a.keys[2][1].x * 24)) > 0.1f);
+    a.free_drag = false;
+    /* Delete removes the selected keys and reports them */
+    key_press(ui, build_tl, &a, CUI_KEY_DELETE, 0);
+    CHECK(a.tr[2].key_count == 2 && a.removed == 1 && a.cur_k == -1 && tl_selected(&a) == 0);
+    /* double click on a row adds a key on the curve, on a frame, selected */
+    float want = cui_curve_eval(a.keys[1], a.tr[1].key_count, 60.0f / 24.0f);
+    double_click(ui, build_tl, &a, tl_x(&m, &a, 60.2f / 24.0f), tl_y(&m, &a, 1));
+    CHECK(a.added == 1 && a.tr[1].key_count == 4);
+    CHECK(a.keys[1][3].x == 60.0f / 24.0f && a.sel[1][3] && tl_selected(&a) == 1);
+    CHECK_NEAR(a.keys[1][3].y, want, 1e-4);
+    CHECK(a.cur_t == 1 && a.cur_k == 3);
+    /* a full track adds nothing */
+    a.tr[2].key_capacity = a.tr[2].key_count;
+    double_click(ui, build_tl, &a, tl_x(&m, &a, 3.5f), tl_y(&m, &a, 2));
+    CHECK(a.added == 1 && a.tr[2].key_count == 2);
+    a.tr[2].key_capacity = 16;
+    /* a click on a track name selects its keys */
+    click_at(ui, build_tl, &a, m.rx + 60, tl_y(&m, &a, 1));
+    CHECK(tl_selected(&a) == 4 && a.cur_t == 1 && a.cur_k == -1);
+    key_press(ui, build_tl, &a, CUI_KEY_ESCAPE, 0);
+
+    /* the wheel zooms, and the time under the pointer stays under it */
+    float wx = tl_x(&m, &a, 1.3f), wy = tl_y(&m, &a, 3);
+    cui_input_mouse_move(ui, wx, wy);
+    run(ui, build_tl, &a, 1);
+    float under = a.view.start + (wx - m.px) / m.pw * (a.view.end - a.view.start);
+    cui_input_scroll(ui, 0, 3);
+    run(ui, build_tl, &a, 1);
+    float range = a.view.end - a.view.start;
+    CHECK_NEAR(range, 4.0 / pow(1.12, 3), 1e-4);
+    CHECK_NEAR(a.view.start + (wx - m.px) / m.pw * range, under, 1e-4);
+    CHECK(a.r.view_changed);
+    /* Shift+wheel pans */
+    float vs = a.view.start;
+    tl_mods(ui, CUI_MOD_SHIFT);
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_tl, &a, 1);
+    tl_mods(ui, 0);
+    CHECK(a.view.start > vs);
+    CHECK_NEAR(a.view.end - a.view.start, range, 1e-4);
+    /* the middle button drags the view */
+    vs = a.view.start;
+    cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, true);
+    run(ui, build_tl, &a, 1);
+    cui_input_mouse_move(ui, wx + 60, wy);
+    run(ui, build_tl, &a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, false);
+    run(ui, build_tl, &a, 1);
+    CHECK_NEAR(vs - a.view.start, 60.0f / m.pw * range, 1e-4);
+    /* + zooms around the playhead, F fits (reduced motion: at once) */
+    key_press(ui, build_tl, &a, CUI_KEY_EQUAL, 0);
+    CHECK_NEAR(a.view.end - a.view.start, range / 1.25, 1e-4);
+    key_press(ui, build_tl, &a, CUI_KEY_F, 0);
+    CHECK(a.view.start == 0 && a.view.end == 4);
+    /* with motion on, fitting animates and settles on the whole sequence */
+    cui_set_reduced_motion(ui, false);
+    cui_input_mouse_move(ui, wx, wy);
+    for (int i = 0; i < 4; i++) { cui_input_scroll(ui, 0, 2); run(ui, build_tl, &a, 1); }
+    float zoomed = a.view.end - a.view.start;
+    CHECK(zoomed < 2);
+    key_press(ui, build_tl, &a, CUI_KEY_F, 0);
+    run(ui, build_tl, &a, 2);
+    float mid = a.view.end - a.view.start;
+    CHECK(mid > zoomed + 1e-3f && mid < 4 - 1e-3f);   /* on its way */
+    run(ui, build_tl, &a, 90);
+    CHECK_NEAR(a.view.start, 0, 1e-5);
+    CHECK_NEAR(a.view.end, 4, 1e-5);
+    cui_set_reduced_motion(ui, true);
+    run(ui, build_tl, &a, 1);
+    /* the playhead keeps in view: stepping past the edge moves the view */
+    cui_input_mouse_move(ui, wx, wy);
+    for (int i = 0; i < 3; i++) { cui_input_scroll(ui, 0, 3); run(ui, build_tl, &a, 1); }
+    a.time = a.view.end - 0.5f / 24.0f;
+    run(ui, build_tl, &a, 1);
+    key_press(ui, build_tl, &a, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    CHECK(a.time >= a.view.start && a.time <= a.view.end);
+    key_press(ui, build_tl, &a, CUI_KEY_F, 0);
+
+    /* hovering a key shows its time and value after the delay */
+    cui_input_mouse_move(ui, tl_x(&m, &a, 3.6f), tl_y(&m, &a, 1));
+    run(ui, build_tl, &a, 70);
+    int idle = cui_get_draw_data(ui)->vertex_count;
+    cui_input_mouse_move(ui, tl_x(&m, &a, 2.0f), tl_y(&m, &a, 1));
+    run(ui, build_tl, &a, 3);
+    CHECK(a.r.hovered_track == 1 && a.r.hovered_key == 2);
+    run(ui, build_tl, &a, 70);
+    CHECK(cui_get_draw_data(ui)->vertex_count > idle + 40);
+
+    /* collapsing a group hides its rows: Audio moves up to row 1 */
+    click_at(ui, build_tl, &a, m.rx + 10, tl_y(&m, &a, 0));
+    CHECK(a.tr[0].collapsed && a.toggled == 0);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 1.75f), tl_y(&m, &a, 1));
+    CHECK(a.clips[0].selected && tl_selected(&a) == 0);
+    click_at(ui, build_tl, &a, m.rx + 10, tl_y(&m, &a, 0));
+    CHECK(!a.tr[0].collapsed);
+    /* clips: drag the body to move, an end to trim (snapped) */
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.75f), tl_y(&m, &a, 3), tl_x(&m, &a, 1.75f + 12.2f / 24.0f), 6);
+    CHECK(a.clips[0].start == 1.5f && a.clips[0].end == 3.0f && a.clips[0].selected);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 3.0f) - 2, tl_y(&m, &a, 3), tl_x(&m, &a, 3.5f) - 2, 6);
+    CHECK(a.clips[0].start == 1.5f && a.clips[0].end == 3.5f);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.5f) + 2, tl_y(&m, &a, 3), tl_x(&m, &a, 2.0f) + 2, 6);
+    CHECK(a.clips[0].start == 2.0f && a.clips[0].end == 3.5f && a.clips[0].offset == 0.5f);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 2.5f), tl_y(&m, &a, 3), tl_x(&m, &a, 3.9f), 6);
+    CHECK(a.clips[0].end == 4.0f && a.clips[0].start == 2.5f);   /* held inside the sequence */
+    key_press(ui, build_tl, &a, CUI_KEY_DELETE, 0);
+    CHECK(a.tr[3].clip_count == 0 && a.r.removed_clips == 1);
+    /* locked tracks: shown, not editable */
+    a.tr[1].locked = true;
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 2.0f), tl_y(&m, &a, 1));
+    CHECK(tl_selected(&a) == 0);
+    a.tr[1].locked = false;
+    /* toggles: hide and lock buttons on each row */
+    a.toggles = true;
+    run(ui, build_tl, &a, 2);
+    a.changed = false;
+    click_at(ui, build_tl, &a, m.rx + 184 - 4 - 11, tl_y(&m, &a, 2));
+    CHECK(a.tr[2].locked && a.toggled == 2 && a.changed);
+    click_at(ui, build_tl, &a, m.rx + 184 - 4 - 22 - 11, tl_y(&m, &a, 2));
+    CHECK(a.tr[2].muted);
+    a.toggles = false; a.tr[2].locked = a.tr[2].muted = false;
+    /* the play range: drag the in marker, snapped and kept before the out marker */
+    a.range = true; a.in = 0.5f; a.out = 3.0f;
+    run(ui, build_tl, &a, 2);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 0.5f), ruler_y, tl_x(&m, &a, 1.02f), 6);
+    CHECK(a.in == 1.0f && a.out == 3.0f);
+    drag(ui, build_tl, &a, tl_x(&m, &a, 1.0f), ruler_y, tl_x(&m, &a, 3.6f), 6);
+    CHECK_NEAR(a.in, 71.0 / 24.0, 1e-6);
+    a.range = false;
+    /* a narrow editor: the list turns to icons, keys still hit */
+    a.width = 300;
+    run(ui, build_tl, &a, 3);
+    m = tl_map_of(ui, &a);
+    CHECK(m.px - m.rx == 50);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 2.0f), tl_y(&m, &a, 1));
+    CHECK(a.sel[1][2] && tl_selected(&a) == 1);
+    cui_destroy(ui);
+
+    /* 2000 tracks in 200 groups: only the rows in view are visited */
+    int bn = 2000;
+    cui_timeline_track *big = calloc((size_t)bn, sizeof *big);
+    cui_curve_key *bk = calloc((size_t)bn * 12, sizeof *bk);
+    bool *bs = calloc((size_t)bn * 12, sizeof *bs);
+    for (int i = 0; i < bn; i++) {
+        big[i].name = i % 10 ? "Channel" : "Bone";
+        big[i].depth = i % 10 ? 1 : 0;
+        big[i].keys = bk + i * 12; big[i].key_capacity = 12; big[i].key_selected = bs + i * 12;
+        big[i].key_count = 10;
+        for (int j = 0; j < 10; j++) curve_key(&big[i].keys[j], (float)((j * 9 + i) % 96) / 24.0f * 0.98f + j * 0.001f, (float)j, j % 3);
+        cui_curve_key *kk = big[i].keys;   /* sorted by time */
+        for (int x = 1; x < 10; x++) for (int y = x; y > 0 && kk[y - 1].x > kk[y].x; y--) { cui_curve_key t = kk[y]; kk[y] = kk[y - 1]; kk[y - 1] = t; }
+    }
+    ui = new_ctx();
+    tl_setup(&a);
+    a.big = big; a.big_n = bn;
+    clock_t c0 = clock();
+    run(ui, build_tl, &a, 3);
+    int verts = cui_get_draw_data(ui)->vertex_count;
+    CHECK(verts < 30000);
+    m = tl_map_of(ui, &a);
+    /* scroll the rows from the track list, zoom and pan over the time area */
+    cui_input_mouse_move(ui, m.rx + 60, m.by + 100);
+    for (int i = 0; i < 200; i++) { cui_input_scroll(ui, 0, -5); run(ui, build_tl, &a, 1); }
+    CHECK(a.view.scroll > 30000);
+    CHECK(cui_get_draw_data(ui)->vertex_count < 30000);
+    cui_input_mouse_move(ui, tl_x(&m, &a, 2), m.by + 100);
+    for (int i = 0; i < 20; i++) { cui_input_scroll(ui, 0, i < 10 ? 2 : -2); run(ui, build_tl, &a, 1); }
+    key_press(ui, build_tl, &a, CUI_KEY_A, CUI_MOD_PRIMARY);   /* nothing focused yet: no-op */
+    int vr = (int)(a.view.scroll / 26) + 2;
+    click_at(ui, build_tl, &a, m.rx + 100, tl_y(&m, &a, vr));   /* a name: its keys */
+    int all = 0;
+    for (int i = 0; i < bn * 12; i++) all += bs[i];
+    CHECK(all == 10 && a.cur_t == vr);
+    key_press(ui, build_tl, &a, CUI_KEY_A, CUI_MOD_PRIMARY);
+    all = 0;
+    for (int i = 0; i < bn * 12; i++) all += bs[i];
+    CHECK(all == bn * 10);
+    key_press(ui, build_tl, &a, CUI_KEY_RIGHT, CUI_MOD_ALT);   /* every key moves a frame */
+    CHECK(a.r.keys_moved);
+    CHECK(cui_get_draw_data(ui)->vertex_count < 40000);
+    double secs = (double)(clock() - c0) / CLOCKS_PER_SEC;
+    CHECK(secs < 5.0);
+    printf("  2000 tracks: %d vertices, %.3f s for ~240 frames\n", verts, secs);
+    cui_destroy(ui);
+    free(big); free(bk); free(bs);
+
+    /* no tracks: the ruler still scrubs; nothing breaks */
+    ui = new_ctx();
+    tl_setup(&a);
+    a.n = 0;
+    run(ui, build_tl, &a, 3);
+    m = tl_map_of(ui, &a);
+    cui_rect er = cui_get_rect(ui, a.id);
+    CHECK(er.h > 80);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 2.0f), m.ry + 14);
+    CHECK(a.time == 2.0f);
+    click_at(ui, build_tl, &a, tl_x(&m, &a, 2.0f), m.by + 30);
+    double_click(ui, build_tl, &a, tl_x(&m, &a, 2.0f), m.by + 30);
+    drag2(ui, build_tl, &a, tl_x(&m, &a, 1.0f), m.by + 10, tl_x(&m, &a, 3.0f), m.by + 60, 4);
+    key_press(ui, build_tl, &a, CUI_KEY_DELETE, 0);
+    key_press(ui, build_tl, &a, CUI_KEY_DOWN, 0);
+    key_press(ui, build_tl, &a, CUI_KEY_A, CUI_MOD_PRIMARY);
+    cui_input_scroll(ui, 0, 3);
+    run(ui, build_tl, &a, 1);
+    CHECK(a.added == 0 && a.removed == 0 && a.time == 2.0f);
+    /* garbage in: out of range current key, NaN time */
+    tl_setup(&a);
+    a.cur_t = 7; a.cur_k = 99; a.time = NAN;
+    run(ui, build_tl, &a, 2);
+    CHECK(a.cur_t == -1 && a.cur_k == -1 && a.time == 0);
+    cui_destroy(ui);
+
+    /* random presses, drags, wheels and keys at several widths: the arrays
+     * stay sorted, inside the sequence and within their capacity */
+    ui = new_ctx();
+    tl_setup(&a);
+    a.toggles = true; a.range = true; a.in = 1; a.out = 3;
+    a.clips[1] = (cui_timeline_clip){ 3.0f, 3.5f, 0, "Door", false };
+    a.tr[3].clip_count = 2;
+    unsigned rng = 0x9E3779B9u;
+    static const int fkeys[] = { CUI_KEY_LEFT, CUI_KEY_RIGHT, CUI_KEY_UP, CUI_KEY_DOWN, CUI_KEY_HOME, CUI_KEY_END, CUI_KEY_DELETE,
+                                 CUI_KEY_ESCAPE, CUI_KEY_A, CUI_KEY_F, CUI_KEY_EQUAL, CUI_KEY_MINUS, CUI_KEY_SPACE, CUI_KEY_BACKSPACE };
+    static const int fmods[] = { 0, CUI_MOD_SHIFT, CUI_MOD_ALT, CUI_MOD_PRIMARY, CUI_MOD_ALT | CUI_MOD_SHIFT };
+    bool ok = true;
+    for (int step = 0; step < 1500 && ok; step++) {
+        if (step % 300 == 0) { a.width = (float)(260 + tl_rand(&rng) % 520); cui_set_reduced_motion(ui, (step / 300) % 2 == 0); }
+        cui_rect fr = cui_get_rect(ui, a.id);
+        float x = fr.x - 10 + (float)(tl_rand(&rng) % (unsigned)(fr.w + 20)), y = fr.y - 10 + (float)(tl_rand(&rng) % (unsigned)(fr.h + 20));
+        int what = (int)(tl_rand(&rng) % 8);
+        tl_mods(ui, fmods[tl_rand(&rng) % 5]);
+        if (what == 0) click_at(ui, build_tl, &a, x, y);
+        else if (what == 1) drag2(ui, build_tl, &a, x, y, x + (float)((int)(tl_rand(&rng) % 300) - 150), y + (float)((int)(tl_rand(&rng) % 120) - 60), 3);
+        else if (what == 2) double_click(ui, build_tl, &a, x, y);
+        else if (what == 3) { cui_input_mouse_move(ui, x, y); cui_input_scroll(ui, (tl_rand(&rng) % 4 == 0) ? 1.0f : 0.0f, (float)((int)(tl_rand(&rng) % 7) - 3)); run(ui, build_tl, &a, 1); }
+        else if (what == 4) {
+            cui_input_mouse_move(ui, x, y); cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, true); run(ui, build_tl, &a, 1);
+            cui_input_mouse_move(ui, x + 40, y - 20); run(ui, build_tl, &a, 1); cui_input_mouse_button(ui, CUI_MOUSE_MIDDLE, false); run(ui, build_tl, &a, 1);
+        } else key_press(ui, build_tl, &a, (cui_key)fkeys[tl_rand(&rng) % 14], fmods[tl_rand(&rng) % 5]);
+        tl_mods(ui, 0);
+        if (tl_rand(&rng) % 50 == 0) a.time = (float)(tl_rand(&rng) % 500) / 100.0f;
+        for (int t = 0; t < 4; t++) {
+            const cui_timeline_track *tr = &a.tr[t];
+            if (tr->key_count < 0 || tr->key_count > tr->key_capacity) ok = false;
+            for (int i = 0; i < tr->key_count; i++) {
+                if (!(tr->keys[i].x >= 0 && tr->keys[i].x <= 4)) ok = false;
+                if (i > 0 && tr->keys[i - 1].x > tr->keys[i].x) ok = false;
+            }
+            for (int i = 0; i < tr->clip_count; i++) {
+                const cui_timeline_clip *c = &tr->clips[i];
+                if (!(c->start >= 0 && c->end <= 4 && c->end > c->start)) ok = false;
+                if (i > 0 && tr->clips[i - 1].end > c->start + 1e-6f) ok = false;
+            }
+        }
+        if (!(a.view.end > a.view.start && a.view.start >= -1e-4f && a.view.end <= 4 + 1e-4f && a.view.scroll >= 0)) ok = false;
+        if (!(a.in >= 0 && a.out <= 4 && a.in < a.out)) ok = false;
+        if (!ok) printf("  fuzz broke an invariant at step %d\n", step);
+    }
+    CHECK(ok);
     cui_destroy(ui);
 }
 
@@ -3700,6 +4926,224 @@ static void test_hex_view(void) {
     cui_destroy(ui);
 }
 
+/* markdown view ---------------------------------------------------------- */
+
+typedef struct {
+    char text[4096];
+    int length;             /* 0: strlen */
+    float width;            /* 0: fill a 600 point column */
+    bool streaming;
+    cui_markdown_result res;
+    int links, toggles;
+    char last_link[128];
+} md_test;
+static void build_md(cui_ctx *ui, void *u) {
+    md_test *m = u;
+    cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
+        m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming);
+    }
+    if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
+    if (m->res.task_offset >= 0) m->toggles++;
+}
+static cui_rect md_rect(cui_ctx *ui) { return cui_get_rect(ui, cui_make_id(ui, "md")); }
+static void md_frames(cui_ctx *ui, md_test *m, int frames) { run(ui, build_md, m, frames); }
+/* Moves the pointer along a row until the view reports a link under it. */
+static bool md_find_link(cui_ctx *ui, md_test *m, float y, cui_vec2 *at) {
+    cui_rect r = md_rect(ui);
+    for (float x = r.x + 2; x < r.x + r.w; x += 3) {
+        cui_input_mouse_move(ui, x, y);
+        md_frames(ui, m, 1);
+        if (m->res.hovered_link) { at->x = x; at->y = y; return true; }
+    }
+    return false;
+}
+static unsigned md_rng = 0x2545F491u;
+static unsigned md_rand(void) { md_rng ^= md_rng << 13; md_rng ^= md_rng >> 17; md_rng ^= md_rng << 5; return md_rng; }
+
+static void test_markdown(void) {
+    printf("markdown: edge cases, links, tasks, keys, streaming, fuzz\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    /* empty and blank text build nothing tall */
+    memset(&m, 0, sizeof m);
+    md_frames(ui, &m, 3);
+    CHECK(md_rect(ui).h < 1);
+    snprintf(m.text, sizeof m.text, "   \n\t\n  \r\n");
+    md_frames(ui, &m, 3);
+    CHECK(md_rect(ui).h < 1);
+    CHECK(m.res.link == NULL && m.res.task_offset == -1);
+    /* a paragraph wraps to the width it gets */
+    snprintf(m.text, sizeof m.text, "one line");
+    md_frames(ui, &m, 3);
+    float line_h = md_rect(ui).h;
+    CHECK(line_h > 14 && line_h < 30);
+    m.width = 120;
+    snprintf(m.text, sizeof m.text, "a paragraph long enough that it has to wrap onto several lines at this width");
+    md_frames(ui, &m, 3);
+    CHECK(md_rect(ui).h > line_h * 3);
+    CHECK_NEAR(md_rect(ui).w, 120, 0.5);
+    m.width = 0;
+    /* unclosed markers and fences, deep nesting, long lines, CRLF, ragged tables, bad UTF-8: no crash */
+    static const char *const edge[] = {
+        "**bold *italic ~~strike `code", "a *b **c*** d_e_f __g__ ~h~ ~~i~~ \\*j\\*", "```c\nint x;\n", "~~~\nunclosed\n\n\n",
+        "[link](https://a.b/(c)) [bad](  [x]( <https://auto.link> www.example.com/x. https://e.org/a_(b)",
+        "![img](i.png) [a [b](c) d](e) [](empty) [unclosed", "# H1\n## H2 ##\n###### H6\n####### seven\n#nospace",
+        "Title\n===\nSub\n---\n- - -\n***\n___", "a\r\nb  \r\nc\\\r\nd<br>e\r\n", "&amp; &lt; &gt; &quot; &#39; &nbsp; &bogus;",
+        "| a | b | c |\n|---|:-:|--:|\n| 1 |\n| 1 | 2 | 3 | 4 | 5 |\n|\n", "| a | b |\n|---|\nnot a table", "\xff\xfe\x80 \xc3 bad \xe2\x82 utf8 \xf0\x9f\x98",
+        "> quote\nlazy\n> > nested\n>\n> - item\n>   ```\n>   code\n", "1. one\n2. two\n   - sub\n     1) deep\n10. ten\n- other",
+        "    indented code\n\n    more", "- [ ] task\n- [x] done\n- [X]\n- [ ]no\n* [ ] star", "`` a ` b `` ``` c ```` d", "<br/> <BR > <b>html</b>",
+    };
+    for (int k = 0; k < (int)(sizeof edge / sizeof edge[0]); k++) {
+        snprintf(m.text, sizeof m.text, "%s", edge[k]);
+        md_frames(ui, &m, 2);
+        CHECK(md_rect(ui).h > 0);
+        m.streaming = true;
+        md_frames(ui, &m, 2);
+        m.streaming = false;
+    }
+    {   /* nesting far past the limit, as quotes and as lists */
+        int o = 0;
+        for (int k = 0; k < 300 && o < 3000; k++) o += snprintf(m.text + o, sizeof m.text - (size_t)o, "> ");
+        snprintf(m.text + o, sizeof m.text - (size_t)o, "deep");
+        md_frames(ui, &m, 2);
+        CHECK(md_rect(ui).h > 0);
+        o = 0;
+        for (int k = 0; k < 60 && o < 3900; k++) o += snprintf(m.text + o, sizeof m.text - (size_t)o, "%*s- level %d\n", k * 2, "", k);
+        md_frames(ui, &m, 2);
+        CHECK(md_rect(ui).h > 0);
+    }
+    {   /* a very long line with no spaces breaks between characters and stays in the column */
+        static char big[100001];
+        for (int k = 0; k < 100000; k++) big[k] = (char)('a' + k % 26);
+        big[100000] = 0;
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        cui_column(ui, .pad = 20, .width = CUI_PX(340)) { cui_markdown(ui, "md", big); }
+        cui_end_frame(ui);
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        cui_column(ui, .pad = 20, .width = CUI_PX(340)) { cui_markdown(ui, "md", big); }
+        cui_end_frame(ui);
+        CHECK(md_rect(ui).h > 1000);
+        CHECK_NEAR(md_rect(ui).w, 300, 0.5);
+    }
+    /* .length limits the text; CRLF lines parse like LF */
+    snprintf(m.text, sizeof m.text, "# Title\r\n\r\nbody\r\n");
+    md_frames(ui, &m, 2);
+    float crlf_h = md_rect(ui).h;
+    snprintf(m.text, sizeof m.text, "# Title\n\nbody\n");
+    md_frames(ui, &m, 2);
+    CHECK_NEAR(md_rect(ui).h, crlf_h, 0.5);
+    m.length = 7;   /* just "# Title" */
+    md_frames(ui, &m, 2);
+    CHECK(md_rect(ui).h < crlf_h - 10);
+    m.length = 0;
+
+    /* links: hovering reports the URL, a click reports it once, nothing is opened */
+    snprintf(m.text, sizeof m.text, "Read the [upgrade guide](https://tern.dev/docs/upgrade) first.");
+    md_frames(ui, &m, 3);
+    cui_rect r = md_rect(ui);
+    cui_vec2 at;
+    CHECK(md_find_link(ui, &m, r.y + r.h / 2, &at));
+    CHECK(m.res.hovered_link && strcmp(m.res.hovered_link, "https://tern.dev/docs/upgrade") == 0);
+    CHECK(at.x > r.x + 30);   /* the link starts after "Read the " */
+    m.links = 0;
+    click_at(ui, build_md, &m, at.x, at.y);
+    CHECK(m.links == 1 && strcmp(m.last_link, "https://tern.dev/docs/upgrade") == 0);
+    cui_input_mouse_move(ui, r.x + 2, r.y + r.h / 2);
+    md_frames(ui, &m, 2);
+    CHECK(m.res.hovered_link == NULL);
+    /* the keyboard: Tab focuses the link, Enter activates it */
+    m.links = 0;
+    cui_input_key(ui, CUI_KEY_TAB, true, 0); md_frames(ui, &m, 1); cui_input_key(ui, CUI_KEY_TAB, false, 0); md_frames(ui, &m, 1);
+    cui_input_key(ui, CUI_KEY_ENTER, true, 0); md_frames(ui, &m, 1); cui_input_key(ui, CUI_KEY_ENTER, false, 0); md_frames(ui, &m, 1);
+    CHECK(m.links == 1);
+    /* www. links report an http:// URL; a link wrapped over two lines is one link */
+    snprintf(m.text, sizeof m.text, "see www.example.com/path.");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    CHECK(md_find_link(ui, &m, r.y + r.h / 2, &at));
+    CHECK(m.res.hovered_link && strcmp(m.res.hovered_link, "http://www.example.com/path") == 0);
+
+    /* task items: a click reports the offset of the box and its line; the caller applies it */
+    snprintf(m.text, sizeof m.text, "Intro\n\n- [ ] Rerun the benchmark\n- [x] Update the changelog\n");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    m.toggles = 0;
+    float row_y = r.y + r.h - line_h * 1.5f;   /* the first task row sits above the last */
+    click_at(ui, build_md, &m, r.x + 9, row_y - 4);
+    CHECK(m.toggles == 1);
+    int off1 = (int)(strstr(m.text, "[ ]") - m.text) + 1;
+    CHECK(m.res.task_offset == off1 && m.res.task_checked && m.res.task_line == 3);
+    CHECK(cui_markdown_apply_task(m.text, &m.res));
+    CHECK(strstr(m.text, "- [x] Rerun") != NULL);
+    md_frames(ui, &m, 2);
+    m.toggles = 0;
+    click_at(ui, build_md, &m, r.x + 9, r.y + r.h - line_h * 0.5f);
+    CHECK(m.toggles == 1 && !m.res.task_checked && m.res.task_line == 4);
+    CHECK(cui_markdown_apply_task(m.text, &m.res));
+    CHECK(strstr(m.text, "- [ ] Update") != NULL);
+    {   /* applying refuses offsets that are not a box */
+        cui_markdown_result bad;
+        memset(&bad, 0, sizeof bad);
+        bad.task_offset = 1; bad.task_checked = true;
+        CHECK(!cui_markdown_apply_task(m.text, &bad));
+        bad.task_offset = -1;
+        CHECK(!cui_markdown_apply_task(m.text, &bad));
+        bad.task_offset = 100000;
+        CHECK(!cui_markdown_apply_task(m.text, &bad));
+    }
+
+    /* streaming: appending a few bytes a frame never shrinks the view by more than a line */
+    {
+        static const char reply[] =
+            "## Fixing the flaky upload test\n\nThe test fails when **the retry *timer* fires** before `upload_done`. See [the issue](https://e.org/i/42).\n\n"
+            "1. Stub the clock\n2. Advance it by hand\n   - check the first retry\n   - check the backoff\n\n- [ ] Land the fix\n- [x] Write it down\n\n"
+            "> The timer starts on the first byte.\n\n```c\nvoid tick(fake_clock *c, int ms) {\n    c->now += ms;\n}\n```\n\n"
+            "| Run | Before | After |\n|:----|------:|-----:|\n| CI | 1 in 30 | 0 in 500 |\n| Laptop | 1 in 80 | 0 in 500 |\n\nDone.";
+        int n = (int)strlen(reply), drops = 0;
+        float prev = 0, worst = 0;
+        snprintf(m.text, sizeof m.text, "%s", reply);
+        m.streaming = true;
+        for (int len = 1; len <= n; len += 3) {
+            m.length = len;
+            md_frames(ui, &m, 2);
+            float h = md_rect(ui).h;
+            if (h < prev - 0.5f) { drops++; if (prev - h > worst) worst = prev - h; }
+            prev = h;
+        }
+        m.streaming = false; m.length = 0;
+        md_frames(ui, &m, 2);
+        CHECK(fabsf(md_rect(ui).h - prev) < line_h * 2);   /* finishing the stream changes little */
+        CHECK(worst <= line_h * 1.6f);
+        CHECK(drops <= 8);
+        if (worst > line_h * 1.6f || drops > 8) printf("  streaming: %d drops, worst %.1f\n", drops, worst);
+    }
+
+    /* random markdown-ish input at random widths */
+    {
+        static const char *const bits[] = { "*", "**", "_", "~~", "`", "```", "[", "](", ")", "<", ">", "#", "- ", "1. ", "|", "\n", "\n\n",
+                                            "  ", "\t", "\\", "&amp;", "[ ]", "[x]", "https://", "www.", "word ", "\xc3\xa9", "\xff", "---", "\r\n", "!" };
+        for (int iter = 0; iter < 400; iter++) {
+            int o = 0, parts = (int)(md_rand() % 120);
+            for (int k = 0; k < parts; k++) {
+                const char *b = bits[md_rand() % (sizeof bits / sizeof bits[0])];
+                int bl = (int)strlen(b);
+                if (o + bl >= (int)sizeof m.text - 1) break;
+                memcpy(m.text + o, b, (size_t)bl);
+                o += bl;
+            }
+            m.text[o] = 0;
+            m.width = (float)(40 + md_rand() % 700);
+            m.streaming = md_rand() % 2;
+            m.length = md_rand() % 3 == 0 && o > 0 ? (int)(md_rand() % (unsigned)o) + 1 : 0;
+            cui_input_mouse_move(ui, (float)(md_rand() % 800), (float)(md_rand() % 600));
+            md_frames(ui, &m, 2);
+        }
+        m.width = 0; m.streaming = false; m.length = 0;
+        CHECK(true);
+    }
+    cui_destroy(ui);
+}
+
 /* flame graph ------------------------------------------------------------ */
 
 typedef struct {
@@ -3926,6 +5370,708 @@ static void test_flame(void) {
     cui_destroy(ui);
 }
 
+/* code editor ----------------------------------------------------------- */
+
+typedef struct {
+    char buf[2048];
+    char *big; size_t cap;     /* an outside buffer instead of buf, or a smaller capacity for buf */
+    const char *lang;
+    bool ro;
+    char other[32];
+    cui_code_editor_result r;
+    bool any_changed;
+} ced_ctx;
+static void build_ced(cui_ctx *ui, void *u) {
+    ced_ctx *c = u;
+    cui_column(ui, .pad = 20, .gap = 12) {
+        char *b = c->big ? c->big : c->buf;
+        size_t cap = c->cap ? c->cap : sizeof c->buf;
+        c->r = cui_code_editor(ui, "ed", b, cap, .lang = c->lang, .read_only = c->ro, .height = 300, .width = CUI_PX(600));
+        c->any_changed |= c->r.changed;
+        cui_input(ui, "after", c->other, sizeof c->other, .width = CUI_PX(200));
+    }
+}
+static void ced_text(ced_ctx *c, const char *s) { snprintf(c->buf, sizeof c->buf, "%s", s); }
+/* caret (or a selection) from code; also focuses the editor */
+static void ced_sel(cui_ctx *ui, ced_ctx *c, int a, int b) { cui_code_editor_select(ui, "ed", a, b); run(ui, build_ced, c, 1); }
+static int ced_at(const ced_ctx *c, const char *needle) { const char *p = strstr(c->buf, needle); return p ? (int)(p - c->buf) : -1; }
+
+static void test_code_editor(void) {
+    printf("code editor: typing, indentation, undo, clipboard, find, brackets, capacity, virtualization\n");
+    cui_ctx *ui = new_ctx();
+    static ced_ctx c;
+    memset(&c, 0, sizeof c);
+    c.lang = "c";
+    run(ui, build_ced, &c, 3);
+    cui_rect er = rect_of(ui, cui_make_id(ui, "ed"));
+    CHECK_NEAR(er.h, 300, 0.5);
+    CHECK(c.r.line == 1 && c.r.column == 1 && c.r.line_count == 1 && !c.r.focused);
+
+    /* typing: a click focuses, text arrives as text input like a text area's */
+    click_at(ui, build_ced, &c, er.x + 200, er.y + 100);
+    CHECK(c.r.focused && cui_wants_keyboard(ui));
+    type(ui, build_ced, &c, "int x;");
+    CHECK(strcmp(c.buf, "int x;") == 0 && c.r.changed && c.r.column == 7);
+    key(ui, build_ced, &c, CUI_KEY_BACKSPACE, 0);
+    CHECK(strcmp(c.buf, "int x") == 0);
+    key(ui, build_ced, &c, CUI_KEY_LEFT, 0);
+    type(ui, build_ced, &c, "\xc3\xa9");
+    CHECK(strcmp(c.buf, "int \xc3\xa9x") == 0 && c.r.column == 6);
+
+    /* Enter keeps the indentation, one level more after an opening brace */
+    ced_text(&c, "    foo();");
+    ced_sel(ui, &c, 10, 10);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(c.buf, "    foo();\n    ") == 0 && c.r.line == 2 && c.r.column == 5);
+    ced_text(&c, "  if (a) {");
+    ced_sel(ui, &c, 10, 10);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(c.buf, "  if (a) {\n      ") == 0 && c.r.cursor == 17);
+    type(ui, build_ced, &c, "go();");
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    type(ui, build_ced, &c, "}");   /* a closing brace on a blank line steps back a level */
+    CHECK(strcmp(c.buf, "  if (a) {\n      go();\n  }") == 0);
+    ced_text(&c, "f() {}");   /* between braces: the closing one moves down */
+    ced_sel(ui, &c, 5, 5);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(c.buf, "f() {\n    \n}") == 0 && c.r.line == 2 && c.r.column == 5);
+    c.lang = "python";
+    ced_text(&c, "def f():");
+    ced_sel(ui, &c, 8, 8);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(c.buf, "def f():\n    ") == 0);
+    c.lang = "c";
+
+    /* Tab: spaces to the next stop; on a selection, Tab and Shift+Tab move whole lines */
+    ced_text(&c, "ab");
+    ced_sel(ui, &c, 2, 2);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "ab  ") == 0 && c.r.focused);   /* the Tab stayed in the editor */
+    ced_text(&c, "a\nb\nc\n");
+    ced_sel(ui, &c, 0, 3);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "    a\n    b\nc\n") == 0);
+    CHECK(c.r.anchor == 0 && c.r.cursor == 11);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "        a\n        b\nc\n") == 0);
+    key(ui, build_ced, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    key(ui, build_ced, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    CHECK(strcmp(c.buf, "a\nb\nc\n") == 0 && c.r.anchor == 0 && c.r.cursor == 3);
+    key(ui, build_ced, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);   /* nothing left to outdent */
+    CHECK(strcmp(c.buf, "a\nb\nc\n") == 0);
+    ced_text(&c, "x\n  y\n");   /* a selection ending at a line start leaves that line alone */
+    ced_sel(ui, &c, 0, 2);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "    x\n  y\n") == 0);
+    ced_sel(ui, &c, 7, 7);   /* Shift+Tab without a selection outdents the caret's line */
+    key(ui, build_ced, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    CHECK(strcmp(c.buf, "    x\ny\n") == 0 && c.r.cursor == 6);
+
+    /* Home goes to the first character, then column 0, then back */
+    ced_text(&c, "    foo");
+    ced_sel(ui, &c, 7, 7);
+    key(ui, build_ced, &c, CUI_KEY_HOME, 0);
+    CHECK(c.r.cursor == 4);
+    key(ui, build_ced, &c, CUI_KEY_HOME, 0);
+    CHECK(c.r.cursor == 0);
+    key(ui, build_ced, &c, CUI_KEY_HOME, 0);
+    CHECK(c.r.cursor == 4);
+    key(ui, build_ced, &c, CUI_KEY_END, CUI_MOD_SHIFT);
+    CHECK(c.r.anchor == 4 && c.r.cursor == 7);
+    key(ui, build_ced, &c, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(c.r.anchor == 0 && c.r.cursor == 7);
+
+    /* undo: typing within a second is one step, Enter is its own */
+    ced_text(&c, "");
+    ced_sel(ui, &c, 0, 0);
+    run(ui, build_ced, &c, 80);
+    type(ui, build_ced, &c, "a");
+    type(ui, build_ced, &c, "b");
+    type(ui, build_ced, &c, "c");
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    type(ui, build_ced, &c, "d");
+    CHECK(strcmp(c.buf, "abc\nd") == 0);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "abc\n") == 0 && c.r.changed);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "abc") == 0);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "") == 0);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    CHECK(strcmp(c.buf, "abc") == 0 && c.r.cursor <= 3);
+    key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+    key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "abc\nd") == 0);
+    key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);   /* nothing more to redo */
+    CHECK(strcmp(c.buf, "abc\nd") == 0);
+    ced_sel(ui, &c, 5, 5);
+    type(ui, build_ced, &c, "e");
+    run(ui, build_ced, &c, 80);   /* a pause starts a new step */
+    type(ui, build_ced, &c, "f");
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "abc\nde") == 0);
+
+    /* clipboard round trip; without a selection copy and cut take the line */
+    ced_text(&c, "foo bar\nbaz\n");
+    ced_sel(ui, &c, 4, 7);
+    key(ui, build_ced, &c, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "bar") == 0);
+    ced_sel(ui, &c, 11, 11);
+    key(ui, build_ced, &c, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "foo bar\nbazbar\n") == 0 && c.r.cursor == 14);
+    ced_sel(ui, &c, 0, 3);
+    key(ui, build_ced, &c, CUI_KEY_X, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "foo") == 0 && strcmp(c.buf, " bar\nbazbar\n") == 0);
+    ced_sel(ui, &c, 6, 6);
+    key(ui, build_ced, &c, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "bazbar\n") == 0 && strcmp(c.buf, " bar\nbazbar\n") == 0);
+    key(ui, build_ced, &c, CUI_KEY_X, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, " bar\n") == 0);
+    snprintf(g_clip, sizeof g_clip, "a\r\nb");   /* carriage returns are dropped */
+    ced_sel(ui, &c, 0, 0);
+    key(ui, build_ced, &c, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "a\nb bar\n") == 0);
+
+    /* find: count, next, previous (wrapping), Esc closes; Ctrl+F takes the selected word */
+    ced_text(&c, "tile a;\nint tile_b;\n/* TILE */ tile;\n");
+    ced_sel(ui, &c, 0, 0);
+    cui_code_editor_find(ui, "ed", "tile");
+    run(ui, build_ced, &c, 2);
+    CHECK(c.r.find_matches == 4 && c.r.find_index == 1 && c.r.anchor == 0 && c.r.cursor == 4);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);   /* the find field has focus: Enter is next */
+    CHECK(c.r.find_index == 2 && c.r.anchor == ced_at(&c, "tile_b"));
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.r.find_index == 4);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);   /* wraps to the first */
+    CHECK(c.r.find_index == 1 && c.r.anchor == 0);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_SHIFT);   /* back, wrapping to the last */
+    CHECK(c.r.find_index == 4);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_SHIFT);
+    CHECK(c.r.find_index == 3 && c.r.anchor == ced_at(&c, "TILE"));
+    type(ui, build_ced, &c, "x");   /* typing in the field searches again */
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.find_matches == 0 && c.r.focused);
+    key(ui, build_ced, &c, CUI_KEY_ESCAPE, 0);
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.find_matches == 0 && c.r.focused);
+    type(ui, build_ced, &c, "Q");   /* the editor has the keyboard again: the selection is replaced */
+    CHECK(strncmp(c.buf, "tile a;\nint tile_b;\n/* Q */", 26) == 0);
+    ced_sel(ui, &c, ced_at(&c, "int"), ced_at(&c, "int") + 3);
+    key(ui, build_ced, &c, CUI_KEY_F, CUI_MOD_PRIMARY);
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.find_matches == 1 && c.r.find_index == 1);
+    key(ui, build_ced, &c, CUI_KEY_ESCAPE, 0);
+    /* go to line, from code and with Ctrl+G */
+    cui_code_editor_goto(ui, "ed", 2, 5);
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.line == 2 && c.r.column == 5 && c.r.cursor == 12);
+    key(ui, build_ced, &c, CUI_KEY_G, CUI_MOD_PRIMARY);
+    type(ui, build_ced, &c, "3");
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.r.line == 3 && c.r.column == 1 && c.r.focused);
+
+    /* bracket matching: the bracket before the caret first, then the one after */
+    ced_text(&c, "f(a[1], {b});\n");
+    ced_sel(ui, &c, 2, 2);
+    CHECK(c.r.bracket == 1 && c.r.bracket_match == 11);
+    ced_sel(ui, &c, 3, 3);   /* before '[' */
+    CHECK(c.r.bracket == 3 && c.r.bracket_match == 5);
+    ced_sel(ui, &c, 10, 10);   /* after 'b', before '}' */
+    CHECK(c.r.bracket == 10 && c.r.bracket_match == 8);
+    ced_sel(ui, &c, 12, 12);   /* after ')' */
+    CHECK(c.r.bracket == 11 && c.r.bracket_match == 1);
+    ced_sel(ui, &c, 13, 13);
+    CHECK(c.r.bracket == -1 && c.r.bracket_match == -1);
+    ced_text(&c, "(()");   /* unmatched: nothing */
+    ced_sel(ui, &c, 0, 0);
+    CHECK(c.r.bracket == -1);
+
+    /* mouse: double-click a word, triple-click a line, click the gutter, drag */
+    ced_text(&c, "alpha beta\ngamma delta\nlast\n");
+    run(ui, build_ced, &c, 2);
+    float cw = cui_measure_text(ui, CUI_FONT_MONO, 13, "0000000000000000", 16).width / 16;
+    float lh = roundf(13 * 1.6f), cx0 = er.x + 1 + 12 + 2 * cw + 14 + 8, ly = er.y + 1 + 6 + lh * 0.5f;
+    cui_input_mouse_move(ui, er.x + 300, er.y + 250);
+    run(ui, build_ced, &c, 30);   /* a fresh click sequence */
+    click_at(ui, build_ced, &c, cx0 + cw * 8.3f, ly + lh);
+    CHECK(c.r.cursor == 11 + 8 && c.r.anchor == c.r.cursor);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_ced, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_ced, &c, 1);
+    CHECK(c.r.anchor == 17 && c.r.cursor == 22);   /* "delta" */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_ced, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_ced, &c, 1);
+    CHECK(c.r.anchor == 11 && c.r.cursor == 23);   /* the whole line with its newline */
+    cui_input_mouse_move(ui, er.x + 300, er.y + 250);
+    run(ui, build_ced, &c, 30);
+    click_at(ui, build_ced, &c, er.x + 10, ly + 2 * lh);   /* the gutter selects the line */
+    CHECK(c.r.anchor == 23 && c.r.cursor == 28);
+    run(ui, build_ced, &c, 30);
+    drag2(ui, build_ced, &c, cx0 + cw * 1.0f, ly, cx0 + cw * 3.0f, ly + lh, 4);
+    CHECK(c.r.anchor == 1 && c.r.cursor == 14);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+    CHECK(c.r.anchor == 1 && c.r.cursor == 26);
+
+    /* Esc, then Tab, leaves the editor; Tab alone does not */
+    ced_text(&c, "x");
+    ced_sel(ui, &c, 1, 1);
+    key(ui, build_ced, &c, CUI_KEY_ESCAPE, 0);
+    run(ui, build_ced, &c, 1);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    run(ui, build_ced, &c, 1);
+    CHECK(!c.r.focused && strcmp(c.buf, "x") == 0);
+
+    /* read only: no edits, but selection, copy and find */
+    c.ro = true;
+    ced_text(&c, "const int k = 1;\n");
+    ced_sel(ui, &c, 6, 9);
+    c.any_changed = false;
+    type(ui, build_ced, &c, "zz");
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    key(ui, build_ced, &c, CUI_KEY_BACKSPACE, 0);
+    key(ui, build_ced, &c, CUI_KEY_V, CUI_MOD_PRIMARY);
+    key(ui, build_ced, &c, CUI_KEY_X, CUI_MOD_PRIMARY);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    key(ui, build_ced, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    CHECK(strcmp(c.buf, "const int k = 1;\n") == 0 && !c.any_changed);
+    CHECK(strcmp(g_clip, "int") == 0);
+    cui_code_editor_find(ui, "ed", "k");
+    run(ui, build_ced, &c, 2);
+    CHECK(c.r.find_matches == 1);
+    cui_code_editor_find(ui, "ed", NULL);
+    c.ro = false;
+
+    /* capacity: an edit that does not fit is refused whole and reported */
+    c.cap = 12;
+    ced_text(&c, "");
+    ced_sel(ui, &c, 0, 0);
+    for (int i = 0; i < 8; i++) type(ui, build_ced, &c, "ab");
+    CHECK(strlen(c.buf) == 10 && c.r.refused);
+    type(ui, build_ced, &c, "c");
+    CHECK(strlen(c.buf) == 11 && !c.r.refused);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strlen(c.buf) == 11 && c.r.refused);
+    ced_text(&c, "x");
+    ced_sel(ui, &c, 1, 1);
+    snprintf(g_clip, sizeof g_clip, "0123456789abcdef");
+    key(ui, build_ced, &c, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "x") == 0 && c.r.refused);
+    c.cap = 0;
+    cui_destroy(ui);
+
+    /* virtualization: 20 000 lines lay out and draw only what is in view */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.lang = "c";
+    run(ui, build_ced, &c, 3);
+    ced_text(&c, "int main(void) {\n    return 0;\n}\n");
+    run(ui, build_ced, &c, 3);
+    int small_vtx = cui_get_draw_data(ui)->vertex_count;
+    size_t big_n = 20000 * 40 + 1;
+    char *big = malloc(big_n + 4096);
+    size_t off = 0;
+    for (int i = 0; i < 20000; i++)
+        off += (size_t)snprintf(big + off, big_n + 4096 - off, i % 50 == 0 ? "/* block %05d\n" : i % 50 == 1 ? "   comment */\n" : "    value_%05d = compute(%d, \"x\");\n", i, i);
+    c.big = big; c.cap = big_n + 4096;
+    clock_t t0 = clock();
+    run(ui, build_ced, &c, 3);
+    CHECK(c.r.line_count == 20001);
+    cui_code_editor_goto(ui, "ed", 10000, 1);
+    run(ui, build_ced, &c, 2);
+    CHECK(c.r.line == 10000);
+    for (int i = 0; i < 20; i++) type(ui, build_ced, &c, "q");
+    CHECK(c.r.line == 10000 && c.r.column == 21 && c.r.changed);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(c.r.column == 1);
+    for (int i = 0; i < 30; i++) key(ui, build_ced, &c, CUI_KEY_PAGE_DOWN, 0);
+    key(ui, build_ced, &c, CUI_KEY_END, CUI_MOD_CTRL);
+    CHECK(c.r.line == 20001);
+    cui_input_mouse_move(ui, er.x + 300, er.y + 150);
+    for (int i = 0; i < 20; i++) { cui_input_scroll(ui, 0, 5); run(ui, build_ced, &c, 1); }
+    double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    int big_vtx = cui_get_draw_data(ui)->vertex_count;
+    CHECK(big_vtx < small_vtx * 4 + 4000);   /* bounded by the lines in view, not the file */
+    CHECK(secs < 5.0);
+    printf("  20k lines: %d frames in %.3f s, %d vertices (a 3 line file: %d)\n", 3 + 2 + 20 + 1 + 30 + 1 + 20, secs, big_vtx, small_vtx);
+    cui_destroy(ui);
+    free(big);
+
+    /* random keys, text and pointer input on a small buffer stay inside it */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.cap = 300;
+    ced_text(&c, "void f(int a) {\n\tif (a) { g(\"s\"); }\n}\n/* c */\n");
+    unsigned rng = 777u;
+    static const cui_key keys[] = { CUI_KEY_TAB, CUI_KEY_ENTER, CUI_KEY_ESCAPE, CUI_KEY_BACKSPACE, CUI_KEY_DELETE, CUI_KEY_LEFT,
+                                    CUI_KEY_RIGHT, CUI_KEY_UP, CUI_KEY_DOWN, CUI_KEY_HOME, CUI_KEY_END, CUI_KEY_PAGE_UP,
+                                    CUI_KEY_PAGE_DOWN, CUI_KEY_A, CUI_KEY_C, CUI_KEY_V, CUI_KEY_X, CUI_KEY_Z, CUI_KEY_Y,
+                                    CUI_KEY_F, CUI_KEY_G };
+    static const char *texts[] = { "a", "}", "{", "(", ")", " ", "\xc3\xa9", "\xf0\x9f\x98\x80", ":", "\"", "/*", "*/", "\t" };
+    static const char *langs[] = { "c", "python", "json", NULL, "js" };
+    bool ok = true;
+    for (int f = 0; f < 3000; f++) {
+        rng = rng * 1664525u + 1013904223u;
+        unsigned r = rng >> 8;
+        switch (r % 9) {
+        case 0: case 1: cui_input_mouse_move(ui, er.x - 20 + (float)((r >> 4 & 1023) % 660), er.y - 20 + (float)((r >> 14 & 511) % 360)); break;
+        case 2: cui_input_mouse_button(ui, CUI_MOUSE_LEFT, (r >> 5) & 1); break;
+        case 3: cui_input_scroll(ui, (float)((int)(r >> 6 & 7) - 3), (float)((int)(r >> 9 & 7) - 3)); break;
+        case 4: case 5: { cui_key k = keys[(r >> 4) % (sizeof keys / sizeof keys[0])]; int m = (int)(r >> 12 & 7); cui_input_key(ui, k, true, m); cui_input_key(ui, k, false, m); break; }
+        case 6: case 7: cui_input_key(ui, CUI_KEY_NONE, false, 0); cui_input_text(ui, texts[(r >> 4) % (sizeof texts / sizeof texts[0])]); break;
+        default:
+            if ((r >> 4) % 40 == 0) c.lang = langs[(r >> 10) % 5];
+            if ((r >> 4) % 97 == 1) c.ro = !c.ro;
+            if ((r >> 4) % 211 == 2) snprintf(g_clip, sizeof g_clip, "%s", (r >> 12) & 1 ? "pasted\r\n\ttext {}" : "x");
+            break;
+        }
+        run(ui, build_ced, &c, 1);
+        size_t n = strlen(c.buf);
+        if (n >= c.cap || c.r.cursor < 0 || c.r.cursor > (int)n || c.r.anchor < 0 || c.r.anchor > (int)n || c.r.length != (int)n) ok = false;
+    }
+    CHECK(ok);
+    cui_destroy(ui);
+}
+
+/* diff viewer ---------------------------------------------------------- */
+
+/* the lines of a text, each with its line ending, for checking scripts */
+typedef struct { const char *s; int len; } df_line;
+static int df_lines(const char *t, size_t n, df_line *out, int cap) {
+    int count = 0;
+    size_t i = 0;
+    while (i < n && count < cap) {
+        size_t e = i;
+        while (e < n && t[e] != '\n') e++;
+        if (e < n) e++;   /* the line ending belongs to the line */
+        out[count].s = t + i; out[count].len = (int)(e - i);
+        count++;
+        i = e;
+    }
+    return count;
+}
+static bool df_line_eq(df_line a, df_line b) { return a.len == b.len && memcmp(a.s, b.s, (size_t)a.len) == 0; }
+static int df_check_lines(const df_line *la, int na, const df_line *lb, int nb, const cui_diff_hunk *h, int nh);
+
+/* Checks hunks against the texts: sorted, separated by equal lines, and the
+ * lines between them equal pairwise. Returns the edit distance or -1. */
+static int df_check(const char *a, const char *b, const cui_diff_hunk *h, int nh) {
+    size_t an = strlen(a), bn = strlen(b);
+    df_line *la = malloc(sizeof *la * (an + 1)), *lb = malloc(sizeof *lb * (bn + 1));
+    int na = df_lines(a, an, la, (int)an + 1), nb = df_lines(b, bn, lb, (int)bn + 1);
+    int dist = df_check_lines(la, na, lb, nb, h, nh);
+    free(la);
+    free(lb);
+    return dist;
+}
+static int df_check_lines(const df_line *la, int na, const df_line *lb, int nb, const cui_diff_hunk *h, int nh) {
+    int i = 0, j = 0, dist = 0;
+    for (int k = 0; k < nh; k++) {
+        if (h[k].old_start < i || h[k].new_start < j) return -1;
+        if (h[k].old_start - i != h[k].new_start - j) return -1;
+        if (k > 0 && h[k].old_start == i) return -1;   /* touching hunks should have merged */
+        if (h[k].old_count + h[k].new_count == 0) return -1;
+        while (i < h[k].old_start) if (!df_line_eq(la[i++], lb[j++])) return -1;
+        i += h[k].old_count; j += h[k].new_count;
+        dist += h[k].old_count + h[k].new_count;
+    }
+    if (na - i != nb - j) return -1;
+    while (i < na) if (!df_line_eq(la[i++], lb[j++])) return -1;
+    return dist;
+}
+/* the shortest edit distance, by dynamic programming (small inputs) */
+static int df_lcs_dist(const char *a, const char *b) {
+    static df_line la[64], lb[64];
+    static int t[65][65];
+    int na = df_lines(a, strlen(a), la, 64), nb = df_lines(b, strlen(b), lb, 64);
+    for (int i = 0; i <= na; i++)
+        for (int j = 0; j <= nb; j++)
+            t[i][j] = !i || !j ? 0 : df_line_eq(la[i - 1], lb[j - 1]) ? t[i - 1][j - 1] + 1 : (t[i - 1][j] > t[i][j - 1] ? t[i - 1][j] : t[i][j - 1]);
+    return na + nb - 2 * t[na][nb];
+}
+static int df_diff(const char *a, const char *b, unsigned flags, cui_diff_hunk *h, int cap, cui_diff_stats *st) {
+    return cui_diff_compute(a, strlen(a), b, strlen(b), flags, h, cap, st);
+}
+
+typedef struct {
+    const char *a, *b;
+    cui_diff_mode mode;
+    int *current;
+    bool no_fold;
+    float width;
+    cui_diff_result r;
+} diff_ctx;
+static void build_diff(cui_ctx *ui, void *u) {
+    diff_ctx *d = u;
+    cui_column(ui, .pad = 10) {
+        d->r = cui_diff_view(ui, "dv", d->a, d->b, .mode = d->mode, .current = d->current, .no_fold = d->no_fold,
+                             .width = d->width > 0 ? CUI_PX(d->width) : CUI_FILL, .height = 300, .language = "c");
+    }
+}
+static void diff_key(cui_ctx *ui, diff_ctx *d, cui_key k, int mods) {
+    cui_input_key(ui, k, true, mods);
+    run(ui, build_diff, d, 1);
+    cui_input_key(ui, k, false, mods);
+    run(ui, build_diff, d, 1);
+}
+
+static void test_diff(void) {
+    printf("diff viewer: Myers, words, folds, navigation, rows, limits\n");
+    cui_diff_hunk h[64];
+    cui_diff_stats st;
+
+    /* identical, empty, all added, all removed */
+    CHECK(df_diff("a\nb\nc\n", "a\nb\nc\n", 0, h, 64, &st) == 0 && st.added == 0 && st.removed == 0 && st.old_lines == 3);
+    CHECK(df_diff("", "", 0, h, 64, &st) == 0 && st.old_lines == 0 && st.new_lines == 0);
+    CHECK(df_diff("", "a\nb\n", 0, h, 64, &st) == 1 && h[0].old_start == 0 && h[0].old_count == 0 && h[0].new_start == 0 && h[0].new_count == 2 && st.added == 2);
+    CHECK(df_diff("a\nb\n", "", 0, h, 64, &st) == 1 && h[0].old_count == 2 && h[0].new_count == 0 && st.removed == 2);
+    CHECK(df_diff("x", "", 0, h, 64, &st) == 1 && st.old_lines == 1 && st.removed == 1);
+    /* a missing final newline is a change, unless ignored */
+    CHECK(df_diff("a\nb", "a\nb\n", 0, h, 64, &st) == 1 && h[0].old_start == 1 && h[0].old_count == 1 && h[0].new_start == 1 && h[0].new_count == 1);
+    CHECK(df_diff("a\nb", "a\nb\n", CUI_DIFF_IGNORE_EOL, h, 64, &st) == 0);
+    /* CRLF against LF */
+    CHECK(df_diff("a\r\nb\r\n", "a\nb\n", 0, h, 64, &st) == 1 && h[0].old_count == 2 && h[0].new_count == 2);
+    CHECK(df_diff("a\r\nb\r\n", "a\nb\n", CUI_DIFF_IGNORE_EOL, h, 64, &st) == 0);
+    CHECK(df_diff("a\r\nb\r\nc\r\n", "a\r\nB\r\nc\r\n", 0, h, 64, &st) == 1 && h[0].old_start == 1 && h[0].old_count == 1);
+    /* the example from Myers' paper: ABCABBA to CBABAC, 5 edits, common
+     * subsequence BABA. Searching from both ends finds another shortest script
+     * than the paper's figure: A becomes C, delete C, delete the second B,
+     * add C at the end. */
+    const char *ma = "A\nB\nC\nA\nB\nB\nA\n", *mb = "C\nB\nA\nB\nA\nC\n";
+    int n = df_diff(ma, mb, 0, h, 64, &st);
+    CHECK(st.added + st.removed == 5 && !st.approximate);
+    CHECK(df_check(ma, mb, h, n) == 5);
+    CHECK(n == 4 && h[0].old_start == 0 && h[0].old_count == 1 && h[0].new_start == 0 && h[0].new_count == 1 &&
+          h[1].old_start == 2 && h[1].old_count == 1 && h[1].new_start == 2 && h[1].new_count == 0 &&
+          h[2].old_start == 5 && h[2].old_count == 1 && h[2].new_start == 4 && h[2].new_count == 0 &&
+          h[3].old_start == 7 && h[3].old_count == 0 && h[3].new_start == 5 && h[3].new_count == 1);
+    /* an added function slides to end on its blank line */
+    const char *fa = "int a(void) {\n    return 1;\n}\n\nint c(void) {\n    return 3;\n}\n";
+    const char *fb = "int a(void) {\n    return 1;\n}\n\nint b(void) {\n    return 2;\n}\n\nint c(void) {\n    return 3;\n}\n";
+    n = df_diff(fa, fb, 0, h, 64, &st);
+    CHECK(n == 1 && h[0].new_start == 4 && h[0].new_count == 4 && df_check(fa, fb, h, n) == 4);
+    /* cap: the count is all hunks, only cap written */
+    CHECK(df_diff("a\nb\nc\nd\ne\n", "A\nb\nC\nd\nE\n", 0, h, 2, &st) == 3 && st.hunks == 3);
+
+    /* random inputs: always a valid script, and the shortest one */
+    unsigned rng = 12345u;
+    int bad = 0, long_ = 0;
+    for (int it = 0; it < 400; it++) {
+        char ta[256], tb[256];
+        int pa = 0, pb = 0;
+        for (int side = 0; side < 2; side++) {
+            char *t = side ? tb : ta;
+            int *p = side ? &pb : &pa;
+            rng = rng * 1103515245u + 12345u;
+            int lines = (int)(rng >> 16) % 24;
+            for (int l = 0; l < lines; l++) {
+                rng = rng * 1103515245u + 12345u;
+                int k = (int)(rng >> 16) % 5;
+                t[(*p)++] = (char)('a' + k);
+                if (k == 4) t[(*p)++] = '\r';
+                t[(*p)++] = '\n';
+            }
+            rng = rng * 1103515245u + 12345u;
+            if ((rng >> 16) % 4 == 0 && *p > 0) (*p)--;   /* sometimes no final newline */
+            t[*p] = 0;
+        }
+        int nh = df_diff(ta, tb, 0, h, 64, &st);
+        int dist = nh >= 0 && nh <= 64 ? df_check(ta, tb, h, nh) : -1;
+        if (dist < 0 || dist != st.added + st.removed) bad++;
+        if (dist != df_lcs_dist(ta, tb)) long_++;
+    }
+    CHECK(bad == 0);
+    CHECK(long_ == 0);
+
+    /* invalid UTF-8 and control bytes are compared as bytes and drawn safely */
+    const char *ua = "ok\n\xff\xfe broken\nend \xe2\x82\n\x01\x02\n", *ub = "ok\n\xff\xfd broken\nend \xe2\x82\xac\n\x01\x02\n";
+    n = df_diff(ua, ub, 0, h, 64, &st);
+    CHECK(n == 1 && df_check(ua, ub, h, n) == 4);
+
+    /* word marks */
+    cui_diff_range ro[8], rn[8];
+    int no = 0, nn = 0;
+    CHECK(cui_diff_words("    int count = 0;", -1, "    int loaded = 0;", -1, ro, &no, rn, &nn, 8));
+    CHECK(no == 1 && ro[0].start == 8 && ro[0].length == 5 && nn == 1 && rn[0].start == 8 && rn[0].length == 6);
+    CHECK(cui_diff_words("if (!eq) return 0;", -1, "if (!eq || eq == line) return 0;", -1, ro, &no, rn, &nn, 8));
+    CHECK(no == 0 && nn == 1 && rn[0].start == 7 && rn[0].length == 14);   /* " || eq == line" reads as one mark */
+    CHECK(!cui_diff_words("return total_size * 4;", -1, "for (;;) { wait(); }", -1, ro, &no, rn, &nn, 8));   /* too different */
+    CHECK(cui_diff_words("a \xff\xfe b", -1, "a \xff\xfd b", -1, ro, &no, rn, &nn, 8) && no == 1 && ro[0].start == 2 && ro[0].length == 2);
+    CHECK(cui_diff_words("same", -1, "same", -1, ro, &no, rn, &nn, 8) && no == 0 && nn == 0);
+
+    /* large inputs: exact when changed lines are new, bounded and coarse
+     * (but correct) when the search would take too long */
+    {
+        int lines = 60000;
+        char *big_a = malloc((size_t)lines * 12 + 1), *big_b = malloc((size_t)lines * 12 + 1);
+        size_t pa = 0, pb = 0;
+        for (int i = 0; i < lines; i++) {
+            pa += (size_t)snprintf(big_a + pa, 13, "a%09d\n", (int)((long long)i * 7919 % 1000003));
+            pb += (size_t)snprintf(big_b + pb, 13, "b%09d\n", (int)((long long)i * 104729 % 1000003));
+        }
+        clock_t t0 = clock();
+        n = cui_diff_compute(big_a, pa, big_b, pb, 0, NULL, 0, &st);
+        double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        CHECK(n == 1 && st.removed == lines && st.added == lines && !st.approximate);
+        CHECK(secs < 5.0);
+        /* the same text with a few edits stays exact and quick */
+        memcpy(big_b, big_a, pa + 1);
+        for (int i = 0; i < 40; i++) big_b[(size_t)(i * 1499 + 7) * 11 + 3] = 'x';
+        t0 = clock();
+        n = cui_diff_compute(big_a, pa, big_b, pa, 0, NULL, 0, &st);
+        secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        CHECK(n == 40 && st.added == 40 && st.removed == 40 && !st.approximate);
+        CHECK(secs < 5.0);
+        /* partly shared: a valid script within the limit */
+        for (int i = 0; i < lines; i += 3) memcpy(big_b + (size_t)i * 11, "zzzzzzzzzz", 10);
+        static cui_diff_hunk hh[60000];
+        t0 = clock();
+        n = cui_diff_compute(big_a, pa, big_b, pa, 0, hh, 60000, &st);
+        secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        CHECK(n > 0 && n <= 60000 && st.added == st.removed && secs < 5.0);
+        int ia = 0;
+        bool ordered = true;
+        for (int k = 0; k < n && k < 60000; k++) { if (hh[k].old_start < ia) ordered = false; ia = hh[k].old_start + hh[k].old_count; }
+        CHECK(ordered && !st.approximate);
+        CHECK(df_check(big_a, big_b, hh, n) == st.added + st.removed);
+        /* lines from three symbols: every line has matches, the search hits its
+         * limit and the rest is replaced */
+        unsigned r3 = 99u;
+        for (int i = 0; i < lines; i++) {
+            r3 = r3 * 1103515245u + 12345u; big_a[2 * i] = (char)('a' + (r3 >> 16) % 3); big_a[2 * i + 1] = '\n';
+            r3 = r3 * 1103515245u + 12345u; big_b[2 * i] = (char)('a' + (r3 >> 16) % 3); big_b[2 * i + 1] = '\n';
+        }
+        big_a[2 * lines] = big_b[2 * lines] = 0;
+        t0 = clock();
+        n = cui_diff_compute(big_a, (size_t)lines * 2, big_b, (size_t)lines * 2, 0, hh, 60000, &st);
+        secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        CHECK(st.approximate && n > 0 && n <= 60000 && secs < 5.0);
+        CHECK(df_check(big_a, big_b, hh, n) == st.added + st.removed);
+        free(big_a);
+        free(big_b);
+    }
+
+    /* the view ---------------------------------------------------------- */
+    char va[4096], vb[4096];
+    size_t pa = 0, pb = 0;
+    for (int i = 1; i <= 60; i++) {
+        pa += (size_t)snprintf(va + pa, sizeof va - pa, "line %d\n", i);
+        if (i == 20) pb += (size_t)snprintf(vb + pb, sizeof vb - pb, "line twenty\nline 20b\nline 20c\n");   /* 1 replaced by 3 */
+        else if (i == 40) { /* removed */ }
+        else pb += (size_t)snprintf(vb + pb, sizeof vb - pb, "line %d\n", i);
+    }
+    cui_ctx *ui = new_ctx();
+    int cur = -1;
+    diff_ctx d = { va, vb, CUI_DIFF_SPLIT, &cur, false, 0, { 0 } };
+    run(ui, build_diff, &d, 1);
+    CHECK(d.r.recomputed);
+    run(ui, build_diff, &d, 3);
+    CHECK(!d.r.recomputed);
+    CHECK(d.r.added == 3 && d.r.removed == 2 && d.r.changes == 2 && d.r.mode == CUI_DIFF_SPLIT);
+    /* folds: before the first change, between the changes, after the last */
+    CHECK(d.r.folds == 3 && d.r.hidden == 16 + 13 + 17);
+    /* split rows: the replaced line beside its first replacement, then fillers */
+    static cui_diff_row rows[128];
+    int nr = cui_diff_view_rows(ui, "dv", rows, 0, 128);
+    CHECK(nr > 0 && nr < 40);
+    int k20 = -1;
+    for (int i = 0; i < nr; i++) if (rows[i].kind != CUI_DIFF_ROW_SAME && rows[i].kind != CUI_DIFF_ROW_FOLD) { k20 = i; break; }
+    CHECK(k20 > 0 && rows[k20].kind == CUI_DIFF_ROW_CHANGED && rows[k20].old_line == 19 && rows[k20].new_line == 19 && rows[k20].change == 0);
+    CHECK(rows[k20 + 1].kind == CUI_DIFF_ROW_ADDED && rows[k20 + 1].old_line == -1 && rows[k20 + 1].new_line == 20);
+    CHECK(rows[k20 + 2].kind == CUI_DIFF_ROW_ADDED && rows[k20 + 3].kind == CUI_DIFF_ROW_SAME && rows[k20 + 3].old_line == 20 && rows[k20 + 3].new_line == 22);
+    CHECK(rows[0].kind == CUI_DIFF_ROW_FOLD && rows[0].old_line == 0 && rows[0].hidden == 16 && rows[1].old_line == 16);
+    /* inline rows: removed, then added */
+    d.mode = CUI_DIFF_INLINE;
+    run(ui, build_diff, &d, 2);
+    CHECK(d.r.mode == CUI_DIFF_INLINE && !d.r.recomputed);
+    nr = cui_diff_view_rows(ui, "dv", rows, 0, 128);
+    for (k20 = 0; k20 < nr && rows[k20].kind != CUI_DIFF_ROW_REMOVED; k20++) {}
+    CHECK(k20 < nr && rows[k20].old_line == 19 && rows[k20].new_line == -1);
+    CHECK(rows[k20 + 1].kind == CUI_DIFF_ROW_ADDED && rows[k20 + 1].new_line == 19 && rows[k20 + 3].kind == CUI_DIFF_ROW_ADDED && rows[k20 + 4].kind == CUI_DIFF_ROW_SAME);
+    int rem40 = -1;
+    for (int i = k20 + 4; i < nr; i++) if (rows[i].kind == CUI_DIFF_ROW_REMOVED) { rem40 = i; break; }
+    CHECK(rem40 > 0 && rows[rem40].old_line == 39 && rows[rem40].change == 1);
+    /* the same rows in both modes for every unchanged line */
+    d.mode = CUI_DIFF_SPLIT;
+    run(ui, build_diff, &d, 2);
+
+    /* click the first fold row: it opens */
+    cui_rect vr = rect_of(ui, cui_make_id(ui, "dv"));
+    float row_h = roundf(12 * 1.75f);
+    click_at(ui, build_diff, &d, vr.x + 200, vr.y + 1 + 4 + row_h * 0.5f);
+    CHECK(d.r.folds == 2 && d.r.hidden == 13 + 17);
+    nr = cui_diff_view_rows(ui, "dv", rows, 0, 128);
+    CHECK(rows[0].kind == CUI_DIFF_ROW_SAME && rows[0].old_line == 0);
+    /* the view has focus from the click: E opens all, Shift+E folds again */
+    diff_key(ui, &d, CUI_KEY_E, 0);
+    CHECK(d.r.folds == 0 && d.r.hidden == 0);
+    diff_key(ui, &d, CUI_KEY_E, CUI_MOD_SHIFT);
+    CHECK(d.r.folds == 3);
+    /* next and previous change */
+    CHECK(cur == -1 && d.r.current == -1);
+    diff_key(ui, &d, CUI_KEY_N, 0);
+    CHECK(cur == 0 && d.r.current == 0);
+    diff_key(ui, &d, CUI_KEY_DOWN, CUI_MOD_ALT);
+    CHECK(cur == 1 && d.r.current == 1);
+    diff_key(ui, &d, CUI_KEY_N, 0);
+    CHECK(cur == 1);   /* the last one stays */
+    diff_key(ui, &d, CUI_KEY_P, 0);
+    CHECK(cur == 0);
+    diff_key(ui, &d, CUI_KEY_UP, CUI_MOD_ALT);
+    CHECK(cur == 0);
+    /* the caller sets it (a button) */
+    cur = 1;
+    run(ui, build_diff, &d, 1);
+    CHECK(d.r.current == 1 && d.r.current_changed);
+    run(ui, build_diff, &d, 1);
+    CHECK(d.r.current == 1 && !d.r.current_changed);
+    cur = 99;   /* out of range is clamped */
+    run(ui, build_diff, &d, 1);
+    CHECK(cur == 1);
+    diff_key(ui, &d, CUI_KEY_ESCAPE, 0);
+    CHECK(cur == -1);
+
+    /* recompute only when a text changes */
+    char vcopy[4096];
+    memcpy(vcopy, vb, sizeof vcopy);
+    d.b = vcopy;   /* same text, other memory */
+    run(ui, build_diff, &d, 1);
+    CHECK(!d.r.recomputed);
+    vcopy[0] = 'L';   /* edited in place: same pointer, same length */
+    run(ui, build_diff, &d, 1);
+    CHECK(d.r.recomputed && d.r.changes == 3);
+    run(ui, build_diff, &d, 2);
+    CHECK(!d.r.recomputed);
+
+    /* narrow: split shows inline */
+    d.width = 400;
+    run(ui, build_diff, &d, 3);
+    CHECK(d.r.mode == CUI_DIFF_INLINE);
+    d.width = 0;
+    run(ui, build_diff, &d, 3);
+    CHECK(d.r.mode == CUI_DIFF_SPLIT);
+
+    /* invalid UTF-8, CRLF, a missing newline and long lines in the view */
+    char longa[3000], longb[3000];
+    memset(longa, 'x', sizeof longa); memset(longb, 'x', sizeof longb);
+    memcpy(longa, "\t\xff\xfe\xe2\x82\n", 6); memcpy(longb, "\t\xff\xfd\xe2\x82\xac\n", 7);
+    longa[2990] = '\n'; longb[2990] = 'y'; longa[2999] = longb[2999] = 0;
+    diff_ctx d2 = { longa, longb, CUI_DIFF_SPLIT, NULL, true, 0, { 0 } };
+    run(ui, build_diff, &d2, 3);
+    CHECK(d2.r.changes >= 1);
+    d2.a = "a\r\nb\r\nc"; d2.b = "a\nb\nc\n";
+    run(ui, build_diff, &d2, 2);
+    CHECK(d2.r.changes == 1 && d2.r.added == 3 && d2.r.removed == 3);
+    d2.mode = CUI_DIFF_INLINE;
+    run(ui, build_diff, &d2, 2);
+    d2.a = ""; d2.b = "";
+    run(ui, build_diff, &d2, 2);
+    CHECK(d2.r.changes == 0 && d2.r.added == 0);
+    d2.a = NULL; d2.b = "only new\n";
+    run(ui, build_diff, &d2, 2);
+    CHECK(d2.r.added == 1 && d2.r.removed == 0);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -3950,14 +6096,19 @@ int main(void) {
     test_disclosure();
     test_checklist();
     test_data_grid();
+    test_tree_table();
     test_tools();
     test_hex_view();
+    test_markdown();
+    test_code_editor();
+    test_diff();
     test_planning();
     test_node_editor();
     test_flame();
     test_curve_eval();
     test_curve_editor();
     test_gradient();
+    test_timeline();
     test_media();
     test_viz();
     test_motion();
@@ -3969,6 +6120,7 @@ int main(void) {
     test_extras();
     test_reorder();
     test_chrome();
+    test_dock();
     test_virtual_list();
     test_theme();
     test_renderer();

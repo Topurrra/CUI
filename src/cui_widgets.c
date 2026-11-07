@@ -1087,7 +1087,8 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
         float fy0 = r.y + in_top, fy1 = r.y + r.h - in_bot;
         if (fy1 <= fy0) { fy0 = r.y; fy1 = r.y + r.h; }
         float fw = CUI_MIN(36.0f, r.w * 0.15f);
-        float lt = cui__clampf(st->x / fw, 0, 1), rt = cui__clampf((max_x - st->x) / fw, 0, 1);
+        /* a scroll area squeezed to no width has no edges to fade (and dividing by 0 gives NaN) */
+        float lt = fw > 0 ? cui__clampf(st->x / fw, 0, 1) : 0, rt = fw > 0 ? cui__clampf((max_x - st->x) / fw, 0, 1) : 0;
         cui_color clear = st->fade; clear.a = 0;
         for (int side = 0; side < 2; side++) {
             float k = side ? rt : lt;

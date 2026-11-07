@@ -9,7 +9,7 @@
 
 enum { TK_TEXT, TK_KEYWORD, TK_TYPE, TK_STRING, TK_NUMBER, TK_COMMENT, TK_FUNC, TK_PREPROC, TK_PUNCT, TK_CONST, TK_COUNT };
 
-typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types; } cui__lang;
+typedef char cui__tk_count_check[TK_COUNT == CUI__TK_COUNT ? 1 : -1];   /* cui__lang and cui__tok are in cui_internal.h */
 
 static const char *const kw_c[] = { "if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "goto",
                                     "typedef", "struct", "union", "enum", "static", "const", "extern", "volatile", "inline", "sizeof",
@@ -39,7 +39,7 @@ static const char *const kw_sh[] = { "if", "then", "else", "elif", "fi", "for", 
                                      "return", "export", "local", "echo", "cd", "sudo", "cmake", "make", "git", "apt", "brew", NULL };
 static const char *const none[] = { NULL };
 
-static cui__lang cui__lang_for(const char *lang) {
+cui__lang cui__lang_for(const char *lang) {
     cui__lang l = { none, none, NULL, NULL, false, false, false, false };
     if (!lang) return l;
     if (!strcmp(lang, "c") || !strcmp(lang, "cpp") || !strcmp(lang, "c++") || !strcmp(lang, "h")) {
@@ -65,10 +65,8 @@ static bool cui__in_list(const char *const *list, const char *s, int n) {
 static bool cui__ident_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (unsigned char)c >= 0x80; }
 static bool cui__ident_char(char c) { return cui__ident_start(c) || (c >= '0' && c <= '9'); }
 
-typedef struct { int start, len; uint8_t kind; } cui__tok;
-
 /* Tokenize one line. *in_block carries an open block comment between lines. */
-static int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
+int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
     int count = 0, i = 0;
 #define EMIT(st, ln, k) do { if (count < cap) { out[count].start = (st); out[count].len = (ln); out[count].kind = (uint8_t)(k); count++; } } while (0)
     while (i < n) {
@@ -135,7 +133,7 @@ static int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bo
     return count;
 }
 
-static void cui__syntax_colors(cui_ctx *ui, cui_color *c) {
+void cui__syntax_colors(cui_ctx *ui, cui_color *c) {
     bool dark = ui->mode == CUI_THEME_DARK;
     c[TK_TEXT] = CUI_C(ui, FOREGROUND);
     c[TK_KEYWORD] = dark ? cui_oklch(0.76f, 0.14f, 305, 1) : cui_oklch(0.52f, 0.20f, 305, 1);
@@ -148,6 +146,19 @@ static void cui__syntax_colors(cui_ctx *ui, cui_color *c) {
     c[TK_PUNCT] = CUI_C(ui, TEXT_SECONDARY);
     c[TK_CONST] = dark ? cui_oklch(0.80f, 0.13f, 60, 1) : cui_oklch(0.58f, 0.16f, 50, 1);
 }
+
+/* The highlighter for other components (the diff viewer): one line at a time,
+ * the token kinds index the colors from cui__code_colors. */
+typedef char cui__code_kinds_match[TK_COUNT == CUI__CODE_KINDS ? 1 : -1];
+int cui__code_tokens(const char *lang, const char *s, int n, bool *in_block, cui__code_tok *out, int cap) {
+    bool json = lang && !strcmp(lang, "json");
+    cui__lang L = cui__lang_for(json ? NULL : lang);
+    cui__tok toks[256];
+    int count = cui__tokenize(&L, json, s, n, in_block, toks, cap < 256 ? cap : 256);
+    for (int k = 0; k < count; k++) { out[k].start = toks[k].start; out[k].len = toks[k].len; out[k].kind = toks[k].kind; }
+    return count;
+}
+void cui__code_colors(cui_ctx *ui, cui_color *colors) { cui__syntax_colors(ui, colors); }
 
 /* ------------------------------------------------------------------------ */
 /* Code block                                                               */

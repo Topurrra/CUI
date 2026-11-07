@@ -723,6 +723,329 @@ SCENE(data_grid) {
         cui_data_grid_end(ui);
     }
 }
+/* a project explorer: a path bar over a tree table, kept in sync. Folders
+ * marked lazy load their children after a short pretend delay. */
+typedef struct { const char *name; int parent; int bytes; long long stamp; const char *kind; bool lazy; } tt_entry;
+static const tt_entry tt_files[] = {
+    { "cui", -1, 0, 202611061042LL, "Folder", false },                       /* 0 */
+    { "include", 0, 0, 202611041519LL, "Folder", false },                    /* 1 */
+    { "cui", 1, 0, 202611041519LL, "Folder", false },                        /* 2 */
+    { "cui.h", 2, 100966, 202611061042LL, "C header", false },
+    { "cui_app.h", 2, 3277, 202610281130LL, "C header", false },
+    { "cui_icons.h", 2, 42906, 202610190904LL, "C header", false },
+    { "cui_render.h", 2, 2458, 202609300817LL, "C header", false },
+    { "src", 0, 0, 202611061042LL, "Folder", true },                         /* 7 */
+    { "render", 7, 0, 202611021655LL, "Folder", true },                      /* 8 */
+    { "cui_render_gl.c", 8, 22221, 202610271402LL, "C source", false },
+    { "cui_render_sw.c", 8, 34816, 202611021655LL, "C source", false },
+    { "platform", 7, 0, 202610301218LL, "Folder", true },                    /* 11 */
+    { "cui_platform_glfw.c", 11, 14438, 202610301218LL, "C source", false },
+    { "cui_platform_sdl.c", 11, 16896, 202610221034LL, "C source", false },
+    { "cui_core.c", 7, 24883, 202611051847LL, "C source", false },
+    { "cui_grid.c", 7, 28570, 202611061042LL, "C source", false },
+    { "cui_treetable.c", 7, 27034, 202611061037LL, "C source", false },
+    { "cui_widgets.c", 7, 53862, 202611030921LL, "C source", false },
+    { "docs", 0, 0, 202611061040LL, "Folder", false },                       /* 18 */
+    { "images", 18, 0, 202611061040LL, "Folder", true },                     /* 19 */
+    { "data-grid.png", 19, 90522, 202610140912LL, "PNG image", false },
+    { "path-bar.png", 19, 30925, 202611061040LL, "PNG image", false },
+    { "tree-table.png", 19, 72704, 202611061040LL, "PNG image", false },
+    { "components-more.md", 18, 76288, 202611061039LL, "Markdown", false },
+    { "design.md", 18, 12083, 202610120944LL, "Markdown", false },
+    { "tests", 0, 0, 202611061036LL, "Folder", true },                       /* 25 */
+    { "CMakeLists.txt", 25, 3379, 202610290811LL, "CMake", false },
+    { "component_shots.c", 25, 134758, 202611061036LL, "C source", false },
+    { "test_main.c", 25, 217088, 202611061036LL, "C source", false },
+    { "CMakeLists.txt", 0, 6042, 202611061042LL, "CMake", false },
+    { "LICENSE", 0, 1088, 202603020900LL, "Text", false },
+    { "README.md", 0, 9933, 202611011410LL, "Markdown", false },
+};
+#define TT_N ((int)(sizeof tt_files / sizeof tt_files[0]))
+static cui_tree_node tt_nodes[TT_N];
+static int tt_root = 0, tt_cursor = 16;
+static cui_table_sort tt_sort = { 0, false };
+static bool tt_loaded[TT_N];
+static double tt_due[TT_N];          /* when a pending load finishes, 0 none */
+static char tt_status[128];
+static char tt_goto[256];            /* a typed path still waiting for folders to load */
+
+static bool tt_folder(int n) { return strcmp(tt_files[n].kind, "Folder") == 0; }
+static int tt_items(int n) { int c = 0; for (int k = 0; k < TT_N; k++) c += tt_files[k].parent == n; return c; }
+static int tt_icase(const char *a, const char *b) {
+    for (;; a++, b++) {
+        int x = (unsigned char)*a, y = (unsigned char)*b;
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y || !x) return x - y;
+    }
+}
+static int tt_cmp(void *user, int a, int b) {
+    (void)user;
+    if (tt_folder(a) != tt_folder(b)) return tt_folder(a) ? -1 : 1;   /* folders first, either way */
+    int c = 0;
+    switch (tt_sort.column) {
+    case 1: c = tt_folder(a) ? tt_items(a) - tt_items(b) : (tt_files[a].bytes > tt_files[b].bytes) - (tt_files[a].bytes < tt_files[b].bytes); break;
+    case 2: c = (tt_files[a].stamp > tt_files[b].stamp) - (tt_files[a].stamp < tt_files[b].stamp); break;
+    case 3: c = tt_icase(tt_files[a].kind, tt_files[b].kind); break;
+    default: break;
+    }
+    if (!c) c = tt_icase(tt_files[a].name, tt_files[b].name);
+    return tt_sort.descending ? -c : c;
+}
+static void tt_link(int folder) {   /* the folder's children arrive */
+    int last = -1;
+    for (int k = 0; k < TT_N; k++) {
+        if (tt_files[k].parent != folder) continue;
+        if (last < 0) tt_nodes[folder].first_child = k; else tt_nodes[last].next_sibling = k;
+        last = k;
+    }
+    tt_loaded[folder] = true;
+    tt_nodes[folder].flags &= ~(uint32_t)CUI_TREE_LOADING;
+    tt_root = cui_tree_sort(tt_nodes, TT_N, tt_root, tt_cmp, NULL);
+}
+static void tt_init(cui_ctx *ui) {
+    for (int k = 0; k < TT_N; k++) {
+        tt_nodes[k].parent = tt_files[k].parent;
+        tt_nodes[k].first_child = tt_nodes[k].next_sibling = -1;
+        tt_nodes[k].flags = tt_folder(k) ? CUI_TREE_HAS_CHILDREN : 0;
+    }
+    for (int k = 0; k < TT_N; k++) if (tt_folder(k) && !tt_files[k].lazy) tt_link(k);
+    tt_link(7);                                                   /* src was opened earlier */
+    tt_nodes[0].flags |= CUI_TREE_OPEN;
+    tt_nodes[7].flags |= CUI_TREE_OPEN;
+    tt_nodes[25].flags |= CUI_TREE_OPEN | CUI_TREE_LOADING;      /* tests is loading */
+    tt_due[25] = cui_time(ui) + 2.5;
+    tt_nodes[16].flags |= CUI_TREE_SELECTED;
+}
+static const char *tt_icon(int n) {
+    if (tt_folder(n)) return (tt_nodes[n].flags & CUI_TREE_OPEN) ? CUI_ICON_FOLDER_OPEN : CUI_ICON_FOLDER;
+    const char *k = tt_files[n].kind;
+    if (!strcmp(k, "Markdown") || !strcmp(k, "Text")) return CUI_ICON_FILE_TEXT;
+    if (!strcmp(k, "PNG image")) return CUI_ICON_IMAGE;
+    return CUI_ICON_FILE;
+}
+static const char *tt_label(void *user, int n) { (void)user; return tt_files[n].name; }
+static void tt_size(char *out, size_t cap, int n) {
+    int b = tt_files[n].bytes;
+    if (tt_folder(n)) { int c = tt_items(n); snprintf(out, cap, "%d item%s", c, c == 1 ? "" : "s"); }
+    else if (b < 1024) snprintf(out, cap, "%d bytes", b);
+    else if (b < 1024 * 1024) snprintf(out, cap, "%.1f KB", b / 1024.0);
+    else snprintf(out, cap, "%.1f MB", b / (1024.0 * 1024.0));
+}
+static void tt_when(char *out, size_t cap, long long stamp) {
+    static const char *const mon[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    int mi = (int)(stamp % 100), hh = (int)(stamp / 100 % 100), dd = (int)(stamp / 10000 % 100);
+    int mo = (int)(stamp / 1000000 % 100), yy = (int)(stamp / 100000000 % 10000);
+    if (yy == 2026 && mo == 11 && dd == 6) snprintf(out, cap, "Today %d:%02d", hh, mi);
+    else if (yy == 2026 && mo == 11 && dd == 5) snprintf(out, cap, "Yesterday %d:%02d", hh, mi);
+    else snprintf(out, cap, "%s %d, %d", mon[(mo + 11) % 12], dd, yy);
+}
+static int tt_path(int n, int *out, int cap) {   /* the root first */
+    int chain[32], c = 0;
+    for (; n >= 0 && c < 32; n = tt_nodes[n].parent) chain[c++] = n;
+    int m = 0;
+    while (c > 0 && m < cap) out[m++] = chain[--c];
+    return m;
+}
+static void tt_reveal(int n) {   /* open the ancestors and select n alone */
+    for (int p = tt_nodes[n].parent; p >= 0; p = tt_nodes[p].parent) tt_nodes[p].flags |= CUI_TREE_OPEN;
+    for (int k = 0; k < TT_N; k++) tt_nodes[k].flags &= ~(uint32_t)CUI_TREE_SELECTED;
+    tt_nodes[n].flags |= CUI_TREE_SELECTED;
+    tt_cursor = n;
+}
+static void tt_request(cui_ctx *ui, int n) {   /* start loading a folder */
+    tt_nodes[n].flags |= CUI_TREE_OPEN | CUI_TREE_LOADING;
+    tt_due[n] = cui_time(ui) + 0.6;
+}
+/* Resolves "cui/src/render" (a leading "cui/" or "/" is optional). Returns
+ * the node, -1 when a name is wrong (tt_status says which), -2 while a
+ * folder on the way is still loading. */
+static int tt_resolve(cui_ctx *ui, const char *path) {
+    int cur = 0;
+    char name[96];
+    const char *s = path;
+    while (*s == '/' || *s == ' ') s++;
+    if (!strncmp(s, "~/", 2)) s += 2;
+    bool first = true;
+    while (*s) {
+        int len = 0;
+        while (s[len] && s[len] != '/') len++;
+        snprintf(name, sizeof name, "%.*s", len, s);
+        s += len;
+        while (*s == '/') s++;
+        if (!name[0]) continue;
+        if (first && !tt_icase(name, tt_files[0].name)) { first = false; continue; }
+        first = false;
+        if (!tt_folder(cur)) { snprintf(tt_status, sizeof tt_status, "%s is a file", tt_files[cur].name); return -1; }
+        if (!tt_loaded[cur]) { if (!(tt_nodes[cur].flags & CUI_TREE_LOADING)) tt_request(ui, cur); return -2; }
+        int found = -1;
+        for (int c = tt_nodes[cur].first_child; c >= 0; c = tt_nodes[c].next_sibling) if (!tt_icase(tt_files[c].name, name)) found = c;
+        if (found < 0) { snprintf(tt_status, sizeof tt_status, "Nothing named %.40s in %.40s", name, tt_files[cur].name); return -1; }
+        cur = found;
+    }
+    return cur;
+}
+static void tt_describe(void) {
+    int n = 0, last = -1;
+    for (int k = 0; k < TT_N; k++) if (tt_nodes[k].flags & CUI_TREE_SELECTED) { n++; last = k; }
+    char sz[32];
+    if (n == 1) { tt_size(sz, sizeof sz, last); snprintf(tt_status, sizeof tt_status, "%s, %s", tt_files[last].name, sz); }
+    else if (n > 1) snprintf(tt_status, sizeof tt_status, "%d items selected", n);
+    else snprintf(tt_status, sizeof tt_status, "Nothing selected");
+}
+SCENE(tree_table) {
+    static bool init = false;
+    if (!init) { tt_init(ui); tt_describe(); init = true; }
+    /* pretend loads finish */
+    for (int k = 0; k < TT_N; k++)
+        if (tt_due[k] > 0 && cui_time(ui) >= tt_due[k]) { tt_due[k] = 0; tt_link(k); }
+    for (int k = 0; k < TT_N; k++) if (tt_due[k] > 0) cui_request_redraw(ui);
+    if (tt_goto[0]) {
+        int n = tt_resolve(ui, tt_goto);
+        if (n != -2) { if (n >= 0) { tt_reveal(n); tt_describe(); } tt_goto[0] = 0; }
+    }
+    /* the path bar shows where the cursor is */
+    int chain[32];
+    int depth = tt_path(tt_cursor, chain, 32);
+    const char *segs[32];
+    for (int k = 0; k < depth; k++) segs[k] = tt_files[chain[k]].name;
+    cui_path_bar_result pr = cui_path_bar(ui, "path", segs, depth, .icon = CUI_ICON_FOLDER, .menus = true);
+    if (pr.clicked >= 0) { tt_reveal(chain[pr.clicked]); tt_describe(); }
+    if (pr.submitted) {
+        int n = tt_resolve(ui, pr.submitted);
+        if (n >= 0) { tt_reveal(n); tt_describe(); }
+        else if (n == -2) { snprintf(tt_goto, sizeof tt_goto, "%s", pr.submitted); snprintf(tt_status, sizeof tt_status, "Opening %.80s", pr.submitted); }
+    }
+    int seg;
+    if (cui_path_bar_menu_begin(ui, "path", &seg)) {   /* the children of segment seg */
+        int parent = seg >= 0 && seg < depth ? chain[seg] : 0;
+        for (int c = tt_nodes[parent].first_child; c >= 0; c = tt_nodes[c].next_sibling) {
+            cui_push_id_int(ui, c);
+            bool here = seg + 1 < depth && chain[seg + 1] == c;
+            if (cui_menu_item(ui, tt_files[c].name, .icon = tt_icon(c), .checked = here)) { tt_reveal(c); tt_describe(); }
+            cui_pop_id(ui);
+        }
+        cui_path_bar_menu_end(ui);
+    }
+    static const cui_grid_column cols[] = {
+        { "Name", 240, CUI_TEXT_LEFT, true, false, 0 }, { "Size", 96, CUI_TEXT_RIGHT, true, false, 1 },
+        { "Modified", 150, CUI_TEXT_LEFT, true, false, 2 }, { "Kind", 110, CUI_TEXT_LEFT, true, false, 3 },
+    };
+    cui_tree_table_begin(ui, "files", cols, 4, tt_nodes, TT_N, .height = CUI_PX(424), .root = tt_root, .sort = &tt_sort,
+                         .cursor = &tt_cursor, .guides = true, .label = tt_label);
+    int n;
+    while ((n = cui_tree_table_row(ui)) >= 0) {
+        char sz[32], when[32];
+        cui_tree_table_name(ui, tt_files[n].name, tt_icon(n));
+        tt_size(sz, sizeof sz, n);
+        cui_data_grid_cell_text(ui, sz);
+        tt_when(when, sizeof when, tt_files[n].stamp);
+        cui_data_grid_cell_text(ui, when);
+        cui_data_grid_cell_text(ui, tt_files[n].kind);
+    }
+    cui_tree_table_events ev = cui_tree_table_end(ui);
+    for (int k = 0; k < ev.load_count; k++) tt_due[ev.load[k]] = cui_time(ui) + 0.6;
+    if (ev.sort_changed) tt_root = cui_tree_sort(tt_nodes, TT_N, tt_root, tt_cmp, NULL);
+    if (ev.selection_changed) tt_describe();
+    if (ev.activated >= 0) {
+        int a = ev.activated;
+        if (tt_folder(a)) { if (tt_nodes[a].flags & CUI_TREE_OPEN) tt_nodes[a].flags &= ~(uint32_t)CUI_TREE_OPEN; else if (tt_loaded[a]) tt_nodes[a].flags |= CUI_TREE_OPEN; else tt_request(ui, a); }
+        else snprintf(tt_status, sizeof tt_status, "Opened %s", tt_files[a].name);
+    }
+    cui_text(ui, tt_status, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY, .nowrap = true);
+}
+
+/* a scene graph path with a menu of siblings open, and a long file path in
+ * a narrow bar whose middle folders collapse into "..." */
+typedef struct { const char *name; int parent; const char *icon; } pb_entry;
+static const pb_entry pb_scene[] = {
+    { "World", -1, CUI_ICON_GLOBE }, { "Harbor", 0, CUI_ICON_LAYERS }, { "Dock_North", 1, CUI_ICON_LAYERS },
+    { "Crane_02", 2, CUI_ICON_BOX }, { "Hook", 3, CUI_ICON_BOX }, { "Cable", 3, CUI_ICON_BOX },
+    { "Crane_01", 2, CUI_ICON_BOX }, { "Bollards", 2, CUI_ICON_BOX }, { "Dock_South", 1, CUI_ICON_LAYERS },
+    { "Lighthouse", 1, CUI_ICON_BUILDING_2 }, { "Warehouse_A", 1, CUI_ICON_BUILDING_2 }, { "Water", 1, CUI_ICON_BOX },
+    { "Town", 0, CUI_ICON_LAYERS }, { "Market", 12, CUI_ICON_BUILDING_2 }, { "Station", 12, CUI_ICON_BUILDING_2 },
+    { "Sky", 0, CUI_ICON_LAYERS }, { "Sun", 15, CUI_ICON_SUN }, { "Clouds", 15, CUI_ICON_CLOUD }, { "Main camera", 0, CUI_ICON_CAMERA },
+};
+#define PB_N ((int)(sizeof pb_scene / sizeof pb_scene[0]))
+static int pb_find(int parent, const char *name, int len) {
+    for (int k = 0; k < PB_N; k++)
+        if (pb_scene[k].parent == parent && (int)strlen(pb_scene[k].name) == len && !strncmp(pb_scene[k].name, name, (size_t)len)) return k;
+    return -1;
+}
+static void scene_path_bar(cui_ctx *ui, int f) {
+    static int cur = 4;   /* World/Harbor/Dock_North/Crane_02/Hook */
+    static char file_segs[8][48] = { "maya", "projects", "cui", "src", "render", "cui_render_sw.c" };
+    static int file_n = 6;
+    static char note[96] = "";
+    if (f < 0) {
+        /* open the menu after Harbor: its children, the siblings of Dock_North */
+        int k = -f - 1;
+        cui_push_id(ui, "scene-path"); cui_push_id_int(ui, 1);
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "sep"));
+        cui_pop_id(ui); cui_pop_id(ui);
+        if (k == 3 && r.w > 0) cui_input_mouse_move(ui, r.x + r.w / 2, r.y + r.h / 2);
+        if (k == 4 && r.w > 0) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (k == 5 && r.w > 0) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (k == 7) cui_input_mouse_leave(ui);
+        return;
+    }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = frame_pad(ui), .gap = 16, .align = CUI_ALIGN_START) {
+        /* the file path: any typed path is taken as it is */
+        const char *fs[8];
+        for (int k = 0; k < file_n; k++) fs[k] = file_segs[k];
+        cui_row(ui, UPTO(300)) {
+            cui_path_bar_result r = cui_path_bar(ui, "file-path", fs, file_n, .icon = CUI_ICON_HOUSE, .text = NULL);
+            if (r.clicked >= 0) file_n = r.clicked + 1;
+            if (r.submitted) {
+                int n = 0;
+                const char *s = r.submitted;
+                while (*s && n < 8) {
+                    while (*s == '/') s++;
+                    int len = 0;
+                    while (s[len] && s[len] != '/') len++;
+                    if (len) { snprintf(file_segs[n], sizeof file_segs[n], "%.*s", len, s); n++; }
+                    s += len;
+                }
+                if (n) file_n = n;
+            }
+        }
+        /* the scene graph: separators list the children of the node before them */
+        int chain[16], depth = 0;
+        for (int n = cur; n >= 0 && depth < 16; n = pb_scene[n].parent) chain[depth++] = n;
+        for (int a = 0, b = depth - 1; a < b; a++, b--) { int t = chain[a]; chain[a] = chain[b]; chain[b] = t; }
+        const char *segs[16];
+        for (int k = 0; k < depth; k++) segs[k] = pb_scene[chain[k]].name;
+        cui_row(ui, UPTO(620)) {
+            cui_path_bar_result r = cui_path_bar(ui, "scene-path", segs, depth, .menus = true, .placeholder = "World/Harbor/Lighthouse");
+            if (r.clicked >= 0) { cur = chain[r.clicked]; note[0] = 0; }
+            if (r.submitted) {
+                int n = -1;
+                const char *s = r.submitted;
+                bool ok = true;
+                while (*s && ok) {
+                    while (*s == '/') s++;
+                    int len = 0;
+                    while (s[len] && s[len] != '/') len++;
+                    if (len) { int m = pb_find(n, s, len); if (m < 0) ok = false; else n = m; }
+                    s += len;
+                }
+                if (ok && n >= 0) { cur = n; note[0] = 0; }
+                else snprintf(note, sizeof note, "No node at %s", r.submitted);
+            }
+        }
+        int seg;
+        if (cui_path_bar_menu_begin(ui, "scene-path", &seg)) {
+            int parent = seg >= 0 && seg < depth ? chain[seg] : 0;
+            for (int k = 0; k < PB_N; k++) {
+                if (pb_scene[k].parent != parent) continue;
+                bool here = seg + 1 < depth && chain[seg + 1] == k;
+                if (cui_menu_item(ui, pb_scene[k].name, .icon = pb_scene[k].icon, .checked = here)) { cur = k; note[0] = 0; }
+            }
+            cui_path_bar_menu_end(ui);
+        }
+        if (note[0]) cui_text(ui, note, .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+    }
+}
 SCENE(code_block) {
     cui_code_block(ui, "c",
         "#include <cui/cui.h>\n"
@@ -735,6 +1058,76 @@ SCENE(code_block) {
         "    cui_textf(ui, \"Clicked %d times\", clicks);\n"
         "}\n",
         .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
+}
+/* code editor: the buffer is static, so the live page keeps what you type;
+ * the find bar and the caret are set once, then belong to the page */
+static char ed_src[16384] =
+    "/* tile_cache.c: a small LRU cache of decoded map tiles */\n"
+    "#include <stdint.h>\n"
+    "#include <stdlib.h>\n"
+    "#include <string.h>\n"
+    "\n"
+    "#define CACHE_SLOTS 64\n"
+    "\n"
+    "typedef struct {\n"
+    "    uint32_t key;           /* zoom << 24 | y << 12 | x */\n"
+    "    uint32_t last_used;\n"
+    "    uint8_t *pixels;\n"
+    "} tile;\n"
+    "\n"
+    "static tile cache[CACHE_SLOTS];\n"
+    "static uint32_t clock_now;\n"
+    "\n"
+    "static uint32_t tile_key(int zoom, int x, int y) {\n"
+    "    return (uint32_t)zoom << 24 | (uint32_t)y << 12 | (uint32_t)x;\n"
+    "}\n"
+    "\n"
+    "tile *tile_get(int zoom, int x, int y) {\n"
+    "    uint32_t key = tile_key(zoom, x, y);\n"
+    "    tile *oldest = &cache[0];\n"
+    "    for (int i = 0; i < CACHE_SLOTS; i++) {\n"
+    "        if (cache[i].key == key && cache[i].pixels) {\n"
+    "            cache[i].last_used = ++clock_now;\n"
+    "            return &cache[i];\n"
+    "        }\n"
+    "        if (cache[i].last_used < oldest->last_used) oldest = &cache[i];\n"
+    "    }\n"
+    "    /* miss: reuse the least recently used slot */\n"
+    "    free(oldest->pixels);\n"
+    "    oldest->pixels = decode_tile(zoom, x, y);\n"
+    "    oldest->key = key;\n"
+    "    oldest->last_used = ++clock_now;\n"
+    "    return oldest;\n"
+    "}\n"
+    "\n"
+    "void tile_cache_clear(void) {\n"
+    "    for (int i = 0; i < CACHE_SLOTS; i++) free(cache[i].pixels);\n"
+    "    memset(cache, 0, sizeof cache);\n"
+    "}\n";
+static void body_code_editor(cui_ctx *ui);
+static void scene_code_editor(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int t = -f - 1;
+        if (t == 3) cui_code_editor_find(ui, "editor", "last_used");
+        if (t == 5) {   /* the caret just after the loop's opening brace: its partner lights up */
+            const char *at = strstr(ed_src, "CACHE_SLOTS; i++) {\n        if");
+            if (at) { int pos = (int)(at - ed_src) + 19; cui_code_editor_select(ui, "editor", pos, pos); }
+        }
+        return;
+    }
+    frame_wrap(ui, body_code_editor);
+}
+static void body_code_editor(cui_ctx *ui) {
+    cui_column(ui, .width = CUI_FILL, .gap = 10) {
+        cui_code_editor_result r = cui_code_editor(ui, "editor", ed_src, sizeof ed_src, .lang = "c", .height = 356,
+                                                   .placeholder = "Write some C");
+        cui_row(ui, .width = CUI_FILL, .gap = 16, .align = CUI_ALIGN_CENTER, .wrap = true) {
+            cui_textf(ui, "Ln %d, Col %d", r.line, r.column);
+            cui_textf(ui, "%d lines", r.line_count);
+            cui_text(ui, "Spaces: 4", .size = 12.5f, .color = CUI_COLOR_TEXT_MUTED);
+            if (r.refused) cui_text(ui, "Buffer full", .size = 12.5f, .color = CUI_COLOR_DANGER);
+        }
+    }
 }
 /* ---- tool panels ---- */
 SCENE(inspector) {
@@ -912,6 +1305,90 @@ SCENE(gradient_editor) {
         cui_gradient_editor(ui, "flame", gr_stops, &gr_n, 12, .selected = &gr_sel);
     }
 }
+/* timeline editor: a shot with a hero, a camera move and a sound track. The
+ * tracks, keys, selection and playhead are static and the scene applies what
+ * the editor reports, so the live page scrubs, plays, selects, drags, adds and
+ * deletes keys; the current track's curve is edited below with the curve
+ * editor, on the same key array */
+#define TE_CAP 32
+enum { TE_HERO, TE_PX, TE_PY, TE_ROT, TE_SCALE, TE_OPACITY, TE_CAMERA, TE_ZOOM, TE_PAN, TE_AUDIO, TE_N };
+static cui_curve_key te_keys[TE_N][TE_CAP] = {
+    [TE_PX] = { { 0, 40 }, { 1.25f, 250 }, { 2.25f, 380 }, { 3.5f, 520 }, { 5, 600 } },
+    [TE_PY] = { { 0, 0 }, { 1.25f, 0 }, { 1.75f, 72 }, { 2.25f, 0 }, { 4, 0, 0, 0, 0, 0, CUI_CURVE_STEP } },
+    [TE_ROT] = { { 0, 0 }, { 1.25f, -8 }, { 1.75f, 12 }, { 2.25f, 0 }, { 3.5f, 4 } },
+    [TE_SCALE] = { { 0, 1 }, { 2.25f, 1, 0, 0, 0, 0, CUI_CURVE_LINEAR }, { 2.375f, 0.86f, 0, 0, 0, 0, CUI_CURVE_LINEAR }, { 2.625f, 1 } },
+    [TE_OPACITY] = { { 0, 0, 0, 0, 0, 0, CUI_CURVE_LINEAR }, { 0.5f, 1, 0, 0, 0, 0, CUI_CURVE_LINEAR },
+                     { 4.5f, 1, 0, 0, 0, 0, CUI_CURVE_LINEAR }, { 5, 0, 0, 0, 0, 0, CUI_CURVE_LINEAR } },
+    [TE_ZOOM] = { { 0, 1 }, { 3, 1 }, { 4.25f, 1.6f }, { 5, 1.6f } },
+    [TE_PAN] = { { 0, -80, 0, 0, 0, 0, CUI_CURVE_LINEAR }, { 5, 120, 0, 0, 0, 0, CUI_CURVE_LINEAR } },
+};
+static bool te_sel[TE_N][TE_CAP] = { [TE_ROT] = { [2] = true } };
+static cui_timeline_clip te_clips[4] = { { 0.375f, 2.25f, 0, "Footsteps", false }, { 3.0f, 4.625f, 0.75f, "Street ambience", false } };
+#define TE_TRACK(name, depth, i, n) { name, NULL, depth, .keys = te_keys[i], .key_count = n, .key_capacity = TE_CAP, .key_selected = te_sel[i] }
+static cui_timeline_track te_tracks[TE_N] = {
+    [TE_HERO] = { "Hero", CUI_ICON_USER, 0 },
+    [TE_PX] = TE_TRACK("Position X", 1, TE_PX, 5), [TE_PY] = TE_TRACK("Position Y", 1, TE_PY, 5),
+    [TE_ROT] = TE_TRACK("Rotation", 1, TE_ROT, 5), [TE_SCALE] = TE_TRACK("Scale", 1, TE_SCALE, 4),
+    [TE_OPACITY] = TE_TRACK("Opacity", 1, TE_OPACITY, 4),
+    [TE_CAMERA] = { "Camera", CUI_ICON_VIDEO, 0, .color = 4 },
+    [TE_ZOOM] = TE_TRACK("Zoom", 1, TE_ZOOM, 4), [TE_PAN] = TE_TRACK("Pan", 1, TE_PAN, 2),
+    [TE_AUDIO] = { "Sound", CUI_ICON_AUDIO_LINES, 0, .color = 3, .clips = te_clips, .clip_count = 2 },
+};
+static const struct { float lo, hi; const char *unit; } te_range[TE_N] = {
+    [TE_PX] = { 0, 640, "Pixels" }, [TE_PY] = { -10, 100, "Pixels" }, [TE_ROT] = { -20, 20, "Degrees" }, [TE_SCALE] = { 0.6f, 1.2f, "Scale" },
+    [TE_OPACITY] = { 0, 1, "Opacity" }, [TE_ZOOM] = { 0.8f, 2, "Zoom" }, [TE_PAN] = { -150, 150, "Pixels" },
+};
+static float te_time = 1.5f, te_in = 0.5f, te_out = 4.5f;
+static int te_cur_track = TE_ROT, te_cur_key = 2;
+static bool te_playing;
+static double te_last;
+static void body_timeline_editor(cui_ctx *ui);
+static void scene_timeline_editor(cui_ctx *ui, int f) {
+    if (f < 0) {   /* hover the jump's peak on Position Y: its tooltip shows the time and value */
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "shot"));
+        if (-f - 1 == 4 && r.w >= 552) cui_input_mouse_move(ui, r.x + 194 + 1.75f / 5 * (r.w - 204), r.y + 29 + TE_PY * 26 + 13);
+        return;
+    }
+    frame_wrap(ui, body_timeline_editor);
+}
+static void body_timeline_editor(cui_ctx *ui) {
+    /* playing is ours: the editor asks (Space or the button), we advance the time */
+    double now = cui_time(ui);
+    if (te_playing) {
+        te_time += (float)(now - te_last);
+        if (te_time >= te_out || te_time < te_in) te_time = te_in;
+        cui_request_redraw(ui);
+    }
+    te_last = now;
+    cui_column(ui, .width = CUI_FILL, .gap = 12) {
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {
+            if (cui_icon_button(ui, te_playing ? CUI_ICON_PAUSE : CUI_ICON_PLAY, .tooltip = te_playing ? "Pause" : "Play")) te_playing = !te_playing;
+            cui_text(ui, "Shot 4", .font = CUI_FONT_MEDIUM, .size = 13);
+            cui_text(ui, "5 seconds at 24 fps", .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+        cui_timeline_editor_result r = cui_timeline_editor(ui, "shot", te_tracks, TE_N, &te_time, .end = 5, .fps = 24, .in = &te_in, .out = &te_out,
+                                                           .current_track = &te_cur_track, .current_key = &te_cur_key, .toggles = true);
+        if (r.play_toggled) te_playing = !te_playing;
+        /* the current track's curve: the same keys, so edits show in both */
+        cui_timeline_track *tr = te_cur_track >= 0 ? &te_tracks[te_cur_track] : NULL;
+        if (tr && tr->keys) {
+            cui_text(ui, tr->name, .font = CUI_FONT_MEDIUM, .size = 13);
+            int before = te_cur_key;
+            cui_curve_result cr = cui_curve_editor(ui, "curve", tr->keys, &tr->key_count, TE_CAP, .x_max = 5, .y_min = te_range[te_cur_track].lo,
+                                                   .y_max = te_range[te_cur_track].hi, .x_label = "Time", .y_label = te_range[te_cur_track].unit,
+                                                   .selected = &te_cur_key, .show_playhead = true, .playhead = te_time, .height = 170);
+            bool *sel = tr->key_selected;   /* the timeline's selection follows the curve editor's */
+            if (cr.added >= 0) { memmove(&sel[cr.added + 1], &sel[cr.added], (size_t)(tr->key_count - 1 - cr.added)); sel[cr.added] = false; }
+            if (cr.removed >= 0) { memmove(&sel[cr.removed], &sel[cr.removed + 1], (size_t)(tr->key_count - cr.removed)); sel[tr->key_count] = false; }
+            if (te_cur_key != before || cr.added >= 0 || cr.removed >= 0) {
+                memset(te_sel, 0, sizeof te_sel);
+                if (te_cur_key >= 0) sel[te_cur_key] = true;
+            }
+        } else {
+            cui_text(ui, "Select a key or a track name to edit its curve here.", .size = 13, .color = CUI_COLOR_TEXT_MUTED);
+        }
+    }
+}
 SCENE(json_view) {
     cui_json_view(ui, "json",
         "{\"name\": \"cui\", \"version\": \"1.1.0\", \"private\": false, \"downloads\": 128400,\n"
@@ -919,6 +1396,115 @@ SCENE(json_view) {
         " \"renderer\": {\"backend\": \"opengl\", \"fallback\": \"software\", \"vsync\": true, \"msaa\": null},\n"
         " \"authors\": [{\"name\": \"Maya\", \"commits\": 412}, {\"name\": \"Jonas\", \"commits\": 388}]}",
         .expand_depth = 1);
+}
+/* markdown view: the text is static, so ticking a task box on the live page
+ * edits it, and links report where they go instead of opening */
+static char md_notes[2048] =
+    "## Tern 2.4 release notes\n"
+    "\n"
+    "The ~~beta~~ sync engine is now the default. It batches writes, so **a 2,000 item import takes 3.1 s** instead of 14 s. "
+    "Run `tern migrate` once after updating; the [upgrade guide](https://tern.dev/docs/upgrade) lists every *breaking* change.\n"
+    "\n"
+    "### What changed\n"
+    "\n"
+    "- The offline banner waits 2 s before it appears\n"
+    "  - It no longer flickers on a slow network\n"
+    "  - Retry keeps your scroll position\n"
+    "- Attachments upload in the background\n"
+    "\n"
+    "### Before you ship\n"
+    "\n"
+    "- [x] Update the changelog\n"
+    "- [ ] Rerun the sync benchmark on Android\n"
+    "- [ ] Tag the release\n"
+    "\n"
+    "> Builds made before March 4 still read the old cache format, but they write the new one.\n"
+    "\n"
+    "```c\n"
+    "int sync_flush(sync_queue *q) {\n"
+    "    if (q->count == 0) return 0;   /* nothing to send */\n"
+    "    return send_batch(q->items, q->count);\n"
+    "}\n"
+    "```\n"
+    "\n"
+    "| Platform | Cold start | vs 2.3 |\n"
+    "|:---------|-----------:|:------:|\n"
+    "| macOS | 412 ms | -18% |\n"
+    "| Windows | 498 ms | -11% |\n"
+    "| Android | 731 ms | -9% |\n";
+static void body_markdown(cui_ctx *ui) {
+    static char status[160];
+    static double stream_start = -1;   /* Replay: the notes arrive as a reply would */
+    int len = (int)strlen(md_notes), shown = len;
+    if (stream_start >= 0) {
+        shown = (int)((cui_time(ui) - stream_start) * 420.0);
+        if (shown >= len) { shown = len; stream_start = -1; }
+        else cui_request_redraw(ui);
+    }
+    cui_column(ui, .gap = 16, UPTO(640)) {
+        cui_markdown_result r = cui_markdown(ui, "notes", md_notes, .length = shown, .streaming = shown < len);
+        if (r.link) snprintf(status, sizeof status, "Opened: %s", r.link);
+        if (cui_markdown_apply_task(md_notes, &r))
+            snprintf(status, sizeof status, "%s the task on line %d", r.task_checked ? "Checked" : "Unchecked", r.task_line);
+        cui_separator(ui);
+        cui_row(ui, .width = CUI_FILL, .gap = 12, .align = CUI_ALIGN_CENTER, .wrap = true) {
+            if (cui_button(ui, "Replay as a stream", .size = CUI_SIZE_SM, .icon = CUI_ICON_PLAY)) { stream_start = cui_time(ui); status[0] = 0; }
+            cui_text(ui, status[0] ? status : r.hovered_link ? r.hovered_link : "Click a link or a task box",
+                     .size = 12.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+    }
+}
+static void scene_markdown(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    frame_wrap(ui, body_markdown);
+}
+/* diff viewer: two versions of a config loader. The mode toggle and the
+ * selected change are static and wired to the view, so the live page keeps
+ * them; folds open on a click and stay open. */
+static const char *const df_old =
+    "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n#include \"config.h\"\n\n#define LINE_MAX 256\n\n"
+    "static void trim(char *s) {\n    size_t n = strlen(s);\n    while (n > 0 && (s[n - 1] == '\\n' || s[n - 1] == ' ')) s[--n] = '\\0';\n}\n\n"
+    "static int parse_line(const char *line, char *key, char *value) {\n    const char *eq = strchr(line, '=');\n    if (!eq) return 0;\n"
+    "    size_t n = (size_t)(eq - line);\n    memcpy(key, line, n);\n    key[n] = '\\0';\n    strcpy(value, eq + 1);\n    trim(value);\n    return 1;\n}\n\n"
+    "int config_load(config *cfg, const char *path) {\n    FILE *f = fopen(path, \"r\");\n    char buf[LINE_MAX];\n    int count = 0;\n"
+    "    while (fgets(buf, sizeof buf, f)) {\n        char key[LINE_MAX], value[LINE_MAX];\n        if (buf[0] == '#') continue;\n"
+    "        if (!parse_line(buf, key, value)) continue;\n        /* keys from version 1 used dashes */\n        for (char *p = key; *p; p++)\n"
+    "            if (*p == '-') *p = '_';\n        config_set(cfg, key, value);\n        count++;\n    }\n    fclose(f);\n    return count;\n}\n\n"
+    "void config_free(config *cfg) {\n    for (int i = 0; i < cfg->count; i++) {\n        free(cfg->keys[i]);\n        free(cfg->values[i]);\n    }\n"
+    "    free(cfg->keys);\n    free(cfg->values);\n    cfg->count = 0;\n}\n";
+static const char *const df_new =
+    "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n#include \"config.h\"\n#include \"log.h\"\n\n#define LINE_MAX 256\n\n"
+    "static void trim(char *s) {\n    size_t n = strlen(s);\n    while (n > 0 && (s[n - 1] == '\\n' || s[n - 1] == ' ')) s[--n] = '\\0';\n}\n\n"
+    "static int parse_line(const char *line, char *key, char *value) {\n    const char *eq = strchr(line, '=');\n    if (!eq || eq == line) return 0;\n"
+    "    size_t n = (size_t)(eq - line);\n    memcpy(key, line, n);\n    key[n] = '\\0';\n    snprintf(value, LINE_MAX, \"%s\", eq + 1);\n    trim(value);\n    return 1;\n}\n\n"
+    "int config_load(config *cfg, const char *path) {\n    FILE *f = fopen(path, \"r\");\n    if (!f) {\n        log_error(\"cannot open %s\", path);\n        return -1;\n    }\n"
+    "    char buf[LINE_MAX];\n    int loaded = 0;\n"
+    "    while (fgets(buf, sizeof buf, f)) {\n        char key[LINE_MAX], value[LINE_MAX];\n        if (buf[0] == '#') continue;\n"
+    "        if (!parse_line(buf, key, value)) continue;\n        config_set(cfg, key, value);\n        loaded++;\n    }\n    fclose(f);\n    return loaded;\n}\n\n"
+    "void config_free(config *cfg) {\n    for (int i = 0; i < cfg->count; i++) {\n        free(cfg->keys[i]);\n        free(cfg->values[i]);\n    }\n"
+    "    free(cfg->keys);\n    free(cfg->values);\n    cfg->count = 0;\n}\n";
+static int df_mode = 0, df_change = 6;
+static cui_diff_result df_last;   /* last frame's result, for the toolbar above the view */
+SCENE(diff_view) {
+    static const char *const modes[] = { "Split", "Inline" };
+    cui_row(ui, .width = CUI_FILL, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {
+        cui_segmented(ui, "mode", modes, 2, &df_mode, .size = CUI_SIZE_SM);
+        if (df_last.mode != (df_mode ? CUI_DIFF_INLINE : CUI_DIFF_SPLIT)) cui_text(ui, "Inline on narrow screens", .size = 12.5f, .color = CUI_COLOR_TEXT_MUTED);
+        cui_box(ui, .width = CUI_GROW(1)) {}
+        cui_row(ui, .gap = 4, .align = CUI_ALIGN_CENTER) {
+            char at[48];
+            if (df_last.current >= 0) snprintf(at, sizeof at, "Change %d of %d", df_last.current + 1, df_last.changes);
+            else snprintf(at, sizeof at, "%d changes", df_last.changes);
+            cui_text(ui, at, .size = 12.5f, .tabular = true, .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_gap(ui, 4);
+            if (cui_icon_button(ui, CUI_ICON_ARROW_UP, .size = CUI_SIZE_SM, .tooltip = "Previous change", .shortcut = "P", .disabled = df_change <= 0))
+                df_change--;
+            if (cui_icon_button(ui, CUI_ICON_ARROW_DOWN, .size = CUI_SIZE_SM, .tooltip = "Next change", .shortcut = "N", .disabled = df_change >= df_last.changes - 1))
+                df_change++;
+        }
+    }
+    df_last = cui_diff_view(ui, "diff", df_old, df_new, .mode = df_mode ? CUI_DIFF_INLINE : CUI_DIFF_SPLIT, .current = &df_change,
+                            .language = "c", .old_title = "config.c (main)", .new_title = "config.c", .height = 372);
 }
 SCENE(chat) {
     cui_card(ui, .gap = 0, .pad = 16, .width = CUI_FILL) {
@@ -2397,6 +2983,138 @@ static void scene_app_chrome(cui_ctx *ui, int f) {
     if (f < 0) return;
     frame_wrap(ui, body_app_chrome);
 }
+/* ---- docking: an engine style workspace; everything you do on the live page sticks ---- */
+static const char *const dk_layout = "dock1 h0.22([*Scene tree,Assets],h0.6(v0.62([*Viewport],[*Log]),[*Inspector]))";
+/* on a phone the app picks a stacked layout, one column of panels, rather than three cramped ones */
+static const char *const dk_layout_narrow = "dock1 v0.56([*Viewport,Scene tree,Assets],[*Inspector,Log])";
+static const char *const dk_titles[5] = { "Scene tree", "Assets", "Viewport", "Log", "Inspector" };
+static const char *const dk_icons[5] = { CUI_ICON_LAYERS, CUI_ICON_FOLDER, CUI_ICON_BOX, CUI_ICON_SQUARE_TERMINAL, CUI_ICON_SLIDERS_HORIZONTAL };
+static bool dk_open[5] = { true, true, true, true, true };
+static cui_rect dk_tab[5], dk_view;
+static int dk_pick = 3;   /* the selected object in the scene tree */
+static void dk_paint_viewport(cui_ctx *ui, cui_rect r, void *user) {
+    (void)user;
+    cui_draw_rect(ui, r, CUI_CORNERS(0), cui_color_of(ui, CUI_COLOR_SURFACE_MUTED));
+    /* a ground plane in perspective and one crate, outlined in the accent because it is selected */
+    float hx = r.x + r.w * 0.5f, hy = r.y + r.h * 0.38f;
+    cui_color line = cui_color_of(ui, CUI_COLOR_BORDER);
+    for (int k = -8; k <= 8; k++) cui_draw_line(ui, (cui_vec2){ hx + k * 14.0f, hy }, (cui_vec2){ hx + k * 120.0f, r.y + r.h }, 1, line);
+    for (int k = 1; k <= 6; k++) {
+        float t = (float)(k * k) / 36.0f, y = hy + (r.y + r.h - hy) * t;
+        cui_draw_line(ui, (cui_vec2){ r.x, y }, (cui_vec2){ r.x + r.w, y }, 1, line);
+    }
+    float s = (r.w < r.h ? r.w : r.h) * 0.16f, cx = hx - s * 0.2f, cy = hy + (r.y + r.h - hy) * 0.42f;
+    cui_vec2 f[4] = { { cx - s, cy - s * 0.2f }, { cx + s * 0.6f, cy - s * 0.2f }, { cx + s * 0.6f, cy + s * 1.2f }, { cx - s, cy + s * 1.2f } };
+    cui_vec2 top[4] = { f[0], f[1], { f[1].x + s * 0.55f, f[1].y - s * 0.45f }, { f[0].x + s * 0.55f, f[0].y - s * 0.45f } };
+    cui_vec2 side[4] = { f[1], top[2], { top[2].x, f[2].y - s * 0.45f }, f[2] };
+    cui_draw_polygon(ui, f, 4, cui_color_of(ui, CUI_COLOR_SURFACE_RAISED));
+    cui_draw_polygon(ui, top, 4, cui_color_of(ui, CUI_COLOR_SURFACE));
+    cui_draw_polygon(ui, side, 4, cui_color_of(ui, CUI_COLOR_BORDER));
+    cui_color acc = cui_color_of(ui, CUI_COLOR_ACCENT);
+    cui_draw_polyline(ui, f, 4, 1.5f, acc, true);
+    cui_draw_polyline(ui, top, 4, 1.5f, acc, true);
+    cui_draw_polyline(ui, side, 4, 1.5f, acc, true);
+    cui_draw_text(ui, CUI_FONT_MEDIUM, 12, (cui_vec2){ r.x + 12, r.y + 10 }, cui_color_of(ui, CUI_COLOR_TEXT_SECONDARY), "Perspective", -1);
+    cui_draw_text(ui, CUI_FONT_MONO, 11, (cui_vec2){ r.x + 12, r.y + r.h - 24 }, cui_color_of(ui, CUI_COLOR_TEXT_MUTED), "1280 x 720  16.4 ms", -1);
+}
+static void dk_scene_tree(cui_ctx *ui) {
+    static bool open_root = true, open_pier = true, open_lights = false;
+    static const char *const pier[4] = { "pier_01", "pier_02", "crate_large_01", "crate_large_02" };
+    cui_scroll(ui, .width = CUI_FILL, .height = CUI_FILL, .pad = 8) {
+        cui_tree(ui, "harbor_town", &open_root, .icon = CUI_ICON_LAYERS) {
+            bool t = false;
+            cui_tree(ui, "Terrain", &t, .icon = CUI_ICON_BOX, .leaf = true) {}
+            cui_tree(ui, "Pier", &open_pier, .icon = CUI_ICON_FOLDER) {
+                for (int k = 0; k < 4; k++) {
+                    cui_tree(ui, pier[k], &t, .icon = CUI_ICON_BOX, .leaf = true, .selected = dk_pick == k) {}
+                    if (cui_tree_clicked(ui)) dk_pick = k;
+                }
+            }
+            cui_tree(ui, "Lights", &open_lights, .icon = CUI_ICON_SUN) {
+                cui_tree(ui, "sun", &t, .icon = CUI_ICON_SUN, .leaf = true) {}
+            }
+        }
+    }
+}
+static void dk_assets(cui_ctx *ui) {
+    static const struct { const char *name, *icon, *size; } files[] = {
+        { "barrel_d.png", CUI_ICON_IMAGE, "16.0 MB" }, { "crate_large.obj", CUI_ICON_BOX, "412 KB" },
+        { "dock_planks.mat", CUI_ICON_PALETTE, "3 KB" }, { "gull_call.ogg", CUI_ICON_AUDIO_LINES, "88 KB" },
+        { "harbor_town.scene", CUI_ICON_LAYERS, "1.2 MB" }, { "water_surface.frag", CUI_ICON_CODE, "6 KB" },
+    };
+    static int sel = 1;
+    cui_scroll(ui, .width = CUI_FILL, .height = CUI_FILL, .pad = 6) {
+        for (int k = 0; k < 6; k++)
+            if (cui_list_item(ui, files[k].name, .icon = files[k].icon, .trailing = files[k].size, .selected = sel == k)) sel = k;
+    }
+}
+static void dk_inspector(cui_ctx *ui) {
+    static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 };
+    static float roughness = 0.42f;
+    static cui_color base = { 0xC2, 0x6A, 0x3D, 255 };
+    static int shader = 0;
+    static bool t_open = true, m_open = true, cast = true;
+    static const char *const shaders[] = { "Standard PBR", "Unlit", "Toon", "Glass" };
+    cui_scroll(ui, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_column(ui, .width = CUI_FILL, .pad_x = 12, .pad_y = 4) {
+            if (cui_inspector_begin(ui, "props")) {
+                if (cui_inspector_group(ui, "Transform", &t_open)) {
+                    cui_prop_vec3(ui, "Position", pos, .step = 0.05f, .format = "%.2f");
+                    cui_prop_vec3(ui, "Rotation", rot, .step = 1, .format = "%.0f");
+                }
+                if (cui_inspector_group(ui, "Material", &m_open)) {
+                    cui_prop_enum(ui, "Shader", shaders, 4, &shader);
+                    cui_prop_color(ui, "Base color", &base);
+                    cui_prop_float(ui, "Roughness", &roughness, .min = 0, .max = 1, .step = 0.01f);
+                    cui_prop_bool(ui, "Cast shadows", &cast);
+                }
+                cui_inspector_end(ui);
+            }
+        }
+    }
+}
+static void body_docking(cui_ctx *ui) {
+    static bool filled = false;
+    if (!filled) { fill_build_log(); filled = true; }
+    const char *layout = cui_viewport_size(ui).x < 620 ? dk_layout_narrow : dk_layout;
+    WINDOW(ui) {
+        CHROME_TOP(ui) {
+            cui_toolbar(ui, "dock-tools") {
+                /* a View menu in miniature: each toggle shows or hides a panel, as the x on its tab does */
+                for (int k = 0; k < 5; k++) cui_toolbar_button(ui, dk_icons[k], .tooltip = dk_titles[k], .toggle = &dk_open[k]);
+                cui_toolbar_spacer(ui);
+                if (cui_toolbar_button(ui, CUI_ICON_ROTATE_CCW, .label = "Reset layout")) cui_dock_load(ui, "workspace", layout);
+            }
+        }
+        cui_dockspace(ui, "workspace", .layout = layout, .shortcuts = true) {
+            for (int k = 0; k < 5; k++) {
+                bool shown = cui_dock_panel_begin(ui, dk_titles[k], &dk_open[k], .icon = dk_icons[k]);
+                dk_tab[k] = cui_last_id(ui) ? cui_last_rect(ui) : (cui_rect){ 0, 0, 0, 0 };
+                if (!shown) continue;
+                switch (k) {
+                case 0: dk_scene_tree(ui); break;
+                case 1: dk_assets(ui); break;
+                case 2: dk_view = cui_canvas(ui, "viewport", CUI_FILL, CUI_FILL, dk_paint_viewport, NULL, 0).rect; break;
+                case 3: cui_log_view(ui, "log", &g_log, .height = -1); break;
+                default: dk_inspector(ui); break;
+                }
+                cui_dock_panel_end(ui);
+            }
+        }
+    }
+}
+static void scene_docking(cui_ctx *ui, int f) {
+    if (f < 0) {   /* carry the Log tab over the viewport's right side: the drop targets and the preview show */
+        int t = -f - 1;
+        cui_rect a = dk_tab[3], v = dk_view;
+        float x0 = a.x + 20, y0 = a.y + a.h * 0.5f, x1 = v.x + v.w * 0.86f, y1 = v.y + v.h * 0.55f;
+        if (t == 30 && a.w > 0) cui_input_mouse_move(ui, x0, y0);
+        if (t == 31 && a.w > 0) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (t >= 32 && t <= 50 && a.w > 0) { float k = (t - 32) / 18.0f; cui_input_mouse_move(ui, x0 + (x1 - x0) * k, y0 + (y1 - y0) * k); }
+        return;
+    }
+    frame_wrap(ui, body_docking);
+}
 
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
@@ -2518,10 +3236,14 @@ int main(int argc, char **argv) {
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
-        { "json-view", scene_json_view, 560, 330, true },
+        { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
+        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true },
+        { "code-editor", scene_code_editor, 760, 446, true },
+        { "diff-view", scene_diff_view, 900, 480, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
+        { "timeline-editor", scene_timeline_editor, 960, 660, true },
         { "comments", scene_comments, 600, 370, true }, { "presence-ticker", scene_presence_ticker, 640, 170, true },
         { "carousel", scene_carousel, 700, 300, true }, { "compare-stack", scene_compare_stack, 860, 320, true },
         { "kanban", scene_kanban, 920, 480, true }, { "week-calendar", scene_week_calendar, 960, 520, true },
@@ -2538,6 +3260,7 @@ int main(int argc, char **argv) {
         { "sources", scene_sources, 680, 380, true }, { "composer", scene_composer, 640, 190, true }, { "model-picker", scene_model_picker, 380, 300, true },
         { "voice-orb", scene_voice_orb, 760, 230, true }, { "suggestions", scene_suggestions, 640, 260, true },
         { "app-chrome", scene_app_chrome, 900, 440, true }, { "menu-bar", scene_menu_bar, 640, 360, true },
+        { "docking", scene_docking, 960, 560, true },
         { "toolbar", scene_toolbar, 640, 370, true }, { "status-bar", scene_status_bar, 820, 160, true },
         { "document-tabs", scene_document_tabs, 720, 230, true },
     };

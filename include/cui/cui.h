@@ -1004,6 +1004,8 @@ typedef struct cui_grid_column {
     cui_text_align align;
     bool sortable;
     bool fixed;                /* not resizable */
+    int priority;              /* 0 always shown; when the grid is too narrow, columns with a
+                                * priority hide, the highest number first, until the rest fit */
 } cui_grid_column;
 typedef struct cui_grid_opts {
     int _;
@@ -1012,7 +1014,9 @@ typedef struct cui_grid_opts {
     bool *selected;            /* one bool per row; adds a checkbox column */
     cui_table_sort *sort;
     bool striped;
-    int *cursor;               /* the keyboard row, optional */
+    int *cursor;               /* the keyboard row, optional; setting it scrolls that row into view */
+    bool hide_checkboxes;      /* with selected: rows still select (click, Shift, Ctrl) but no checkbox column */
+    int *anchor;               /* the row Shift ranges start from, optional (in and out like cursor) */
 } cui_grid_opts;
 CUI_API bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id, const cui_grid_column *columns, int column_count, int row_count,
                                     int *first, int *last, const cui_grid_opts *opts);
@@ -1036,6 +1040,102 @@ CUI_API bool cui_tree_cell(cui_ctx *ui, const char *label, int depth, bool has_c
 typedef struct cui_filter_field { const char *name; const char *icon; const char *const *options; int option_count; } cui_filter_field;
 CUI_API bool cui_filter_bar(cui_ctx *ui, const char *id, const cui_filter_field *fields, int count, uint32_t *selected,
                             char *search, size_t search_cap);
+
+/* ---- Tree table and path bar ---- */
+
+/* Tree table: an expandable tree with columns (a file explorer, a scene
+ * graph, debugger variables), built on the data grid. You own the nodes: a
+ * flat array linked by index, where children may arrive later (lazy). The
+ * table flattens the open part of the tree every frame and builds only the
+ * rows in view, so 100k nodes cost what a screenful does.
+ *
+ *     cui_tree_table_begin(ui, "files", cols, 4, nodes, count, .sort = &sort, .cursor = &cursor);
+ *     int n;
+ *     while ((n = cui_tree_table_row(ui)) >= 0) {
+ *         cui_tree_table_name(ui, files[n].name, files[n].icon);
+ *         cui_data_grid_cell_text(ui, files[n].size);
+ *     }
+ *     cui_tree_table_events ev = cui_tree_table_end(ui);
+ *     for (int k = 0; k < ev.load_count; k++) start_loading(ev.load[k]);
+ *
+ * Keyboard: Up and Down move, Right opens a node or moves to its first
+ * child, Left closes it or moves to its parent, Home and End, Enter
+ * activates, * opens every sibling, typing jumps to a name (with .label).
+ * Selection is the data grid's: click, Shift for a range, Ctrl to toggle,
+ * Ctrl+A, Esc. Columns hide by cui_grid_column.priority when narrow. */
+enum {
+    CUI_TREE_HAS_CHILDREN = 1 << 0,   /* shows a chevron before its children are loaded */
+    CUI_TREE_OPEN         = 1 << 1,   /* expanded (the table toggles it) */
+    CUI_TREE_SELECTED     = 1 << 2,   /* the table sets and clears it */
+    CUI_TREE_LOADING      = 1 << 3    /* children pending: an open node shows a spinner row; clear it when loaded */
+};
+typedef struct cui_tree_node {
+    int parent;                /* -1 for a top level node */
+    int first_child;           /* -1 when it has none, or none loaded yet */
+    int next_sibling;          /* -1 for the last one */
+    uint32_t flags;            /* CUI_TREE_* */
+} cui_tree_node;
+typedef struct cui_tree_table_opts {
+    int _;
+    cui_size width, height;    /* default fill */
+    float row_height;          /* default 32 */
+    int root;                  /* the first top level node, default 0 */
+    cui_table_sort *sort;      /* sortable headers set it; sort each level yourself (cui_tree_sort) */
+    int *cursor;               /* the keyboard node, optional (in and out) */
+    bool guides;               /* quiet vertical lines for each indentation level */
+    const char *(*label)(void *user, int node);   /* names for type-ahead, optional */
+    void *user;
+} cui_tree_table_opts;
+typedef struct cui_tree_table_events {
+    int activated;             /* node chosen with Enter or a double click, else -1 */
+    int expanded, collapsed;   /* a node opened or closed this frame, else -1 */
+    const int *load;           /* nodes to load children for (each now has CUI_TREE_LOADING), valid this frame */
+    int load_count;
+    bool selection_changed;
+    bool sort_changed;         /* re-sort every sibling list by *sort */
+} cui_tree_table_events;
+CUI_API void cui_tree_table_begin_ex(cui_ctx *ui, const char *id, const cui_grid_column *columns, int column_count,
+                                     cui_tree_node *nodes, int node_count, const cui_tree_table_opts *opts);
+/* The next row in view: returns its node, or -1 when done. Then build its
+ * cells: cui_tree_table_name first, then cui_data_grid_cell(_text). */
+CUI_API int cui_tree_table_row(cui_ctx *ui);
+/* The first cell: indentation, guides, the chevron, an icon and the name
+ * (cut short with a tooltip of the whole name when it does not fit). */
+CUI_API void cui_tree_table_name(cui_ctx *ui, const char *label, const char *icon);
+CUI_API int cui_tree_table_depth(cui_ctx *ui);   /* depth of the current row, 0 at the top */
+CUI_API cui_tree_table_events cui_tree_table_end(cui_ctx *ui);
+/* Sorts every sibling list (stable) by cmp, relinking the nodes. Returns
+ * the new first top level node. */
+CUI_API int cui_tree_sort(cui_tree_node *nodes, int node_count, int root, int (*cmp)(void *user, int a, int b), void *user);
+
+/* Path bar: a breadcrumb for file and scene paths. Segments are clickable,
+ * the last one is the current place. Middle segments that do not fit
+ * collapse into a "..." menu. With .menus, the chevron after segment k opens
+ * a menu you fill with the children of segment k (cui_path_bar_menu_begin).
+ * Click the empty part (or the current segment), or press Ctrl+L, to type a
+ * path: Enter submits it, Esc or clicking away cancels. */
+typedef struct cui_path_bar_opts {
+    int _;
+    const char *icon;          /* before the first segment */
+    const char *text;          /* what editing starts with, default the segments joined by "/" */
+    const char *placeholder;
+    cui_control_size size;
+    cui_size width;            /* default fill */
+    bool menus;                /* separators open a menu of the next segment's siblings */
+    bool no_edit;              /* no text mode */
+} cui_path_bar_opts;
+typedef struct cui_path_bar_result {
+    int clicked;               /* segment clicked (here or in the "..." menu), else -1 */
+    const char *submitted;     /* the typed path after Enter, else NULL; valid this frame */
+    bool editing;
+} cui_path_bar_result;
+CUI_API cui_path_bar_result cui_path_bar_ex(cui_ctx *ui, const char *id, const char *const *segments, int count, const cui_path_bar_opts *opts);
+/* True while the menu of separator *segment is showing: build menu items
+ * for the children of that segment, then call cui_path_bar_menu_end. */
+CUI_API bool cui_path_bar_menu_begin(cui_ctx *ui, const char *id, int *segment);
+CUI_API void cui_path_bar_menu_end(cui_ctx *ui);
+#define cui_tree_table_begin(ui, id, cols, ncols, nodes, n, ...) cui_tree_table_begin_ex((ui), (id), (cols), (ncols), (nodes), (n), CUI__OPTS(cui_tree_table_opts, __VA_ARGS__))
+#define cui_path_bar(ui, id, segs, n, ...) cui_path_bar_ex((ui), (id), (segs), (n), CUI__OPTS(cui_path_bar_opts, __VA_ARGS__))
 
 /* ------------------------------------------------------------------------ */
 /* Code                                                                     */
@@ -1061,6 +1161,225 @@ CUI_API void cui_code_block_ex(cui_ctx *ui, const char *id, const char *code, co
 typedef struct cui_json_opts { int _; int expand_depth; float max_height; } cui_json_opts;
 CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, const cui_json_opts *opts);
 
+/* ---- Markdown view ---- */
+
+/* Markdown view: renders your markdown text (UTF-8) as native content, every
+ * frame, without keeping a copy:
+ *
+ *     static char notes[4096] = "## Release 2.4\n- [ ] Tag the release\n";
+ *     cui_markdown_result r = cui_markdown(ui, "notes", notes);
+ *     if (r.link) show_status(r.link);              (never opened for you)
+ *     cui_markdown_apply_task(notes, &r);           (a checkbox was clicked)
+ *
+ * Supported: ATX headings (# to ######) and setext headings (=== and ---
+ * under a line), paragraphs (single newlines are soft breaks; two trailing
+ * spaces, a trailing backslash or <br> break the line), **bold**, *italic*
+ * (and _ forms), ~~strikethrough~~, `inline code`, [links](url) and
+ * ![images](url) (shown as links to the image), <https://autolinks>, bare
+ * https:// and www. links, backslash escapes, &amp; &lt; &gt; &quot; &#39;
+ * &nbsp;, bullet (- * +) and ordered (1. or 1)) lists nested by indentation,
+ * task items (- [ ] and - [x]), block quotes, fenced code blocks (``` or ~~~
+ * with a language, drawn by cui_code_block with its highlighter), indented
+ * code, horizontal rules (--- *** ___) and pipe tables with an alignment row
+ * (drawn with cui_table, scrolling sideways when narrower than their columns).
+ * Everything else (HTML, reference links, footnotes, math) shows as plain
+ * text. Containers nest at most 12 deep; deeper content shows as text.
+ *
+ * With .streaming set (text still arriving, as in an AI reply), an unclosed
+ * **, *, ~~, `, [link] or (url) at the very end renders as if it were
+ * closed, markers that may still grow are held back, and an unfinished
+ * table row or heading underline waits for its line, so appending text never
+ * flickers between styles. An unclosed code fence always runs to the end.
+ *
+ * Links use the accent color with an underline that firms up on hover, show
+ * their URL as a tooltip, take Tab focus and activate with Enter. Text is not
+ * selectable (CUI text has no selection yet); code blocks have a copy button.
+ * Parsing allocates only from the frame arena (about 16 bytes a line and a
+ * few dozen per inline marker), so a long reply re-parses every frame. */
+typedef struct cui_markdown_opts {
+    int _;
+    cui_size width;            /* default fill */
+    bool fit_content;          /* as wide as the content needs, up to the space there is (chat bubbles) */
+    int length;                /* bytes of text to show, default strlen (text then need not end in a NUL) */
+    float size;                /* body text size, default theme text_body */
+    cui_color color;           /* body text color, default foreground; links then take it too, underlined */
+    bool streaming;            /* text is still arriving */
+    bool compact;              /* smaller headings and tighter spacing, for chat bubbles */
+} cui_markdown_opts;
+typedef struct cui_markdown_result {
+    const char *link;          /* URL of the link clicked (or activated with Enter) this frame, or NULL; frame memory */
+    const char *hovered_link;  /* URL of the link under the pointer, or NULL; frame memory */
+    int task_offset;           /* a task box was toggled: byte offset in text of the character between its brackets, else -1 */
+    int task_line;             /* that item's 1 based line in text, 0 when none */
+    bool task_checked;         /* the state the box was toggled to */
+    float height;              /* height of the view in the latest layout */
+} cui_markdown_result;
+CUI_API cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id, const char *text, const cui_markdown_opts *opts);
+/* Writes a reported task toggle into text ('x' or ' ' between the brackets).
+ * Returns false when nothing was toggled or text no longer has a box there. */
+CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *result);
+#ifndef __cplusplus
+#define cui_markdown(ui, id, text, ...) cui_markdown_ex((ui), (id), (text), CUI__OPTS(cui_markdown_opts, __VA_ARGS__))
+#endif
+
+/* ---- Code editor ---- */
+
+/* Code editor: editable code with the code block's highlighting, a line
+ * number gutter and a monospace grid, for shader editors, script consoles
+ * and config files. You own the text: a NUL terminated buffer and its
+ * capacity, edited in place.
+ *
+ *     static char src[64 * 1024] = "void main() {\n}\n";
+ *     cui_code_editor_result r = cui_code_editor(ui, "shader", src, sizeof src,
+ *                                                .lang = "c", .height = 360);
+ *     if (r.changed) recompile(src);
+ *     cui_textf(ui, "Ln %d, Col %d", r.line, r.column);
+ *
+ * Lines never wrap; long ones scroll sideways while the gutter stays. Only
+ * the lines in view are tokenized and drawn, so files of tens of thousands
+ * of lines stay fast. An edit that would not fit in the capacity is refused
+ * whole (r.refused). Keys when focused: arrows, Ctrl+arrows by word, Home
+ * (first character, then column 0), End, Page Up/Down, Ctrl+Home/End;
+ * Shift extends; Ctrl+A; Ctrl+C/X/V (the whole line without a selection);
+ * Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y; Tab and Shift+Tab indent and outdent the
+ * selected lines; Enter keeps the indentation (a level deeper after an
+ * opening bracket, or a colon in Python); Ctrl+F finds, Ctrl+G goes to a
+ * line; Esc closes the bar, else clears the selection, else lets the next
+ * Tab move focus. Double-click selects a word, triple-click or the gutter a
+ * line. Read only keeps selection, copy and find. */
+typedef struct cui_code_editor_opts {
+    int _;
+    const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell"; NULL plain */
+    cui_size width;            /* default fill */
+    float height;              /* default 320; negative fills the space */
+    float size;                /* font size, default 13 */
+    int tab_size;              /* columns per indentation level, default 4 */
+    bool use_tabs;             /* indent with tab characters instead of spaces */
+    bool read_only;
+    bool no_line_numbers;
+    bool autofocus;
+    const char *placeholder;   /* shown while the text is empty */
+} cui_code_editor_opts;
+typedef struct cui_code_editor_result {
+    bool changed;              /* the text changed this frame */
+    bool refused;              /* an edit did not fit in the capacity and was dropped */
+    bool focused;              /* the editor or its find bar has the keyboard */
+    int cursor, anchor;        /* caret and the other end of the selection, byte offsets */
+    int line, column;          /* the caret, 1 based; columns count tabs to their stop */
+    int line_count, length;    /* lines, and bytes of text */
+    int bracket, bracket_match;   /* the bracket beside the caret and its partner, byte offsets, or -1 */
+    int find_matches, find_index; /* with the find bar open: matches, and which one is selected (1 based, 0 none) */
+} cui_code_editor_result;
+CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
+/* On the editor's next frame: put the caret at a line and column (1 based),
+ * focus the editor and scroll there. Call from the same id scope. */
+CUI_API void cui_code_editor_goto(cui_ctx *ui, const char *id, int line, int column);
+/* On the next frame: select bytes anchor..cursor, focus and scroll there. */
+CUI_API void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int cursor);
+/* Opens the find bar with query and selects the next match (NULL closes). */
+CUI_API void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query);
+#ifndef __cplusplus
+#define cui_code_editor(ui, id, buf, cap, ...) cui_code_editor_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_code_editor_opts, __VA_ARGS__))
+#endif
+/* ---- Diff viewer ---- */
+
+/* Diff viewer: compares two versions of a text line by line, side by side or
+ * inline, with changed words marked inside changed lines. The texts are yours
+ * (UTF-8, read during the call); the view keeps a copy and diffs again only
+ * when one of them changes, so it is cheap to call every frame.
+ *
+ *     static cui_diff_mode mode = CUI_DIFF_SPLIT;
+ *     static int change = 0;                       (the selected change, -1 none)
+ *     cui_diff_result r = cui_diff_view(ui, "diff", before, after, .mode = mode, .current = &change,
+ *                                       .language = "c", .old_title = "parser.c (main)", .new_title = "parser.c");
+ *     if (cui_icon_button(ui, CUI_ICON_ARROW_DOWN, .tooltip = "Next change", .shortcut = "N"))
+ *         change = CUI_MIN(change + 1, r.changes - 1);   (or any index: the view scrolls to it)
+ *     cui_textf(ui, "+%d -%d", r.added, r.removed);
+ *
+ * The line diff is Myers' algorithm (the shortest edit script, in linear
+ * memory). Very different large texts are capped: past about 16 million search
+ * steps the remaining parts are shown as replaced, still a correct diff but
+ * not the shortest (r.approximate). Insertions and deletions slide to end on
+ * a blank line where they can, the way an added function reads best. Paired
+ * changed lines get word marks when they have enough in common.
+ *
+ * Split shows the old text on the left and the new on the right, rows aligned
+ * with a blank filler opposite added or removed lines; narrower than
+ * split_min_width (560 points) it shows inline instead (r.mode says which).
+ * Each side has its line numbers and a + or - sign. Unchanged stretches keep
+ * .context lines (3) beside each change; longer ones fold into a "42 unchanged
+ * lines" row that opens on a click. Lines longer than the view scroll
+ * sideways, both sides together; the first 1024 bytes of a line are drawn.
+ *
+ * With the view focused: N or Alt+Down goes to the next change, P or Alt+Up to
+ * the previous one, arrows and Page Up/Down scroll, E opens every fold and
+ * Shift+E folds them again, Esc clears the selected change. A click on a
+ * change selects it. Only the rows in sight are built. */
+typedef enum cui_diff_mode { CUI_DIFF_SPLIT = 0, CUI_DIFF_INLINE = 1 } cui_diff_mode;
+typedef struct cui_diff_opts {
+    int _;
+    cui_diff_mode mode;
+    const char *language;       /* syntax colors, as cui_code_block: "c", "js", "python", ... */
+    const char *old_title, *new_title;   /* a header above the sides, e.g. file names, with the +/- summary */
+    int *current;               /* the selected change, read and written (may be NULL); set it to scroll to a change */
+    int context;                /* unchanged lines kept beside each change, default 3 */
+    bool no_fold;               /* show every unchanged line */
+    bool ignore_eol;            /* "\r\n" equals "\n", and a missing final newline does not count */
+    float split_min_width;      /* below this width split shows inline, default 560 */
+    cui_size width;             /* default fill */
+    float height;               /* default: the rows, up to 420; negative fills the space */
+    float size;                 /* font size, default 12 */
+} cui_diff_opts;
+typedef struct cui_diff_result {
+    int added, removed;         /* lines */
+    int changes;                /* change blocks (hunks without context) */
+    int current;                /* the selected change, -1 none */
+    bool current_changed;       /* this frame, by the keys, a click or .current */
+    cui_diff_mode mode;         /* what is shown: inline when split did not fit */
+    int folds, hidden;          /* folded rows shown, and the unchanged lines they hide */
+    bool recomputed;            /* a text changed and was diffed this frame */
+    bool approximate;           /* the search hit its limit: correct, maybe not the shortest */
+} cui_diff_result;
+CUI_API cui_diff_result cui_diff_view_ex(cui_ctx *ui, const char *id, const char *old_text, const char *new_text, const cui_diff_opts *opts);
+#define cui_diff_view(ui, id, old_text, new_text, ...) cui_diff_view_ex((ui), (id), (old_text), (new_text), CUI__OPTS(cui_diff_opts, __VA_ARGS__))
+
+/* The rows the view shows after folding, e.g. to put a comment button beside
+ * a line. Copies rows [first, first + cap) and returns how many there are (0
+ * before the view's first frame). Call it in the same id scope as the view. */
+typedef enum cui_diff_row_kind {
+    CUI_DIFF_ROW_SAME = 0, CUI_DIFF_ROW_REMOVED, CUI_DIFF_ROW_ADDED,
+    CUI_DIFF_ROW_CHANGED,       /* split: a removed line beside the added line that replaced it */
+    CUI_DIFF_ROW_FOLD           /* hidden unchanged lines, starting at old_line / new_line */
+} cui_diff_row_kind;
+typedef struct cui_diff_row {
+    cui_diff_row_kind kind;
+    int old_line, new_line;     /* 0 based, -1 for none */
+    int change;                 /* the change it belongs to, or -1 */
+    int hidden;                 /* fold rows: lines hidden */
+} cui_diff_row;
+CUI_API int cui_diff_view_rows(cui_ctx *ui, const char *id, cui_diff_row *rows, int first, int cap);
+
+/* The same diff without a view. Old lines [old_start, old_start + old_count)
+ * became new lines [new_start, new_start + new_count), 0 based; a pure
+ * insertion has old_count 0 and goes before old line old_start. Writes up to
+ * cap hunks and returns how many there are (-1 when out of memory). Lines end
+ * at "\n"; a "\r" before it is part of the line ending. Allocates with malloc. */
+typedef struct cui_diff_hunk { int old_start, old_count, new_start, new_count; } cui_diff_hunk;
+typedef struct cui_diff_stats {
+    int added, removed, hunks;
+    int old_lines, new_lines;
+    bool approximate;
+} cui_diff_stats;
+enum { CUI_DIFF_IGNORE_EOL = 1 };   /* flags */
+CUI_API int cui_diff_compute(const char *old_text, size_t old_len, const char *new_text, size_t new_len, unsigned flags,
+                             cui_diff_hunk *hunks, int cap, cui_diff_stats *stats);
+/* Word marks between two versions of one line, as byte ranges (a length of -1
+ * reads up to the terminator). Returns false when the lines have too little in
+ * common for marks to help, or a line is very long (over 2000 bytes). */
+typedef struct cui_diff_range { int start, length; } cui_diff_range;
+CUI_API bool cui_diff_words(const char *old_line, int old_len, const char *new_line, int new_len,
+                            cui_diff_range *old_ranges, int *old_count, cui_diff_range *new_ranges, int *new_count, int cap);
+
 /* ------------------------------------------------------------------------ */
 /* Conversation                                                             */
 /* ------------------------------------------------------------------------ */
@@ -1076,6 +1395,8 @@ typedef struct cui_chat_opts {
     bool grouped;              /* continues the previous message */
     bool last_in_group;        /* shows the avatar (others) and status (mine) */
     cui_texture avatar;
+    bool markdown;             /* render the text with cui_markdown (compact, as wide as it needs) */
+    cui_markdown_result *markdown_result;   /* optional: links and task toggles the markdown reported */
 } cui_chat_opts;
 CUI_API void cui_chat_message_ex(cui_ctx *ui, const char *text, const cui_chat_opts *opts);
 CUI_API void cui_chat_divider(cui_ctx *ui, const char *label);       /* "Today" */
@@ -1725,6 +2046,68 @@ typedef struct cui_doc_tabs_result {
     int move_from, move_to;    /* move the tab at move_from to move_to, or -1 */
 } cui_doc_tabs_result;
 CUI_API cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id, const cui_doc_tab *tabs, int count, int *selected, const cui_doc_tabs_opts *opts);
+
+/* ---- Docking ---- */
+
+/* Dockspace: an IDE style workspace that lays out your panels in a tree of
+ * resizable splits whose leaves hold one or more panels as document tabs.
+ * Submit every panel each frame between cui_dockspace_begin and
+ * cui_dockspace_end; the dockspace decides where it goes, and a panel's
+ * content is built only while its tab is the one showing:
+ *
+ *     cui_dockspace_begin(ui, "main", .layout = "dock1 h0.25([Scene tree],[Viewport])");
+ *     if (cui_dock_panel_begin(ui, "Inspector", &show_inspector)) {
+ *         ...content...
+ *         cui_dock_panel_end(ui);
+ *     }
+ *     cui_dockspace_end(ui);
+ *
+ * Drag a divider to resize. Drag a tab out of its strip to re-dock it: drop
+ * targets appear over the leaf under the pointer (the middle stacks it as a
+ * tab, the four sides split the leaf) and along the dockspace's outer edges,
+ * with a tinted preview of where it will land; Esc cancels. A leaf that loses
+ * its last panel collapses into its neighbour. The x on a tab writes
+ * *open = false; set it back to true (from a View menu) and the panel
+ * returns to its last place, or as a tab in the largest leaf. Pass NULL for a
+ * panel that cannot be closed. Panels are identified by title ("Log (3)###log"
+ * keeps the identity while the label changes), unique within a dockspace and
+ * at most 63 bytes; a dockspace holds up to 48 panels. The id is global (it
+ * ignores cui_push_id), so cui_dock_save and cui_dock_load can be called from
+ * anywhere. Dockspaces lay out from the previous frame's size, so a panel
+ * that appears or reopens shows from the next frame (one is requested).
+ * After cui_dock_panel_begin, cui_last_rect gives the panel's tab. */
+typedef struct cui_dockspace_opts {
+    int _;
+    const char *layout;        /* first run layout, in the cui_dock_save format */
+    cui_size width, height;    /* default fill */
+    float min_panel_width;     /* default 120; splits stop here (and share what there is when too narrow) */
+    float min_panel_height;    /* default 96 */
+    bool shortcuts;            /* Ctrl+Tab, Ctrl+Shift+Tab and Ctrl+W act on the focused leaf */
+} cui_dockspace_opts;
+CUI_API void cui_dockspace_begin_ex(cui_ctx *ui, const char *id, const cui_dockspace_opts *opts);
+CUI_API void cui_dockspace_end(cui_ctx *ui);
+/* Returns true while the panel's content should be built; then call
+ * cui_dock_panel_end. */
+typedef struct cui_dock_panel_opts { int _; const char *icon; bool dirty; } cui_dock_panel_opts;
+CUI_API bool cui_dock_panel_begin_ex(cui_ctx *ui, const char *title, bool *open, const cui_dock_panel_opts *opts);
+CUI_API void cui_dock_panel_end(cui_ctx *ui);
+/* Saved layout: one line, e.g.
+ *     dock1 h0.22([*Scene tree,Assets],v0.7([*Viewport],[*Log,-Console]))
+ * h splits side by side and v stacks, the number is the first child's share,
+ * [..] is a leaf's tabs in order, * the selected tab, - a closed panel; a
+ * backslash escapes , [ ] ( ) and itself in names. cui_dock_save returns the full length (as
+ * snprintf does) and writes what fits, or 0 when there is no layout.
+ * cui_dock_load replaces the layout (and sets each panel's *open from it on
+ * its next frame); names it does not know yet are kept for when they appear.
+ * Malformed text returns false and changes nothing. */
+CUI_API size_t cui_dock_save(cui_ctx *ui, const char *id, char *buf, size_t cap);
+CUI_API bool cui_dock_load(cui_ctx *ui, const char *id, const char *text);
+#ifndef __cplusplus
+#define cui_dockspace_begin(ui, id, ...)    cui_dockspace_begin_ex((ui), (id), CUI__OPTS(cui_dockspace_opts, __VA_ARGS__))
+#define cui_dockspace(ui, id, ...)          CUI__SCOPE(cui_dockspace_begin_ex((ui), (id), CUI__OPTS(cui_dockspace_opts, __VA_ARGS__)), cui_dockspace_end(ui))
+#define cui_dock_panel_begin(ui, title, open, ...) cui_dock_panel_begin_ex((ui), (title), (open), CUI__OPTS(cui_dock_panel_opts, __VA_ARGS__))
+#define cui_dock_panel(ui, title, open, ...) CUI__SCOPE_IF(cui_dock_panel_begin_ex((ui), (title), (open), CUI__OPTS(cui_dock_panel_opts, __VA_ARGS__)), cui_dock_panel_end(ui))
+#endif
 /* Tool panels: property inspector, log console                             */
 /* ------------------------------------------------------------------------ */
 
@@ -2059,6 +2442,117 @@ CUI_API cui_gradient_result cui_gradient_editor_ex(cui_ctx *ui, const char *id, 
  * interpolated in sRGB between the stops on either side; the end colors
  * continue past the first and last stop). */
 CUI_API cui_color cui_gradient_eval(const cui_gradient_stop *stops, int count, float t);
+
+/* ---- Timeline ---- */
+
+/* Timeline editor (dope sheet): a track list on the left, a time ruler on
+ * top and a row per track with its keys (and clips, for video and audio
+ * tracks). You own the tracks, their keys and clips, the playhead time and
+ * the selection; the editor edits them in place and reports what it did:
+ *
+ *     static cui_curve_key rot[32] = { { 0, 0 }, { 1, 30 }, { 2, 0 } };
+ *     static bool rot_sel[32];                   (parallel to the keys)
+ *     static cui_timeline_track tracks[] = {
+ *         { "Hero", CUI_ICON_USER, 0 },
+ *         { "Rotation", NULL, 1, .keys = rot, .key_count = 3, .key_capacity = 32, .key_selected = rot_sel },
+ *     };
+ *     static float t;
+ *     cui_timeline_editor_result r = cui_timeline_editor(ui, "anim", tracks, 2, &t, .end = 4, .fps = 24);
+ *     if (r.play_toggled) playing = !playing;    (you advance t while playing)
+ *     float angle = cui_curve_eval(rot, tracks[1].key_count, t);
+ *
+ * Keys are curve keys (x is the time in seconds, y the value), so a track's
+ * array goes straight into cui_curve_editor and cui_curve_eval; the mode sets
+ * the mark: a diamond for SMOOTH and FREE, a circle for LINEAR, a square for
+ * STEP. Keys stay sorted by time and inside start..end. A track whose next
+ * tracks are deeper is a group: a chevron collapses it and its row shows
+ * its tracks' keys as small marks. Only the rows in view are visited and
+ * only the keys in view are searched (binary searches), so thousands of
+ * tracks stay fast.
+ *
+ * Mouse: click the ruler or drag in it to scrub (snapped to frames); click a
+ * key to select it, Shift+click adds, Ctrl+click toggles; drag in empty
+ * space for a box selection (Shift or Ctrl adds to the selection); drag
+ * selected keys to move them, by whole frames (hold Shift to move freely);
+ * double-click a row to add a key there (on the curve, so the motion is
+ * kept); drag a clip to move it, its ends to trim it; click a track name to
+ * select its keys. The wheel zooms time around the pointer, Shift+wheel or a
+ * sideways scroll pans, the wheel over the track list scrolls the rows, and
+ * a middle-button drag pans both ways. Hovering a key shows its time and
+ * value.
+ * Keys when focused: Left/Right step the playhead a frame (Shift: 10),
+ * Alt+Left/Right move the selected keys a frame (Shift: 10), Up/Down jump to
+ * the previous/next key, Home/End to the start/end, Space reports a play
+ * request, Delete or Backspace removes the selected keys and clips, Ctrl+A
+ * selects every key on the visible tracks, Esc clears the selection, F fits
+ * the whole sequence (animated, snaps with reduced motion), + and - zoom
+ * around the playhead. The view follows the playhead when it leaves the
+ * view. */
+typedef enum cui_timeline_ruler {
+    CUI_TIMELINE_FRAMES = 0,   /* frame numbers */
+    CUI_TIMELINE_SECONDS,      /* 1.5 s */
+    CUI_TIMELINE_TIMECODE      /* minutes:seconds:frames (hours too past an hour) */
+} cui_timeline_ruler;
+typedef struct cui_timeline_clip {
+    float start, end;          /* seconds, end > start */
+    float offset;              /* where the clip starts in its media; trimming the start moves it along */
+    const char *name;
+    bool selected;
+} cui_timeline_clip;
+typedef struct cui_timeline_track {
+    const char *name;
+    const char *icon;          /* optional, before the name */
+    int depth;                 /* 0 top level; the deeper tracks after a track belong to it (a group) */
+    bool collapsed;            /* a group hides its tracks (its chevron toggles this) */
+    bool muted, locked;        /* toggled by the row's buttons (.toggles); a locked track can't be edited */
+    uint8_t color;             /* series color 1..6; 0 takes the group's, or the next one at the top level */
+    cui_curve_key *keys;       /* sorted by x: x is the time in seconds, y the value (may be NULL) */
+    int key_count, key_capacity;
+    bool *key_selected;        /* parallel to keys, kept by you; NULL: the keys are shown but not selectable */
+    cui_timeline_clip *clips;  /* sorted by start, not overlapping (may be NULL) */
+    int clip_count;
+} cui_timeline_track;
+typedef struct cui_timeline_view {
+    float start, end;          /* visible time range; end <= start fits the sequence */
+    float scroll;              /* rows scrolled off the top, in points */
+} cui_timeline_view;
+typedef struct cui_timeline_editor_opts {
+    int _;
+    float start, end;          /* the sequence in seconds; both 0 = 0..10 */
+    float fps;                 /* frames per second, default 30: snapping, stepping and frame labels */
+    int ruler;                 /* cui_timeline_ruler */
+    cui_timeline_view *view;   /* NULL keeps it in the editor */
+    float *in, *out;           /* a play range: with both set, markers to drag in the ruler and shading outside */
+    int *current_track, *current_key;   /* the key last clicked or added, or -1; kept by you (NULL: in the editor) */
+    cui_size width;            /* default fill */
+    float height;              /* default: fits every track (up to 360) */
+    float row_height;          /* default 26 */
+    float track_width;         /* track list, default 184; narrower (then icons only) on a narrow editor */
+    bool toggles;              /* hide and lock buttons on every track */
+    bool free_drag;            /* drags and scrubbing do not snap to frames */
+} cui_timeline_editor_opts;
+typedef struct cui_timeline_editor_result {
+    bool changed;              /* keys or clips moved, were added or removed, or a track flag changed */
+    bool time_changed;         /* *time moved (scrub, ruler click, keys) */
+    bool scrubbing;            /* the playhead is being dragged */
+    bool play_toggled;         /* Space: start or stop playback */
+    bool selection_changed;
+    bool view_changed;
+    bool keys_moved;           /* selected keys moved this frame (drag or Alt+arrows) */
+    int added_track, added_key;  /* the key added this frame (double click), or -1 */
+    int removed_keys, removed_clips;   /* how many were removed this frame (Delete) */
+    int clip_track, clip;      /* the clip moved or trimmed this frame, or -1 */
+    int toggled;               /* the track whose collapsed, muted or locked flag changed, or -1 */
+    int current_track, current_key;
+    int hovered_track, hovered_key;    /* the key under the pointer, or -1 */
+} cui_timeline_editor_result;
+/* time: the playhead in seconds (may be NULL). */
+CUI_API cui_timeline_editor_result cui_timeline_editor_ex(cui_ctx *ui, const char *id, cui_timeline_track *tracks, int count,
+                                                          float *time, const cui_timeline_editor_opts *opts);
+#ifndef __cplusplus
+#define cui_timeline_editor(ui, id, tracks, count, time, ...) \
+    cui_timeline_editor_ex((ui), (id), (tracks), (count), (time), CUI__OPTS(cui_timeline_editor_opts, __VA_ARGS__))
+#endif
 
 /* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
