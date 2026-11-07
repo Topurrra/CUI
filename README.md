@@ -10,7 +10,7 @@
 **Native UI components for C.**
 
 About 150 components with spring motion and full keyboard support.<br>
-Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
+Windows, macOS and Linux from one C99 codebase. No dependencies, about 250 KB.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/yappologistic/CUI/ci.yml?branch=master&label=CI&style=flat-square&labelColor=24292f)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-57606a.svg?style=flat-square&labelColor=24292f&color=57606a)](LICENSE)
@@ -99,7 +99,7 @@ Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtuali
 
 **Small and fast**
 
-A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 240 KB.
+A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 250 KB.
 
 </td>
 </tr>
@@ -302,7 +302,7 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 
 | Measure | Result |
 |---|---|
-| `hello` on Linux, stripped, whole executable | about 240 KB |
+| `hello` on Linux, stripped, whole executable | about 250 KB |
 | `assistant` (the AI app above), whole executable | about 330 KB |
 | Whole library: every component, both renderers, X11 backend, fonts and icons | about 590 KB |
 | Build, layout and paint a frame (gallery pages, 1240 × 820 points at 2×) | 0.12 to 0.25 ms |

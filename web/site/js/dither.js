@@ -50,10 +50,13 @@ function tint(pal, lum, groundW) {
 /* opts: src, cell (CSS px per dot), focusY (0 top .. 1 bottom: which part of
  * the photo stays in view when it is cropped), horizon (0..1 of the photo
  * where the sky gives way to the ground), gamma (higher = fewer dots),
- * reveal (true: dots develop from the top on first draw; 'view': the same,
- * once the art scrolls into view), reduced () => bool. */
+ * reveal (true: the picture fades in on first draw; 'view': the same, once
+ * the art scrolls into view), loop (a soft band of light sweeps across
+ * the picture and repeats, like cloud shadows over the valley; it pauses
+ * off screen and never runs with reduced motion), reduced () => bool. */
 export function ditherArt(opts) {
-  const o = { cell: 2, focusY: 0.5, horizon: 0.53, gamma: 1, reveal: true, reduced: () => false, ...opts };
+  const o = { cell: 2, focusY: 0.5, horizon: 0.53, gamma: 1, reveal: true, loop: false, reduced: () => false, ...opts };
+  const PERIOD = 14;   // seconds for one sweep of the light
   const el = document.createElement('div');
   el.className = 'dither';
   el.setAttribute('aria-hidden', 'true');
@@ -92,10 +95,12 @@ export function ditherArt(opts) {
     return true;
   }
 
-  // progress 0..1 develops the dots from the top down
-  function paint(progress) {
+  // progress 0..1 develops the dots from the top down; time (seconds) moves
+  // the band of light when looping
+  function paint(progress, time = loopTime()) {
     if (!lum) return;
     const dark = document.documentElement.dataset.theme === 'dark';
+    const sweep = time === null ? null : (time / PERIOD) * Math.PI * 2;
     const pal = dark ? PALETTE.dark : PALETTE.light;
     const d = data.data;
     for (let y = 0; y < gh; y++) {
@@ -105,6 +110,12 @@ export function ditherArt(opts) {
         const i = y * gw + x, j = i * 4;
         let v = dark ? lum[i] : 1 - lum[i];
         v = Math.pow(v, o.gamma) * t;
+        if (sweep !== null) {
+          // a diagonal band: dark theme gains light dots, light theme loses ink
+          const w = 0.5 + 0.5 * Math.cos((x / gw * 0.9 + y / gh * 0.35) * Math.PI * 2 - sweep);
+          const band = w * w * w * w * w * w;
+          v *= dark ? 1 + 0.55 * band : 1 - 0.45 * band;
+        }
         if (v > BAYER[(y & 7) * 8 + (x & 7)]) {
           const c = tint(pal, lum[i], groundW);
           d[j] = c[0]; d[j + 1] = c[1]; d[j + 2] = c[2]; d[j + 3] = 255;
@@ -117,43 +128,71 @@ export function ditherArt(opts) {
     ctx.drawImage(small, 0, 0, gw * k, gh * k);
   }
 
+  // Paint once, then fade the canvas in with CSS: the compositor runs the fade,
+  // so it stays smooth while the page is busy starting its live previews.
+  // The light sweep only starts after the fade, so one painter at a time.
+  let loopReady = false, loopDelay = 0;
   function draw() {
     cancelAnimationFrame(raf);
     if (!measure()) return;
-    if (revealed || o.reduced()) { revealed = true; paint(1); return; }
-    if (!visible) { paint(0); return; }
-    revealed = true;
-    const start = performance.now(), dur = 1100;
-    const step = (now) => {
-      const p = Math.min(1, (now - start) / dur);
-      paint(p);
-      if (p < 1 && el.isConnected) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
+    if (!visible) { paint(1); return; }   // 'view': drawn but hidden until it scrolls in
+    paint(1);
+    if (!revealed) {
+      revealed = true;
+      if (!o.reveal || o.reduced()) el.classList.add('shown', 'instant');
+      else raf = requestAnimationFrame(() => el.classList.add('shown'));
+      clearTimeout(loopDelay);
+      loopDelay = setTimeout(() => { loopReady = true; loopStart(); }, o.reduced() ? 0 : 1600);
+    } else loopStart();
   }
 
-  let lastW = 0, lastH = 0, pending = 0, seen = false;
+  let loopRaf = 0, loopLast = 0, inView = false;
+  const t0 = performance.now();
+  function loopTime() { return o.loop && !o.reduced() && loopReady ? (performance.now() - t0) / 1000 : null; }
+  function loopTick(now) {
+    loopRaf = 0;
+    if (!el.isConnected || !o.loop || o.reduced() || !loopReady || !inView || document.hidden) return;
+    if (now - loopLast >= 50 && lum) { loopLast = now; paint(1); }
+    loopRaf = requestAnimationFrame(loopTick);
+  }
+  function loopStart() { if (o.loop && loopReady && !loopRaf) loopRaf = requestAnimationFrame(loopTick); }
+  const vio = new IntersectionObserver((es) => { inView = es.some((e) => e.isIntersecting); if (inView) loopStart(); }, { threshold: 0 });
+  const onVis = () => { if (!document.hidden) loopStart(); };
+  document.addEventListener('visibilitychange', onVis);
+
+  // size changes while fonts and layout settle collapse into one redraw
+  let lastW = 0, lastH = 0, pending = 0, settle = 0, seen = false;
   const ro = new ResizeObserver(([e]) => {
     const { width, height } = e.contentRect;
     if (el.isConnected) seen = true;
     else { if (seen) stop(); return; }
     if (Math.abs(width - lastW) < 1 && Math.abs(height - lastH) < 1) return;
     lastW = width; lastH = height;
-    cancelAnimationFrame(pending);
-    pending = requestAnimationFrame(draw);
+    cancelAnimationFrame(pending); clearTimeout(settle);
+    if (!lum) pending = requestAnimationFrame(draw);
+    else settle = setTimeout(draw, 150);
   });
-  const mo = new MutationObserver(() => { if (!el.isConnected) { if (seen) stop(); return; } if (lum) paint(1); });
+  let themeRaf = 0;
+  const mo = new MutationObserver(() => {
+    if (!el.isConnected) { if (seen) stop(); return; }
+    if (lum && !themeRaf) themeRaf = requestAnimationFrame(() => { themeRaf = 0; paint(1); });
+  });
   const io = new IntersectionObserver((es) => {
     if (!es.some((e) => e.isIntersecting)) return;
     io.disconnect();
     if (!visible) { visible = true; if (lum) draw(); }
   }, { threshold: 0.35 });
-  function stop() { ro.disconnect(); mo.disconnect(); io.disconnect(); cancelAnimationFrame(raf); cancelAnimationFrame(pending); }
+  function stop() {
+    ro.disconnect(); mo.disconnect(); io.disconnect(); vio.disconnect(); document.removeEventListener('visibilitychange', onVis);
+    cancelAnimationFrame(raf); cancelAnimationFrame(pending); cancelAnimationFrame(loopRaf); cancelAnimationFrame(themeRaf);
+    clearTimeout(settle); clearTimeout(loopDelay);
+  }
 
   loadImage(o.src).then((i) => {
     img = i;
     ro.observe(el);
     if (!visible) io.observe(el);
+    if (o.loop) vio.observe(el);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
   }).catch(() => {});
   return el;

@@ -19,6 +19,22 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 const svg = (paths, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${paths}</svg>`;
 const I = {
+  // landing page: the same Lucide shapes CUI draws from its icon font
+  table: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
+  command: svg('<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>'),
+  workflow: svg('<rect x="3" y="3" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect x="13" y="13" width="8" height="8" rx="2"/>'),
+  sliders: svg('<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>'),
+  chart: svg('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>'),
+  message: svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+  kanban: svg('<path d="M6 5v11M12 5v6M18 5v14"/>'),
+  window: svg('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M6 4v5"/>'),
+  terminal: svg('<path d="m4 17 6-6-6-6M12 19h8"/>'),
+  grid: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
+  contrast: svg('<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>'),
+  pen: svg('<path d="M21.2 6.8 17.2 2.8 3 17v4h4z"/><path d="m14 6 4 4"/>'),
+  plug: svg('<path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8z"/>'),
+  ruler: svg('<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2M11.5 9.5l2-2M8.5 6.5l2-2M17.5 15.5l2-2"/>'),
+  layers: svg('<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>'),
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   moon: svg('<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>'),
   eye: svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
@@ -513,8 +529,6 @@ FetchContent_MakeAvailable(cui)
 target_link_libraries(my_app PRIVATE cui::cui)`],
   ['Git', 'git clone https://github.com/yappologistic/CUI.git'],
 ];
-const DEMOS = [['segmented', 'segmented-control'], ['slider', 'slider'], ['rolling-numbers', 'rolling-numbers'],
-               ['chips', 'chips-and-rating'], ['select', 'select-and-combobox'], ['menu', 'dropdown-and-context-menu']];
 
 function installBlock() {
   let cur = 0;
@@ -531,26 +545,178 @@ function installBlock() {
 
 const FACTS = [
   ['0.1 to 0.25 ms a frame', 'A full screen builds, lays out and paints in a fraction of a millisecond. An idle app uses no CPU.'],
-  ['About 240 KB', 'That is a complete app. CUI has no dependencies, and the library is one C99 codebase.'],
+  ['About 250 KB', 'That is a complete app. CUI has no dependencies, and the library is one C99 codebase.'],
   ['Win32, Cocoa and X11', 'Or SDL2 and GLFW, drawn with OpenGL or the software renderer. The core only emits triangles, so your own renderer works too.'],
   ['Keyboard and reduced motion', 'Every component works from the keyboard and every animation has a reduced motion path. Text meets 4.5:1 contrast.'],
 ];
 const ART = 'img/tetons.jpg';
 
+// the hexagon C, drawn from simple geometry: three blues and a white C whose
+// mouth follows the dark wedge. viewBox has room for the rounded corners.
+const C_LOGO = `<svg class="c-logo" viewBox="-14 -14 388 432" role="img" aria-label="C">
+<defs><mask id="c-hex"><polygon points="180,0 360,101 360,303 180,404 0,303 0,101" fill="#fff" stroke="#fff" stroke-width="28" stroke-linejoin="round"/></mask></defs>
+<g mask="url(#c-hex)">
+<polygon points="180,202 0,303 0,101 180,-20 380,101" fill="#659ad2"/>
+<polygon points="180,202 380,303 180,424 0,303" fill="#00599c"/>
+<polygon points="180,202 380,101 380,303" fill="#004482"/>
+<path d="M282.9 144.3A118 118 0 1 0 282.9 259.7L230.6 230.4A58 58 0 1 1 230.6 173.6Z" fill="#fff"/>
+</g></svg>`;
+// the landing page: the hero's controls, the showcase, the bento and the
+// playground are all the library itself, compiled to WebAssembly
+const STRIP = [['~150', 'components'], ['~250 KB', 'a complete app'], ['< 0.25 ms', 'per frame'], ['Win · Mac · Linux', 'one C99 codebase'], ['0', 'dependencies']];
+const SHOWCASE = [['stage-mosaic', 'Overview', 'layers'], ['app-chrome', 'Editor', 'window'], ['hero-data', 'Data', 'table'],
+                  ['hero-plan', 'Planning', 'kanban'], ['hero-ai', 'Assistant', 'message'], ['hero-charts', 'Charts', 'chart']];
+const BENTO = [
+  ['data-grid', 'data-grid-and-filter-bar', 'table', 'Data grid', 'Thousands of rows, sorting, filters and spreadsheet selection.', 'wide'],
+  ['command-palette', 'command-palette', 'command', 'Command palette', 'Fuzzy search with groups and shortcuts.', ''],
+  ['node-editor', 'node-editor', 'workflow', 'Node editor', 'Pan, zoom and wire nodes together.', 'wide'],
+  ['inspector', 'property-inspector', 'sliders', 'Property inspector', 'Typed editors in folding groups.', 'tall'],
+  ['line-chart', 'charts', 'chart', 'Charts', 'Lines, bars, donuts and a dozen more.', ''],
+  ['chat', 'chat', 'message', 'Chat', 'Bubbles, replies and reactions.', ''],
+];
+
+function dropBlock(root) {
+  const b = blocks.find((x) => x.root === root);
+  if (b) { b.dispose(); blocks.splice(blocks.indexOf(b), 1); }
+}
+
+// one large stage; the tabs swap which scene runs in it
+function showcase() {
+  const host = h('div', { class: 'show-stage' });
+  const items = SHOWCASE.filter(([scene]) => CAT.scenes[scene]);
+  let cur = -1, root = null;
+  const ind = h('span', { class: 'slide-ind', 'aria-hidden': 'true' });
+  const tabs = h('div', { class: 'show-tabs', role: 'tablist', 'aria-label': 'Showcase' }, ind,
+    items.map(([, label, icon], i) => h('button', { role: 'tab', 'aria-selected': 'false', html: I[icon] + `<span>${label}</span>`, onclick: () => pick(i) })));
+  function pick(i) {
+    if (i === cur) return;
+    const first = cur < 0;
+    cur = i;
+    tabs.querySelectorAll('button').forEach((b, k) => b.setAttribute('aria-selected', String(k === i)));
+    slideTo(ind, tabs.querySelectorAll('button')[i], first);
+    if (root) dropBlock(root);
+    const scene = items[i][0], sc = CAT.scenes[scene];
+    root = previewBlock({ module: 'scenes', content: scene, title: scene, item: items[i][1], tight: true,
+                          codeSource: sc.source, codeFile: sc.file, codeLine: sc.line });
+    if (!first) root.classList.add('swap-in');
+    host.replaceChildren(root);
+  }
+  // the first scene starts once the hero has settled, so its startup does not
+  // compete with the hero's entrance on load
+  const first = tabs.querySelectorAll('button')[0];
+  if (first) { first.setAttribute('aria-selected', 'true'); requestAnimationFrame(() => slideTo(ind, first, true)); }
+  setTimeout(() => { if (host.isConnected && cur < 0) pick(0); }, motionOff() ? 0 : 700);
+  keepSliding(tabs, ind, () => tabs.querySelectorAll('button')[Math.max(cur, 0)]);
+  return h('div', { class: 'previews home-show' }, tabs, host);
+}
+
+function bentoTile([scene, item, icon, title, text, size]) {
+  const sc = CAT.scenes[scene];
+  if (!sc) return null;
+  const it = CAT.items[item];
+  return h('div', { class: 'tile' + (size ? ' ' + size : '') },
+    h('div', { class: 'tile-head' },
+      h('span', { class: 'tile-icon', html: I[icon] }),
+      h('div', { class: 'tile-text' }, h('h3', {}, title), h('p', {}, text)),
+      it ? h('a', { class: 'demo-link', href: `#/c/${item}`, 'aria-label': `Open ${title}`, html: 'Docs' + I.arrow }) : null),
+    previewBlock({ module: 'scenes', content: scene, bare: true, item: it?.title, codeSource: sc.source, codeFile: sc.file, codeLine: sc.line }));
+}
+
+// light or dark and an accent, for one live page of components
+function playground() {
+  const scene = CAT.scenes['stage-mosaic-pro'] ? 'stage-mosaic-pro' : 'stage-mosaic';
+  const sc = CAT.scenes[scene];
+  const root = previewBlock({ module: 'scenes', content: scene, title: scene, item: 'Overview', tight: true,
+                              codeSource: sc.source, codeFile: sc.file, codeLine: sc.line });
+  let dark = null, accent = -1;
+  const apply = () => {
+    const b = blocks.find((x) => x.root === root);
+    if (!b) return;
+    const stage = root.querySelector('.stage');
+    for (const p of b.previews) {
+      if (dark !== null) p.setTheme(dark);
+      if (accent >= 0) p.setAccent(accent);
+    }
+    if (dark !== null && stage) stage.style.setProperty('--stage-bg', dark ? BG.dark : BG.light);
+  };
+  const segInd = h('span', { class: 'slide-ind', 'aria-hidden': 'true' });
+  const checked = () => mode.querySelector('button[aria-checked="true"]');
+  const mode = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Theme' }, segInd,
+    [['Light', false, I.sun], ['Dark', true, I.moon]].map(([label, d, icon]) => h('button', {
+      role: 'radio', 'aria-checked': String(isDark() === d), html: icon + `<span>${label}</span>`,
+      onclick: (e) => { dark = d; mode.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(b === e.currentTarget))); slideTo(segInd, e.currentTarget); apply(); renderSwatches(); },
+    })));
+  keepSliding(mode, segInd, checked);
+  const swatches = h('div', { class: 'play-swatches', role: 'radiogroup', 'aria-label': 'Accent' });
+  const renderSwatches = () => swatches.replaceChildren(...ACCENTS.map(([name, l, d], i) => h('button', {
+    class: 'swatch', role: 'radio', 'aria-checked': String(accent === i), 'aria-label': `${name} accent`, title: name,
+    style: `--c:${(dark ?? isDark()) ? d : l}`,
+    onclick: () => { accent = i; renderSwatches(); apply(); },
+  })));
+  renderSwatches();
+  return h('div', { class: 'home-play-body' }, h('div', { class: 'play-controls' }, mode, swatches), root);
+}
+
+
+// a pill that slides under the selected tab; first placement does not animate
+function slideTo(ind, btn, instant = false) {
+  if (!btn) return;
+  if (instant) ind.classList.add('no-anim');
+  ind.style.width = `${btn.offsetWidth}px`;
+  ind.style.transform = `translateX(${btn.offsetLeft}px)`;
+  ind.classList.add('on');
+  if (instant) requestAnimationFrame(() => requestAnimationFrame(() => ind.classList.remove('no-anim')));
+}
+// keep it under the selection when fonts load or the row reflows
+function keepSliding(row, ind, current) {
+  const ro = new ResizeObserver(() => { if (!row.isConnected) { ro.disconnect(); return; } const b = current(); if (b) slideTo(ind, b, true); });
+  ro.observe(row);
+}
+// numbers in the strip count up once, when they come into view
+function countUp(root) {
+  const els = [...root.querySelectorAll('.strip-v')].filter((el) => /\d{2,}/.test(el.textContent));
+  if (motionOff() || !els.length) return;
+  const io = new IntersectionObserver((es) => {
+    if (!es.some((e) => e.isIntersecting)) return;
+    io.disconnect();
+    for (const el of els) {
+      const m = el.textContent.match(/^(\D*)(\d+)(.*)$/);
+      if (!m) continue;
+      const [, pre, num, post] = m, end = +num, t0 = performance.now(), dur = 1100;
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 4);
+        el.textContent = pre + Math.round(end * e) + post;
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+  }, { threshold: 0.6 });
+  io.observe(root);
+}
+// a soft light that follows the pointer across a card
+function spotlight(root, sel) {
+  if (motionOff()) return;
+  root.querySelectorAll(sel).forEach((el) => el.addEventListener('pointermove', (e) => {
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${e.clientX - r.left}px`);
+    el.style.setProperty('--my', `${e.clientY - r.top}px`);
+  }, { passive: true }));
+}
+
+// one line to copy; the full CMake and Git steps live in Getting started
+function heroCommand() {
+  const cmd = 'git clone https://github.com/yappologistic/CUI';
+  const btn = h('button', { class: 'cmd-copy', 'aria-label': 'Copy the command', title: 'Copy', html: I.copy,
+    onclick: () => navigator.clipboard?.writeText(cmd).then(() => { btn.innerHTML = I.check; toast('Copied'); setTimeout(() => { btn.innerHTML = I.copy; }, 1400); }) });
+  return h('div', { class: 'hero-cmd' }, h('code', {}, h('span', { class: 'cmd-prompt', 'aria-hidden': 'true' }, '$'), cmd), btn);
+}
+
 function viewHome() {
   setNav('home');
   const guide = (id) => CAT.guides.find((g) => g.id === id);
-  const next = [['getting-started', 'Build CUI, open a window and learn the frame loop.'], ['layout', 'Rows, columns, sizes, grids, scrolling and split views.'],
-                ['theming', 'Light and dark, eight accents, tokens, fonts and motion.'], ['custom-components', 'Draw your own components with the same tools.'],
-                ['integration', 'Bring your own window, input and renderer.'], ['design', 'The rules every component follows.']];
-  const demo = ([scene, item]) => {
-    const it = CAT.items[item], sc = CAT.scenes[scene];
-    if (!sc) return null;
-    return h('div', { class: 'demo' },
-      h('div', { class: 'demo-head' }, h('span', {}, it ? it.title : scene),
-        it ? h('a', { class: 'demo-link', href: `#/c/${item}`, 'aria-label': `Open ${it.title}`, html: 'Docs' + I.arrow }) : null),
-      previewBlock({ module: 'scenes', content: scene, bare: true, item: it?.title, codeSource: sc.source, codeFile: sc.file, codeLine: sc.line }));
-  };
+  const next = [['getting-started', 'terminal', 'Build CUI, open a window and learn the frame loop.'], ['layout', 'grid', 'Rows, columns, sizes, grids, scrolling and split views.'],
+                ['theming', 'contrast', 'Light and dark, eight accents, tokens, fonts and motion.'], ['custom-components', 'pen', 'Draw your own components with the same tools.'],
+                ['integration', 'plug', 'Bring your own window, input and renderer.'], ['design', 'ruler', 'The rules every component follows.']];
   const head = (num, title, text, link) => h('div', { class: 'feature-head' },
     h('span', { class: 'feature-num' }, num),
     h('h2', {}, title),
@@ -558,33 +724,44 @@ function viewHome() {
     link ? h('a', { class: 'text-link', href: link[0], html: link[1] + I.arrow }) : null);
   const page = h('div', { class: 'page home' },
     h('div', { class: 'hero' },
-      h('a', { class: 'hero-badge', href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer', html: '<span>Open source</span><span class="dot"></span><span>MIT licensed</span>' + I.arrow }),
-      h('h1', {}, 'Native UI components for C'),
-      h('p', { class: 'lede' }, 'About 150 components with spring motion and full keyboard support, for Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.'),
+      h('h1', { class: 'hero-title', 'aria-label': 'Native UI components for C' },
+        ...['Native', 'UI', 'components', 'for'].map((w) => h('span', { class: 'hw' }, w)),
+        h('span', { class: 'hw hw-logo', html: C_LOGO })),
+      h('p', { class: 'lede' }, 'Spring motion and full keyboard support, from one C99 codebase.'),
       h('div', { class: 'hero-actions' },
         h('a', { class: 'btn primary', href: '#/guide/getting-started', html: 'Get started' + I.arrow }),
         h('a', { class: 'btn', href: '#/components' }, 'Browse components')),
-      installBlock()),
-    h('div', { class: 'previews home-stage' }, previewBlock({ module: 'scenes', content: 'stage-mosaic', title: 'stage-mosaic', item: 'Overview', tight: true,
-      codeSource: CAT.scenes['stage-mosaic'].source, codeFile: CAT.scenes['stage-mosaic'].file, codeLine: CAT.scenes['stage-mosaic'].line })),
+      heroCommand()),
+    showcase(),
+    h('ul', { class: 'home-strip', 'aria-label': 'At a glance' },
+      STRIP.map(([v, k]) => h('li', {}, h('span', { class: 'strip-v' }, v), h('span', { class: 'strip-k' }, k)))),
+    h('section', { class: 'home-feature home-demos home-bento' },
+      head('01', 'Everything a desktop app needs', 'Not a box of primitives: complete components, designed together, that look finished without styling. Each tile below is running; click into one and use it.',
+        ['#/components', 'Browse all components']),
+      h('div', { class: 'bento' }, BENTO.map(bentoTile))),
     h('section', { class: 'home-feature home-split' },
-      head('01', 'Your interface is plain C', 'Components are functions that draw themselves and return what happened. Your variables are the state, and the whole screen is described again every frame, so there is nothing to keep in sync.',
+      head('02', 'Your interface is plain C', 'Components are functions that draw themselves and return what happened. Your variables are the state, and the whole screen is described again every frame, so there is nothing to keep in sync.',
         ['#/guide/getting-started/how-immediate-mode-works', 'How immediate mode works']),
       (() => { const w = h('div', {}, h('pre', { class: 'code', html: '<code>' + highlight(FIRST_WINDOW) + '</code>' })); addCopy(w); return w.firstChild; })()),
-    h('section', { class: 'home-feature home-demos' },
-      head('02', 'Every component runs here', 'These are the library itself, compiled to WebAssembly. Click one and use it with the mouse or the keyboard.',
-        ['#/components', 'Browse all components']),
-      h('div', { class: 'demo-grid' }, DEMOS.map(demo))),
+    h('section', { class: 'home-feature home-demos home-play' },
+      head('03', 'Make it yours', 'Light and dark, eight accents, and semantic tokens your own drawing follows too. Try them on a live page of components.',
+        ['#/guide/theming', 'Theming']),
+      playground()),
     h('section', { class: 'home-feature home-facts' },
-      head('03', 'Small, fast and careful', 'Native apps should start instantly and stay out of the way. These are the numbers and rules CUI is held to.',
+      head('04', 'Small, fast and careful', 'Native apps should start instantly and stay out of the way. These are the numbers and rules CUI is held to.',
         ['#/guide/design', 'Design principles']),
       h('ul', { class: 'facts' }, FACTS.map(([t, d]) => h('li', {}, h('h3', {}, t), h('p', {}, d))))),
-    h('section', { class: 'home-next' },
-      h('h2', {}, 'Read next'),
-      h('ul', { class: 'link-list' }, next.filter(([id]) => guide(id)).map(([id, text]) =>
-        h('li', {}, h('a', { href: `#/guide/${id}` }, h('span', { class: 'link-title' }, guide(id).title), h('span', { class: 'link-text' }, text), h('span', { class: 'link-arrow', html: I.arrow })))))),
+    h('section', { class: 'home-feature home-demos home-guides' },
+      head('05', 'Learn it in an afternoon', 'Six short guides take you from your first window to your own components and your own renderer.',
+        ['#/guide/getting-started', 'Start with the first guide']),
+      h('ul', { class: 'guide-cards' }, next.filter(([id]) => guide(id)).map(([id, icon, text], i) =>
+        h('li', {}, h('a', { class: 'guide-card', href: `#/guide/${id}` },
+          h('span', { class: 'gc-top' }, h('span', { class: 'tile-icon', html: I[icon] }), h('span', { class: 'gc-num' }, String(i + 1).padStart(2, '0'))),
+          h('span', { class: 'gc-title' }, guide(id).title),
+          h('span', { class: 'gc-text' }, text),
+          h('span', { class: 'gc-go', html: 'Read' + I.arrow })))))),
     h('section', { class: 'home-cta' },
-      ditherArt({ src: ART, focusY: 0.95, gamma: 1.15, reveal: 'view', reduced: motionOff }),
+      ditherArt({ src: ART, focusY: 0.95, gamma: 1.15, reveal: 'view', loop: true, reduced: motionOff }),
       h('div', { class: 'home-cta-body' },
         h('h2', {}, 'Start with one window'),
         h('p', {}, 'Build CUI, open a window and draw your first components in a few minutes.'),
@@ -593,9 +770,11 @@ function viewHome() {
           h('a', { class: 'btn', href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer' }, 'Source on GitHub')))),
     h('p', { class: 'art-credit' }, 'Photograph: Ansel Adams, ', h('i', {}, 'The Tetons and the Snake River'), ', 1942. U.S. National Archives, public domain.'));
   const shell = h('div', { class: 'home-shell' },
-    h('div', { class: 'home-art' }, ditherArt({ src: ART, focusY: 0.3, gamma: 1.25, reduced: motionOff })),
+    h('div', { class: 'home-art' }, ditherArt({ src: ART, focusY: 0.3, gamma: 1.25, loop: true, reduced: motionOff })),
     page);
   homeMotion(shell);
+  countUp(shell.querySelector('.home-strip'));
+  spotlight(shell, '.bento > .tile, .guide-card');
   return shell;
 }
 
@@ -648,8 +827,8 @@ function pageMotion(view, kind) {
  * fades, and its sections reveal like every other page. */
 function homeMotion(shell) {
   if (motionOff()) { shell.classList.add('still'); return; }
-  const io = revealOnScroll(shell, ['.feature-head', '.home-split > :last-child', '.home-stage', '.home-next h2', '.home-cta', '.art-credit',
-                                    '.demo-grid > .demo', '.facts > li', '.link-list > li']);
+  const io = revealOnScroll(shell, ['.feature-head', '.home-split > :last-child', '.home-show', '.home-cta', '.art-credit',
+                                    '.bento > .tile', '.home-play-body', '.facts > li', '.guide-cards > li', '.home-strip > li']);
   const art = shell.querySelector('.home-art .dither');
   let ticking = false;
   const onScroll = () => {
