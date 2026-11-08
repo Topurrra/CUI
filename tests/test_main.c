@@ -2346,7 +2346,9 @@ static void test_dock(void) {
             fz[n] = 0;
             if (it % 4 == 1) memcpy(fz, "dock1 ", n >= 6 ? 6 : (size_t)n);
         } else {
-            snprintf(fz, sizeof fz, "%s", s1);
+            size_t sl = strlen(s1) < sizeof fz - 1 ? strlen(s1) : sizeof fz - 1;
+            memcpy(fz, s1, sl);
+            fz[sl] = 0;
             int len = (int)strlen(fz);
             for (int m = 0; m < 1 + rand() % 3 && len > 0; m++) fz[rand() % len] = (char)(1 + rand() % 255);
         }
@@ -2400,23 +2402,35 @@ static void test_dock(void) {
     CHECK(!d.open[1]);
     cui_destroy(ui);
 
-    /* narrow: splits share what there is, nothing overlaps or leaves the dockspace */
+    /* narrow (a phone): too tight for panes side by side, every panel is a tab of one stack and the
+       selected one fills the dockspace. The layout itself is kept, and the panes come back with room */
     for (int wv = 0; wv < 3; wv++) {
         static const float widths[] = { 280, 340, 200 };
+        static const char *lay = "dock1 h0.3([*Files],h0.5([*Editor,Log],[*Props]))";
         ui = new_ctx();
-        d = dock_new("dock1 h0.3([*Files],h0.5([*Editor,Log],[*Props]))", widths[wv], 420);
+        d = dock_new(lay, widths[wv], 420);
         run(ui, build_dock, &d, 5);
+        memset(d.body, 0, sizeof d.body);
+        run(ui, build_dock, &d, 1);
+        cui_rect r0 = dock_body(ui, &d, 0);
+        CHECK(r0.w > widths[wv] - 4 && r0.x >= -0.5f && r0.x + r0.w <= widths[wv] + 0.5f);
+        CHECK(!d.body[1] && !d.body[2] && !d.body[3]);
+        CHECK(d.tab[1].w > 0 && d.tab[3].w > 0);
+        click_at(ui, build_dock, &d, d.tab[1].x + 12, d.tab[1].y + d.tab[1].h / 2);
+        memset(d.body, 0, sizeof d.body);
+        run(ui, build_dock, &d, 2);
+        CHECK(d.body[1] && !d.body[0] && !d.body[3]);
+        CHECK(dock_body(ui, &d, 1).w > widths[wv] - 4);
+        CHECK(strcmp(dock_str(ui), lay) == 0);
+        d.w = 800;
+        run(ui, build_dock, &d, 4);
+        memset(d.body, 0, sizeof d.body);
+        run(ui, build_dock, &d, 1);
         cui_rect r[3] = { dock_body(ui, &d, 0), dock_body(ui, &d, 1), dock_body(ui, &d, 3) };
         for (int k = 0; k < 3; k++) {
-            CHECK(r[k].w > 20 && r[k].x >= -0.5f && r[k].x + r[k].w <= widths[wv] + 0.5f);
+            CHECK(r[k].w > 100 && r[k].x >= -0.5f && r[k].x + r[k].w <= 800.5f);
             for (int j = k + 1; j < 3; j++) CHECK(dock_disjoint(r[k], r[j]));
         }
-        /* each gets an equal share of the minimum when the minimums do not fit */
-        if (widths[wv] < 3 * 120 + 2) CHECK(fabsf(r[0].w - r[1].w) < 3 && fabsf(r[1].w - r[2].w) < 3);
-        /* a divider drag in a narrow dockspace still clamps */
-        dock_drag(ui, &d, r[0].x + r[0].w + 0.5f, r[0].y + 30, 2, r[0].y + 30, true);
-        cui_rect r0 = dock_body(ui, &d, 0);
-        CHECK(r0.w > 20);
         cui_destroy(ui);
     }
 

@@ -349,6 +349,8 @@ bool cui_table_begin_ex(cui_ctx *ui, const char *id_str, const cui_table_column 
     if (o->height.kind) xb.height = CUI_FILL;
     int xs = cui__scroll_begin_ex(ui, id ^ 0x7AB1E5u, &xb, true);
     ui->nodes[xs].flags &= ~(uint32_t)CUI_NF_SCROLL_Y;
+    /* the edge with more columns past it fades, so a phone shows the table goes on */
+    ((cui_scroll_state *)cui_state(ui, id ^ 0x7AB1E5u, sizeof(cui_scroll_state)))->fade = ui->nodes[wrap].bg;
     int content = cui__node_new(ui, 0);
     cui_node *ct = &ui->nodes[content];
     ct->pref_hint = min_w;

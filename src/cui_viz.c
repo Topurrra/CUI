@@ -194,8 +194,11 @@ static void cui__paint_heatmap(cui_ctx *ui, cui_node *n, void *data) {
     cui__hm_geo g = cui__hm_layout(ui, n->rect, p->rows, p->cols, &p->o);
     float fs = cui__fs(ui, ui->theme.text_xs);
     float rad = g.cell >= 18 ? 4 : 2.5f;
+    /* small cells (a phone): every other row label, so they do not run into each other */
+    int every = (int)ceilf(cui__font_line_height(ui, CUI_FONT_BODY, fs) / (g.cell + g.gap));
+    if (every < 1) every = 1;
     for (int i = 0; i < p->rows; i++) {
-        if (p->o.row_labels && p->o.row_labels[i])
+        if (p->o.row_labels && p->o.row_labels[i] && i % every == 0)
             cui__text_at(ui, CUI_FONT_BODY, fs, g.gx - 10, g.gy + i * (g.cell + g.gap) + g.cell * 0.5f, 2, CUI_C(ui, TEXT_SECONDARY), p->o.row_labels[i], false);
         for (int j = 0; j < p->cols; j++) {
             float t = (p->v[i * p->cols + j] - p->lo) / (p->hi - p->lo);
@@ -345,16 +348,16 @@ static void cui__paint_calendar(cui_ctx *ui, cui_node *n, void *data) {
     float ly = gy + 7 * step + 12;
     float lx = gx + p->weeks * step - p->gap;
     float sz = CUI_MIN(p->cell, 12);
-    float more_w = cui__text_width(ui, CUI_FONT_BODY, fs, "More", -1, false);
-    float x = lx - more_w;
-    cui__text_at(ui, CUI_FONT_BODY, fs, x, ly + sz * 0.5f, 0, CUI_C(ui, TEXT_MUTED), "More", false);
-    x -= 6;
+    float more_w = cui__text_width(ui, CUI_FONT_BODY, fs, "More", -1, false), less_w = cui__text_width(ui, CUI_FONT_BODY, fs, "Less", -1, false);
+    const char *tot = p->o.unit ? cui__frame_printf(ui, "%s %s", cui__fmt_value(ui, p->o.format, p->total), p->o.unit) : NULL;
+    float tot_w = tot ? cui__text_width(ui, CUI_FONT_BODY, fs, tot, -1, true) : 0;
+    /* a narrow chart: the swatches lose their Less / More words before they run into the total */
+    bool words = !tot || gx + tot_w + 12 <= lx - more_w - 6 - 5 * (sz + 3) - 3 - less_w;
+    float x = lx;
+    if (words) { x -= more_w; cui__text_at(ui, CUI_FONT_BODY, fs, x, ly + sz * 0.5f, 0, CUI_C(ui, TEXT_MUTED), "More", false); x -= 6; }
     for (int lv = 4; lv >= 0; lv--) { x -= sz; cui_draw_rect(ui, (cui_rect){ x, ly, sz, sz }, CUI_CORNERS(rad), cui__cal_color(ui, p->base, lv)); x -= 3; }
-    cui__text_at(ui, CUI_FONT_BODY, fs, x - 3, ly + sz * 0.5f, 2, CUI_C(ui, TEXT_MUTED), "Less", false);
-    if (p->o.unit) {
-        const char *s = cui__frame_printf(ui, "%s %s", cui__fmt_value(ui, p->o.format, p->total), p->o.unit);
-        cui__text_at(ui, CUI_FONT_BODY, fs, gx, ly + sz * 0.5f, 0, CUI_C(ui, TEXT_SECONDARY), s, true);
-    }
+    if (words) cui__text_at(ui, CUI_FONT_BODY, fs, x - 3, ly + sz * 0.5f, 2, CUI_C(ui, TEXT_MUTED), "Less", false);
+    if (tot && gx + tot_w + 9 <= x) cui__text_at(ui, CUI_FONT_BODY, fs, gx, ly + sz * 0.5f, 0, CUI_C(ui, TEXT_SECONDARY), tot, true);
     cui__tip_draw(ui, &p->tip);
 }
 
@@ -652,6 +655,13 @@ int cui_radar_chart_ex(cui_ctx *ui, const char *id_str, const cui_series *series
     cui_interact r = cui__interact(ui, id, 0);
     cui_rect pr = cui__prev_rect(ui, id);
     float size = o->size > 0 ? o->size : 260;
+    /* when the parent is narrower than the plot and its 90px label gutters, the plot shrinks
+       and the gutters keep just enough room for the side axis names */
+    float full = size, min_size = CUI_MIN(size, 110.0f), tight = 0, fsx = cui__fs(ui, ui->theme.text_xs);
+    for (int i = 0; i < na; i++)
+        if (axes && axes[i] && fabsf(cosf(-CUI_PI * 0.5f + 2 * CUI_PI * i / na)) > 0.3f)
+            tight = CUI_MAX(tight, cui__text_width(ui, CUI_FONT_MEDIUM, fsx, axes[i], -1, false) + 18);
+    if (pr.w > 0 && pr.w < full + 180) size = CUI_CLAMP(floorf(pr.w - 2 * tight), min_size, full);
     float maxv = 0;
     for (int k = 0; k < count; k++)
         for (int i = 0; i < series[k].count && i < na; i++) maxv = CUI_MAX(maxv, series[k].values[i]);
@@ -687,7 +697,10 @@ int cui_radar_chart_ex(cui_ctx *ui, const char *id_str, const cui_series *series
                          cui__viz_color(ui, series[k].color, k));
     }
     float h = size + 52 + (count >= 2 && !o->no_legend ? 30 : 0);
-    cui__viz_node(ui, id, CUI_PX(size + 180), CUI_PX(h), cui__paint_radar, p, hover >= 0);
+    int node = cui__viz_node(ui, id, CUI_FIT, CUI_PX(h), cui__paint_radar, p, hover >= 0);
+    cui__soft_width(&ui->nodes[node], CUI_FIT, full + 180);
+    ui->nodes[node].min_w = CUI_MIN(min_size + 2 * tight, full + 180);
+    ui->nodes[node].flags |= CUI_NF_ADAPTIVE;
     return r.clicked ? hover : -1;
 }
 
@@ -727,10 +740,19 @@ static void cui__paint_funnel(cui_ctx *ui, cui_node *n, void *data) {
         else cui__text_at(ui, CUI_FONT_MEDIUM, fs, x1 + 8, y + CUI__FN_ROW * 0.5f, 0, CUI_C(ui, FOREGROUND), vs, true);
         cui__text_at(ui, hov ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, r.x, y + CUI__FN_ROW * 0.5f, 0, CUI_C(ui, FOREGROUND), p->items[k].label ? p->items[k].label : "", false);
         const char *pc = cui__pct(ui, p->items[k].value, p->items[0].value);
-        /* the second stage's step and overall rates are the same number: say it once */
-        cui__text_at(ui, CUI_FONT_MEDIUM, fs, r.x + r.w, y + CUI__FN_ROW * 0.5f - (k > 1 ? 7 : 0), 2, CUI_C(ui, FOREGROUND), pc, true);
-        if (k > 1) cui__text_at(ui, CUI_FONT_BODY, fx, r.x + r.w, y + CUI__FN_ROW * 0.5f + 9, 2, CUI_C(ui, TEXT_MUTED),
-                                cui__frame_printf(ui, "%s of previous", cui__pct(ui, p->items[k].value, p->items[k - 1].value)), true);   /* step conversion, said plainly */
+        /* the second stage's step and overall rates are the same number: say it once. The step
+           rate is said plainly, shorter on a narrow chart, and left to the tooltip when even that
+           would run into the bar's value */
+        const char *step = NULL;
+        if (k > 1) {
+            float limit = (vw + 20 < w ? x1 : x1 + 8 + vw) + 6;
+            const char *sp = cui__pct(ui, p->items[k].value, p->items[k - 1].value);
+            step = cui__frame_printf(ui, "%s of previous", sp);
+            if (r.x + r.w - cui__text_width(ui, CUI_FONT_BODY, fx, step, -1, true) < limit) step = cui__frame_printf(ui, "%s of prev.", sp);
+            if (r.x + r.w - cui__text_width(ui, CUI_FONT_BODY, fx, step, -1, true) < limit) step = NULL;
+        }
+        cui__text_at(ui, CUI_FONT_MEDIUM, fs, r.x + r.w, y + CUI__FN_ROW * 0.5f - (step ? 7 : 0), 2, CUI_C(ui, FOREGROUND), pc, true);
+        if (step) cui__text_at(ui, CUI_FONT_BODY, fx, r.x + r.w, y + CUI__FN_ROW * 0.5f + 9, 2, CUI_C(ui, TEXT_MUTED), step, true);
         prev_x0 = x0; prev_x1 = x1; prev_y = y + CUI__FN_ROW;
     }
     cui__tip_draw(ui, &p->tip);
@@ -937,9 +959,24 @@ static void cui__paint_sankey(cui_ctx *ui, cui_node *n, void *data) {
         float nmw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, nm, -1, false);
         if (right) {
             float vw = cui__text_width(ui, CUI_FONT_BODY, fs, val, -1, true);
-            if (g.col[i] < g.maxcol) cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 9, nmw + vw + 14, 18 }, CUI_CORNERS(6), cui_alpha(CUI_C(ui, SURFACE), ui->mode == CUI_THEME_DARK ? 0.5f : 0.7f));
-            cui__text_at(ui, CUI_FONT_MEDIUM, fs, lx, ly, 0, CUI_C(ui, FOREGROUND), nm, false);
-            cui__text_at(ui, CUI_FONT_BODY, fs, lx + nmw + 6, ly, 0, CUI_C(ui, TEXT_MUTED), val, true);
+            cui_color plate = cui_alpha(CUI_C(ui, SURFACE), ui->mode == CUI_THEME_DARK ? 0.5f : 0.7f);
+            /* room up to the next column: on a narrow chart the value goes under the name,
+               and a name that still does not fit is cut with an ellipsis */
+            float room = 1e9f;
+            if (g.col[i] < g.maxcol)
+                for (int j = 0; j < g.nn; j++)
+                    if (g.col[j] == g.col[i] + 1 && (g.in[j] > 0 || g.out[j] > 0)) room = CUI_MIN(room, g.node[j].x - lx - 6);
+            if (nmw + 6 + vw <= room) {
+                if (g.col[i] < g.maxcol) cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 9, nmw + vw + 14, 18 }, CUI_CORNERS(6), plate);
+                cui__text_at(ui, CUI_FONT_MEDIUM, fs, lx, ly, 0, CUI_C(ui, FOREGROUND), nm, false);
+                cui__text_at(ui, CUI_FONT_BODY, fs, lx + nmw + 6, ly, 0, CUI_C(ui, TEXT_MUTED), val, true);
+            } else {
+                float tw = CUI_MAX(8.0f, room), bw = CUI_MIN(CUI_MAX(nmw, vw), tw);
+                float fh = cui__font_line_height(ui, CUI_FONT_MEDIUM, fs);
+                cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 16, bw + 8, 32 }, CUI_CORNERS(6), plate);
+                cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, fs, lx, ly - 7 - fh * 0.5f, tw, CUI_C(ui, FOREGROUND), nm, (int)strlen(nm), false);
+                cui__draw_text_ellipsis(ui, CUI_FONT_BODY, fs, lx, ly + 7 - fh * 0.5f, tw, CUI_C(ui, TEXT_MUTED), val, (int)strlen(val), true);
+            }
         } else {
             float vw = cui__text_width(ui, CUI_FONT_BODY, fs, val, -1, true);
             cui__text_at(ui, CUI_FONT_BODY, fs, lx, ly, 2, CUI_C(ui, TEXT_MUTED), val, true);
@@ -1010,7 +1047,7 @@ int cui_sankey_ex(cui_ctx *ui, const char *id_str, const char *const *nodes, int
 /* Waffle                                                                   */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_viz_item *items; int count; int *owner; int cols, rows; float cell, gap; float total; const char *format; float intro; int hover; cui__tip tip; } cui__wf_paint;
+typedef struct { cui_viz_item *items; int count; int *owner; int cols, rows; float cell, gap; float total; const char *format; float intro; int hover; cui__tip tip; float right; bool stack; } cui__wf_paint;
 
 static void cui__paint_waffle(cui_ctx *ui, cui_node *n, void *data) {
     cui__wf_paint *p = data;
@@ -1026,15 +1063,16 @@ static void cui__paint_waffle(cui_ctx *ui, cui_node *n, void *data) {
         if (p->hover >= 0 && p->tip.alpha > 0.01f && o != p->hover) fill = cui_mix(fill, CUI_C(ui, SURFACE), 0.55f * p->tip.alpha);
         cui_draw_rect(ui, q, CUI_CORNERS(p->cell * 0.22f), cui_mix(cui__viz_empty(ui), fill, a));
     }
-    /* legend on the right */
+    /* legend on the right, or under the grid on a narrow screen */
     float fs = cui__fs(ui, ui->theme.text_sm);
     float lx = r.x + p->cols * step + 18, ly = r.y + 4;
+    if (p->stack) { lx = r.x; ly = r.y + p->rows * step - p->gap + 16; }
     for (int k = 0; k < p->count; k++) {
         float a = (p->hover >= 0 && p->tip.alpha > 0.01f && k != p->hover) ? 0.5f : 1.0f;
         float cy = ly + k * 26 + 9;
         cui_draw_rect(ui, (cui_rect){ lx, cy - 5, 10, 10 }, CUI_CORNERS(3), cui_alpha(cui__viz_color(ui, p->items[k].color, k), a));
         cui__text_at(ui, CUI_FONT_BODY, fs, lx + 18, cy, 0, cui_alpha(CUI_C(ui, TEXT_SECONDARY), a), p->items[k].label ? p->items[k].label : "", false);
-        cui__text_at(ui, CUI_FONT_MEDIUM, fs, r.x + r.w, cy, 2, cui_alpha(CUI_C(ui, FOREGROUND), a), cui__pct(ui, p->items[k].value, p->total), true);
+        cui__text_at(ui, CUI_FONT_MEDIUM, fs, p->stack ? r.x + CUI_MIN(r.w, p->right) : r.x + r.w, cy, 2, cui_alpha(CUI_C(ui, FOREGROUND), a), cui__pct(ui, p->items[k].value, p->total), true);
     }
     cui__tip_draw(ui, &p->tip);
 }
@@ -1076,11 +1114,18 @@ int cui_waffle_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *items_in,
     for (int k = 0; k < count; k++) lw = CUI_MAX(lw, cui__text_width(ui, CUI_FONT_BODY, fs, items[k].label ? items[k].label : "", -1, false));
     float gw = cols * step - gap;
     float legend_w = 18 + 18 + lw + 16 + 44;
+    /* the legend drops under the grid when last frame's width had no room beside it */
+    float under_w = CUI_MAX(gw, legend_w - 18);
+    bool stack = pr.w > 0 && pr.w < gw + legend_w - 0.5f;
+    float gh = rows * step - gap;
     int hover = -1;
     if (r.hovered) {
         int cx = (int)floorf((ui->mx - pr.x) / step), cy = (int)floorf((ui->my - pr.y) / step);
         if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) hover = owner[cx * rows + (rows - 1 - cy)];
-        else if (ui->mx > pr.x + gw + 10) {
+        else if (stack && ui->my > pr.y + gh + 12) {
+            int k = (int)floorf((ui->my - pr.y - gh - 16) / 26);
+            if (k >= 0 && k < count) hover = k;
+        } else if (!stack && ui->mx > pr.x + gw + 10) {
             int k = (int)floorf((ui->my - pr.y - 4 + 4) / 26);
             if (k >= 0 && k < count) hover = k;
         }
@@ -1097,8 +1142,12 @@ int cui_waffle_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *items_in,
         cui__tip_row(&p->tip, "Value", cui__fmt_value(ui, o->format, items[p->hover].value), cui__viz_color(ui, items[p->hover].color, p->hover));
         cui__tip_row(&p->tip, "Share", cui__pct(ui, items[p->hover].value, total), cui__rgba(0, 0, 0, 0));
     }
-    float h = CUI_MAX(rows * step - gap, count * 26.0f);
-    cui__viz_node(ui, id, CUI_PX(gw + legend_w), CUI_PX(h), cui__paint_waffle, p, hover >= 0);
+    p->stack = stack; p->right = under_w;
+    float h = stack ? gh + 16 + count * 26.0f : CUI_MAX(gh, count * 26.0f);
+    int node = cui__viz_node(ui, id, CUI_FIT, CUI_PX(h), cui__paint_waffle, p, hover >= 0);
+    cui__soft_width(&ui->nodes[node], CUI_FIT, gw + legend_w);
+    ui->nodes[node].flags |= CUI_NF_ADAPTIVE;
+    ui->nodes[node].min_w = under_w;
     return r.clicked ? hover : -1;
 }
 
@@ -1379,9 +1428,22 @@ int cui_activity_rings_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *r
     cui_rect pr = cui__prev_rect(ui, id);
     cui__viz_state *st = cui_state(ui, id, sizeof *st + sizeof(cui_spring) * 8);
     cui_spring *sp = (cui_spring *)(st + 1);
-    float size = o->size > 0 ? o->size : 150, th = o->thickness > 0 ? o->thickness : CUI_MAX(8.0f, size * 0.1f);
+    float size = o->size > 0 ? o->size : 150;
     cui__ring_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
+    float lw = 0;   /* the legend beside the rings */
+    if (o->legend) {
+        float fs = cui__fs(ui, ui->theme.text_sm), vw = 0;
+        for (int k = 0; k < count; k++) {
+            p->label_w = CUI_MAX(p->label_w, cui__text_width(ui, CUI_FONT_BODY, fs, rings[k].label ? rings[k].label : "", -1, false));
+            vw = CUI_MAX(vw, cui__text_width(ui, CUI_FONT_MEDIUM, fs, cui__pct(ui, rings[k].value, 1), -1, true));
+        }
+        lw = CUI__RING_LEGEND_GAP + 16 + p->label_w + 14 + vw;
+    }
+    /* narrower than asked: the rings shrink, the legend keeps its width */
+    float full = size, min_size = CUI_MIN(size, 96.0f);
+    if (pr.w > 0 && pr.w < full + lw) size = CUI_CLAMP(floorf(pr.w - lw), min_size, full);
+    float th = o->thickness > 0 ? o->thickness : CUI_MAX(8.0f, size * 0.1f);
     p->prog = cui__copy_floats(ui, NULL, count);
     for (int k = 0; k < count; k++) {
         float v = rings[k].value >= 0 ? CUI_MIN(rings[k].value, 4.0f) : 0;
@@ -1390,7 +1452,7 @@ int cui_activity_rings_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *r
     }
     int hover = -1;
     if (r.hovered) {
-        float dx = ui->mx - (pr.x + pr.w * 0.5f), dy = ui->my - (pr.y + size * 0.5f);
+        float dx = ui->mx - (pr.x + (o->legend ? size : pr.w) * 0.5f), dy = ui->my - (pr.y + size * 0.5f);
         float dist = sqrtf(dx * dx + dy * dy);
         for (int k = 0; k < count; k++) {
             float rad = size * 0.5f - th * 0.5f - k * (th + 3);
@@ -1409,16 +1471,10 @@ int cui_activity_rings_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *r
         p->tip.title = rings[p->hover].label ? rings[p->hover].label : "";
         cui__tip_row(&p->tip, "Progress", cui__pct(ui, rings[p->hover].value, 1), cui__viz_color(ui, rings[p->hover].color, p->hover));
     }
-    float w = size;
-    if (o->legend) {
-        float fs = cui__fs(ui, ui->theme.text_sm), vw = 0;
-        for (int k = 0; k < count; k++) {
-            p->label_w = CUI_MAX(p->label_w, cui__text_width(ui, CUI_FONT_BODY, fs, rings[k].label ? rings[k].label : "", -1, false));
-            vw = CUI_MAX(vw, cui__text_width(ui, CUI_FONT_MEDIUM, fs, cui__pct(ui, rings[k].value, 1), -1, true));
-        }
-        w += CUI__RING_LEGEND_GAP + 16 + p->label_w + 14 + vw;
-    }
-    cui__viz_node(ui, id, CUI_PX(w), CUI_PX(size), cui__paint_rings, p, hover >= 0);
+    int node = cui__viz_node(ui, id, CUI_FIT, CUI_PX(size), cui__paint_rings, p, hover >= 0);
+    cui__soft_width(&ui->nodes[node], CUI_FIT, full + lw);
+    ui->nodes[node].min_w = min_size + lw;
+    ui->nodes[node].flags |= CUI_NF_ADAPTIVE;
     return r.clicked ? hover : -1;
 }
 

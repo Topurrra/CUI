@@ -719,6 +719,9 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
         }
     }
     (void)br;
+    /* a phone: a slimmer task list without owners, so the timeline keeps most of the width */
+    cui_rect opr = cui__prev_rect(ui, id);
+    bool slim = opr.w > 0 && opr.w < 480;
     int outer = cui__node_new(ui, id);
     cui_node *on = &ui->nodes[outer];
     on->dir = CUI_ROW; on->w = CUI_FILL; on->align = CUI_ALIGN_STRETCH;
@@ -729,11 +732,11 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
     cui__open(ui, outer);
     /* task list */
     int list = cui__node_new(ui, 0);
-    ui->nodes[list].w = CUI_PX(230); ui->nodes[list].gap = 0;
+    ui->nodes[list].w = CUI_PX(slim ? 128 : 230); ui->nodes[list].gap = 0;
     cui__open(ui, list);
     int lh = cui__node_new(ui, 0);
     ui->nodes[lh].dir = CUI_ROW; ui->nodes[lh].align = CUI_ALIGN_END; ui->nodes[lh].h = CUI_PX(head_h);
-    ui->nodes[lh].pad[3] = 16; ui->nodes[lh].pad[2] = 9; ui->nodes[lh].w = CUI_FILL;
+    ui->nodes[lh].pad[3] = slim ? 12 : 16; ui->nodes[lh].pad[2] = 9; ui->nodes[lh].w = CUI_FILL;
     ui->nodes[lh].bg = CUI_C(ui, SURFACE_MUTED);
     cui__open(ui, lh);
     int lt = cui__text_node(ui, "Task", 4, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), CUI_C(ui, TEXT_MUTED), false);
@@ -745,7 +748,8 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
         int row = cui__node_new(ui, 0);
         cui_node *rn = &ui->nodes[row];
         rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->gap = 10;
-        rn->h = CUI_PX(rh); rn->w = CUI_FILL; rn->pad[3] = 16; rn->pad[1] = 12;
+        rn->h = CUI_PX(rh); rn->w = CUI_FILL; rn->pad[3] = slim ? 12 : 16; rn->pad[1] = slim ? 8 : 12;
+        if (slim) rn->gap = 8;
         if (st->drag == k + 1) rn->bg = CUI_C(ui, HOVER);
         cui__open(ui, row);
         cui_color tone = cui__tone_color(ui, tasks[k].tone ? tasks[k].tone : CUI_TONE_ACCENT);
@@ -755,7 +759,7 @@ int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int cou
         int t = cui__text_node(ui, tasks[k].name, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, FOREGROUND), false);
         ui->nodes[t].line_height = 1.3f;
         ui->nodes[t].w = CUI_FILL;
-        if (tasks[k].owner) {
+        if (tasks[k].owner && !slim) {
             cui_avatar_opts ao;
             memset(&ao, 0, sizeof ao);
             ao.size = 22;

@@ -1213,6 +1213,7 @@ typedef struct {
     int *ends; int nends, ecap;
     bool drawing;
     double last_t;
+    float ref_w;   /* pad width the strokes were recorded at: a narrower pad scales them down */
 } cui__sig_state;
 
 static void cui__sig_dtor(cui_ctx *ui, void *data) {
@@ -1221,7 +1222,7 @@ static void cui__sig_dtor(cui_ctx *ui, void *data) {
     s->pts = NULL; s->widths = NULL; s->ends = NULL;
 }
 
-typedef struct { cui_vec2 *pts; float *widths; int *ends; int nends, npts; cui_color ink, line, hint; const char *placeholder; bool empty; } cui__sig_paint;
+typedef struct { cui_vec2 *pts; float *widths; int *ends; int nends, npts; cui_color ink, line, hint; const char *placeholder; bool empty; float ref_w; } cui__sig_paint;
 
 static void cui__paint_signature(cui_ctx *ui, cui_node *n, void *data) {
     cui__sig_paint *p = data;
@@ -1235,19 +1236,23 @@ static void cui__paint_signature(cui_ctx *ui, cui_node *n, void *data) {
         cui__draw_text_line(ui, CUI_FONT_BODY, fs, r.x + (r.w - w) * 0.5f, base_y - 36, p->hint, p->placeholder, -1, false);
     }
     cui_push_clip(ui, r);
+    /* recorded on a wider pad (a rotated tablet): scale toward the baseline so it all shows */
+    float sc = p->ref_w > 0 && r.w < p->ref_w ? r.w / p->ref_w : 1, by = r.h * 0.72f, wk = CUI_MAX(sc, 0.5f);
+#define CUI__SIG_PT(q) ((cui_vec2){ r.x + (q).x * sc, r.y + by + ((q).y - by) * sc })
     int start = 0;
     for (int s = 0; s <= p->nends; s++) {
         int end = s < p->nends ? p->ends[s] : p->npts;
         if (end <= start) { start = end; continue; }
-        if (end - start == 1) cui_draw_circle(ui, (cui_vec2){ r.x + p->pts[start].x, r.y + p->pts[start].y }, p->widths[start] * 0.5f, p->ink);
+        if (end - start == 1) cui_draw_circle(ui, CUI__SIG_PT(p->pts[start]), p->widths[start] * 0.5f * wk, p->ink);
         for (int k = start + 1; k < end; k++) {
-            cui_vec2 a = { r.x + p->pts[k - 1].x, r.y + p->pts[k - 1].y }, b = { r.x + p->pts[k].x, r.y + p->pts[k].y };
-            float w = (p->widths[k - 1] + p->widths[k]) * 0.5f;
+            cui_vec2 a = CUI__SIG_PT(p->pts[k - 1]), b = CUI__SIG_PT(p->pts[k]);
+            float w = (p->widths[k - 1] + p->widths[k]) * 0.5f * wk;
             cui_draw_line(ui, a, b, w, p->ink);
             cui_draw_circle(ui, b, w * 0.5f, p->ink);
         }
         start = end;
     }
+#undef CUI__SIG_PT
     cui_pop_clip(ui);
 }
 
@@ -1274,17 +1279,21 @@ bool cui_signature_pad_ex(cui_ctx *ui, const char *id_str, const cui_signature_o
     bool changed = false;
     cui_interact r = cui__interact(ui, cid, CUI_IF_DRAG);
     cui_rect pr = cui__prev_rect(ui, cid);
+    if (st->npts == 0) st->ref_w = pr.w;
+    /* the pointer, in the space the strokes were recorded in */
+    float sc = st->ref_w > 0 && pr.w > 0 && pr.w < st->ref_w ? pr.w / st->ref_w : 1, by = pr.h * 0.72f;
+    cui_vec2 mp = { (ui->mx - pr.x) / sc, by + (ui->my - pr.y - by) / sc };
     if (r.hovered && ui->mpressed[0] && pr.w > 0) {
         st->drawing = true;
         if (st->npts > 0) {
             if (st->nends >= st->ecap) { st->ecap = st->ecap ? st->ecap * 2 : 32; st->ends = cui__realloc(ui, st->ends, sizeof(int) * (size_t)st->ecap); }
             st->ends[st->nends++] = st->npts;
         }
-        cui__sig_push(ui, st, (cui_vec2){ ui->mx - pr.x, ui->my - pr.y }, 2.6f);
+        cui__sig_push(ui, st, mp, 2.6f);
         st->last_t = ui->time;
         changed = true;
     } else if (st->drawing && ui->mdown[0]) {
-        cui_vec2 p = { ui->mx - pr.x, ui->my - pr.y };
+        cui_vec2 p = mp;
         cui_vec2 q = st->pts[st->npts - 1];
         float dx = p.x - q.x, dy = p.y - q.y, dist = sqrtf(dx * dx + dy * dy);
         if (dist > 1.5f) {
@@ -1321,7 +1330,7 @@ bool cui_signature_pad_ex(cui_ctx *ui, const char *id_str, const cui_signature_o
     p->line = CUI_C(ui, BORDER_STRONG);
     p->hint = CUI_C(ui, TEXT_MUTED);
     p->placeholder = o->placeholder ? o->placeholder : "Sign here";
-    p->empty = empty;
+    p->empty = empty; p->ref_w = st->ref_w;
     ui->nodes[canvas].paint = cui__paint_signature;
     ui->nodes[canvas].paint_data = p;
     if (!empty) {

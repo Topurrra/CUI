@@ -193,7 +193,8 @@ enum {
     CUI_NF_ON_TOP      = 1 << 14,  /* painted after its siblings */
     CUI_NF_ROW_WRAP    = 1 << 15,  /* row that breaks children onto new lines */
     CUI_NF_LINE_START  = 1 << 16,  /* computed: first child of a wrapped line */
-    CUI_NF_KEEP_W      = 1 << 17   /* never shrinks below its preferred width (its siblings give way) */
+    CUI_NF_KEEP_W      = 1 << 17,  /* never shrinks below its preferred width (its siblings give way) */
+    CUI_NF_ADAPTIVE    = 1 << 18   /* rearranges itself when narrow: min_w is its minimum, not its content */
 };
 
 struct cui_node;
@@ -259,6 +260,7 @@ typedef struct cui_node {
 
     /* computed */
     float pref_w, pref_h, minc_w, minc_h;   /* content based sizes */
+    float cmin_w;                           /* minimum width of the content alone, before min_w */
     cui_rect rect;
     float content_w, content_h;
     int text_lines;
@@ -538,6 +540,7 @@ struct cui_ctx {
     struct cui_swipe_build *swipe;
     struct cui_grid_build *grid;   /* data grid being built (grids do not nest) */
     void *carousel;                /* carousel being built */
+    void *status_bar;              /* status bar being built: its width budget */
     void *card_stack;              /* card stack being built */
     void *kanban;                  /* kanban board being built */
     void *dock;                    /* dock being built */

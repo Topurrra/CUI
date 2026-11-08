@@ -553,11 +553,25 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         st->x.x = st->l.x; st->w.x = st->r.x - st->l.x;
     }
     float h = cui__control_height(ui, size);
+    /* squeezed (a phone): segments drop to 8px side padding before their labels truncate. The row
+       keeps asking for its natural width, so it gets the roomy padding back once there is room */
+    float seg_pad = kind == 0 ? 14 : 10, natural = 0, lfs = cui__fs(ui, size == CUI_SIZE_SM ? ui->theme.text_sm : ui->theme.text_body);
+    bool tight = false;
+    if (!full_width && kind != 1) {
+        for (int k = 0; k < count; k++) {
+            bool lab = items[k] && cui__display_len(items[k]) > 0, ic = icons && icons[k];
+            float iw = ic ? ceilf(cui__text_width(ui, CUI_FONT_ICONS, 16, icons[k], -1, false) * 4) / 4 + 6 : 0;
+            natural += lab ? 2 * seg_pad + iw + ceilf(cui__text_width(ui, CUI_FONT_MEDIUM, lfs, items[k], cui__display_len(items[k]), false) * 4) / 4 : (kind == 1 ? h : h - (kind == 0 ? 6 : 4));
+        }
+        natural += kind == 0 ? 6 : 4 * (float)(count - 1);
+        tight = cr.w > 0 && cr.w < natural - 0.5f;
+    }
     int row = cui__node_new(ui, id);
     cui_node *rn = &ui->nodes[row];
     rn->dir = CUI_ROW;
     rn->align = CUI_ALIGN_CENTER;
     if (full_width) { rn->w = CUI_FILL; rn->self_align = CUI_ALIGN_STRETCH; }
+    else if (kind != 1) cui__soft_width(rn, CUI_FIT, natural);
     else rn->self_align = CUI__ALIGN_NOSTRETCH;
     float inner_h = h;
     if (kind == 0) {
@@ -599,7 +613,7 @@ static bool cui__segments(cui_ctx *ui, const char *id_str, const char *const *it
         cui_node *in = &ui->nodes[it];
         in->dir = CUI_ROW; in->align = CUI_ALIGN_CENTER; in->justify = CUI_JUSTIFY_CENTER; in->gap = 6;
         in->h = CUI_PX(kind == 1 ? h : inner_h);
-        in->pad[1] = in->pad[3] = kind == 0 ? 14 : 10;
+        in->pad[1] = in->pad[3] = tight ? 8 : seg_pad;
         bool icon_only = icons && icons[k] && (!items[k] || cui__display_len(items[k]) == 0);
         if (icon_only) { in->pad[1] = in->pad[3] = 0; in->w = CUI_PX(kind == 1 ? h : inner_h); }   /* square segment */
         if (full_width) in->w = CUI_FILL;
@@ -869,8 +883,19 @@ bool cui_pagination(cui_ctx *ui, const char *id_str, int *page, int page_count) 
     bo.size = CUI_SIZE_MD; bo.tooltip = "Previous page"; bo.disabled = *page <= 0;
     if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_LEFT, &bo)) (*page)--;
     int pages[9], n = 0;
+    /* in a narrow parent (a phone) the pager keeps first, current and last: five slots, not seven */
+    cui_node *par = row > 0 ? &ui->nodes[ui->nodes[row].parent] : NULL;
+    cui_rect ppr = par && par->id ? cui__prev_rect(ui, par->id) : (cui_rect){ 0, 0, 0, 0 };
+    float pavail = ppr.w > 0 ? ppr.w - (par ? par->pad[1] + par->pad[3] : 0) : cui_viewport_size(ui).x - 32;
+    bool compact = page_count > 7 && pavail < 2 * 36 + 7 * 32 + 8 * 2;
     if (page_count <= 7) { for (int k = 0; k < page_count; k++) pages[n++] = k; }
-    else {
+    else if (compact) {
+        pages[n++] = 0;
+        if (*page > 1) pages[n++] = -1;
+        if (*page > 0 && *page < page_count - 1) pages[n++] = *page;
+        if (*page < page_count - 2) pages[n++] = -2;
+        pages[n++] = page_count - 1;
+    } else {
         pages[n++] = 0;
         int a = CUI_MAX(1, *page - 1), b = CUI_MIN(page_count - 2, *page + 1);
         if (*page <= 2) { a = 1; b = 3; }
@@ -921,8 +946,16 @@ static void cui__paint_step(cui_ctx *ui, cui_node *n, void *data) {
 }
 
 void cui_stepper(cui_ctx *ui, const char *const *steps, int count, int current) {
-    int row = cui__node_new(ui, 0);
-    ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 10; ui->nodes[row].w = CUI_FILL; ui->nodes[row].self_align = CUI_ALIGN_STRETCH;
+    /* narrower than every label needs (a phone), only the current step keeps its label;
+       the others show their circle, so nothing is cut to "Ac..." */
+    cui_id sid = count > 0 && steps[0] ? cui_make_id(ui, steps[0]) ^ 0x57E9u : 0;
+    cui_rect pr = sid ? cui__prev_rect(ui, sid) : (cui_rect){ 0, 0, 0, 0 };
+    float need = 0, fs = cui__fs(ui, ui->theme.text_body);
+    for (int k = 0; k < count; k++)
+        need += 32 + cui__text_width(ui, k == current ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, steps[k] ? steps[k] : "", -1, false) + (k < count - 1 ? 36 : 0);
+    bool compact = pr.w > 0 && pr.w + 0.5f < need;
+    int row = cui__node_new(ui, sid);
+    ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = compact ? 6 : 10; ui->nodes[row].w = CUI_FILL; ui->nodes[row].self_align = CUI_ALIGN_STRETCH;
     cui__open(ui, row);
     for (int k = 0; k < count; k++) {
         int item = cui__node_new(ui, 0);
@@ -944,14 +977,16 @@ void cui_stepper(cui_ctx *ui, const char *const *steps, int count, int current) 
             ui->nodes[t].line_height = 1.0f;
         }
         cui__close(ui);
-        int t = cui__text_node(ui, steps[k], -1, k == current ? CUI_FONT_MEDIUM : CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body),
-                               k <= current ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY), false);
-        ui->nodes[t].line_height = 1.3f;
+        if (!compact || k == current) {
+            int t = cui__text_node(ui, steps[k], -1, k == current ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs,
+                                   k <= current ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY), false);
+            ui->nodes[t].line_height = 1.3f;
+        }
         cui__close(ui);
         if (k < count - 1) {
             int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
             ui->nodes[line].bg = k < current ? CUI_C(ui, CONTROL_ON) : CUI_C(ui, BORDER);
-            ui->nodes[line].min_w = 16;
+            ui->nodes[line].min_w = compact ? 12 : 16;
         }
     }
     cui__close(ui);

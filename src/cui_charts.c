@@ -530,6 +530,7 @@ void cui_donut_chart_ex(cui_ctx *ui, const char *id_str, const float *values, co
     /* it always asks for the side by side width, so a container that fits its
      * content offers that room again as soon as it has it */
     cui__soft_width(&ui->nodes[row], o->width, legend ? full + 24 + legend_w : full);
+    if (!o->width.kind) { ui->nodes[row].flags |= CUI_NF_ADAPTIVE; ui->nodes[row].min_w = legend ? CUI_MAX(120.0f, legend_w) : 80; }
     cui__open(ui, row);
     int dn = cui__leaf(ui, did, CUI_PX(size), CUI_PX(size));
     cui__mark_interactive(ui, dn, 0);

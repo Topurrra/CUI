@@ -2,6 +2,24 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
+## Unreleased · phones and tablets
+
+### Changed
+
+- **Every component page fits a phone.** Layouts that used to need more than a phone's width now rearrange instead of shrinking the preview. The calendar, countdown, radar chart, activity rings and donut legend scale down. The waffle legend moves under its grid, and the banner puts its action under the message. The player drops its previous button, and the stepper keeps only the current label. Pagination collapses to the first, current and last pages, and the status bar keeps icons and drops labels. Toolbars, path bars and inspectors fold, and the dock shrinks its icons and stops magnifying.
+- **Docking** shows every panel as a tab of one stack when the dockspace is too narrow for panes side by side. The saved layout is untouched, and the panes come back when there is room.
+- **Segmented controls and button groups** tighten their padding before a label truncates.
+- **Sankey, funnel and heatmaps** keep their labels readable on narrow charts. Sankey labels stack over their values, funnel step rates shorten, heatmaps label every other row, and the calendar heatmap drops its Less and More words.
+- **Gantt charts** use a slimmer task list on phones, so the timeline keeps most of the width. Tables fade at the edge that has more columns.
+- Prompt suggestions and radio cards drop to fewer columns before their text gets cramped. The command palette's key hints wrap to a second line.
+- Signatures scale down with a narrower pad instead of being cut off.
+- The docs site lays out each preview at the width it has before measuring it, so components that adapt are shown at full size.
+
+### Fixed
+
+- Joined wheel pickers in the demo sit flush, so the selection band runs across all three.
+- A demo sankey read past the end of its link array.
+
 ## 2026-11-07 · 1.1: text, code and workspace
 
 ### Added

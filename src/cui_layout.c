@@ -279,7 +279,7 @@ static void cui__measure_w(cui_ctx *ui, int i) {
         minc = ceilf(minc * 4) / 4;
     } else {
         int count = 0;
-        float sum = 0, sum_min = 0, mx = 0, mx_min = 0;
+        float sum = 0, sum_min = 0, mx = 0, mx_min = 0, mx_cmin = 0;
         for (int c = n->first; c >= 0; c = ui->nodes[c].next) {
             cui_node *ch = &ui->nodes[c];
             if (ch->flags & CUI_NF_ABSOLUTE) continue;
@@ -288,18 +288,22 @@ static void cui__measure_w(cui_ctx *ui, int i) {
             else if (ch->w.kind == CUI_SIZE_PERCENT) { cp = 0; cm = ch->minc_w; }
             else if (ch->w.kind == CUI_SIZE_GROW) { cp = ch->pref_w; cm = ch->minc_w; }
             else { cp = ch->pref_w; cm = ch->minc_w; }
+            float cc = ch->w.kind == CUI_SIZE_FIXED ? cm : CUI_MIN(ch->cmin_w, ch->max_w);
             cp = cui__clamp_size(cp, ch->min_w, ch->max_w);
             cm = cui__clamp_size(cm, ch->min_w, ch->max_w);
             sum += cp; sum_min += cm;
             if (cp > mx) mx = cp;
             if (cm > mx_min) mx_min = cm;
+            if (cc > mx_cmin) mx_cmin = cc;
             count++;
         }
         float gaps = count > 1 ? n->gap * (float)(count - 1) : 0;
         if (n->dir == CUI_ROW) {
             pref = sum + gaps;
-            /* a wrapping row can go down to its widest child, one per line */
-            minc = (n->flags & CUI_NF_ROW_WRAP) ? mx_min : sum_min + gaps;
+            /* a wrapping row can go down to its widest child, one per line. A child's min_width
+               decides where lines break; alone on a line it may shrink to its content, so cards
+               that wrap on a tablet still fit a phone */
+            minc = (n->flags & CUI_NF_ROW_WRAP) ? mx_cmin : sum_min + gaps;
         } else if (n->dir == CUI_GRID) {
             int cols = n->columns > 0 ? n->columns : 1;
             if (n->col_min > 0) {
@@ -318,7 +322,10 @@ static void cui__measure_w(cui_ctx *ui, int i) {
     }
     if (n->pref_hint > 0 && n->w.kind == CUI_SIZE_FIT) { pref = n->pref_hint; minc = CUI_MIN(minc, pref); }
     if (n->flags & CUI_NF_KEEP_W) minc = pref;
+    if (n->flags & CUI_NF_ADAPTIVE) minc = CUI_MIN(minc, n->min_w);
     if (n->w.kind == CUI_SIZE_FIXED) { pref = minc = n->w.value; }
+    n->cmin_w = CUI_MIN(minc, CUI_MIN(pref, n->max_w));
+    if (n->flags & CUI_NF_ADAPTIVE) n->cmin_w = CUI_MAX(n->cmin_w, CUI_MIN(n->min_w, n->max_w));
     n->pref_w = cui__clamp_size(pref, n->min_w, n->max_w);
     n->minc_w = cui__clamp_size(CUI_MIN(minc, n->pref_w), n->min_w, n->max_w);
 }
@@ -433,6 +440,11 @@ static void cui__resolve_w(cui_ctx *ui, int i) {
             }
             ui->nodes[start].flags |= CUI_NF_LINE_START;
             cui__distribute(ui, n, start, count, inner, true, true);
+            /* alone on its line, a child narrower than its min_width allows still fits the line */
+            if (count == 1) {
+                cui_node *ch = &ui->nodes[start];
+                if (ch->w.kind != CUI_SIZE_FIXED && ch->rect.w > inner + 0.01f) ch->rect.w = CUI_MAX(inner, ch->cmin_w);
+            }
         }
     } else if (n->dir == CUI_ROW) {
         cui__distribute(ui, n, n->first, n->child_count, inner, true, !(n->flags & CUI_NF_SCROLL_X));

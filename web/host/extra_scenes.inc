@@ -199,7 +199,7 @@ SCENE(money_field) {
 SCENE(prefix_suffix) {
     static char site[64] = "fieldwork.studio", weight[16] = "4.2";
     cui_row(ui, .gap = 16, .align = CUI_ALIGN_START, .wrap = true) {
-        cui_input(ui, "site", site, sizeof site, .label = "Website", .prefix = "https://", .width = CUI_PX(280));
+        cui_input(ui, "site", site, sizeof site, .label = "Website", .prefix = "https://", .width = CUI_PX(cui_viewport_size(ui).x < 360 ? 240 : 280));
         cui_input(ui, "weight", weight, sizeof weight, .label = "Parcel weight", .suffix = "kg", .width = CUI_PX(160));
     }
 }

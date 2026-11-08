@@ -103,10 +103,11 @@ bool cui_carousel_begin(cui_ctx *ui, const char *id_str, int count, int *index, 
     cui__mark_interactive(ui, view, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     if (r.hovered) cui__set_cursor(ui, st->dragging ? CUI_CURSOR_MOVE : CUI_CURSOR_ARROW);
     cui__open(ui, view);
-    int row = cui__node_new(ui, 0);
+    /* the track of slides is a layer inside the clipped view: it never sets the view's minimum
+       width, so the carousel fits a phone and every slide takes the width the view has */
+    int row = cui__absolute(ui, 0, 0, 0, b->count * stride, h);
     cui_node *rn = &ui->nodes[row];
-    rn->dir = CUI_ROW; rn->gap = gap; rn->h = CUI_FILL;
-    rn->w = CUI_PX(b->count * stride);
+    rn->dir = CUI_ROW; rn->gap = gap;
     rn->tx = -st->pos.x * stride;
     cui__open(ui, row);
     b->row = row;
@@ -582,12 +583,11 @@ void cui_ticker_ex(cui_ctx *ui, const char *id_str, const cui_ticker_item *items
     bn->paint_data = ep;
     cui__mark_interactive(ui, box, 0);
     cui__open(ui, box);
-    int strip = cui__node_new(ui, 0);
+    /* a layer wider than the view, so items keep their natural width; as a layer it does not
+       set the ticker's minimum width, which stays narrow enough for a phone */
+    int strip = cui__absolute(ui, 0, 0, 0, st->set_w > 0 ? st->set_w * 3 + 16 : 6000, h);
     ui->nodes[strip].dir = CUI_ROW; ui->nodes[strip].align = CUI_ALIGN_CENTER;
     ui->nodes[strip].tx = -st->off;
-    /* wider than the view so items keep their natural width instead of shrinking */
-    ui->nodes[strip].w = CUI_PX(st->set_w > 0 ? st->set_w * 3 + 16 : 6000);
-    ui->nodes[strip].self_align = CUI__ALIGN_NOSTRETCH;
     cui__open(ui, strip);
     /* enough copies to cover the width while one scrolls off */
     cui__ticker_set(ui, set_id, items, count);

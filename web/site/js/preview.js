@@ -139,9 +139,14 @@ export class Preview {
     if (!w) return;
     let h = nat.h;
     if (w < nat.w && x.inst_content_height) {
+      // Start at the width the container has, not at the minimum measured at the natural size:
+      // toolbars, path bars and inspectors collapse or stack once they see a narrower width,
+      // and only then report how narrow they can go. A few frames let them settle.
+      const avail = this.availWidth();
+      if (avail > 0 && avail < w) w = Math.max(avail, MIN_LAYOUT_W);
       for (let pass = 0; pass < 3; pass++) {
         x.inst_resize(this.inst, w, h, ratio());
-        x.inst_frame(this.inst, 0, 0);
+        for (let f = 0; f < 3; f++) x.inst_frame(this.inst, 0, 0);
         const w2 = this.autoWidth();          // the minimum content width is known now
         const h2 = Math.max(nat.h, Math.ceil(x.inst_content_height(this.inst)));
         if (w2 === w && h2 === h) break;
@@ -183,6 +188,7 @@ export class Preview {
     const x = this.mod.exports;
     this.canvas.style.width = `${this.w * this.fit}px`;
     this.canvas.style.height = `${this.h * this.fit}px`;
+    this.canvas.dataset.fit = this.fit < 1 ? this.fit.toFixed(3) : '1';   // read by the layout checks
     const W = Math.round(this.w * this.scale), H = Math.round(this.h * this.scale);
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; }
   }

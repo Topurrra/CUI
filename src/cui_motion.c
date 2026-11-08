@@ -592,7 +592,7 @@ void cui_loader_ex(cui_ctx *ui, const cui_loader_opts *o) {
 /* Dock                                                                     */
 /* ------------------------------------------------------------------------ */
 
-struct cui_dock_build { cui_id id; float size, mag; bool hot; int k, seps; struct cui_dock_build *prev; };
+struct cui_dock_build { cui_id id; float size, mag, gap; bool hot; int k, seps; struct cui_dock_build *prev; };
 typedef struct { int items, seps; } cui__dock_count;
 
 typedef struct { cui_spring s, press; float hover; } cui__dock_item_state;
@@ -608,10 +608,14 @@ void cui_dock_begin(cui_ctx *ui, const char *id_str, const cui_dock_opts *o) {
     b->mag = o->magnify > 0 ? o->magnify : 1.55f;
     /* on a narrow screen the icons get smaller so the whole dock stays on it */
     cui__dock_count *dc = cui_state(ui, b->id ^ 0xD0C5u, sizeof *dc);
+    b->gap = 8;
     if (dc->items > 0) {
-        float avail = ui->vw - 16 - 16 - 8.0f * (float)(dc->items + dc->seps - 1) - (float)dc->seps;
-        float fit = floorf(avail / (float)dc->items);
-        if (fit < b->size) b->size = CUI_MAX(24.0f, fit);
+        /* viewport less a page margin and the dock's own padding; tighter gaps on phones */
+        float gaps = (float)(dc->items + dc->seps - 1), room = ui->vw - 32 - 16 - (float)dc->seps;
+        float fit = floorf((room - 8.0f * gaps) / (float)dc->items);
+        if (fit < 36) { b->gap = 4; fit = floorf((room - 4.0f * gaps) / (float)dc->items); }
+        /* squeezed onto a narrow screen there is no room to magnify (and no hover on a phone) */
+        if (fit < b->size) { b->size = CUI_MAX(24.0f, fit); b->mag = 1; }
     }
     b->prev = (struct cui_dock_build *)ui->dock;
     ui->dock = b;
@@ -620,7 +624,7 @@ void cui_dock_begin(cui_ctx *ui, const char *id_str, const cui_dock_opts *o) {
     b->hot = pr.w > 0 && ui->mx >= pr.x - 8 && ui->mx < pr.x + pr.w + 8 && ui->my >= pr.y - reach && ui->my < pr.y + pr.h + 4 && ui->mouse_inside;
     int n = cui__node_new(ui, b->id);
     cui_node *nd = &ui->nodes[n];
-    nd->dir = CUI_ROW; nd->align = CUI_ALIGN_END; nd->gap = 8;
+    nd->dir = CUI_ROW; nd->align = CUI_ALIGN_END; nd->gap = b->gap;
     nd->pad[0] = nd->pad[1] = nd->pad[3] = 8; nd->pad[2] = 12;
     nd->radius = CUI_CORNERS(b->size * 0.5f + 4);
     nd->bg = cui_alpha(CUI_C(ui, SURFACE_RAISED), ui->mode == CUI_THEME_DARK ? 0.9f : 0.82f);
@@ -671,7 +675,7 @@ bool cui_dock_item_ex(cui_ctx *ui, const char *icon, const char *label, const cu
         float dist = (ui->mx - (pr.x + pr.w * 0.5f)) / (b->size * 2.4f);
         if (fabsf(dist) < 1) target = 1 + (b->mag - 1) * (0.5f + 0.5f * cosf(dist * CUI_PI));
     }
-    if (st->s.x <= 0) st->s.x = 1;
+    if (st->s.x <= 0 || b->mag <= 1) { st->s.x = 1; st->s.v = 0; }
     cui__spring(ui, &st->s, target, 0.28f, 0.0f);
     cui__spring(ui, &st->press, r.pressed ? 0.9f : 1.0f, CUI_SPRING_SNAPPY);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
@@ -1022,12 +1026,16 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
     float pos = st->dragging ? st->drag_pos : np->position;
     float frac = np->duration > 0 ? cui__clampf(pos / np->duration, 0, 1) : 0;
     bool compact = o->compact;
-    float art = compact ? 44 : 64;
+    /* a phone: smaller artwork and no previous button, so the title keeps some room */
+    cui_rect rpr = cui__prev_rect(ui, id);
+    bool narrow = !compact && rpr.w > 0 && rpr.w < 300;
+    float art = compact ? 44 : narrow ? 48 : 64;
     int root = cui__node_new(ui, id);
     cui_node *rn = &ui->nodes[root];
     rn->dir = CUI_COLUMN; rn->gap = 14;
     rn->pad[0] = rn->pad[1] = rn->pad[2] = rn->pad[3] = compact ? 10 : 16;
     cui__soft_width(rn, o->width, compact ? 340 : 360);
+    if (!compact) { rn->flags |= CUI_NF_ADAPTIVE; rn->min_w = CUI_MAX(rn->min_w, 224); }
     rn->radius = CUI_CORNERS(ui->theme.radius_panel);
     rn->bg = CUI_C(ui, SURFACE);
     rn->border = 1; rn->border_color = CUI_C(ui, BORDER);
@@ -1064,7 +1072,7 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
     cui_button_opts bo;
     memset(&bo, 0, sizeof bo);
     bo.variant = CUI_BUTTON_GHOST; bo.size = CUI_SIZE_SM;
-    if (!compact) { bo.tooltip = "Previous"; if (cui_icon_button_ex(ui, CUI_ICON_SKIP_BACK, &bo)) result |= CUI_PLAYER_PREV; }
+    if (!compact && !narrow) { bo.tooltip = "Previous"; if (cui_icon_button_ex(ui, CUI_ICON_SKIP_BACK, &bo)) result |= CUI_PLAYER_PREV; }
     /* play / pause */
     cui_interact pr = cui__interact(ui, pid, CUI_IF_FOCUSABLE);
     cui__spring(ui, &st->press, pr.pressed ? 0.9f : 1.0f, CUI_SPRING_SNAPPY);

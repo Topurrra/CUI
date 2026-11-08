@@ -47,7 +47,7 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
     cui_box gb;
     memset(&gb, 0, sizeof gb);
     gb.dir = CUI_GRID; gb.columns = cols; gb.gap = 12;
-    gb.min_column_width = 180;   /* fewer columns, down to one, in a narrow container */
+    gb.min_column_width = 220;   /* fewer columns, down to one, in a narrow container: room for a title and its badge */
     int grid = cui__node_new(ui, gid);
     cui__apply_box(ui, &ui->nodes[grid], &gb);
     cui__open(ui, grid);
@@ -196,6 +196,7 @@ bool cui_tag_input_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap, co
     int box = cui__node_new(ui, id);
     cui_node *bn = &ui->nodes[box];
     bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 6;
+    bn->flags |= CUI_NF_ROW_WRAP;   /* on a narrow screen tags take more lines instead of overflowing */
     bn->min_h = h;
     bn->w = outer >= 0 ? CUI_FILL : (o->width.kind ? o->width : CUI_FILL);
     bn->pad[3] = 6; bn->pad[1] = CUI__FIELD_PAD;
@@ -297,8 +298,11 @@ bool cui_otp_input(cui_ctx *ui, const char *id_str, char *code, int length) {
         cui__wakeup_after(ui, 0.53f);
     }
     cui__tween(ui, &st->focus, focused ? 1.0f : 0.0f, CUI__T_FOCUS);
+    /* boxes are 44 points wide when there is room and give way down to 30 on a phone */
     int row = cui__node_new(ui, id);
-    ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 8; ui->nodes[row].self_align = CUI__ALIGN_NOSTRETCH;
+    float natural = length * 44.0f + (length - 1) * 8.0f + (length >= 6 ? 18.0f : 0.0f);
+    ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 8;
+    ui->nodes[row].w = CUI_FILL; ui->nodes[row].max_w = natural; ui->nodes[row].self_align = CUI_ALIGN_START;
     cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_TEXT);
     cui__open(ui, row);
@@ -308,7 +312,7 @@ bool cui_otp_input(cui_ctx *ui, const char *id_str, char *code, int length) {
         bool current = focused && k == CUI_MIN(len, length - 1) && (len < length || k == length - 1);
         int b = cui__node_new(ui, 0);
         cui_node *bn = &ui->nodes[b];
-        bn->w = CUI_PX(44); bn->h = CUI_PX(52);
+        bn->w = CUI_GROW(1); bn->min_w = 30; bn->max_w = 44; bn->h = CUI_PX(52);
         bn->radius = CUI_CORNERS(ui->theme.radius_control);
         bn->bg = CUI_C(ui, SURFACE);
         bn->border = current ? 1.5f : 1;
@@ -373,6 +377,36 @@ void cui_button_group_end(cui_ctx *ui) {
     if (g < 0) return;
     cui_node *gn = &ui->nodes[g];
     float r = gn->radius.tl;
+    /* squeezed (a phone): the buttons drop to 8px side padding before their labels truncate.
+       The group keeps asking for its natural width, so the padding comes back with the room */
+    if (gn->first >= 0 && ui->nodes[gn->first].id && !gn->id) {
+        gn->id = ui->nodes[gn->first].id ^ 0xB6A0u;
+        float natural = 0;
+        int nb = 0;
+        for (int c = gn->first; c >= 0; c = ui->nodes[c].next, nb++) {
+            cui_node *ch = &ui->nodes[c];
+            if (ch->w.kind == CUI_SIZE_FIXED) { natural += ch->w.value; continue; }
+            if (ch->w.kind != CUI_SIZE_FIT) { natural = -1; break; }
+            float w = ch->pad[1] + ch->pad[3];
+            int kids = 0;
+            for (int t = ch->first; t >= 0; t = ui->nodes[t].next, kids++) {
+                cui_node *tn = &ui->nodes[t];
+                if (tn->w.kind == CUI_SIZE_FIXED) w += tn->w.value;
+                else if ((tn->flags & CUI_NF_TEXT) && tn->w.kind == CUI_SIZE_FIT) w += ceilf(cui__text_width(ui, tn->font, tn->font_size, tn->text, tn->text_len, (tn->flags & CUI_NF_TABULAR) != 0) * 4) / 4;
+                else { natural = -1; break; }
+            }
+            if (natural < 0) break;
+            natural += w + (kids > 1 ? ch->gap * (float)(kids - 1) : 0);
+        }
+        if (natural > 0) {
+            cui_rect pr = cui__prev_rect(ui, gn->id);
+            gn->w = CUI_FIT; gn->pref_hint = natural + gn->pad[1] + gn->pad[3];
+            if (pr.w > 0 && pr.w < gn->pref_hint - 0.5f)
+                for (int c = gn->first; c >= 0; c = ui->nodes[c].next)
+                    if (ui->nodes[c].w.kind == CUI_SIZE_FIT && ui->nodes[c].pad[1] > 8) ui->nodes[c].pad[1] = ui->nodes[c].pad[3] = 8;
+        }
+        gn = &ui->nodes[g];
+    }
     for (int c = gn->first; c >= 0; c = ui->nodes[c].next) {
         cui_node *ch = &ui->nodes[c];
         bool first = c == gn->first, last = ch->next < 0;

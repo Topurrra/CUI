@@ -513,11 +513,25 @@ void cui_toolbar_end(cui_ctx *ui) {
 
 #define CUI__STATUS_ITEM_H 22.0f
 
+/* A status bar narrower than its items (a phone, a narrow window) first shows icons without their
+   labels, then leaves out items from the end, as editors do; nothing is squeezed to "Sa...".
+   The budget is last frame's width; `need` is what every item asked for, also last frame. */
+typedef struct { float need; } cui__status_bar_state;
+struct cui_status_build { float avail, used, need; bool compact; cui__status_bar_state *st; struct cui_status_build *prev; };
+
 void cui_status_bar_begin(cui_ctx *ui, const char *id_str, const cui_status_bar_opts *o) {
     cui_status_bar_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     cui_id id = cui_make_id(ui, id_str);
+    struct cui_status_build *b = cui__frame_alloc(ui, sizeof *b);
+    memset(b, 0, sizeof *b);
+    b->st = cui_state(ui, id ^ 0x5BA8u, sizeof *b->st);
+    cui_rect pr = cui__prev_rect(ui, id);
+    b->avail = pr.w > 0 ? pr.w - 12 : 1e9f;
+    b->compact = b->avail + 0.5f < b->st->need;
+    b->prev = (struct cui_status_build *)ui->status_bar;
+    ui->status_bar = b;
     int row = cui__bar_row(ui, id, 3, 6, !o->no_border, true);
     ui->nodes[row].gap = 4;
     cui__open(ui, row);
@@ -525,8 +539,24 @@ void cui_status_bar_begin(cui_ctx *ui, const char *id_str, const cui_status_bar_
 }
 
 void cui_status_bar_end(cui_ctx *ui) {
+    struct cui_status_build *b = (struct cui_status_build *)ui->status_bar;
+    if (b) { b->st->need = b->need; ui->status_bar = b->prev; }
     cui_pop_id(ui);
     cui__close(ui);
+}
+
+/* Books an item's width. *icon_only says to drop its label; false means leave the item out. */
+static bool cui__status_fits(cui_ctx *ui, float label_w, bool has_icon, float extra, bool *icon_only) {
+    struct cui_status_build *b = (struct cui_status_build *)ui->status_bar;
+    *icon_only = false;
+    if (!b) return true;
+    float full = 12 + (has_icon ? 18 : 0) + label_w + extra + (b->need > 0 ? 4 : 0);
+    b->need += full;
+    float w = full;
+    if (b->compact && has_icon && label_w > 0) { *icon_only = true; w = 12 + 12 + extra + (b->used > 0 ? 4 : 0); }
+    if (b->compact && b->used + w > b->avail) return false;
+    b->used += w;
+    return true;
 }
 
 void cui_status_bar_spacer(cui_ctx *ui) { cui_spacer(ui); }
@@ -552,10 +582,13 @@ void cui_status_bar_text_ex(cui_ctx *ui, const char *text, const cui_status_item
     cui_status_item_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
+    bool icon_only;
+    float tw = text ? cui__text_width(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), text, cui__display_len(text), true) : 0;
+    if (!cui__status_fits(ui, tw, o->icon != NULL, 0, &icon_only)) return;
     int i = cui__status_row(ui, 0);
     cui__open(ui, i);
     if (o->icon) cui__icon_node(ui, o->icon, 12, o->tone ? cui__tone_color(ui, o->tone) : CUI_C(ui, TEXT_SECONDARY));
-    if (text) cui__status_label(ui, text, cui__display_len(text), CUI_C(ui, TEXT_SECONDARY));
+    if (text && !icon_only) cui__status_label(ui, text, cui__display_len(text), CUI_C(ui, TEXT_SECONDARY));
     cui__close(ui);
 }
 
@@ -566,6 +599,9 @@ bool cui_status_bar_item_ex(cui_ctx *ui, const char *label, const cui_status_ite
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     if (!label) label = "";
+    bool icon_only;
+    float lw = label[0] ? cui__text_width(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), label, cui__display_len(label), true) : 0;
+    if (!cui__status_fits(ui, lw, o->icon != NULL, 0, &icon_only)) return false;
     cui_id id = cui_make_id(ui, label[0] ? label : (o->tooltip ? o->tooltip : "#status-item"));
     bool disabled = o->disabled || cui_is_disabled(ui);
     cui_push_disabled(ui, disabled);
@@ -583,12 +619,13 @@ bool cui_status_bar_item_ex(cui_ctx *ui, const char *label, const cui_status_ite
     cui__open(ui, i);
     cui_color fg = cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), st->hover);
     if (o->icon) cui__icon_node(ui, o->icon, 12, o->tone ? cui__tone_color(ui, o->tone) : fg);
-    if (label[0] && cui__display_len(label) > 0) cui__status_label(ui, label, cui__display_len(label), fg);
+    if (label[0] && cui__display_len(label) > 0 && !icon_only) cui__status_label(ui, label, cui__display_len(label), fg);
     cui__close(ui);
     cui__focus_ring(ui, i, st->focus);
     ui->last_id = id;
     ui->last_node = i;
     if (o->tooltip) cui_tooltip(ui, o->tooltip);
+    else if (icon_only) cui_tooltip(ui, label);   /* the label it no longer shows */
     return r.clicked && !disabled;
 }
 
@@ -619,6 +656,9 @@ void cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progr
     cui_status_progress_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
+    bool icon_only;
+    float lw = o->label ? cui__text_width(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), o->label, cui__display_len(o->label), true) + 8 : 0;
+    if (!cui__status_fits(ui, lw, false, o->width > 0 ? o->width : 64, &icon_only)) return;
     int i = cui__status_row(ui, 0);
     ui->nodes[i].gap = 8;
     cui__open(ui, i);

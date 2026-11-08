@@ -1000,10 +1000,15 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     }
     bool changed = false;
     cui_push_id(ui, id_str);
+    /* 34px day cells, down to 28 when the parent is narrow (phones) */
+    cui_rect cpr = cui__prev_rect(ui, id);
+    float cs = cpr.w > 0 ? floorf((cpr.w - 12) / 7) : 34;
+    cs = cs > 34 ? 34 : cs < 28 ? 28 : cs;
     int col = cui__node_new(ui, id);
     ui->nodes[col].gap = 8;
-    ui->nodes[col].w = CUI_PX(7 * 34 + 6 * 2);
-    ui->nodes[col].self_align = CUI__ALIGN_NOSTRETCH;
+    cui__soft_width(&ui->nodes[col], CUI_FIT, 7 * 34 + 6 * 2);
+    ui->nodes[col].min_w = 7 * 28 + 6 * 2;
+    ui->nodes[col].flags |= CUI_NF_ADAPTIVE;
     cui__open(ui, col);
     int head = cui__node_new(ui, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].gap = 2; ui->nodes[head].pad[3] = 6;
@@ -1051,9 +1056,9 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
         bool is_today = today.year == y && today.month == m && today.day == day;
         int c = cui__node_new(ui, did);
         cui_node *cn = &ui->nodes[c];
-        cn->h = CUI_PX(34);
+        cn->h = CUI_PX(cs);
         cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->justify = CUI_JUSTIFY_CENTER;
-        cn->radius = CUI_CORNERS(17);
+        cn->radius = CUI_CORNERS(cs / 2);
         cn->bg = sel ? CUI_C(ui, CONTROL_ON) : cui_alpha(CUI_C(ui, HOVER), *hv * 1.4f);
         if (is_today && !sel) { cn->border = 1; cn->border_color = CUI_C(ui, BORDER_STRONG); }
         cui__mark_interactive(ui, c, CUI_IF_FOCUSABLE);
@@ -1469,6 +1474,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
     ui->nodes[sep2].bg = CUI_C(ui, BORDER);
     int foot = cui__node_new(ui, 0);
     ui->nodes[foot].dir = CUI_ROW; ui->nodes[foot].gap = 16;
+    ui->nodes[foot].flags |= CUI_NF_ROW_WRAP;   /* a phone: the hints take two lines rather than cut to "Na..." */
     ui->nodes[foot].pad[0] = ui->nodes[foot].pad[2] = 10; ui->nodes[foot].pad[3] = ui->nodes[foot].pad[1] = 14;
     ui->nodes[foot].bg = CUI_C(ui, SURFACE_MUTED);
     ui->nodes[foot].radius.bl = ui->nodes[foot].radius.br = ui->theme.radius_panel - 1;

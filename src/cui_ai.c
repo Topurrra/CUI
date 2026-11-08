@@ -686,6 +686,7 @@ int cui_prompt_suggestions_ex(cui_ctx *ui, const char *id_str, const cui_prompt_
     int clicked = -1;
     int grid = cui__node_new(ui, id);
     ui->nodes[grid].dir = CUI_GRID; ui->nodes[grid].columns = o->columns > 0 ? o->columns : 2; ui->nodes[grid].gap = 10; ui->nodes[grid].w = CUI_FILL;
+    ui->nodes[grid].col_min = 200;   /* one column on a phone, where two would wrap every word */
     cui__open(ui, grid);
     for (int k = 0; k < count; k++) {
         cui_id cid = cui__hash(&k, sizeof k, id ^ 0x9A0u);

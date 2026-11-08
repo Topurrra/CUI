@@ -59,6 +59,7 @@ typedef struct {
     uint64_t built;            /* frame of the last build */
     int cur_leaf;              /* leaf with the keyboard or the last press */
     int refocus;               /* panel whose tab gets the focus back after a move, -1 */
+    int compact_sel;           /* panel selected in the narrow one-stack view, -1 */
     cui__dk_node nodes[CUI__DK_NODES];
     cui__dk_panel panels[CUI__DK_PANELS];
     /* tab drag */
@@ -90,6 +91,7 @@ typedef struct cui__dk_build {
     int container;
     float min_w, min_h;
     bool shortcuts, in_panel;
+    bool compact;              /* too narrow to split: every panel is a tab of one stack */
     int takeover;              /* leaf whose strip is told the press ended, this frame */
     bool vis[CUI__DK_NODES];
     int body[CUI__DK_NODES];
@@ -115,6 +117,7 @@ static void cui__dk_init(cui__dk_state *st) {
     st->root = -1;
     st->cur_leaf = -1;
     st->refocus = -1;
+    st->compact_sel = -1;
     st->next_uid = 1;
     for (int i = 0; i < CUI__DK_PANELS; i++) { st->panels[i].leaf = -1; st->panels[i].pending = -1; }
 }
@@ -802,6 +805,58 @@ static void cui__dk_drop(cui_ctx *ui, cui__dk_build *b, cui_rect R) {
     st->cur_leaf = nl;
 }
 
+/* panels of the visible leaves, in tree order */
+static void cui__dk_collect(const cui__dk_build *b, int i, int *out, int *n) {
+    const cui__dk_state *st = b->st;
+    if (i < 0 || !b->vis[i]) return;
+    if (st->nodes[i].kind == DK_SPLIT) { cui__dk_collect(b, st->nodes[i].a, out, n); cui__dk_collect(b, st->nodes[i].b, out, n); return; }
+    *n += cui__dk_visible_tabs(st, i, out + *n, -1);
+}
+
+/* Too narrow for side by side panes (a phone): one strip with every panel as a tab and one body.
+   The tree is left as it is, so the panes come back when there is room again. */
+static void cui__dk_build_compact(cui_ctx *ui, cui__dk_build *b) {
+    cui__dk_state *st = b->st;
+    int list[CUI__DK_PANELS], vn = 0;
+    cui__dk_collect(b, st->root, list, &vn);
+    int sel = -1;
+    for (int k = 0; k < vn; k++) if (list[k] == st->compact_sel) sel = k;
+    if (sel < 0 && st->cur_leaf >= 0)
+        for (int k = 0; k < vn; k++) if (list[k] == st->nodes[st->cur_leaf].sel) sel = k;
+    if (sel < 0) sel = 0;
+    cui_id lid = b->id ^ 0xC0A7u;
+    int ln = cui__node_new(ui, lid);
+    cui_node *L = &ui->nodes[ln];
+    L->dir = CUI_COLUMN; L->w = CUI_FILL; L->h = CUI_FILL; L->self_align = CUI_ALIGN_STRETCH;
+    L->bg = CUI_C(ui, SURFACE_MUTED); L->flags |= CUI_NF_CLIP;
+    cui__open(ui, ln);
+    cui_doc_tab *tabs = cui__frame_alloc(ui, sizeof(cui_doc_tab) * (size_t)(vn > 0 ? vn : 1));
+    bool closable = false;
+    for (int k = 0; k < vn; k++) {
+        cui__dk_panel *p = &st->panels[list[k]];
+        tabs[k].title = p->label; tabs[k].icon = p->icon[0] ? p->icon : NULL; tabs[k].tooltip = NULL; tabs[k].dirty = p->dirty;
+        closable = closable || p->closable;
+        b->tab_vis[list[k]] = true;
+        b->tab_id[list[k]] = cui__dk_tab_id(ui, 0xC0A7u, p->label);
+    }
+    cui_doc_tabs_opts o;
+    memset(&o, 0, sizeof o);
+    o.shortcuts = b->shortcuts; o.no_close = !closable; o.no_reorder = true;
+    cui_doc_tabs_result r = cui_doc_tabs_ex(ui, cui__frame_printf(ui, "t%u", 0xC0A7u), tabs, vn, &sel, &o);   /* the ids cui__dk_tab_id gives */
+    if (vn > 0 && r.close >= 0 && r.close < vn && st->panels[list[r.close]].closable) st->panels[list[r.close]].close_req = true;
+    int body = cui__node_new(ui, lid ^ 0xB0D1u);
+    cui_node *B = &ui->nodes[body];
+    B->dir = CUI_COLUMN; B->w = CUI_FILL; B->h = CUI_FILL; B->self_align = CUI_ALIGN_STRETCH;
+    B->bg = CUI_C(ui, SURFACE);
+    cui__close(ui);
+    if (vn <= 0) return;
+    sel = CUI_CLAMP(sel, 0, vn - 1);
+    int pi = list[sel], leaf = st->panels[pi].leaf;
+    st->compact_sel = pi;
+    for (int k = 0; k < vn; k++) b->body[st->panels[list[k]].leaf] = body;
+    if (leaf >= 0) { b->shown[leaf] = pi; st->nodes[leaf].sel = pi; st->cur_leaf = leaf; }
+}
+
 void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace_opts *o) {
     cui_dockspace_opts d;
     memset(&d, 0, sizeof d);
@@ -828,6 +883,8 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
     cui_push_id(ui, id_str);
     b->seed = ui->id_stack[ui->id_depth > 0 ? ui->id_depth - 1 : 0];
     cui_rect R = cui__prev_rect(ui, b->id);
+    b->compact = R.w > 0 && R.w < 2 * b->min_w + 180;
+    if (b->compact && st->drag != DK_IDLE) st->drag = DK_IDLE;   /* nowhere to drop a pane */
     if (st->drag_panel >= 0 && st->drag_panel < CUI__DK_PANELS && st->drag != DK_IDLE && !cui__dk_present(st, &st->panels[st->drag_panel]))
         st->drag = DK_IDLE;   /* the dragged panel went away */
 
@@ -854,7 +911,7 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
             cui_id tid = cui__dk_tab_id(ui, st->nodes[i].uid, p->label);
             b->tab_id[vis[k]] = tid;
             /* a press on a tab may become a dock drag */
-            if (ui->mpressed[0] && st->drag == DK_IDLE && ui->hot == tid) {
+            if (ui->mpressed[0] && st->drag == DK_IDLE && ui->hot == tid && !b->compact) {
                 cui_rect tr = cui__prev_rect(ui, tid);
                 st->drag = DK_PENDING;
                 st->drag_panel = vis[k];
@@ -925,7 +982,10 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
     cui__open(ui, c);
     /* a dockspace squeezed to nothing shows nothing (a strip with no width has no tabs to show) */
     bool room = !cui__has_prev_rect(ui, b->id) || (R.w >= 16 && R.h >= 16);
-    if (room && st->root >= 0 && b->vis[st->root]) cui__dk_build_node(ui, b, st->root);
+    if (room && st->root >= 0 && b->vis[st->root]) {
+        if (b->compact) cui__dk_build_compact(ui, b);
+        else cui__dk_build_node(ui, b, st->root);
+    }
     st->built = ui->frame;
     reg->cur = b;
 }

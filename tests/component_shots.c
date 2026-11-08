@@ -202,7 +202,7 @@ SCENE(feedback) {
     cui_column(ui, .gap = 18, UPTO(460)) {
         cui_progress(ui, 0.68f, .label = "Uploading", .show_value = true);
         cui_meter(ui, "Storage", 18.4f, 20, "GB");
-        cui_row(ui, .gap = 14) { cui_spinner(ui, 18); cui_spinner(ui, 24); cui_skeleton(ui, CUI_PX(180), 12); }
+        cui_row(ui, .gap = 14, .wrap = true, .align = CUI_ALIGN_CENTER) { cui_spinner(ui, 18); cui_spinner(ui, 24); cui_skeleton(ui, CUI_PX(180), 12); }
     }
 }
 SCENE(badges) {
@@ -342,8 +342,9 @@ static void scene_palette(cui_ctx *ui, int f) {
 static void scene_icons(cui_ctx *ui, int f) {
     if (f < 0) return;
     int n = (int)(sizeof icon_list / sizeof icon_list[0]);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 24) {
-        cui_box(ui, .dir = CUI_GRID, .columns = 6, .min_column_width = 140, .gap = 4) {
+    bool narrow = cui_viewport_size(ui).x < 360;   /* two columns on a phone */
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = narrow ? 12 : 24) {
+        cui_box(ui, .dir = CUI_GRID, .columns = 6, .min_column_width = narrow ? 120 : 140, .gap = 4) {
             for (int i = 0; i < n; i++) {
                 cui_row(ui, .gap = 10, .pad = 8, .radius = 10) {
                     cui_icon(ui, icon_list[i].icon, 18, CUI_COLOR_FOREGROUND);
@@ -439,7 +440,7 @@ static void scene_morph(cui_ctx *ui, int f) {
     frame_wrap(ui, body_morph);
 }
 static void body_user_menu(cui_ctx *ui) {
-    cui_box(ui, .width = CUI_PX(270)) {
+    cui_box(ui, UPTO(270)) {
         cui_user_menu(ui, "Maya Okafor", .detail = "maya@fieldwork.studio", .status = "online", .placement = CUI_PLACE_BOTTOM_START) {
             cui_menu_item(ui, "Profile", .icon = CUI_ICON_USER, .shortcut = "Ctrl P");
             cui_menu_item(ui, "Billing", .icon = CUI_ICON_CREDIT_CARD);
@@ -500,7 +501,7 @@ SCENE(shortcut_rec) {
 static void body_multi(cui_ctx *ui) {
     static bool sel[6] = { true, false, true, false, false, true };
     static const char *items[] = { "C", "C++", "Rust", "Zig", "Go", "Swift" };
-    cui_box(ui, .width = CUI_PX(300)) { cui_multi_select(ui, "langs", items, 6, sel, .label = "Languages"); }
+    cui_box(ui, UPTO(300)) { cui_multi_select(ui, "langs", items, 6, sel, .label = "Languages"); }
 }
 static void scene_multi(cui_ctx *ui, int f) {
     if (f < 0) { click_id(ui, cui_make_id(ui, "langs"), -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 600, 10); return; }
@@ -508,7 +509,7 @@ static void scene_multi(cui_ctx *ui, int f) {
 }
 static void body_range(cui_ctx *ui) {
     static cui_date_range r = { { 2026, 11, 3 }, { 2026, 11, 14 } };
-    cui_date_range_picker(ui, "range", &r, .width = CUI_PX(300));
+    cui_box(ui, UPTO(300)) { cui_date_range_picker(ui, "range", &r, .width = CUI_FILL); }
 }
 static void scene_range(cui_ctx *ui, int f) {
     if (f < 0) { click_id(ui, cui_make_id(ui, "range"), -f - 1, 20); if (-f - 1 == 26) cui_input_mouse_move(ui, 10, 10); return; }
@@ -533,10 +534,11 @@ SCENE(wheels) {
     for (int k = 0; k < 31; k++) { snprintf(dbuf[k], sizeof dbuf[k], "%d", k + 1); days[k] = dbuf[k]; }
     for (int k = 0; k < 12; k++) { months[k] = mn[k]; snprintf(ybuf[k], sizeof ybuf[k], "%d", 2020 + k); years[k] = ybuf[k]; }
     cui_row(ui, .gap = 40, .align = CUI_ALIGN_CENTER, .wrap = true) {
-        cui_card(ui, .dir = CUI_ROW, .gap = 0, .pad = 8) {
-            cui_wheel_picker(ui, "day", days, 31, &day, .width = CUI_PX(64), .loop = true, .join_right = true);
-            cui_wheel_picker(ui, "month", months, 12, &month, .width = CUI_PX(128), .loop = true, .join_left = true, .join_right = true);
-            cui_wheel_picker(ui, "year", years, 12, &year, .width = CUI_PX(80), .join_left = true);
+        bool narrow = cui_viewport_size(ui).x < 360;
+        cui_card(ui, .pad = 8) cui_row(ui, .gap = 0) {
+            cui_wheel_picker(ui, "day", days, 31, &day, .width = CUI_PX(narrow ? 52 : 64), .loop = true, .join_right = true);
+            cui_wheel_picker(ui, "month", months, 12, &month, .width = CUI_PX(narrow ? 112 : 128), .loop = true, .join_left = true, .join_right = true);
+            cui_wheel_picker(ui, "year", years, 12, &year, .width = CUI_PX(narrow ? 68 : 80), .join_left = true);
         }
         cui_time_dial(ui, "dial", &dh, &dm, 232);
     }
@@ -2044,7 +2046,7 @@ SCENE(tiles) {
         cui_control_tile(ui, "Focus", &focus, .icon = CUI_ICON_MOON, .detail = "Until 6 pm");
         cui_control_tile(ui, "AirShare", &share, .icon = CUI_ICON_SHARE_2, .detail = "Contacts only");
     }
-    cui_control_tile(ui, "Dark appearance", &dark, .icon = CUI_ICON_SUN, .wide = true, .width = CUI_PX(300));
+    cui_box(ui, UPTO(300)) { cui_control_tile(ui, "Dark appearance", &dark, .icon = CUI_ICON_SUN, .wide = true, .width = CUI_FILL); }
 }
 SCENE(player) {
     static float peaks[96], progress = 0.36f;
@@ -2153,7 +2155,7 @@ SCENE(voice_orb) {
     cui_row(ui, .gap = 18, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
         for (int k = 0; k < 4; k++) cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 6) {
             cui_push_id_int(ui, k);
-            cui_voice_orb(ui, "orb", (cui_voice_state)k, k == 1 ? 0.7f : k == 3 ? 0.5f : 0.2f, .size = 150);
+            cui_voice_orb(ui, "orb", (cui_voice_state)k, k == 1 ? 0.7f : k == 3 ? 0.5f : 0.2f, .size = cui_viewport_size(ui).x < 360 ? 112 : 150);
             cui_pop_id(ui);
             cui_text(ui, names[k], .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
         }
@@ -2396,7 +2398,7 @@ static void pro_flow(cui_ctx *ui) {
     static const cui_sankey_link links[] = { { 0, 3, 712 }, { 1, 3, 408 }, { 2, 3, 231 }, { 3, 4, 1263 }, { 3, 5, 88 } };
     cui_card(ui, .gap = 12, .width = CUI_FILL) {
         cui_text(ui, "Test runs this week", .font = CUI_FONT_MEDIUM, .size = 15);
-        cui_sankey(ui, "flow", nodes, 6, links, 7, .height = 190);
+        cui_sankey(ui, "flow", nodes, 6, links, (int)(sizeof links / sizeof links[0]), .height = 190);
     }
 }
 static void pro_player(cui_ctx *ui) {
@@ -2749,7 +2751,7 @@ static void accent_body(cui_ctx *ui) {
 }
 static void scene_accent(cui_ctx *ui, int f) {
     if (f < 0) return;
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 20, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) { accent_body(ui); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = cui_viewport_size(ui).x < 360 ? 14 : 20, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) { accent_body(ui); }
 }
 
 /* ---- app chrome: menu bar, toolbar, status bar, document tabs ---- */
