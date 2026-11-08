@@ -475,7 +475,7 @@ static void md_seg_add(cui_ctx *ui, md_lay *L, const md_inline *in, int run, con
 }
 
 static void md_finish_line(md_lay *L, int *first, float x, float W, int align) {
-    if (align && W > x) {
+    if ((align == CUI_TEXT_CENTER || align == CUI_TEXT_RIGHT) && W > x) {   /* left and start stay put */
         float dx = (W - x) * (align == CUI_TEXT_CENTER ? 0.5f : 1.0f);
         for (int k = *first; k < L->n; k++) L->seg[k].x += dx;
     }
