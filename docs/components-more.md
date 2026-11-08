@@ -986,6 +986,40 @@ cui_scatter_chart(ui, "frames", s, 2, .height = 300, .x_label = "Nodes", .y_labe
 
 Leave `sizes` NULL for a scatter. With sizes, the area of a bubble follows its value. Every mark has a 1.5 point ring in the surface color, so overlapping points stay apart, and the nearest point under the pointer gets guide lines to both axes.
 
+### Radial gauge
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gauges-dark.png"><img src="images/components/gauges.png" alt="Radial gauges"></picture>
+
+```c
+static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+
+cui_radial_gauge(ui, "cpu", cpu_load, 0, 100, .unit = "%", .label = "CPU load", .bands = load, .band_count = 3);
+cui_radial_gauge(ui, "rps", rps, 0, 2500, .label = "Requests per second", .show_target = true, .target = 2000);
+cui_radial_gauge(ui, "disk", disk_used, 0, 100, .unit = "%", .label = "Disk", .no_needle = true, .ticks = -1);
+```
+
+One value on a dial, for dashboards: speed, load, temperature, a score against a goal. The arc sweeps 240 degrees (`sweep`, 90 to 300) between `min` and `max`, with labelled major ticks (`ticks` divisions, 5 by default, -1 for none) and four minor ticks between them. `bands` color stretches of the arc in the theme's tones, each running from the band before it (or `min`) up to its `to`. A needle points at the value and springs there with a little overshoot when the value changes (it snaps with reduced motion); `no_needle` fills a thick arc instead and puts the readout in the middle, in the color of the band the value is in. `show_target` adds a marker at `target`. The readout uses `format` (by default whole numbers, with large ones shortened to 1.8k) and `unit`, with `label` under it. `size` sets the width and the height follows the sweep.
+
+### Candlestick chart
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/candlestick-dark.png"><img src="images/components/candlestick.png" alt="Candlestick chart"></picture>
+
+```c
+static cui_candle candles[MAX];            /* open, high, low, close, volume per period */
+static const char *dates[MAX];
+static float sma[MAX];                     /* NaN where the average has no value yet */
+cui_series avg = { "SMA 20", sma, count, { 0 } };
+
+int at = cui_candlestick(ui, "nrth", candles, count, .labels = dates, .overlays = &avg, .overlay_count = 1);
+if (at >= 0) show_period(at);
+```
+
+Open, high, low and close per period, for prices. Candles that close higher are drawn in the success color and the rest in the danger color (`up` and `down` change them); `ohlc` draws OHLC bars instead of bodies. Volume bars sit in their own band under the prices whenever any candle has volume (`no_volume` hides them), `overlays` adds lines with one value per candle, such as moving averages, and a dashed line tags the last close on the price axis. The price axis is on the right and fits the candles in view as you pan, easing between ranges. Time labels come from `labels`, thinned to a spacing that reads.
+
+The wheel zooms around the pointer and dragging (or Shift+wheel, or a sideways scroll) pans. Hovering shows a crosshair with the price at the pointer and a tooltip with the candle's open, high, low, close, change from the previous close and volume; the call returns that candle. With the chart focused, Left and Right move the crosshair (Shift+Left and Shift+Right by ten), Home and End jump to the first and last candle, + and - zoom and 0 fits everything. While the newest candle is in view the chart follows new ones as you append them; pan back in time and it stays where you left it.
+
+You own the candles; only the ones in view are read each frame. When zooming out leaves fewer than about three points per candle, candles merge into one bar per pixel column (the first open, the highest high, the lowest low, the last close and the summed volume), so 100,000 candles zoomed all the way out build in about a millisecond.
+
 ## Motion
 
 Text effects, loaders and the playful pieces. With reduced motion, text effects show their final state at once.

@@ -1636,3 +1636,474 @@ int cui_scatter_chart_ex(cui_ctx *ui, const char *id_str, const cui_scatter_seri
     if (flat >= 0) cui__set_cursor(ui, CUI_CURSOR_HAND);
     return r.clicked ? flat : -1;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Radial gauge                                                             */
+/* ------------------------------------------------------------------------ */
+
+typedef struct { cui_spring needle; bool init; } cui__rg_state;
+typedef struct {
+    float t, lo, hi, a0, sweep, R, target_t;
+    int ticks, nband;
+    bool needle, target;
+    const char *value, *unit, *label, *format;
+    cui_gauge_band *bands;
+    cui_color fill;
+} cui__rg_paint;
+
+static void cui__paint_radial_gauge(cui_ctx *ui, cui_node *n, void *data) {
+    cui__rg_paint *p = data;
+    cui_rect r = n->rect;
+    float R = p->R;
+    cui_vec2 c = { r.x + r.w * 0.5f, r.y + 4 + R };
+    float th = p->needle ? CUI_MAX(3.0f, R * 0.075f) : CUI_MAX(6.0f, R * 0.17f), ar = R - th * 0.5f;
+    float a0 = p->a0, a1 = a0 + p->sweep, span = p->hi - p->lo;
+    /* the track: plain, or in band colors */
+    cui_color track = cui__viz_empty(ui);
+    if (p->nband > 0) {
+        float from = 0;
+        for (int k = 0; k < p->nband; k++) {
+            float to = cui__clampf((p->bands[k].to - p->lo) / span, 0, 1);
+            if (to > from) {
+                cui_color bc = cui__tone_color(ui, p->bands[k].tone);
+                if (!p->needle) bc = cui_mix(track, bc, 0.35f);
+                cui_draw_arc(ui, c, ar, a0 + p->sweep * from, a0 + p->sweep * to + (k < p->nband - 1 ? 0.01f : 0), th, bc);
+            }
+            from = CUI_MAX(from, to);
+        }
+        if (from < 1) cui_draw_arc(ui, c, ar, a0 + p->sweep * from, a1, th, track);
+    } else cui_draw_arc(ui, c, ar, a0, a1, th, track);
+    float av = a0 + p->sweep * cui__clampf(p->t, 0, 1);
+    if (!p->needle && p->t > 0.001f) {
+        cui_draw_arc(ui, c, ar, a0, av, th, p->fill);
+        cui_draw_circle(ui, (cui_vec2){ c.x + cosf(a0) * ar, c.y + sinf(a0) * ar }, th * 0.5f, p->fill);
+        cui_draw_circle(ui, (cui_vec2){ c.x + cosf(av) * ar, c.y + sinf(av) * ar }, th * 0.5f, p->fill);
+    }
+    /* ticks: labelled majors inside the arc, four minors between them */
+    float fs = cui__fs(ui, ui->theme.text_xs);
+    if (p->ticks > 0) {
+        int minor = 5, n = p->ticks * minor;
+        float ri = R - th - 3;
+        for (int k = 0; k <= n; k++) {
+            float a = a0 + p->sweep * (float)k / (float)n;
+            bool major = k % minor == 0;
+            float len = major ? 7 : 3.5f;
+            cui_vec2 d = { cosf(a), sinf(a) };
+            cui_draw_line(ui, (cui_vec2){ c.x + d.x * ri, c.y + d.y * ri }, (cui_vec2){ c.x + d.x * (ri - len), c.y + d.y * (ri - len) },
+                          major ? 1.4f : 1, major ? CUI_C(ui, BORDER_STRONG) : CUI_C(ui, BORDER));
+            if (major && R >= 60) {
+                const char *s = cui__fmt_value(ui, p->format, p->lo + span * (float)k / (float)n);
+                float lr = ri - len - 10;
+                cui__text_at(ui, CUI_FONT_BODY, fs, c.x + d.x * lr, c.y + d.y * lr, 1, CUI_C(ui, TEXT_MUTED), s, true);
+            }
+        }
+    }
+    if (p->target) {
+        float a = a0 + p->sweep * cui__clampf(p->target_t, 0, 1);
+        cui_vec2 d = { cosf(a), sinf(a) };
+        cui_draw_line(ui, (cui_vec2){ c.x + d.x * (R - th - 3), c.y + d.y * (R - th - 3) }, (cui_vec2){ c.x + d.x * (R + 3), c.y + d.y * (R + 3) }, 2.5f, CUI_C(ui, SURFACE));
+        cui_draw_line(ui, (cui_vec2){ c.x + d.x * (R - th - 2), c.y + d.y * (R - th - 2) }, (cui_vec2){ c.x + d.x * (R + 2), c.y + d.y * (R + 2) }, 1.5f, CUI_C(ui, FOREGROUND));
+    }
+    /* the readout: under the hub with a needle, in the middle without */
+    float vf = cui__fs(ui, R >= 70 ? 26 : 18), uf = cui__fs(ui, ui->theme.text_sm);
+    float vw = cui__text_width(ui, CUI_FONT_DISPLAY, vf, p->value, -1, true);
+    float uw = p->unit ? cui__text_width(ui, CUI_FONT_MEDIUM, uf, p->unit, -1, false) + 3 : 0;
+    float vy = p->needle ? c.y + R * 0.42f : c.y - (p->label ? 6 : 0);
+    float vx = c.x - (vw + uw) * 0.5f;
+    float vh = cui__font_line_height(ui, CUI_FONT_DISPLAY, vf);
+    cui__draw_text_line(ui, CUI_FONT_DISPLAY, vf, vx, vy - vh * 0.5f, CUI_C(ui, FOREGROUND), p->value, -1, true);
+    if (p->unit) {
+        float uh = cui__font_line_height(ui, CUI_FONT_MEDIUM, uf);
+        cui__draw_text_line(ui, CUI_FONT_MEDIUM, uf, vx + vw + 3, vy + vh * 0.5f - uh - vh * 0.08f, CUI_C(ui, TEXT_SECONDARY), p->unit, -1, false);
+    }
+    if (p->label) cui__text_at(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), c.x, vy + vh * 0.5f + 10, 1, CUI_C(ui, TEXT_SECONDARY), p->label, false);
+    if (p->needle) {
+        cui_vec2 d = { cosf(av), sinf(av) }, nn = { -d.y, d.x };
+        float tip = R - th - 5, base = 3.2f;
+        cui_color col = CUI_C(ui, FOREGROUND);
+        cui_cvert v[3] = { { c.x + d.x * tip, c.y + d.y * tip, col }, { c.x + nn.x * base - d.x * 10, c.y + nn.y * base - d.y * 10, col },
+                           { c.x - nn.x * base - d.x * 10, c.y - nn.y * base - d.y * 10, col } };
+        static const uint32_t idx[3] = { 0, 1, 2 };
+        cui__draw_triangles(ui, v, 3, idx, 3);
+        cui_draw_circle(ui, c, 6.5f, col);
+        cui_draw_circle(ui, c, 2.5f, CUI_C(ui, SURFACE));
+    }
+}
+
+void cui_radial_gauge_ex(cui_ctx *ui, const char *id_str, float value, float min, float max, const cui_radial_gauge_opts *o) {
+    cui_radial_gauge_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    if (!(max > min)) max = min + 1;
+    cui_id id = cui_make_id(ui, id_str ? id_str : "gauge");
+    cui__rg_state *st = cui_state(ui, id, sizeof *st);
+    float t = value == value ? cui__clampf((value - min) / (max - min), 0, 1) : 0;
+    if (!st->init) { st->needle.x = 0; st->init = true; }
+    cui__spring(ui, &st->needle, t, 0.55f, 0.16f);   /* a little overshoot, like a real needle */
+    float size = o->size > 0 ? o->size : 200;
+    float sweep = (o->sweep > 0 ? CUI_CLAMP(o->sweep, 90, 300) : 240) * CUI_PI / 180.0f;
+    float a0 = CUI_PI * 0.5f + (2 * CUI_PI - sweep) * 0.5f;
+    float R = size * 0.5f - 4;
+    cui__rg_paint *p = cui__frame_alloc(ui, sizeof *p);
+    memset(p, 0, sizeof *p);
+    p->t = st->needle.x; p->lo = min; p->hi = max; p->a0 = a0; p->sweep = sweep; p->R = R;
+    p->needle = !o->no_needle;
+    p->ticks = o->ticks < 0 ? 0 : o->ticks > 0 ? CUI_MIN(o->ticks, 20) : 5;
+    p->format = o->format ? cui__frame_strdup(ui, o->format, -1) : NULL;
+    p->value = cui__fmt_value(ui, o->format, value);
+    p->unit = o->unit && *o->unit ? cui__frame_strdup(ui, o->unit, -1) : NULL;
+    p->label = o->label && *o->label ? cui__frame_strdup(ui, o->label, -1) : NULL;
+    p->target = o->show_target; p->target_t = (o->target - min) / (max - min);
+    p->nband = o->bands ? CUI_CLAMP(o->band_count, 0, 16) : 0;
+    if (p->nband) { p->bands = cui__frame_alloc(ui, sizeof(cui_gauge_band) * (size_t)p->nband); memcpy(p->bands, o->bands, sizeof(cui_gauge_band) * (size_t)p->nband); }
+    p->fill = cui__viz_base(ui, (cui_color){ 0 });
+    for (int k = 0; k < p->nband; k++) if (value <= p->bands[k].to || k == p->nband - 1) { p->fill = cui__tone_color(ui, p->bands[k].tone); break; }
+    /* tall enough for the arc's lower ends and the readout under the hub */
+    float below = CUI_MAX(R * sinf(a0) + 6, p->needle ? R * 0.42f + 22 + (p->label ? 22 : 0) : 16 + (p->label ? 20 : 0));
+    float h = 4 + R + below;
+    int node = cui__viz_node(ui, id, CUI_PX(size), CUI_PX(ceilf(h)), cui__paint_radial_gauge, p, false);
+    ui->nodes[node].self_align = CUI__ALIGN_NOSTRETCH;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Candlestick chart                                                        */
+/* ------------------------------------------------------------------------ */
+
+#define CUI__CS_AXIS_H 22.0f   /* time labels under the plot */
+#define CUI__CS_MAXOV  4
+#define CUI__CS_MAXLAB 48
+
+typedef struct {
+    double first, span;        /* the view, in candles: [first, first + span) */
+    float ylo, yhi, axis_w, press_x;
+    double press_first;
+    int count, cursor;
+    bool init, sized, follow, keys;
+} cui__cs_state;
+
+typedef struct { float o, h, l, c, v; } cui__cs_bar;
+typedef struct { float x; const char *s; } cui__cs_label;
+
+typedef struct {
+    cui__cs_bar *bars; int nbars, i0;  /* candles from i0, or one merged bar per pixel column */
+    bool merged, volume, ohlc;
+    double first, span;
+    float ylo, yhi, vmax, axis_w;
+    float *ov; int nov; cui_color ov_col[CUI__CS_MAXOV];
+    cui__cs_label lab[CUI__CS_MAXLAB]; int nlab;
+    int hover;                         /* candle index, -1 none */
+    float hover_y; bool hy;            /* pointer height for the horizontal hair */
+    float last; bool last_up, has_last;
+    const char *format;
+    cui_color up, down;
+    cui_id wheel; bool wheel_on;
+    cui__tip tip;
+} cui__cs_paint;
+
+typedef struct { cui_rect plot, price, vol; float cw; } cui__cs_geo;
+
+static cui__cs_geo cui__cs_layout(cui_rect r, float axis_w, double span, bool volume) {
+    cui__cs_geo g;
+    g.plot = (cui_rect){ r.x, r.y + 6, CUI_MAX(10.0f, r.w - axis_w), CUI_MAX(10.0f, r.h - 6 - CUI__CS_AXIS_H) };
+    float vh = volume ? CUI_MAX(24.0f, g.plot.h * 0.18f) : 0;
+    g.price = (cui_rect){ g.plot.x, g.plot.y, g.plot.w, g.plot.h - (volume ? vh + 8 : 0) };
+    g.vol = (cui_rect){ g.plot.x, g.plot.y + g.plot.h - vh, g.plot.w, vh };
+    g.cw = (float)(g.plot.w / (span > 0 ? span : 1));
+    return g;
+}
+
+static float cui__cs_y(const cui__cs_paint *p, const cui__cs_geo *g, float v) {
+    return g->price.y + g->price.h - (v - p->ylo) / (p->yhi - p->ylo) * g->price.h;
+}
+
+static void cui__paint_candles(cui_ctx *ui, cui_node *n, void *data) {
+    cui__cs_paint *p = data;
+    cui_rect r = n->rect;
+    if (p->wheel_on) {
+        cui_rect clip = ui->dl.clip_stack[ui->dl.clip_depth - 1];
+        float s = ui->scale;
+        cui_rect cp = { clip.x / s, clip.y / s, clip.w / s, clip.h / s };
+        cui__paint_add_hit(ui, p->wheel, cui__rect_intersect(r, cp), CUI_NF_SCROLL_Y);
+    }
+    cui__cs_geo g = cui__cs_layout(r, p->axis_w, p->span, p->volume);
+    float fs = cui__fs(ui, ui->theme.text_xs);
+    cui_color muted = CUI_C(ui, TEXT_MUTED);
+    /* price grid and axis on the right */
+    float glo, ghi, gstep;
+    cui__nice_range(p->ylo, p->yhi, CUI_MAX(2, (int)(g.price.h / 40)), &glo, &ghi, &gstep);
+    float last_y = p->has_last ? cui__cs_y(p, &g, p->last) : -1e9f;
+    if (gstep > 0)
+        for (float v = glo; v <= p->yhi + gstep * 0.01f; v += gstep) {
+            if (v < p->ylo - gstep * 0.01f) continue;
+            float y = cui__cs_y(p, &g, v);
+            cui_draw_rect(ui, (cui_rect){ g.price.x, y - 0.5f, g.price.w, 1 }, CUI_CORNERS(0), CUI_C(ui, BORDER_SUBTLE));
+            if (fabsf(y - last_y) >= 16)   /* the last price's tag covers the label */
+                cui__text_at(ui, CUI_FONT_BODY, fs, g.plot.x + g.plot.w + 8, y, 0, muted, cui__fmt_value(ui, p->format, v), true);
+        }
+    for (int k = 0; k < p->nlab; k++) {
+        float x = g.plot.x + p->lab[k].x;
+        cui_draw_rect(ui, (cui_rect){ x - 0.5f, g.plot.y, 1, g.plot.h }, CUI_CORNERS(0), cui_alpha(CUI_C(ui, BORDER_SUBTLE), 0.6f));
+        cui__text_at(ui, CUI_FONT_BODY, fs, x, g.plot.y + g.plot.h + CUI__CS_AXIS_H * 0.5f + 2, 1, muted, p->lab[k].s, false);
+    }
+    cui_draw_rect(ui, (cui_rect){ g.plot.x, g.price.y + g.price.h - 0.5f, g.plot.w, 1 }, CUI_CORNERS(0), CUI_C(ui, BORDER));
+    cui_push_clip(ui, g.plot);
+    bool dark = ui->mode == CUI_THEME_DARK;
+    float va = dark ? 0.42f : 0.32f;
+    /* each bar: the candle (or merged column) at x, width bw */
+    for (int k = 0; k < p->nbars; k++) {
+        const cui__cs_bar *b = &p->bars[k];
+        if (!(b->h >= b->l)) continue;
+        float x, bw;
+        if (p->merged) { x = g.plot.x + k + 0.5f; bw = 1; }
+        else {
+            x = g.plot.x + (float)((p->i0 + k + 0.5) - p->first) * g.cw;
+            bw = CUI_MAX(1.0f, floorf(g.cw * 0.68f));
+        }
+        bool up = b->c >= b->o;
+        cui_color col = up ? p->up : p->down;
+        if (p->volume && p->vmax > 0 && b->v > 0) {
+            float vh = b->v / p->vmax * g.vol.h;
+            cui_draw_rect(ui, (cui_rect){ x - bw * 0.5f, g.vol.y + g.vol.h - vh, bw, vh }, CUI_CORNERS(0), cui_alpha(col, va));
+        }
+        float yh = cui__cs_y(p, &g, b->h), yl = cui__cs_y(p, &g, b->l);
+        float yo = cui__cs_y(p, &g, b->o), yc = cui__cs_y(p, &g, b->c);
+        bool hl = !p->merged && p->i0 + k == p->hover;
+        if (p->merged || bw < 3) {
+            cui_draw_rect(ui, (cui_rect){ x - 0.5f, yh, 1, CUI_MAX(1.0f, yl - yh) }, CUI_CORNERS(0), col);
+        } else if (p->ohlc) {
+            cui_draw_rect(ui, (cui_rect){ x - 0.75f, yh, 1.5f, CUI_MAX(1.0f, yl - yh) }, CUI_CORNERS(0), col);
+            float tw = CUI_MAX(2.0f, bw * 0.5f);
+            cui_draw_rect(ui, (cui_rect){ x - tw, yo - 0.75f, tw, 1.5f }, CUI_CORNERS(0), col);
+            cui_draw_rect(ui, (cui_rect){ x, yc - 0.75f, tw, 1.5f }, CUI_CORNERS(0), col);
+        } else {
+            cui_draw_rect(ui, (cui_rect){ x - 0.5f, yh, 1, CUI_MAX(1.0f, yl - yh) }, CUI_CORNERS(0), col);
+            float top = CUI_MIN(yo, yc), bh = CUI_MAX(1.0f, fabsf(yo - yc));
+            cui_draw_rect(ui, (cui_rect){ x - bw * 0.5f, top, bw, bh }, CUI_CORNERS(bw >= 6 ? 1.5f : 0), col);
+        }
+        if (hl) cui_draw_rect(ui, (cui_rect){ x - bw * 0.5f - 2, yh - 2, bw + 4, CUI_MAX(1.0f, yl - yh) + 4 }, CUI_CORNERS(3), cui_alpha(CUI_C(ui, FOREGROUND), 0.06f));
+    }
+    /* overlay lines */
+    for (int s = 0; s < p->nov; s++) {
+        cui_vec2 *pts = cui__frame_alloc(ui, sizeof(cui_vec2) * (size_t)CUI_MAX(1, p->nbars));
+        int m = 0;
+        for (int k = 0; k <= p->nbars; k++) {
+            float v = k < p->nbars ? p->ov[s * p->nbars + k] : NAN;
+            if (v == v) {
+                float x = p->merged ? g.plot.x + k + 0.5f : g.plot.x + (float)((p->i0 + k + 0.5) - p->first) * g.cw;
+                pts[m++] = (cui_vec2){ x, cui__cs_y(p, &g, v) };
+            } else {
+                if (m >= 2) cui_draw_polyline(ui, pts, m, 1.5f, p->ov_col[s], false);
+                m = 0;
+            }
+        }
+    }
+    cui_pop_clip(ui);
+    /* the last price, across the plot and tagged on the axis */
+    if (p->has_last && p->last >= p->ylo && p->last <= p->yhi) {
+        float y = cui__cs_y(p, &g, p->last);
+        cui_color col = p->last_up ? p->up : p->down;
+        for (float x = g.plot.x; x < g.plot.x + g.plot.w; x += 6)
+            cui_draw_rect(ui, (cui_rect){ x, y - 0.5f, CUI_MIN(3.0f, g.plot.x + g.plot.w - x), 1 }, CUI_CORNERS(0), cui_alpha(col, 0.7f));
+        const char *s = cui__fmt_value(ui, p->format, p->last);
+        float tw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, s, -1, true) + 10;
+        cui_rect tag = { g.plot.x + g.plot.w + 2, y - 9, tw, 18 };
+        cui_draw_rect(ui, tag, CUI_CORNERS(4), col);
+        cui__text_at(ui, CUI_FONT_MEDIUM, fs, tag.x + 5, y, 0, cui__viz_light_text(col) ? cui__rgba(255, 255, 255, 255) : cui__rgba(20, 20, 20, 255), s, true);
+    }
+    /* crosshair */
+    if (p->hover >= 0 && p->tip.alpha > 0.01f) {
+        cui_color hair = cui_alpha(CUI_C(ui, BORDER_STRONG), p->tip.alpha);
+        float x = g.plot.x + (float)((p->hover + 0.5) - p->first) * g.cw;
+        if (x >= g.plot.x && x <= g.plot.x + g.plot.w) cui_draw_rect(ui, (cui_rect){ x - 0.5f, g.plot.y, 1, g.plot.h }, CUI_CORNERS(0), hair);
+        if (p->hy && p->hover_y >= g.price.y && p->hover_y <= g.price.y + g.price.h) {
+            cui_draw_rect(ui, (cui_rect){ g.plot.x, p->hover_y - 0.5f, g.plot.w, 1 }, CUI_CORNERS(0), hair);
+            float v = p->ylo + (g.price.y + g.price.h - p->hover_y) / g.price.h * (p->yhi - p->ylo);
+            const char *s = cui__fmt_value(ui, p->format, v);
+            float tw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, s, -1, true) + 10;
+            cui_rect tag = { g.plot.x + g.plot.w + 2, p->hover_y - 9, tw, 18 };
+            cui_draw_rect(ui, tag, CUI_CORNERS(4), cui_alpha(CUI_C(ui, FOREGROUND), p->tip.alpha));
+            cui__text_at(ui, CUI_FONT_MEDIUM, fs, tag.x + 5, p->hover_y, 0, cui_alpha(CUI_C(ui, BACKGROUND), p->tip.alpha), s, true);
+        }
+    }
+    cui__tip_draw(ui, &p->tip);
+}
+
+int cui_candlestick_ex(cui_ctx *ui, const char *id_str, const cui_candle *candles, int count, const cui_candlestick_opts *o) {
+    cui_candlestick_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    if (!candles) count = 0;
+    count = CUI_MAX(0, count);
+    cui_id id = cui_make_id(ui, id_str ? id_str : "candles");
+    cui_id wid = id ^ 0xCA4D1u;
+    cui__viz_state *vs = cui__viz_state_get(ui, id);
+    cui__cs_state *st = cui_state(ui, id ^ 0xCA4D2u, sizeof *st);
+    cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    cui_rect pr = cui__prev_rect(ui, id);
+    float h = o->height > 0 ? o->height : 320;
+    bool volume = false;
+    if (!o->no_volume) for (int i = 0; i < count && !volume; i++) volume = candles[i].volume > 0;
+    if (st->axis_w <= 0) st->axis_w = 60;
+    cui_rect rr = pr.w > 0 ? pr : (cui_rect){ 0, 0, 600, h };
+    cui__cs_geo g = cui__cs_layout(rr, st->axis_w, st->span, volume);
+    double min_span = CUI_MIN(8.0, (double)CUI_MAX(1, count)), max_span = CUI_MAX(8.0, count * 1.1);
+    if (!st->init || st->span <= 0 || (!st->sized && pr.w > 0)) {
+        /* about nine points per candle, from the first frame the chart has a size */
+        st->span = CUI_CLAMP(g.plot.w / 9.0, min_span, (double)CUI_MAX(1, count));
+        st->first = count - st->span;
+        st->follow = true; st->cursor = count - 1; st->init = true; st->sized = pr.w > 0;
+    }
+    if (st->follow && count != st->count) st->first = count - st->span;   /* new candles come into view */
+    st->count = count;
+    g = cui__cs_layout(rr, st->axis_w, st->span, volume);
+    /* zoom around a point (0..1 across the plot) */
+#define CUI__CS_ZOOM(f, at) do { double m_ = st->first + (at) * st->span; st->span = CUI_CLAMP(st->span * (f), min_span, max_span); st->first = m_ - (at) * st->span; } while (0)
+    if (ui->scroll_target == wid && (ui->scroll_dy != 0 || ui->scroll_dx != 0) && pr.w > 0) {
+        float at = cui__clampf((ui->mx - g.plot.x) / g.plot.w, 0, 1);
+        if (ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT)) st->first -= (ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy) * st->span * 0.06;
+        else CUI__CS_ZOOM(pow(1.18, -ui->scroll_dy), at);
+        ui->scroll_dx = ui->scroll_dy = 0;
+    }
+    if (r.active && ui->mdown[0] && pr.w > 0) {
+        if (ui->mpressed[0]) { st->press_x = ui->mx; st->press_first = st->first; }
+        st->first = st->press_first - (ui->mx - st->press_x) / g.cw;
+        cui__set_cursor(ui, CUI_CURSOR_MOVE);
+    }
+    if (r.focused && count > 0) {
+        int step = (ui->mods & CUI_MOD_SHIFT) ? 10 : 1, cur = st->keys ? st->cursor : CUI_CLAMP((int)(st->first + st->span) - 1, 0, count - 1);
+        bool moved = false;
+        if (cui_key_pressed(ui, CUI_KEY_LEFT)) { cur -= step; moved = true; }
+        if (cui_key_pressed(ui, CUI_KEY_RIGHT)) { cur += step; moved = true; }
+        if (cui_key_pressed(ui, CUI_KEY_HOME)) { cur = 0; moved = true; }
+        if (cui_key_pressed(ui, CUI_KEY_END)) { cur = count - 1; moved = true; }
+        if (cui_key_pressed(ui, CUI_KEY_EQUAL)) CUI__CS_ZOOM(1 / 1.4, 0.5);
+        if (cui_key_pressed(ui, CUI_KEY_MINUS)) CUI__CS_ZOOM(1.4, 0.5);
+        if (cui_key_pressed(ui, CUI_KEY_0)) { st->span = CUI_MAX((double)count, min_span); st->first = 0; }
+        if (moved) {
+            st->cursor = CUI_CLAMP(cur, 0, count - 1); st->keys = true;
+            if (st->cursor < st->first) st->first = st->cursor;
+            if (st->cursor + 1 > st->first + st->span) st->first = st->cursor + 1 - st->span;
+        }
+    }
+#undef CUI__CS_ZOOM
+    if (ui->mx != ui->pmx || ui->my != ui->pmy) st->keys = false;
+    {
+        double lo = -st->span * 0.2, hi = count - st->span * 0.8;
+        if (hi < lo) hi = lo;
+        st->first = CUI_CLAMP(st->first, lo, hi);
+    }
+    st->follow = st->first + st->span >= count - 0.01;
+    g = cui__cs_layout(rr, st->axis_w, st->span, volume);
+    int hover = -1;
+    if (r.hovered && !r.active && ui->mx >= g.plot.x && ui->mx < g.plot.x + g.plot.w && ui->my >= g.plot.y && ui->my < g.plot.y + g.plot.h) {
+        int i = (int)floor(st->first + (ui->mx - g.plot.x) / g.cw);
+        if (i >= 0 && i < count) hover = i;
+    }
+    if (st->keys && r.focused && count > 0) hover = st->cursor;
+    cui__viz_hover(ui, vs, hover);
+
+    /* candles in view: the price range follows them */
+    int i0 = CUI_MAX(0, (int)floor(st->first)), i1 = CUI_MIN(count, (int)ceil(st->first + st->span) + 1);
+    int nov = o->overlays ? CUI_CLAMP(o->overlay_count, 0, CUI__CS_MAXOV) : 0;
+    float lo = 1e30f, hi = -1e30f, vmax = 0;
+    for (int i = i0; i < i1; i++) {
+        const cui_candle *c = &candles[i];
+        if (c->low == c->low) lo = CUI_MIN(lo, c->low);
+        if (c->high == c->high) hi = CUI_MAX(hi, c->high);
+        vmax = CUI_MAX(vmax, c->volume);
+        for (int s = 0; s < nov; s++)
+            if (i < o->overlays[s].count && o->overlays[s].values[i] == o->overlays[s].values[i]) { lo = CUI_MIN(lo, o->overlays[s].values[i]); hi = CUI_MAX(hi, o->overlays[s].values[i]); }
+    }
+    if (lo > hi) { lo = 0; hi = 1; }
+    if (hi - lo < 1e-6f) { lo -= 0.5f; hi += 0.5f; }
+    float pad = (hi - lo) * 0.07f;
+    lo -= pad; hi += pad;
+    if (!(st->yhi > st->ylo) || r.active) { st->ylo = lo; st->yhi = hi; }
+    else { cui__tween(ui, &st->ylo, lo, CUI__T_STATE); cui__tween(ui, &st->yhi, hi, CUI__T_STATE); }
+    /* the price axis is as wide as its widest label (next frame) */
+    float fs = cui__fs(ui, ui->theme.text_xs);
+    st->axis_w = ceilf(CUI_MAX(cui__text_width(ui, CUI_FONT_MEDIUM, fs, cui__fmt_value(ui, o->format ? o->format : "%.2f", hi), -1, true),
+                               cui__text_width(ui, CUI_FONT_MEDIUM, fs, cui__fmt_value(ui, o->format ? o->format : "%.2f", lo), -1, true))) + 22;
+
+    cui__cs_paint *p = cui__frame_alloc(ui, sizeof *p);
+    memset(p, 0, sizeof *p);
+    p->first = st->first; p->span = st->span; p->ylo = st->ylo; p->yhi = st->yhi; p->vmax = vmax;
+    p->axis_w = cui__cs_layout(rr, st->axis_w, st->span, volume).plot.w > 0 ? st->axis_w : 60;
+    p->volume = volume; p->ohlc = o->ohlc;
+    p->format = o->format ? cui__frame_strdup(ui, o->format, -1) : "%.2f";
+    p->up = cui__color_set(o->up) ? cui_color_of(ui, o->up) : CUI_C(ui, SUCCESS);
+    p->down = cui__color_set(o->down) ? cui_color_of(ui, o->down) : CUI_C(ui, DANGER);
+    p->wheel = wid; p->wheel_on = r.hovered || r.focused;
+    g = cui__cs_layout(rr, p->axis_w, st->span, volume);
+    p->merged = g.cw < 2.5f;
+    if (p->merged) {
+        /* one bar per pixel column: first open, highest high, lowest low, last close, summed volume */
+        int cols = CUI_MAX(1, (int)g.plot.w);
+        p->bars = cui__frame_alloc(ui, sizeof(cui__cs_bar) * (size_t)cols);
+        p->ov = cui__frame_alloc(ui, sizeof(float) * (size_t)CUI_MAX(1, nov * cols));
+        p->nbars = cols;
+        float bvmax = 0;
+        for (int k = 0; k < cols; k++) {
+            int a = (int)floor(st->first + k / g.cw), b = (int)floor(st->first + (k + 1) / g.cw);
+            if (b <= a) b = a + 1;
+            a = CUI_MAX(a, 0); b = CUI_MIN(b, count);
+            cui__cs_bar *bar = &p->bars[k];
+            bar->h = -1e30f; bar->l = 1e30f; bar->v = 0;
+            for (int s = 0; s < nov; s++) p->ov[s * cols + k] = NAN;
+            if (a >= b) { bar->h = NAN; continue; }
+            bar->o = candles[a].open; bar->c = candles[b - 1].close;
+            for (int i = a; i < b; i++) { bar->h = CUI_MAX(bar->h, candles[i].high); bar->l = CUI_MIN(bar->l, candles[i].low); bar->v += candles[i].volume; }
+            bvmax = CUI_MAX(bvmax, bar->v);
+            for (int s = 0; s < nov; s++) if (b - 1 < o->overlays[s].count) p->ov[s * cols + k] = o->overlays[s].values[b - 1];
+        }
+        p->vmax = bvmax;
+    } else {
+        int nb = CUI_MAX(0, i1 - i0);
+        p->i0 = i0; p->nbars = nb;
+        p->bars = cui__frame_alloc(ui, sizeof(cui__cs_bar) * (size_t)CUI_MAX(1, nb));
+        p->ov = cui__frame_alloc(ui, sizeof(float) * (size_t)CUI_MAX(1, nov * nb));
+        for (int k = 0; k < nb; k++) {
+            const cui_candle *c = &candles[i0 + k];
+            p->bars[k] = (cui__cs_bar){ c->open, c->high, c->low, c->close, c->volume };
+            for (int s = 0; s < nov; s++) p->ov[s * nb + k] = i0 + k < o->overlays[s].count ? o->overlays[s].values[i0 + k] : NAN;
+        }
+    }
+    p->nov = nov;
+    for (int s = 0; s < nov; s++) p->ov_col[s] = cui__viz_color(ui, o->overlays[s].color, s);
+    /* time labels at a spacing that reads, on candles that are multiples of the step */
+    if (o->labels && count > 0) {
+        int step = CUI_MAX(1, (int)ceilf(90.0f / CUI_MAX(0.01f, g.cw)));
+        static const int nice[] = { 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000 };
+        for (int k = 0; k < (int)(sizeof nice / sizeof nice[0]); k++) if (nice[k] >= step) { step = nice[k]; break; }
+        for (int i = (i0 / step) * step; i < i1 && p->nlab < CUI__CS_MAXLAB; i += step) {
+            if (i < i0 || !o->labels[i]) continue;
+            float x = (float)((i + 0.5) - st->first) * g.cw;
+            if (x < 20 || x > g.plot.w - 20) continue;
+            p->lab[p->nlab++] = (cui__cs_label){ x, cui__frame_strdup(ui, o->labels[i], -1) };
+        }
+    }
+    if (count > 0) { p->has_last = true; p->last = candles[count - 1].close; p->last_up = candles[count - 1].close >= candles[count - 1].open; }
+    p->hover = vs->hover_t > 0.01f && vs->shown < count ? vs->shown : -1;
+    p->hover_y = ui->my; p->hy = hover >= 0 && !st->keys;
+    if (p->hover >= 0) {
+        const cui_candle *c = &candles[p->hover];
+        p->tip.alpha = vs->hover_t; p->tip.bounds = pr;
+        p->tip.x = st->keys ? g.plot.x + (float)((p->hover + 0.5) - st->first) * g.cw : ui->mx;
+        p->tip.y = st->keys ? g.price.y + g.price.h * 0.3f : ui->my;
+        p->tip.title = o->labels && o->labels[p->hover] ? cui__frame_strdup(ui, o->labels[p->hover], -1) : cui__frame_printf(ui, "#%d", p->hover + 1);
+        const char *f = p->format;
+        cui__tip_row(&p->tip, "Open", cui__fmt_value(ui, f, c->open), cui__rgba(0, 0, 0, 0));
+        cui__tip_row(&p->tip, "High", cui__fmt_value(ui, f, c->high), cui__rgba(0, 0, 0, 0));
+        cui__tip_row(&p->tip, "Low", cui__fmt_value(ui, f, c->low), cui__rgba(0, 0, 0, 0));
+        cui__tip_row(&p->tip, "Close", cui__fmt_value(ui, f, c->close), c->close >= c->open ? p->up : p->down);
+        float ref = p->hover > 0 ? candles[p->hover - 1].close : c->open;
+        if (ref != 0) cui__tip_row(&p->tip, "Change", cui__frame_printf(ui, "%+.2f%%", (double)((c->close - ref) / ref * 100)), cui__rgba(0, 0, 0, 0));
+        if (volume) cui__tip_row(&p->tip, "Volume", cui__frame_printf(ui, c->volume >= 1e6f ? "%.2fM" : c->volume >= 1e4f ? "%.1fk" : "%.0f",
+                                                                      (double)(c->volume >= 1e6f ? c->volume / 1e6f : c->volume >= 1e4f ? c->volume / 1e3f : c->volume)), cui__rgba(0, 0, 0, 0));
+    }
+    if (r.hovered && !r.active) cui__set_cursor(ui, CUI_CURSOR_ARROW);
+    int node = cui__viz_node(ui, id, o->width.kind ? o->width : CUI_FILL, CUI_PX(h), cui__paint_candles, p, hover >= 0);
+    cui__mark_interactive(ui, node, CUI_IF_FOCUSABLE);
+    cui__focus_ring(ui, node, r.focus_visible ? 1.0f : 0.0f);
+    return hover;
+}

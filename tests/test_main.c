@@ -6185,6 +6185,74 @@ static void test_dials(void) {
     cui_destroy(ui);
 }
 
+/* ---- radial gauge and candlestick chart ---- */
+typedef struct { cui_candle *c; int n; int hover; float value; cui_rect r; } cs_ctx;
+static void build_cs(cui_ctx *ui, void *u) {
+    cs_ctx *c = u;
+    static const cui_gauge_band bands[] = { { 50, CUI_TONE_SUCCESS }, { 100, CUI_TONE_DANGER } };
+    cui_column(ui, .width = CUI_FILL, .pad = 10, .gap = 10) {
+        cui_radial_gauge(ui, "g", c->value, 0, 100, .bands = bands, .band_count = 2, .show_target = true, .target = 80, .label = "Load");
+        c->hover = cui_candlestick(ui, "cs", c->c, c->n, .height = 300);
+        c->r = cui_last_rect(ui);
+    }
+}
+static void test_candles(void) {
+    cui_ctx *ui = new_ctx();
+    enum { N = 100000 };
+    cui_candle *cs = malloc(sizeof *cs * N);
+    float p = 100;
+    for (int i = 0; i < N; i++) {
+        float o = p, c = p + sinf(i * 0.37f) * 2 + cosf(i * 0.011f);
+        cs[i] = (cui_candle){ o, fmaxf(o, c) + 1, fminf(o, c) - 1, c, 1000 + (float)(i % 17) * 50 };
+        p = c;
+    }
+    cs_ctx c = { cs, 500, -1, NAN };   /* a NaN value draws an empty gauge, no crash */
+    run(ui, build_cs, &c, 3);
+    c.value = 72;
+    run(ui, build_cs, &c, 3);
+    CHECK(c.r.w > 700 && c.r.h == 300);
+    /* the newest candle is in view; the crosshair follows the pointer */
+    cui_input_mouse_move(ui, c.r.x + c.r.w - 90, c.r.y + 120); run(ui, build_cs, &c, 2);
+    CHECK(c.hover > 400 && c.hover < 500);
+    int h0 = c.hover;
+    /* appending keeps the view on the newest candles */
+    c.n = 520; run(ui, build_cs, &c, 2);
+    CHECK(c.hover > h0 && c.hover < 520);
+    h0 = c.hover;
+    /* dragging right pans back in time */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_cs, &c, 1);
+    cui_input_mouse_move(ui, c.r.x + c.r.w - 90 + 300, c.r.y + 120); run(ui, build_cs, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_cs, &c, 1);
+    cui_input_mouse_move(ui, c.r.x + c.r.w - 90, c.r.y + 121); run(ui, build_cs, &c, 2);
+    CHECK(c.hover >= 0 && c.hover < h0 - 20);   /* 300 points at about 12 per candle */
+    int h1 = c.hover;
+    /* and new candles no longer move a view that left the end */
+    c.n = 540; run(ui, build_cs, &c, 2);
+    CHECK(c.hover == h1);
+    /* the wheel zooms around the pointer: the candle under it stays under it */
+    cui_input_scroll(ui, 0, -3); run(ui, build_cs, &c, 2);
+    CHECK(abs(c.hover - h1) <= 1);
+    /* keys: End puts the crosshair on the newest candle, Left steps back */
+    click_at(ui, build_cs, &c, c.r.x + 200, c.r.y + 100);
+    key(ui, build_cs, &c, CUI_KEY_END, 0);
+    CHECK(c.hover == 539);
+    key(ui, build_cs, &c, CUI_KEY_LEFT, CUI_MOD_SHIFT);
+    CHECK(c.hover == 529);
+    /* 100,000 candles zoomed all the way out merge per pixel column and stay fast */
+    c.n = N;
+    key(ui, build_cs, &c, CUI_KEY_0, 0);
+    run(ui, build_cs, &c, 2);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    CHECK(dd->vertex_count < 60000);   /* one wick per column, not 100,000 candles */
+    clock_t t0 = clock();
+    for (int i = 0; i < 20; i++) { cui_input_mouse_move(ui, c.r.x + 100 + i * 20, c.r.y + 100); run(ui, build_cs, &c, 1); }
+    double ms = (double)(clock() - t0) / CLOCKS_PER_SEC * 1000 / 20;
+    CHECK(ms < 25);
+    printf("    candlestick: 100k candles, %.2f ms per frame\n", ms);
+    free(cs);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6216,6 +6284,7 @@ int main(void) {
     test_code_editor();
     test_diff();
     test_dials();
+    test_candles();
     test_planning();
     test_node_editor();
     test_flame();

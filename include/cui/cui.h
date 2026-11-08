@@ -1529,6 +1529,55 @@ typedef struct cui_scatter_opts {
 } cui_scatter_opts;
 CUI_API int cui_scatter_chart_ex(cui_ctx *ui, const char *id, const cui_scatter_series *series, int count, const cui_scatter_opts *opts);
 
+/* Radial gauge: one value on a dial with colored bands, labelled ticks, a
+ * needle and a target marker, for dashboards (speed, load, temperature, a
+ * score against a goal). The needle springs to new values.
+ *
+ *     static const cui_gauge_band bands[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+ *     cui_radial_gauge(ui, "cpu", load, 0, 100, .unit = "%", .label = "CPU load", .bands = bands, .band_count = 3);
+ */
+typedef struct cui_gauge_band { float to; cui_tone tone; } cui_gauge_band;   /* from the band before (or min) up to `to` */
+typedef struct cui_radial_gauge_opts {
+    int _;
+    const char *label;         /* under the value */
+    const char *format;        /* the value and the tick labels, default "%.0f" */
+    const char *unit;          /* after the value, smaller */
+    float size;                /* width, default 200; the height follows the sweep */
+    float sweep;               /* degrees of arc, default 240 (90 to 300) */
+    const cui_gauge_band *bands; int band_count;
+    int ticks;                 /* labelled divisions, default 5; -1 hides the ticks */
+    float target;              /* a marker on the arc, when show_target is set */
+    bool show_target;
+    bool no_needle;            /* a thick arc filled to the value instead of a needle */
+} cui_radial_gauge_opts;
+CUI_API void cui_radial_gauge_ex(cui_ctx *ui, const char *id, float value, float min, float max, const cui_radial_gauge_opts *opts);
+
+/* Candlestick chart: open, high, low and close per period with volume under
+ * it, for prices. The wheel zooms around the pointer, dragging (or Shift+wheel)
+ * pans, a crosshair shows each candle's values, and the price axis fits the
+ * candles in view. Zoomed out past a few points per candle, candles merge
+ * per pixel column, so a long history stays fast. When the view shows the
+ * newest candle it follows new ones as they are appended. With the chart
+ * focused, Left and Right move the crosshair (Shift: ten at a time), Home and
+ * End jump to the ends, + and - zoom and 0 fits everything.
+ *
+ *     cui_candlestick(ui, "btc", candles, count, .labels = dates, .overlays = &sma, .overlay_count = 1);
+ */
+typedef struct cui_candle { float open, high, low, close, volume; } cui_candle;
+typedef struct cui_candlestick_opts {
+    int _;
+    cui_size width;
+    float height;              /* default 320 */
+    const char *const *labels; /* one per candle (dates or times): the time axis and the tooltip */
+    const char *format;        /* prices, default "%.2f" */
+    const cui_series *overlays; int overlay_count;   /* lines with one value per candle, e.g. moving averages */
+    bool no_volume;            /* volume bars show when any candle has volume */
+    bool ohlc;                 /* OHLC bars instead of candle bodies */
+    cui_color up, down;        /* default the success and danger colors */
+} cui_candlestick_opts;
+/* Returns the candle under the crosshair (pointer or keys), or -1. */
+CUI_API int cui_candlestick_ex(cui_ctx *ui, const char *id, const cui_candle *candles, int count, const cui_candlestick_opts *opts);
+
 /* ------------------------------------------------------------------------ */
 /* Motion and text effects                                                  */
 /* ------------------------------------------------------------------------ */
@@ -2800,6 +2849,8 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_bar_list(ui, id, items, n, ...) cui_bar_list_ex((ui), (id), (items), (n), CUI__OPTS(cui_bar_list_opts, __VA_ARGS__))
 #define cui_activity_rings(ui, id, rings, n, ...) cui_activity_rings_ex((ui), (id), (rings), (n), CUI__OPTS(cui_rings_opts, __VA_ARGS__))
 #define cui_scatter_chart(ui, id, s, n, ...) cui_scatter_chart_ex((ui), (id), (s), (n), CUI__OPTS(cui_scatter_opts, __VA_ARGS__))
+#define cui_radial_gauge(ui, id, value, min, max, ...) cui_radial_gauge_ex((ui), (id), (value), (min), (max), CUI__OPTS(cui_radial_gauge_opts, __VA_ARGS__))
+#define cui_candlestick(ui, id, candles, count, ...) cui_candlestick_ex((ui), (id), (candles), (count), CUI__OPTS(cui_candlestick_opts, __VA_ARGS__))
 #define cui_chat_message(ui, text, ...)     cui_chat_message_ex((ui), (text), CUI__OPTS(cui_chat_opts, __VA_ARGS__))
 #define cui_comment(ui, id, author, text, ...) cui_comment_ex((ui), (id), (author), (text), CUI__OPTS(cui_comment_opts, __VA_ARGS__))
 #define cui_carousel(ui, id, count, index, ...) CUI__SCOPE(cui_carousel_begin((ui), (id), (count), (index), CUI__OPTS(cui_carousel_opts, __VA_ARGS__)), cui_carousel_end(ui))

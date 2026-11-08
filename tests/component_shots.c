@@ -2000,6 +2000,58 @@ SCENE(funnel_split) {
         }
     }
 }
+SCENE(gauges) {
+    static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+    cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
+        cui_radial_gauge(ui, "cpu", 72, 0, 100, .unit = "%", .label = "CPU load", .bands = load, .band_count = 3);
+        cui_radial_gauge(ui, "rps", 1840, 0, 2500, .label = "Requests per second", .show_target = true, .target = 2000, .ticks = 5);
+        cui_radial_gauge(ui, "disk", 38, 0, 100, .unit = "%", .label = "Disk", .no_needle = true, .size = 160, .ticks = -1);
+    }
+}
+/* a price history for the candlestick demo: a seeded random walk with a trend and some volatility clusters */
+static int demo_candles(cui_candle *out, int n, const char **labels, char (*buf)[12], float *sma, int sma_n) {
+    uint32_t seed = 42;
+    float price = 182.0f;
+    static const char *mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    for (int i = 0; i < n; i++) {
+        float u[5];
+        for (int j = 0; j < 5; j++) { seed = seed * 1664525u + 1013904223u; u[j] = (float)(seed >> 8) / 16777216.0f; }
+        float vol = 0.012f + 0.018f * (0.5f + 0.5f * sinf(i * 0.07f));
+        float o = price, c = o * (1 + (u[0] - 0.48f) * 2 * vol);
+        float h = fmaxf(o, c) * (1 + u[1] * vol * 0.8f), l = fminf(o, c) * (1 - u[2] * vol * 0.8f);
+        out[i] = (cui_candle){ o, h, l, c, (0.6f + u[3] * 0.9f + fabsf(c - o) / o * 30) * 1.2e6f };
+        price = c;
+        int day = i % 28 + 1, m = (8 + i / 28) % 12;
+        snprintf(buf[i], 12, "%s %d", mon[m], day);
+        labels[i] = buf[i];
+    }
+    for (int i = 0; i < n; i++) {
+        if (i + 1 < sma_n) { sma[i] = NAN; continue; }
+        float s = 0;
+        for (int k = 0; k < sma_n; k++) s += out[i - k].close;
+        sma[i] = s / sma_n;
+    }
+    return n;
+}
+SCENE(candlestick) {
+    enum { N = 140 };
+    static cui_candle cs[N];
+    static const char *labels[N];
+    static char buf[N][12];
+    static float sma[N];
+    static bool init;
+    if (!init) { demo_candles(cs, N, labels, buf, sma, 20); init = true; }
+    cui_series ov = { "SMA 20", sma, N, { 0 } };
+    cui_card(ui, UPTO(820), .gap = 10, .pad = 18) {
+        cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+            cui_text(ui, "NRTH", .font = CUI_FONT_MEDIUM, .size = 15);
+            cui_text(ui, "Northwind Labs", .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_spacer(ui);
+            cui_badge(ui, "Daily", .tone = CUI_TONE_NEUTRAL);
+        }
+        cui_candlestick(ui, "nrth", cs, N, .labels = labels, .overlays = &ov, .overlay_count = 1, .height = 300);
+    }
+}
 SCENE(sankey) {
     static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
     static const cui_sankey_link links[] = {
@@ -3291,7 +3343,7 @@ int main(int argc, char **argv) {
         { "flame-graph", scene_flame, 1000, 300, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
-        { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
+        { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
         { "scatter", scene_scatter, 860, 360, true },
         { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
         { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },

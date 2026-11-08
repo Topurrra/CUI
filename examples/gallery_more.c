@@ -842,6 +842,28 @@ static void page_viz(cui_ctx *ui) {
         cui_card(ui, .pad = 18, .width = CUI_FILL) {
             cui_scatter_chart(ui, "scatter", ss, 2, .height = 300, .x_label = "Nodes", .y_label = "Frame time (ms)", .y_format = "%.2f");
         }
+        static const cui_gauge_band bands[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+        cui_card(ui, .pad = 18, .width = CUI_FILL, .dir = CUI_ROW, .wrap = true, .gap = 24, .align = CUI_ALIGN_CENTER) {
+            cui_radial_gauge(ui, "cpu", 64, 0, 100, .unit = "%", .label = "CPU", .bands = bands, .band_count = 3, .size = 180);
+            cui_radial_gauge(ui, "temp", 71, 20, 100, .unit = "C", .label = "GPU temperature", .show_target = true, .target = 85, .size = 180);
+            cui_radial_gauge(ui, "mem", 0.62f * 32, 0, 32, .format = "%.1f", .unit = "GB", .label = "Memory", .no_needle = true, .ticks = -1, .size = 150);
+        }
+        enum { NC = 2000 };
+        static cui_candle candles[NC];
+        static bool cinit;
+        if (!cinit) {
+            float price = 64;
+            for (int k = 0; k < NC; k++) {
+                float o = price, c = o * (1 + sinf(k * 0.37f) * 0.012f + cosf(k * 0.043f) * 0.008f);
+                candles[k] = (cui_candle){ o, fmaxf(o, c) * 1.006f, fminf(o, c) * 0.994f, c, 2000 + (float)((k * 7919) % 900) * 10 };
+                price = c;
+            }
+            cinit = true;
+        }
+        cui_card(ui, .pad = 18, .width = CUI_FILL, .gap = 10) {
+            cui_label(ui, "Price, 2,000 periods");
+            cui_candlestick(ui, "price", candles, NC, .height = 280);
+        }
     }
 }
 
