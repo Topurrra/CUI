@@ -3377,6 +3377,83 @@ static void scene_docking(cui_ctx *ui, int f) {
     frame_wrap(ui, body_docking);
 }
 
+/* ---- share images: the newer components on the stage, 16:9 ---- */
+static void tw_studio_body(cui_ctx *ui) {
+    static char path[512] = "/Users/maya/Projects/fieldnotes";
+    static const char *const places[] = { "/Users/maya", "/Users/maya/Desktop", "/Users/maya/Documents", "/Users/maya/Projects" };
+    static bool filled;
+    if (!filled) { term_demo_fill(); filled = true; }
+    cui_row(ui, .gap = 20, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_PX(610)) { cui_file_browser(ui, "files", path, sizeof path, .list = demo_fs, .places = places, .place_count = 4, .height = CUI_PX(430)); }
+        cui_box(ui, .width = CUI_FILL) { cui_terminal(ui, "term", &g_term, .height = 430, .prompt = "~/fieldnotes $ ", .size = 12); }
+    }
+}
+static void scene_tw_studio(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_plain, tw_studio_body); }
+
+static void tw_audio_body(cui_ctx *ui) {
+    static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+    cui_column(ui, .gap = 24, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        body_mixer(ui);
+        cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
+            cui_radial_gauge(ui, "cpu", 42, 0, 100, .unit = "%", .label = "DSP load", .bands = load, .band_count = 3, .size = 150);
+            cui_radial_gauge(ui, "lat", 6, 0, 20, .unit = " ms", .label = "Latency", .size = 150, .ticks = 5);
+            cui_radial_gauge(ui, "disk", 63, 0, 100, .unit = "%", .label = "Session disk", .no_needle = true, .size = 150, .ticks = -1);
+        }
+    }
+}
+static void scene_tw_audio(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_plain, tw_audio_body); }
+
+static void tw_markets_body(cui_ctx *ui) {
+    static const cui_gauge_band risk[] = { { 40, CUI_TONE_SUCCESS }, { 70, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+    cui_row(ui, .gap = 20, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_box(ui, .width = CUI_GROW(1)) {
+            enum { N = 140 };
+            static cui_candle cs[N];
+            static const char *labels[N];
+            static char buf[N][12];
+            static float sma[N];
+            static bool init;
+            if (!init) { demo_candles(cs, N, labels, buf, sma, 20); init = true; }
+            cui_series ov = { "SMA 20", sma, N, { 0 } };
+            cui_card(ui, .width = CUI_FILL, .gap = 10, .pad = 18) {
+                cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                    cui_text(ui, "NRTH", .font = CUI_FONT_MEDIUM, .size = 15);
+                    cui_text(ui, "Northwind Labs", .color = CUI_COLOR_TEXT_SECONDARY);
+                    cui_spacer(ui);
+                    cui_badge(ui, "Daily", .tone = CUI_TONE_NEUTRAL);
+                }
+                cui_candlestick(ui, "nrth", cs, N, .labels = labels, .overlays = &ov, .overlay_count = 1, .height = 420);
+            }
+        }
+        cui_column(ui, .gap = 16, .width = CUI_PX(250)) {
+            cui_card(ui, .pad = 16, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                cui_radial_gauge(ui, "risk", 34, 0, 100, .label = "Volatility", .bands = risk, .band_count = 3, .size = 190);
+            }
+            cui_card(ui, .pad = 16, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                cui_radial_gauge(ui, "goal", 68, 0, 100, .unit = "%", .label = "Of yearly target", .no_needle = true, .size = 190, .ticks = -1);
+            }
+        }
+    }
+}
+static void scene_tw_markets(cui_ctx *ui, int f) { if (f < 0) return; stage(ui, &look_plain, tw_markets_body); }
+
+static void tw_calendar_body(cui_ctx *ui) {
+    static cui_date month = { 2026, 11, 1 }, sel = { 2026, 11, 10 };
+    static char recent[256] = "\xf0\x9f\x91\x8d \xf0\x9f\x8e\x89 \xe2\x9c\x85 \xf0\x9f\x98\x82 \xf0\x9f\x9a\x80 \xf0\x9f\x91\x80 \xe2\x9d\xa4\xef\xb8\x8f \xf0\x9f\x99\x8f";
+    static int tone = 0;
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
+        cui_card(ui, .pad = 18, .width = CUI_GROW(1)) {
+            cui_month_calendar(ui, "month", &month, month_events, (int)(sizeof month_events / sizeof month_events[0]), .selected = &sel,
+                               .today = (cui_date){ 2026, 11, 8 }, .cell_height = 76);
+        }
+        cui_emoji_picker(ui, "emoji", .recent = recent, .recent_cap = sizeof recent, .tone = &tone, .height = 390);
+    }
+}
+static void scene_tw_calendar(cui_ctx *ui, int f) {
+    if (f < 0) { if (-f - 1 >= 20) cui_input_mouse_move(ui, 865, 195); return; }   /* hover the party popper: the preview names it */
+    stage(ui, &look_plain, tw_calendar_body);
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -3524,6 +3601,8 @@ int main(int argc, char **argv) {
         { "docking", scene_docking, 960, 560, true },
         { "toolbar", scene_toolbar, 640, 370, true }, { "status-bar", scene_status_bar, 820, 160, true },
         { "document-tabs", scene_document_tabs, 720, 230, true },
+        { "tw-studio", scene_tw_studio, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-audio", scene_tw_audio, 960, 540, true, false, CUI_ACCENT_NEUTRAL },
+        { "tw-markets", scene_tw_markets, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-calendar", scene_tw_calendar, 1200, 675, true, false, CUI_ACCENT_NEUTRAL },
     };
     cui_sw_renderer *sw = cui_sw_create();
     if (argc <= 2 || strcmp(argv[2], "button-states") == 0) { render_states(dir, false, sw); render_states(dir, true, sw); }
