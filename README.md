@@ -108,7 +108,7 @@ A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CP
 
 **Native everywhere**
 
-Win32, Cocoa and X11, or SDL2 and GLFW, drawn with OpenGL or a software renderer. The core only emits triangles, so your own renderer works too.
+Win32, Cocoa and X11, or SDL2 and GLFW, drawn with OpenGL or a software renderer. The core only emits triangles, so your own renderer works too. Layouts mirror for Persian, Arabic and Hebrew with one setting.
 
 </td>
 <td valign="top">
