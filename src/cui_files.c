@@ -127,7 +127,9 @@ static bool cui__path_up(char *path) {
 static void cui__path_join(char *out, size_t cap, const char *dir, const char *name) {
     size_t dl = strlen(dir);
     bool sep = dl > 0 && !cui__is_sep(dir[dl - 1]);
-    snprintf(out, cap, "%s%s%s", dir, sep ? (char[2]){ CUI__SEP, 0 } : "", name);
+    /* the separator the path already uses ("/w" stays "/w/a" on Windows too), else the system's */
+    char c = strchr(dir, '/') ? '/' : strchr(dir, '\\') ? '\\' : CUI__SEP;
+    snprintf(out, cap, "%s%s%s", dir, sep ? (char[2]){ c, 0 } : "", name);
 }
 
 /* a pattern list like "*.png;*.jpg": case-insensitive, * and ? only */
