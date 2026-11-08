@@ -1198,8 +1198,75 @@ CUI_API cui_path_bar_result cui_path_bar_ex(cui_ctx *ui, const char *id, const c
  * for the children of that segment, then call cui_path_bar_menu_end. */
 CUI_API bool cui_path_bar_menu_begin(cui_ctx *ui, const char *id, int *segment);
 CUI_API void cui_path_bar_menu_end(cui_ctx *ui);
+/* File browser and file picker (an open or save dialog drawn by CUI, like
+ * the rest of the window; cui_app_file_dialog in cui_app.h opens the
+ * system's own). The browser lists a folder (name,
+ * date modified and size; folders first, any column sorts), with back,
+ * forward and up, a path bar you can type into, a filter field and a
+ * sidebar of places. Double-click or Enter opens a folder or picks a file;
+ * Backspace goes up, Alt+Left and Alt+Right go back and forward, F5
+ * reloads, and typing a letter jumps to the next name that starts with it.
+ * A folder is read when you enter it (or reload), not every frame, and only
+ * the rows in view are built.
+ *
+ * Listing goes through `list`, by default cui_fs_list (the local disk; none
+ * in a browser build), so a dialog can show any tree: a zip, a remote store.
+ *
+ *     static bool open; static char path[512];
+ *     if (cui_button(ui, "Open...")) open = true;
+ *     if (cui_file_picker(ui, "open", &open, path, sizeof path, .filter = "*.png;*.jpg")) load(path);
+ */
+typedef struct cui_file_entry {
+    const char *name;
+    bool dir;
+    uint64_t size;             /* bytes */
+    int64_t modified;          /* seconds since 1970 (UTC); 0 unknown */
+} cui_file_entry;
+/* Lists a folder into out (names copied into names). Returns the number of
+ * entries, or -1 when the folder cannot be read. Without hidden, names
+ * starting with a dot (and hidden files on Windows) are left out. */
+typedef int (*cui_file_list_fn)(void *user, const char *path, cui_file_entry *out, int cap, char *names, size_t names_cap, bool hidden);
+CUI_API int cui_fs_list(void *user, const char *path, cui_file_entry *out, int cap, char *names, size_t names_cap, bool hidden);
+
+typedef struct cui_file_browser_opts {
+    int _;
+    cui_size width, height;    /* default fill and 380 */
+    const char *filter;        /* patterns that files must match, e.g. "*.png;*.jpg"; folders always show */
+    bool folders_only;
+    bool hidden;               /* show hidden files */
+    bool no_places;            /* the sidebar of places */
+    const char *const *places; int place_count;   /* sidebar paths, default home, desktop, documents, downloads and the root */
+    cui_file_list_fn list; void *list_user;       /* default cui_fs_list */
+    int max_entries;           /* default 20,000 */
+} cui_file_browser_opts;
+typedef struct cui_file_browser_result {
+    const char *picked;        /* a file double-clicked or Entered, as a full path; valid this frame */
+    const char *selected;      /* the selected entry as a full path, or NULL; valid this frame */
+    bool navigated;            /* the folder in *path changed */
+    bool error;                /* the folder could not be read */
+} cui_file_browser_result;
+/* path: the folder shown, yours; the browser writes it as you move around. */
+CUI_API cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id, char *path, size_t path_cap, const cui_file_browser_opts *opts);
+
+typedef struct cui_file_picker_opts {
+    int _;
+    const char *title;         /* default "Open", "Save" or "Choose a folder" */
+    bool save;                 /* a name field and Save */
+    bool folders;              /* choose a folder */
+    const char *start;         /* the folder to start in, default the current directory */
+    const char *name;          /* save: the name to start with */
+    const char *filter;        /* e.g. "*.png;*.jpg" */
+    const char *filter_label;  /* e.g. "Images" */
+    cui_file_list_fn list; void *list_user;
+} cui_file_picker_opts;
+/* True once, with the chosen path in out, when the dialog is confirmed;
+ * *open turns false then, or on Cancel and Esc. */
+CUI_API bool cui_file_picker_ex(cui_ctx *ui, const char *id, bool *open, char *out, size_t out_cap, const cui_file_picker_opts *opts);
+
 #define cui_tree_table_begin(ui, id, cols, ncols, nodes, n, ...) cui_tree_table_begin_ex((ui), (id), (cols), (ncols), (nodes), (n), CUI__OPTS(cui_tree_table_opts, __VA_ARGS__))
 #define cui_path_bar(ui, id, segs, n, ...) cui_path_bar_ex((ui), (id), (segs), (n), CUI__OPTS(cui_path_bar_opts, __VA_ARGS__))
+#define cui_file_browser(ui, id, path, cap, ...) cui_file_browser_ex((ui), (id), (path), (cap), CUI__OPTS(cui_file_browser_opts, __VA_ARGS__))
+#define cui_file_picker(ui, id, open, out, cap, ...) cui_file_picker_ex((ui), (id), (open), (out), (cap), CUI__OPTS(cui_file_picker_opts, __VA_ARGS__))
 
 /* ------------------------------------------------------------------------ */
 /* Code                                                                     */

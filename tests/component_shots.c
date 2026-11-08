@@ -2077,6 +2077,46 @@ static void body_tour(cui_ctx *ui) {
     if (g_tour_step >= 0) cui_tour(ui, "intro", steps, 4, &g_tour_step);
 }
 static void scene_tour(cui_ctx *ui, int f) { if (f < 0) return; frame_wrap(ui, body_tour); }
+/* a small made-up disk for the file browser demos, the same on every run */
+typedef struct { const char *dir, *name; bool folder; double size; int day; } demo_file;
+static const demo_file demo_files[] = {
+    { "/Users/maya", "Desktop", true, 0, 40 }, { "/Users/maya", "Documents", true, 0, 38 }, { "/Users/maya", "Downloads", true, 0, 41 },
+    { "/Users/maya", "Projects", true, 0, 42 }, { "/Users/maya", "notes.md", false, 4210, 30 },
+    { "/Users/maya/Projects", "fieldnotes", true, 0, 42 }, { "/Users/maya/Projects", "harbor-town", true, 0, 12 }, { "/Users/maya/Projects", "cui", true, 0, 44 },
+    { "/Users/maya/Projects/fieldnotes", "assets", true, 0, 39 }, { "/Users/maya/Projects/fieldnotes", "build", true, 0, 44 },
+    { "/Users/maya/Projects/fieldnotes", "src", true, 0, 44 }, { "/Users/maya/Projects/fieldnotes", "CMakeLists.txt", false, 1840, 31 },
+    { "/Users/maya/Projects/fieldnotes", "README.md", false, 6320, 36 }, { "/Users/maya/Projects/fieldnotes", "cover.png", false, 482113, 33 },
+    { "/Users/maya/Projects/fieldnotes", "field-report-q3.pdf", false, 2814400, 41 }, { "/Users/maya/Projects/fieldnotes", "samples-2.csv", false, 91000, 20 },
+    { "/Users/maya/Projects/fieldnotes", "samples-10.csv", false, 143000, 21 }, { "/Users/maya/Projects/fieldnotes", "site-photos.zip", false, 182400000, 37 },
+    { "/Users/maya/Projects/fieldnotes", "theme.mp3", false, 5400000, 10 }, { "/Users/maya/Projects/fieldnotes", "main.c", false, 12800, 44 },
+    { "/Users/maya/Projects/fieldnotes/src", "main.c", false, 12800, 44 }, { "/Users/maya/Projects/fieldnotes/src", "report.c", false, 30200, 43 },
+    { "/Users/maya/Projects/fieldnotes/assets", "logo.svg", false, 3100, 39 }, { "/Users/maya/Projects/fieldnotes/assets", "map.png", false, 991000, 39 },
+};
+static int demo_fs(void *user, const char *path, cui_file_entry *out, int cap, char *names, size_t names_cap, bool hidden) {
+    (void)user; (void)names; (void)names_cap; (void)hidden;
+    int n = 0;
+    for (size_t k = 0; k < sizeof demo_files / sizeof demo_files[0] && n < cap; k++) {
+        if (strcmp(demo_files[k].dir, path)) continue;
+        /* 2024-09-01 plus a number of days, in the afternoon */
+        out[n++] = (cui_file_entry){ demo_files[k].name, demo_files[k].folder, (uint64_t)demo_files[k].size, 1725148800 + demo_files[k].day * 86400 + 14 * 3600 + k * 600 };
+    }
+    if (!n && strncmp(path, "/Users/maya", 11)) return -1;
+    return n;
+}
+SCENE(file_browser) {
+    static char path[512] = "/Users/maya/Projects/fieldnotes";
+    static const char *const places[] = { "/Users/maya", "/Users/maya/Desktop", "/Users/maya/Documents", "/Users/maya/Projects" };
+    static bool open;
+    static char picked[512];
+    cui_box(ui, UPTO(900), .gap = 10) {
+        cui_file_browser(ui, "files", path, sizeof path, .list = demo_fs, .places = places, .place_count = 4, .height = CUI_PX(360));
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+            if (cui_button(ui, "Save as\xe2\x80\xa6", .icon = CUI_ICON_DOWNLOAD)) open = true;
+            if (picked[0]) cui_muted(ui, picked);
+        }
+        cui_file_picker(ui, "save", &open, picked, sizeof picked, .save = true, .name = "report.pdf", .start = "/Users/maya/Documents", .list = demo_fs);
+    }
+}
 SCENE(gauges) {
     static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
@@ -3420,7 +3460,7 @@ int main(int argc, char **argv) {
         { "flame-graph", scene_flame, 1000, 300, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
-        { "month-calendar", scene_month_calendar, 880, 720, true }, { "image-viewer", scene_image_viewer, 900, 380, true }, { "tour", scene_tour, 820, 420, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
+        { "month-calendar", scene_month_calendar, 880, 720, true }, { "file-browser", scene_file_browser, 900, 460, true }, { "image-viewer", scene_image_viewer, 900, 380, true }, { "tour", scene_tour, 820, 420, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
         { "scatter", scene_scatter, 860, 360, true },
         { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
         { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },

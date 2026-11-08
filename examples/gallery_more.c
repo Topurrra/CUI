@@ -1122,6 +1122,33 @@ static void page_audio(cui_ctx *ui) {
     if (tour >= 0) cui_tour(ui, "audio-tour", steps, 3, &tour);
 }
 
+/* ---- files ---------------------------------------------------------------- */
+
+/* the local disk, or a few made-up files where there is none (the browser build) */
+static int files_list(void *user, const char *path, cui_file_entry *out, int cap, char *names, size_t names_cap, bool hidden) {
+    int n = cui_fs_list(user, path, out, cap, names, names_cap, hidden);
+    if (n >= 0 || strcmp(path, ".")) return n;
+    static const char *demo[] = { "assets", "src", "README.md", "notes.txt", "cover.png", "report.pdf" };
+    for (int k = 0; k < 6 && k < cap; k++) out[k] = (cui_file_entry){ demo[k], k < 2, (uint64_t)(k * 13100), 1730000000 + k * 86400 };
+    return 6;
+}
+
+static void page_files(cui_ctx *ui) {
+    static char folder[1024] = ".";
+    static bool open_dlg, save_dlg;
+    static char chosen[1024];
+    section(ui, "File browser", "Double-click to open; type to jump; Backspace goes up.");
+    cui_file_browser_result r = cui_file_browser(ui, "files", folder, sizeof folder, .list = files_list, .height = CUI_PX(380));
+    if (r.picked) snprintf(chosen, sizeof chosen, "%s", r.picked);
+    cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {
+        if (cui_button(ui, "Open\xe2\x80\xa6", .icon = CUI_ICON_FOLDER_OPEN)) open_dlg = true;
+        if (cui_button(ui, "Save as\xe2\x80\xa6", .icon = CUI_ICON_DOWNLOAD)) save_dlg = true;
+        if (chosen[0]) cui_muted(ui, chosen);
+    }
+    cui_file_picker(ui, "open", &open_dlg, chosen, sizeof chosen, .list = files_list);
+    cui_file_picker(ui, "save", &save_dlg, chosen, sizeof chosen, .list = files_list, .save = true, .name = "untitled.txt");
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -1141,6 +1168,7 @@ static const more_page pages[] = {
     { "Motion", CUI_ICON_ACTIVITY, page_motion },
     { "AI", CUI_ICON_MESSAGE_SQUARE, page_ai },
     { "Audio", CUI_ICON_AUDIO_LINES, page_audio },
+    { "Files", CUI_ICON_FOLDER, page_files },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

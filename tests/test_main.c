@@ -6471,6 +6471,120 @@ static void test_photo(void) {
     cui_destroy(ui);
 }
 
+/* ---- file browser and file picker ---- */
+static const struct { const char *dir, *name; bool folder; uint64_t size; } fb_disk[] = {
+    { "/w", "beta", true, 0 }, { "/w", "Alpha", true, 0 }, { "/w", "zeta.txt", false, 30 }, { "/w", "img10.png", false, 900 },
+    { "/w", "img2.png", false, 100 }, { "/w", "notes.md", false, 5 }, { "/w/Alpha", "inner.txt", false, 1 }, { "/w/beta", "b.txt", false, 2 },
+};
+static int fb_list(void *user, const char *path, cui_file_entry *out, int cap, char *names, size_t names_cap, bool hidden) {
+    (void)user; (void)names; (void)names_cap; (void)hidden;
+    int n = 0;
+    for (size_t k = 0; k < sizeof fb_disk / sizeof fb_disk[0] && n < cap; k++)
+        if (!strcmp(fb_disk[k].dir, path)) out[n++] = (cui_file_entry){ fb_disk[k].name, fb_disk[k].folder, fb_disk[k].size, 1000 + (int64_t)k };
+    return n || !strcmp(path, "/w") ? n : -1;
+}
+static int fb_big_list(void *user, const char *path, cui_file_entry *out, int cap, char *names, size_t names_cap, bool hidden) {
+    (void)path; (void)names; (void)names_cap; (void)hidden;
+    char (*nm)[12] = user;
+    int n = cap < 20000 ? cap : 20000;
+    for (int k = 0; k < n; k++) out[k] = (cui_file_entry){ nm[k], k % 50 == 0, (uint64_t)k * 13, 1000 + k };
+    return n;
+}
+typedef struct { char path[256]; cui_file_browser_result r; cui_rect lr, btn; const char *filter; bool open; char out[256]; bool done, save; } fb_ctx;
+static void build_fb(cui_ctx *ui, void *u) {
+    fb_ctx *c = u;
+    c->r = cui_file_browser(ui, "fb", c->path, sizeof c->path, .list = fb_list, .no_places = true, .filter = c->filter, .height = CUI_PX(300));
+    c->lr = cui_last_rect(ui);
+    c->done |= cui_file_picker(ui, "pick", &c->open, c->out, sizeof c->out, .list = fb_list, .start = "/w", .save = c->save, .name = "out.txt");
+    if (c->open) c->btn = cui_last_rect(ui);   /* the dialog's last button: Save or Open */
+}
+static void test_files(void) {
+    cui_ctx *ui = new_ctx();
+    fb_ctx c = { "/w" };
+    run(ui, build_fb, &c, 3);
+    /* folders first, names in natural order: Alpha, beta, img2, img10, notes, zeta */
+    float row0 = c.lr.y + 31 + 15;
+    click_at(ui, build_fb, &c, c.lr.x + 40, row0);
+    CHECK(c.r.selected && !strcmp(c.r.selected, "/w/Alpha"));
+    key(ui, build_fb, &c, CUI_KEY_DOWN, 0); key(ui, build_fb, &c, CUI_KEY_DOWN, 0); key(ui, build_fb, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.selected && !strcmp(c.r.selected, "/w/img10.png"));
+    /* typing jumps by name */
+    cui_input_text(ui, "z"); run(ui, build_fb, &c, 1);
+    CHECK(c.r.selected && !strcmp(c.r.selected, "/w/zeta.txt"));
+    /* Enter on a file picks it; on a folder enters it */
+    key(ui, build_fb, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.r.picked && !strcmp(c.r.picked, "/w/zeta.txt"));
+    key(ui, build_fb, &c, CUI_KEY_HOME, 0);
+    key(ui, build_fb, &c, CUI_KEY_ENTER, 0);
+    CHECK(!strcmp(c.path, "/w/Alpha") && c.r.navigated);
+    run(ui, build_fb, &c, 1);
+    /* Backspace goes up, Alt+Left back, Alt+Right forward */
+    key(ui, build_fb, &c, CUI_KEY_BACKSPACE, 0);
+    CHECK(!strcmp(c.path, "/w"));
+    key(ui, build_fb, &c, CUI_KEY_LEFT, CUI_MOD_ALT);
+    CHECK(!strcmp(c.path, "/w/Alpha"));
+    key(ui, build_fb, &c, CUI_KEY_RIGHT, CUI_MOD_ALT);
+    CHECK(!strcmp(c.path, "/w"));
+    /* double-click a folder goes into it */
+    run(ui, build_fb, &c, 30);
+    click_at(ui, build_fb, &c, c.lr.x + 40, row0 + 30);
+    click_at(ui, build_fb, &c, c.lr.x + 40, row0 + 30);
+    CHECK(!strcmp(c.path, "/w/beta"));
+    key(ui, build_fb, &c, CUI_KEY_BACKSPACE, 0);
+    /* the filter keeps folders and the files that match */
+    c.filter = "*.png";
+    run(ui, build_fb, &c, 2);
+    click_at(ui, build_fb, &c, c.lr.x + 40, row0 + 60);
+    CHECK(c.r.selected && !strcmp(c.r.selected, "/w/img2.png"));
+    click_at(ui, build_fb, &c, c.lr.x + 40, row0 + 90);
+    CHECK(c.r.selected && !strcmp(c.r.selected, "/w/img10.png"));
+    c.filter = NULL;
+    /* a folder that cannot be read says so */
+    snprintf(c.path, sizeof c.path, "/nowhere");
+    run(ui, build_fb, &c, 2);
+    CHECK(c.r.error);
+    snprintf(c.path, sizeof c.path, "/w");
+    run(ui, build_fb, &c, 2);
+    /* the picker: Save puts the name in the folder it shows */
+    c.open = true; c.save = true; c.done = false;
+    run(ui, build_fb, &c, 20);
+    CHECK(c.btn.w > 0);
+    click_at(ui, build_fb, &c, c.btn.x + c.btn.w / 2, c.btn.y + c.btn.h / 2);
+    CHECK(c.done && !c.open && !strcmp(c.out, "/w/out.txt"));
+    /* open: nothing selected, Open is off; selecting a file and Open picks it */
+    c.save = false; c.open = true; c.done = false; c.out[0] = 0;
+    run(ui, build_fb, &c, 20);
+    click_at(ui, build_fb, &c, c.btn.x + c.btn.w / 2, c.btn.y + c.btn.h / 2);
+    CHECK(!c.done && c.open);
+    c.open = false;
+    run(ui, build_fb, &c, 20);
+    /* a folder of 20,000 files: read and sorted once, then only the rows in view */
+    {
+        cui_ctx *u2 = new_ctx();
+        fb_ctx b = { "/big" };
+        static char big_names[20000][12];
+        for (int k = 0; k < 20000; k++) snprintf(big_names[k], sizeof big_names[k], "f%05d.txt", (k * 7919) % 20000);
+        clock_t t0 = clock();
+        for (int f = 0; f < 21; f++) {
+            if (f == 1) t0 = clock();
+            cui_begin_frame(u2, 1.0f / 60);
+            cui_file_browser(u2, "big", b.path, sizeof b.path, .list = fb_big_list, .list_user = big_names, .no_places = true, .height = CUI_PX(400));
+            cui_end_frame(u2);
+        }
+        double ms = (double)(clock() - t0) / CLOCKS_PER_SEC * 1000 / 20;
+        printf("    file browser: 20,000 files, %.2f ms per frame\n", ms);
+        CHECK(ms < 20);
+        cui_destroy(u2);
+    }
+    /* the local disk: this folder has files; a missing one fails */
+    cui_file_entry ents[64];
+    char names[8192];
+    int n = cui_fs_list(NULL, ".", ents, 64, names, sizeof names, true);
+    CHECK(n > 0);
+    CHECK(cui_fs_list(NULL, "./no/such/folder/here", ents, 64, names, sizeof names, true) == -1);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6506,6 +6620,7 @@ int main(void) {
     test_month();
     test_tour();
     test_photo();
+    test_files();
     test_planning();
     test_node_editor();
     test_flame();

@@ -484,6 +484,27 @@ When the table is narrower than its columns, columns with a `priority` hide, the
 
 The path bar is a breadcrumb for file and scene paths, styled like `cui_breadcrumb`. Every segment except the last is a button that reports `clicked`; the last one is where you are. When the bar is too narrow, middle segments collapse into a "..." menu, starting after the first. If there is still not enough room, the first goes too, and the current segment is cut short last. With `.menus`, the chevron after a segment opens a menu that you fill between `cui_path_bar_menu_begin` and `cui_path_bar_menu_end` with that segment's children, which are the siblings of the next segment. To type a path, click the empty part of the bar or the current segment, or press Ctrl+L when no text field has the keyboard. The bar becomes a text field holding the whole path (`.text`, or the segments joined by "/"), all selected. Enter reports `submitted`; Esc or clicking away puts the segments back. `.no_edit` turns typing off.
 
+### File browser and picker
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/file-browser-dark.png"><img src="images/components/file-browser.png" alt="File browser"></picture>
+
+```c
+static char folder[1024] = ".";
+cui_file_browser_result r = cui_file_browser(ui, "files", folder, sizeof folder, .filter = "*.c;*.h");
+if (r.picked) open_document(r.picked);           /* double-click or Enter on a file */
+
+static bool saving;
+static char path[1024];
+if (cui_button(ui, "Save as...")) saving = true;
+if (cui_file_picker(ui, "save", &saving, path, sizeof path, .save = true, .name = "report.pdf")) write_report(path);
+```
+
+A folder's contents with name, date modified and size, folders first and names in natural order (file2 before file10); click a column title to sort by it, again to reverse. Above the list are back, forward and up, a path bar (click a segment to go there, or click the bar and type a path), a filter field and reload; beside it a sidebar of places (home, desktop, documents, downloads and the root, or your own `places`). Double-click or Enter opens a folder or picks a file (`r.picked`, a full path), and `r.selected` tells you what is selected. With the list focused the arrows, Page Up, Page Down, Home and End move the selection, typing letters jumps to the next name that starts with them, Backspace goes up, Alt+Left and Alt+Right go back and forward and F5 reloads. `path` is yours and the browser writes it as you move around. `filter` takes patterns like `*.png;*.jpg` (folders always show), `folders_only` and `hidden` change what is listed. Narrow, the date and then the size columns step aside and the sidebar is left out.
+
+`cui_file_picker` puts a browser in a dialog with a footer: Open, or with `save` a name field and Save (selecting a file fills in its name), or with `folders` Choose. It returns true once with the chosen path; `*open` turns false then or on Cancel and Esc. It is drawn by CUI like the rest of the window; `cui_app_file_dialog` in `cui_app.h` opens the system's own dialog instead.
+
+A folder is read when you enter it or reload, not every frame, and only the rows in view are built, so a folder of 20,000 files scrolls and filters without slowing down. Reading goes through `list`, which defaults to `cui_fs_list` (POSIX or Windows; nothing in a browser build), so the same browser can show a zip file, a remote bucket or an asset database.
+
 ## Code
 
 ### Code block

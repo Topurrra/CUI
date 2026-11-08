@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- **File browser and file picker**: a folder view with sorting, natural name order, a filter, back, forward and up, a typeable path bar, places, type-ahead and keys. The open, save and folder dialog is drawn by CUI. Listing goes through a callback (the local disk by default), and big folders are read once and built only where they show.
 - **Image viewer and cropper**: zoom around the pointer, pan, double-click for actual pixels, keys, eased motion and a zoom pill. The cropper has corner and edge handles, aspect lock, a round mask for avatars, thirds lines and the size while dragging.
 - **Guided tour**: a spotlight that glides from control to control with a card saying what each one does. It has Back, Next and Done, progress dots and keys, and can show a centered card for steps without a target. The spotlighted control can still be tried, and the button text can be translated.
 - **Month calendar**: a month grid with events. Multi-day and all-day events are bars that share lanes across a week; timed events show in time order with a dot and the time, and a full day says "+N more" and opens a list. It supports keyboard navigation across months, double-click to add, localized month and day names, any first weekday, and a phone layout with colored dots and an agenda of the selected day.
