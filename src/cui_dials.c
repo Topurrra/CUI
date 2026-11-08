@@ -59,14 +59,6 @@ static float cui__dl_input(cui_ctx *ui, cui_interact r, cui_id wheel_id, float t
     return cui__clampf(t, 0, 1);
 }
 
-/* the wheel comes to a focused control while the pointer is over it */
-static void cui__dl_wheel_hit(cui_ctx *ui, cui_id wheel_id, cui_rect r) {
-    cui_rect clip = ui->dl.clip_stack[ui->dl.clip_depth - 1];
-    float s = ui->scale;
-    cui_rect cp = { clip.x / s, clip.y / s, clip.w / s, clip.h / s };
-    cui__paint_add_hit(ui, wheel_id, cui__rect_intersect(r, cp), CUI_NF_SCROLL_Y);
-}
-
 static void cui__dl_text_at(cui_ctx *ui, cui_font f, float size, float x, float y, int align, cui_color c, const char *s) {
     float w = cui__text_width(ui, f, size, s, -1, true);
     float fh = cui__font_line_height(ui, f, size);
@@ -104,7 +96,7 @@ static void cui__dl_cap(cui_ctx *ui, cui_vec2 c, float rad, float a, float th, c
 static void cui__paint_knob(cui_ctx *ui, cui_node *n, void *data) {
     cui__knob_paint *p = data;
     cui_rect r = n->rect;
-    if (p->wheel_on) cui__dl_wheel_hit(ui, p->wheel, r);
+    if (p->wheel_on) cui__paint_wheel_hit(ui, p->wheel, r);
     cui_vec2 c = { r.x + r.w * 0.5f, r.y + r.h * 0.5f };
     float R = CUI_MIN(r.w, r.h) * 0.5f - 1;
     float th = cui__clampf(R * 0.12f, 2.5f, 4.0f), ar = R - th * 0.5f;
@@ -326,7 +318,7 @@ static void cui__fader_travel(cui_rect r, bool horizontal, float lw, float *a, f
 static void cui__paint_fader(cui_ctx *ui, cui_node *n, void *data) {
     cui__fader_paint *p = data;
     cui_rect r = n->rect;
-    if (p->wheel_on) cui__dl_wheel_hit(ui, p->wheel, r);
+    if (p->wheel_on) cui__paint_wheel_hit(ui, p->wheel, r);
     float a, b, cr;
     cui__fader_travel(r, p->horizontal, p->lw, &a, &b, &cr);
     float pos = a + (b - a) * p->t;

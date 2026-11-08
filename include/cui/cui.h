@@ -861,6 +861,40 @@ CUI_API void cui_image_destroy(cui_ctx *ui, cui_texture tex);
 typedef struct cui_image_opts { int _; cui_size width, height; float radius; cui_color tint; } cui_image_opts;
 CUI_API void cui_image_ex(cui_ctx *ui, cui_texture tex, const cui_image_opts *opts);
 
+/* Image viewer: zoom and pan a picture. The wheel (or a pinch, which comes
+ * as Ctrl+wheel) zooms around the pointer, dragging pans, double-click
+ * switches between fitting the view and 100%. With the viewer focused, + and
+ * - zoom, 0 fits, 1 shows actual pixels and the arrows pan. Zoom and pan ease.
+ * Keep a cui_image_view to keep the zoom and position (zeroed: fit). */
+typedef struct cui_image_view {
+    float zoom;                /* screen points per image pixel; 0 fits the image in the view */
+    float cx, cy;              /* the image point at the middle of the view, in pixels */
+} cui_image_view;
+typedef struct cui_image_viewer_opts {
+    int _;
+    cui_size width, height;    /* default the width it gets and 360 */
+    float max_zoom;            /* default 16 (1600%) */
+    bool no_toolbar;           /* the zoom buttons and percentage in the corner */
+    bool checkerboard;         /* a grid behind transparent images */
+} cui_image_viewer_opts;
+/* Returns true when the view changed. */
+CUI_API bool cui_image_viewer_ex(cui_ctx *ui, const char *id, cui_texture tex, int image_w, int image_h, cui_image_view *view, const cui_image_viewer_opts *opts);
+
+/* Cropper: a crop rectangle over a picture, in image pixels. Drag inside to
+ * move it, drag a corner or an edge to resize it; the outside dims and thirds
+ * lines show while you drag. With it focused, the arrows move the crop (Shift
+ * for 10 pixels). A zeroed crop starts as the largest centered rectangle of
+ * the aspect. */
+typedef struct cui_cropper_opts {
+    int _;
+    cui_size width, height;    /* default the width it gets and 360 */
+    float aspect;              /* width / height to keep, 0 for free */
+    bool round;                /* a round mask, for avatars (keeps a 1:1 aspect) */
+    float min_size;            /* smallest side, image pixels; default 16 */
+} cui_cropper_opts;
+/* Returns true when the crop changed. */
+CUI_API bool cui_cropper_ex(cui_ctx *ui, const char *id, cui_texture tex, int image_w, int image_h, cui_rect *crop, const cui_cropper_opts *opts);
+
 /* ------------------------------------------------------------------------ */
 /* Command palette (block)                                                  */
 /* ------------------------------------------------------------------------ */
@@ -2852,6 +2886,8 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_tabs(ui, id, items, n, idx, ...) cui_tabs_ex((ui), (id), (items), (n), (idx), CUI__OPTS(cui_tabs_opts, __VA_ARGS__))
 #define cui_nav_item(ui, label, ...)        cui_nav_item_ex((ui), (label), CUI__OPTS(cui_nav_opts, __VA_ARGS__))
 #define cui_popover(ui, id, ...)            CUI__SCOPE_IF(cui_popover_begin((ui), (id), CUI__OPTS(cui_popover_opts, __VA_ARGS__)), cui_popover_end(ui))
+#define cui_image_viewer(ui, id, tex, w, h, view, ...) cui_image_viewer_ex((ui), (id), (tex), (w), (h), (view), CUI__OPTS(cui_image_viewer_opts, __VA_ARGS__))
+#define cui_cropper(ui, id, tex, w, h, crop, ...) cui_cropper_ex((ui), (id), (tex), (w), (h), (crop), CUI__OPTS(cui_cropper_opts, __VA_ARGS__))
 #define cui_tour(ui, id, steps, count, step, ...) cui_tour_ex((ui), (id), (steps), (count), (step), CUI__OPTS(cui_tour_opts, __VA_ARGS__))
 #define cui_menu(ui, label, ...)            CUI__SCOPE_IF(cui_menu_begin((ui), (label), CUI__OPTS(cui_menu_opts, __VA_ARGS__)), cui_menu_end(ui))
 #define cui_context_menu(ui, id)            CUI__SCOPE_IF(cui_context_menu_begin((ui), (id)), cui_context_menu_end(ui))

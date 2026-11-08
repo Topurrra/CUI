@@ -838,6 +838,22 @@ int dir = cui_card_stack_end(ui);   /* -1 or 1 when the top card was thrown left
 
 Drag the divider, or focus it and use the arrow keys. Pass the pictures' `aspect` (width over height) and they are cropped to fill the box instead of stretched. The top card of the stack follows the pointer; past a third of its width, or with a fast flick, it flies off and the cards behind move up. Cards clip their content to a rectangle, so content that fills a card gives itself a radius of 25 (the card's 26, less its 1px border) and its corners line up.
 
+### Image viewer and cropper
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/image-viewer-dark.png"><img src="images/components/image-viewer.png" alt="Image viewer and cropper"></picture>
+
+```c
+static cui_image_view view;                /* zeroed: fit; keep it to keep the zoom and position */
+static cui_rect crop;                      /* image pixels; zeroed: the largest centered square */
+
+cui_image_viewer(ui, "photo", tex, img_w, img_h, &view, .height = CUI_PX(420));
+if (cui_cropper(ui, "avatar", tex, img_w, img_h, &crop, .round = true)) preview_crop(crop);
+```
+
+The viewer shows a picture fitted to its box and lets you look closer. The wheel, or a pinch (which arrives as Ctrl+wheel), zooms around the pointer, so the spot you aim at stays under it; dragging pans; double-click switches between fitting the view and actual pixels at the pointer. With the viewer focused, + and - zoom, 0 fits, 1 shows actual pixels and the arrows pan. Zoom and position ease to where they are going and the image never slides out of the view: smaller than the box it stays centered, larger it keeps its edges outside. A pill in the corner has zoom out, the percentage, zoom in and fit (`no_toolbar` hides it), `checkerboard` puts a grid behind transparent pictures and `max_zoom` caps the zoom (16 by default). The view is yours: `zoom` is screen points per image pixel (0 means fit) and `cx`, `cy` the image point in the middle, so you can save it or set it.
+
+The cropper puts a crop rectangle over the fitted picture, in image pixels. Drag inside it to move it, drag a corner or an edge to resize it, or drag outside to draw a new one; the outside dims, thirds lines and the size show while you drag, and the crop stays inside the image and no smaller than `min_size` (16 by default). `aspect` keeps a width to height ratio (an edge then resizes around the middle and a corner follows the larger change), `round` draws a round mask for avatars and keeps a square. With the cropper focused the arrows move the crop by a pixel, or ten with Shift. Both draw the picture with a single quad cut to what is in view, so a deep zoom into a large image costs no more than a fitted one.
+
 ## Planning
 
 ### Kanban board

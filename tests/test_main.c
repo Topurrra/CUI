@@ -6381,6 +6381,96 @@ static void test_tour(void) {
     cui_destroy(ui);
 }
 
+/* ---- image viewer and cropper ---- */
+typedef struct { cui_texture tex; cui_image_view view; cui_rect crop; float aspect; cui_rect vr, cr; bool vchanged, cchanged; } photo_ctx;
+static void build_photo(cui_ctx *ui, void *u) {
+    photo_ctx *p = u;
+    cui_column(ui, .pad = 20, .gap = 20, .width = CUI_PX(640)) {
+        p->vchanged = cui_image_viewer(ui, "v", p->tex, 1000, 500, &p->view, .height = CUI_PX(250));
+        p->vr = cui_last_rect(ui);
+        p->cchanged = cui_cropper(ui, "c", p->tex, 1000, 500, &p->crop, .aspect = p->aspect, .height = CUI_PX(250));
+        p->cr = cui_last_rect(ui);
+    }
+}
+static void photo_drag(cui_ctx *ui, build_fn fn, void *u, float ax, float ay, float bx, float by) {
+    cui_input_mouse_move(ui, ax, ay); run(ui, fn, u, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, fn, u, 1);
+    for (int k = 1; k <= 4; k++) { cui_input_mouse_move(ui, ax + (bx - ax) * k / 4, ay + (by - ay) * k / 4); run(ui, fn, u, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, fn, u, 1);
+}
+static void test_photo(void) {
+    cui_ctx *ui = new_ctx();
+    static unsigned char px[16 * 16 * 4];
+    memset(px, 200, sizeof px);
+    photo_ctx p = { 0 };
+    p.tex = cui_image_create(ui, 16, 16, px);
+    p.aspect = 1;
+    run(ui, build_photo, &p, 3);
+    /* a zeroed view fits: the 1000 x 500 image in a 600 x 250 view is shown at 50% */
+    CHECK(p.view.zoom == 0 && p.view.cx == 500 && p.view.cy == 250);
+    /* the wheel zooms around the pointer: the image point under it stays under it */
+    float mx = p.vr.x + p.vr.w * 0.25f, my = p.vr.y + p.vr.h * 0.5f;
+    float fit = fminf(p.vr.w / 1000, p.vr.h / 500);
+    float ix = 500 + (mx - (p.vr.x + p.vr.w / 2)) / fit;
+    cui_input_mouse_move(ui, mx, my); run(ui, build_photo, &p, 2);
+    cui_input_scroll(ui, 0, 3); run(ui, build_photo, &p, 1);
+    CHECK(p.vchanged && p.view.zoom > fit * 1.6f);
+    float ix2 = p.view.cx + (mx - (p.vr.x + p.vr.w / 2)) / p.view.zoom;
+    CHECK_NEAR(ix2, ix, 1.0);
+    /* dragging pans by the distance over the zoom */
+    float cx0 = p.view.cx, z = p.view.zoom;
+    photo_drag(ui, build_photo, &p, mx, my, mx - 40, my);
+    CHECK_NEAR(p.view.cx, cx0 + 40 / z, 0.5);
+    /* double-click: actual pixels around the pointer, again: fit */
+    run(ui, build_photo, &p, 30);
+    click_at(ui, build_photo, &p, mx, my); click_at(ui, build_photo, &p, mx, my);
+    CHECK_NEAR(p.view.zoom, 1, 0.001);
+    run(ui, build_photo, &p, 30);
+    click_at(ui, build_photo, &p, mx, my); click_at(ui, build_photo, &p, mx, my);
+    CHECK(p.view.zoom == 0);
+    /* keys: 1 is actual pixels, 0 fits, the arrows pan */
+    key(ui, build_photo, &p, CUI_KEY_1, 0);
+    CHECK_NEAR(p.view.zoom, 1, 0.001);
+    float cy0 = p.view.cy;
+    key(ui, build_photo, &p, CUI_KEY_DOWN, 0);
+    CHECK(p.view.cy > cy0);
+    key(ui, build_photo, &p, CUI_KEY_0, 0);
+    CHECK(p.view.zoom == 0);
+    /* panning never pulls the image off the view */
+    key(ui, build_photo, &p, CUI_KEY_1, 0);
+    for (int k = 0; k < 60; k++) key(ui, build_photo, &p, CUI_KEY_LEFT, 0);
+    CHECK_NEAR(p.view.cx, p.vr.w * 0.5f, 0.6);
+
+    /* cropper: a zeroed crop starts as the largest centered square, kept inside */
+    CHECK(p.crop.w > 0 && fabsf(p.crop.w - p.crop.h) < 0.01f && p.crop.h <= 500);
+    float cz = fminf((p.cr.w - 28) / 1000, (p.cr.h - 28) / 500);
+    float ox = p.cr.x + (p.cr.w - 1000 * cz) / 2, oy = p.cr.y + (p.cr.h - 500 * cz) / 2;
+    cui_rect c0 = p.crop;
+    /* the bottom-right corner grows it and the aspect holds */
+    float sx = ox + (c0.x + c0.w) * cz, sy = oy + (c0.y + c0.h) * cz;
+    photo_drag(ui, build_photo, &p, sx, sy, sx - 40, sy - 30);
+    CHECK(p.crop.w < c0.w && fabsf(p.crop.w - p.crop.h) < 0.01f && p.crop.x == c0.x && p.crop.y == c0.y);
+    /* moving keeps it in the image */
+    cui_rect c1 = p.crop;
+    float in_x = ox + (c1.x + c1.w / 2) * cz, in_y = oy + (c1.y + c1.h / 2) * cz;
+    photo_drag(ui, build_photo, &p, in_x, in_y, in_x + 2000, in_y);
+    CHECK_NEAR(p.crop.x + p.crop.w, 1000, 0.01);
+    CHECK(p.crop.w == c1.w);
+    /* free aspect: dragging outside draws a new crop */
+    p.aspect = 0;
+    run(ui, build_photo, &p, 2);
+    photo_drag(ui, build_photo, &p, ox + 20 * cz, oy + 20 * cz, ox + 220 * cz, oy + 120 * cz);
+    CHECK_NEAR(p.crop.x, 20, 1.5); CHECK_NEAR(p.crop.w, 200, 1.5); CHECK_NEAR(p.crop.h, 100, 1.5);
+    /* keys move it; it never gets smaller than min_size */
+    key(ui, build_photo, &p, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    CHECK_NEAR(p.crop.x, 30, 1.5);
+    float l = ox + p.crop.x * cz, t = oy + p.crop.y * cz;
+    photo_drag(ui, build_photo, &p, l + p.crop.w * cz, t + p.crop.h * cz, l - 100, t - 100);
+    CHECK(p.crop.w >= 16 && p.crop.h >= 16);
+    cui_image_destroy(ui, p.tex);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6415,6 +6505,7 @@ int main(void) {
     test_candles();
     test_month();
     test_tour();
+    test_photo();
     test_planning();
     test_node_editor();
     test_flame();

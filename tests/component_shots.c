@@ -1615,6 +1615,28 @@ static void shot_scene(unsigned char *px, int w, int h, bool color) {
             p[2] = (unsigned char)(fminf(1, fmaxf(0, b)) * 255); p[3] = 255;
         }
 }
+SCENE(image_viewer) {
+    static cui_texture photo;
+    static cui_image_view view = { 1.6f, 1180, 330 };
+    static cui_rect crop = { 300, 120, 620, 620 };
+    bool *made = cui_state(ui, cui_make_id(ui, "iv-texture"), sizeof *made);
+    if (!*made) {
+        *made = true;
+        static unsigned char px[1600 * 1000 * 4];
+        shot_scene(px, 1600, 1000, true);
+        photo = cui_image_create(ui, 1600, 1000, px);
+    }
+    cui_row(ui, .gap = 20, .align = CUI_ALIGN_START, .width = CUI_FILL, .wrap = true) {
+        cui_column(ui, .gap = 8, .width = CUI_GROW(3), .min_width = 260) {
+            cui_label(ui, "Viewer");
+            cui_image_viewer(ui, "view", photo, 1600, 1000, &view, .height = CUI_PX(300));
+        }
+        cui_column(ui, .gap = 8, .width = CUI_GROW(2), .min_width = 240) {
+            cui_label(ui, "Cropper");
+            cui_cropper(ui, "crop", photo, 1600, 1000, &crop, .round = true, .height = CUI_PX(300));
+        }
+    }
+}
 SCENE(compare_stack) {
     static cui_texture before, after;
     static float split = 0.42f;
@@ -3398,7 +3420,7 @@ int main(int argc, char **argv) {
         { "flame-graph", scene_flame, 1000, 300, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
-        { "month-calendar", scene_month_calendar, 880, 720, true }, { "tour", scene_tour, 820, 420, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
+        { "month-calendar", scene_month_calendar, 880, 720, true }, { "image-viewer", scene_image_viewer, 900, 380, true }, { "tour", scene_tour, 820, 420, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
         { "scatter", scene_scatter, 860, 360, true },
         { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
         { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },

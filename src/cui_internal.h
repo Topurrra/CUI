@@ -306,6 +306,8 @@ int cui__float_begin(cui_ctx *ui, cui_id id, int z, cui_id anchor, int placement
 void cui__float_end(cui_ctx *ui);
 int cui__absolute(cui_ctx *ui, cui_id id, float x, float y, float w, float h);
 void cui__paint_add_hit(cui_ctx *ui, cui_id id, cui_rect r, uint32_t flags);
+/* From a paint callback: the wheel over r (inside the current clip) goes to id, ahead of any scroll area under it. */
+void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r);
 
 /* ---- per id state ---- */
 typedef struct cui_state_entry {

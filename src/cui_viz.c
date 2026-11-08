@@ -1819,12 +1819,7 @@ static float cui__cs_y(const cui__cs_paint *p, const cui__cs_geo *g, float v) {
 static void cui__paint_candles(cui_ctx *ui, cui_node *n, void *data) {
     cui__cs_paint *p = data;
     cui_rect r = n->rect;
-    if (p->wheel_on) {
-        cui_rect clip = ui->dl.clip_stack[ui->dl.clip_depth - 1];
-        float s = ui->scale;
-        cui_rect cp = { clip.x / s, clip.y / s, clip.w / s, clip.h / s };
-        cui__paint_add_hit(ui, p->wheel, cui__rect_intersect(r, cp), CUI_NF_SCROLL_Y);
-    }
+    if (p->wheel_on) cui__paint_wheel_hit(ui, p->wheel, r);
     cui__cs_geo g = cui__cs_layout(r, p->axis_w, p->span, p->volume);
     float fs = cui__fs(ui, ui->theme.text_xs);
     cui_color muted = CUI_C(ui, TEXT_MUTED);

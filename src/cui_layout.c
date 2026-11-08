@@ -982,6 +982,17 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
 
 void cui__paint_add_hit(cui_ctx *ui, cui_id id, cui_rect r, uint32_t flags) { cui__add_hit(ui, id, r, flags); }
 
+void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r) {
+    cui_rect clip = ui->dl.clip_stack[ui->dl.clip_depth - 1];
+    float s = ui->scale;
+    cui_rect cp = { clip.x / s, clip.y / s, clip.w / s, clip.h / s };
+    /* it can always scroll, so the wheel stops here instead of going on to the page */
+    cui_scroll_state *ss = cui_state(ui, id, sizeof *ss);
+    ss->view_w = r.w; ss->view_h = r.h;
+    ss->content_w = r.w + 1e6f; ss->content_h = r.h + 1e6f;
+    cui__add_hit(ui, id, cui__rect_intersect(r, cp), CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y);
+}
+
 void cui__paint(cui_ctx *ui) {
     if (ui->node_count == 0) return;
     cui_rect full = { 0, 0, ui->vw, ui->vh };

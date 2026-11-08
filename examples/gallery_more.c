@@ -610,6 +610,18 @@ static void page_social(cui_ctx *ui) {
         }
     }
 
+    static cui_image_view view;
+    static cui_rect crop;
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL, .wrap = true) {
+        cui_column(ui, .width = CUI_GROW(3), .min_width = 280, .gap = 10) {
+            section(ui, "Image viewer", "Wheel to zoom around the pointer, drag to pan, double-click for 100%.");
+            cui_image_viewer(ui, "viewer", after, 640, 400, &view, .height = CUI_PX(260));
+        }
+        cui_column(ui, .width = CUI_GROW(2), .min_width = 240, .gap = 10) {
+            section(ui, "Cropper", "Drag the corners; the square keeps its shape.");
+            cui_cropper(ui, "cropper", after, 640, 400, &crop, .aspect = 1, .height = CUI_PX(260));
+        }
+    }
     cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
             section(ui, "Before and after", "Drag the divider.");
