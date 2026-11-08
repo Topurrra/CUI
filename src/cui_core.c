@@ -299,6 +299,14 @@ cui_state_entry *cui__state_entry(cui_ctx *ui, cui_id id) {
     return e;
 }
 
+/* The state of id when it has some or want is true, else NULL: for components
+ * whose state is all rest values until touched (a button in a long list). */
+void *cui__state_lazy(cui_ctx *ui, cui_id id, size_t size, bool want) {
+    cui_state_entry *e = cui__state_find(ui, id);
+    if (!want && (!e || !e->data || e->size < size)) return NULL;
+    return cui_state(ui, id, size);
+}
+
 /* A 0..1 fade toward on, kept in state only while it is above zero, so rows that
  * scroll past without being hovered cost no allocation. */
 float cui__hover_fade(cui_ctx *ui, cui_id id, bool on, float duration) {

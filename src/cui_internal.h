@@ -335,7 +335,8 @@ typedef struct cui_state_entry {
 } cui_state_entry;
 
 cui_state_entry *cui__state_entry(cui_ctx *ui, cui_id id);
-float cui__hover_fade(cui_ctx *ui, cui_id id, bool on, float duration);   /* state only while above zero */
+float cui__hover_fade(cui_ctx *ui, cui_id id, bool on, float duration);
+void *cui__state_lazy(cui_ctx *ui, cui_id id, size_t size, bool want);   /* NULL while untouched */   /* state only while above zero */
 void cui__state_set_dtor(cui_ctx *ui, cui_id id, void (*dtor)(cui_ctx *ui, void *data));
 cui_rect cui__prev_rect(cui_ctx *ui, cui_id id);
 bool cui__has_prev_rect(cui_ctx *ui, cui_id id);

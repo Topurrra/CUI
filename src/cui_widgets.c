@@ -173,7 +173,10 @@ static void cui__paint_underline(cui_ctx *ui, cui_node *n, void *data) {
 bool cui_link(cui_ctx *ui, const char *text) {
     cui_id id = cui_make_id(ui, text) ^ 0x11AC0009u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
-    cui__btn_state *st = cui_state(ui, id, sizeof *st);
+    cui__btn_state rest;
+    memset(&rest, 0, sizeof rest);
+    cui__btn_state *st = cui__state_lazy(ui, id, sizeof *st, r.hovered || r.focus_visible);
+    if (!st) st = &rest;
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     int i = cui__text_node(ui, text, cui__display_len(text), CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body),
@@ -337,7 +340,11 @@ static bool cui__button_impl(cui_ctx *ui, const char *label, const char *icon_on
     cui_push_disabled(ui, disabled);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui_pop_disabled(ui);
-    cui__btn_state *st = cui_state(ui, id, sizeof *st);
+    /* untouched buttons (most of a long list) keep no state */
+    cui__btn_state rest;
+    memset(&rest, 0, sizeof rest);
+    cui__btn_state *st = cui__state_lazy(ui, id, sizeof *st, r.hovered || r.pressed || r.focused || r.focus_visible);
+    if (!st) st = &rest;
     if (st->press.x == 0) st->press.x = 1;
     cui_button_variant v = o->variant;
     if (v == CUI_BUTTON_DEFAULT) v = (icon_only || ui->button_group_depth > 0) ? CUI_BUTTON_GHOST : CUI_BUTTON_SECONDARY;

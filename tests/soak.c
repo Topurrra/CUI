@@ -98,7 +98,7 @@ static double cpu_s(void) {
 typedef struct { size_t size; void *site; } soak_hdr;   /* site: who asked, for --sites */
 static size_t live_bytes, peak_bytes;
 static unsigned long long alloc_calls;
-static bool opt_sites;
+static bool opt_sites, opt_deep;   /* --deep: name the caller one level further up */
 #define SOAK_LIVE (1 << 16)
 static soak_hdr *live_tab[SOAK_LIVE];
 static void live_add(soak_hdr *h) { if (!opt_sites) return; size_t i = ((uintptr_t)h >> 4) & (SOAK_LIVE - 1); while (live_tab[i]) i = (i + 1) & (SOAK_LIVE - 1); live_tab[i] = h; }
@@ -158,7 +158,7 @@ static void *soak_alloc(size_t n, void *u) {
     if (!h) return NULL;
     live_add(h);
     h->size = n; h->site = opt_sites ? __builtin_return_address(1) : NULL; live_bytes += n; alloc_calls++;
-    if (opt_sites) count_call(h->site, __builtin_return_address(2), n);
+    if (opt_sites) count_call(h->site, (opt_deep ? __builtin_return_address(3) : __builtin_return_address(2)), n);
     if (live_bytes > peak_bytes) peak_bytes = live_bytes;
     return h + 1;
 }
@@ -180,7 +180,7 @@ static void *soak_realloc(void *p, size_t n, void *u) {
     live_add(g);
     live_bytes = live_bytes - old + n; alloc_calls++;
     g->size = n; g->site = opt_sites ? __builtin_return_address(1) : NULL;
-    if (opt_sites) count_call(g->site, __builtin_return_address(2), n);
+    if (opt_sites) count_call(g->site, (opt_deep ? __builtin_return_address(3) : __builtin_return_address(2)), n);
     if (live_bytes > peak_bytes) peak_bytes = live_bytes;
     return g + 1;
 }
@@ -590,6 +590,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--sw")) opt_sw = true;
         else if (!strcmp(argv[i], "--full")) opt_full = true;
         else if (!strcmp(argv[i], "--sites")) opt_sites = true;
+        else if (!strcmp(argv[i], "--deep")) opt_sites = opt_deep = true;
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc) opt_csv = argv[++i];
     }
     return example_main();

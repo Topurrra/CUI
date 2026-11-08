@@ -21,7 +21,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Changed
 
-- **Long lists keep less state.** Scrolling through thousands of rows used to leave three state entries per row for five seconds, and the table never shrank: paging through a 5,000 row grid held 15,000 entries. Now an entry that holds only last frame's rectangle expires after 30 frames, hover fades take state only once a row is hovered, and the table packs itself when mostly empty. The same paging holds about 1,700 live entries, and 150 at rest.
+- **Long lists keep less state.** Scrolling through thousands of rows used to leave three state entries per row for five seconds, and the table never shrank: paging through a 5,000 row grid held 15,000 entries. Now an entry that holds only last frame's rectangle expires after 30 frames, hover fades take state only once a row is hovered, buttons and links keep none until touched, and the table packs itself when mostly empty. The same paging holds about 1,700 live entries, and 150 at rest.
 - **Emoji cost less.** The emoji texture is released once no emoji has been drawn for 600 frames, which frees 1 to 4 MB after the picker closes. Small emoji use a quarter of the texture. Bitmap emoji are scaled with precomputed weights, which makes drawing new ones about three times faster, and at most 12 are drawn per frame, so scrolling the picker stays near 2 ms a frame.
 - **The software renderer draws only what changed.** `cui_sw_set_incremental` keeps the last frame in the buffer and repaints only the 64 pixel tiles whose triangles changed, so a hover or a caret blink costs a few tiles rather than the window. A frame where nothing changed draws nothing, and `cui_sw_last_damage` tells the backend which part to copy to the screen. The app's software path and the browser build use it: with the same input, the Mail example used 3.9% of a core instead of 12.9%. Output is identical to a full repaint (tested frame by frame).
 - **The glyph atlas shrinks again.** It still grows when it fills up, but glyphs not drawn for five seconds (sizes from before a zoom or a change of display scale) are dropped, and the rest move into the smallest atlas they fit. A long session no longer keeps a 2048 or 4096 pixel atlas it no longer needs.
@@ -38,6 +38,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- The gallery's image compare page made new textures each time it was visited and never freed the old ones, about 2 MB per visit. Found by the soak test.
 - Joined wheel pickers in the demo sit flush, so the selection band runs across all three.
 - A demo sankey read past the end of its link array.
 
