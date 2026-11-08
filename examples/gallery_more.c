@@ -1076,27 +1076,38 @@ static void page_audio(cui_ctx *ui) {
             float t = (tick + c * 5) / 60.0f, beat = fmodf(t * (1.8f + 0.2f * k) + k * 0.31f, 1.0f);
             lv[k][c] = (0.3f + 0.1f * k) * (0.2f + 0.8f * expf(-beat * (2.5f + k)));
         }
+    static int tour = -1;
+    static cui_tour_step steps[3] = {
+        { 0, "Turn a knob", "Drag up and down. Hold Shift for fine steps, double-click to reset.", CUI_PLACE_BOTTOM_START },
+        { 0, "Watch the levels", "Bars fall back after each peak; the mark above them holds the peak a moment.", CUI_PLACE_TOP_START },
+        { 0, "Ride the faders", "Click a fader, then use the wheel or the arrow keys.", CUI_PLACE_LEFT_START },
+    };
+    if (cui_button(ui, "Take the tour", .icon = CUI_ICON_SPARKLES, .variant = CUI_BUTTON_OUTLINE)) tour = 0;
     cui_row(ui, .gap = 16, .wrap = true, .align = CUI_ALIGN_START) {
         cui_card(ui, .gap = 16, .min_width = 280) {
             cui_heading(ui, "Synth", 4);
             cui_row(ui, .gap = 14, .wrap = true) {
                 cui_knob(ui, "Cutoff", &cutoff, 20, 20000, .unit = "Hz", .log_scale = true, .reset = 1000);
+                steps[0].target = cui_last_id(ui);
                 cui_knob(ui, "Resonance", &res, 0, 1, .format = "%.2f");
                 cui_knob(ui, "Attack", &attack, 1, 2000, .unit = "ms", .log_scale = true, .reset = 10);
                 cui_knob(ui, "Pan", &pan, -1, 1, .bipolar = true, .format = "%+.2f");
             }
             float master[2] = { lv[0][0] * 1.4f, lv[4][1] * 1.3f };
             cui_level_meter(ui, "master", master, 2, .horizontal = true, .length = 240, .scale = true, .segmented = true);
+            steps[1].target = cui_last_id(ui);
         }
         cui_card(ui, .dir = CUI_ROW, .gap = 8, .wrap = true) {
             for (int k = 0; k < 6; k++) {
                 cui_push_id_int(ui, k);
                 cui_fader(ui, names[k], &faders[k], -48, 6, .unit = "dB", .length = 180, .ticks = k == 0 ? marks : NULL,
                           .tick_count = k == 0 ? 6 : 0, .meter = lv[k], .meter_channels = 2);
+                if (k == 2) steps[2].target = cui_last_id(ui);
                 cui_pop_id(ui);
             }
         }
     }
+    if (tour >= 0) cui_tour(ui, "audio-tour", steps, 3, &tour);
 }
 
 /* ---- registry ------------------------------------------------------------ */

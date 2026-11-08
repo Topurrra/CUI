@@ -2025,6 +2025,36 @@ SCENE(month_calendar) {
                            .today = (cui_date){ 2026, 11, 8 }, .cell_height = 96);
     }
 }
+static int g_tour_step = 1;
+static void body_tour(cui_ctx *ui) {
+    static cui_tour_step steps[4] = {
+        { 0, "Welcome to Fieldnotes", "A quick look at the three things you will use every day.", 0 },
+        { 0, "Export anywhere", "Send a report to PDF, Markdown or your team's drive. Shift+Export repeats the last one.", CUI_PLACE_BOTTOM_END },
+        { 0, "Share with your team", "People you invite can comment without an account.", CUI_PLACE_BOTTOM_END },
+        { 0, "Search everything", "Ctrl K finds notes, people and commands.", CUI_PLACE_BOTTOM_START },
+    };
+    cui_card(ui, UPTO(760), .pad = 1, .gap = 0) {
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL, .pad = 12, .wrap = true) {
+            cui_search(ui, "q", (char[32]){ 0 }, 32, .placeholder = "Search", .width = CUI_PX(200));
+            steps[3].target = cui_last_id(ui);
+            cui_spacer(ui);
+            cui_button(ui, "Share", .icon = CUI_ICON_USERS, .variant = CUI_BUTTON_OUTLINE);
+            steps[2].target = cui_last_id(ui);
+            cui_button(ui, "Export", .icon = CUI_ICON_DOWNLOAD, .variant = CUI_BUTTON_PRIMARY);
+            steps[1].target = cui_last_id(ui);
+        }
+        cui_separator(ui);
+        cui_column(ui, .pad = 20, .gap = 10, .width = CUI_FILL) {
+            cui_heading(ui, "Q3 field report", 3);
+            cui_text(ui, "Survey results from the coastal sites, with photos and the soil samples sent to the lab.", .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_skeleton(ui, CUI_PCT(90), 10);
+            cui_skeleton(ui, CUI_PCT(75), 10);
+            cui_skeleton(ui, CUI_PCT(82), 10);
+        }
+    }
+    if (g_tour_step >= 0) cui_tour(ui, "intro", steps, 4, &g_tour_step);
+}
+static void scene_tour(cui_ctx *ui, int f) { if (f < 0) return; frame_wrap(ui, body_tour); }
 SCENE(gauges) {
     static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
@@ -3368,7 +3398,7 @@ int main(int argc, char **argv) {
         { "flame-graph", scene_flame, 1000, 300, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
-        { "month-calendar", scene_month_calendar, 880, 720, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
+        { "month-calendar", scene_month_calendar, 880, 720, true }, { "tour", scene_tour, 820, 420, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
         { "scatter", scene_scatter, 860, 360, true },
         { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
         { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },

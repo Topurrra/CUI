@@ -651,6 +651,36 @@ typedef enum cui_placement {
 typedef struct cui_popover_opts { int _; cui_placement placement; float width; float pad; float gap; } cui_popover_opts;
 CUI_API bool cui_popover_begin(cui_ctx *ui, const char *id, const cui_popover_opts *opts);
 CUI_API void cui_popover_end(cui_ctx *ui);
+
+/* Guided tour: a spotlight on one control at a time, with a card beside it
+ * that says what the control does, for onboarding and "what's new". The
+ * rest of the window dims; the spotlight glides from one control to the
+ * next. Call it after the controls it points at, every frame while *step is
+ * 0 or more; it sets *step to -1 when the tour ends. Right or Enter go to the
+ * next step, Left goes back and Esc ends the tour.
+ *
+ *     static int step = 0;
+ *     cui_button(ui, "Export");  steps[1].target = cui_last_id(ui);
+ *     ...
+ *     if (step >= 0) cui_tour(ui, "intro", steps, 4, &step);
+ */
+typedef struct cui_tour_step {
+    cui_id target;             /* the control to point at (cui_last_id after it); 0: a card in the middle */
+    const char *title;
+    const char *body;
+    cui_placement placement;   /* the card's side of the target, default below it */
+} cui_tour_step;
+typedef struct cui_tour_opts {
+    int _;
+    float width;               /* the card, default 300 */
+    float padding;             /* room around the target inside the spotlight, default 6 */
+    bool block_target;         /* the spotlighted control ignores the pointer too */
+    const char *next_label, *back_label, *done_label;   /* default "Next", "Back", "Done" */
+    const char *count_format;  /* the step count, default "%d of %d" (step, then total) */
+} cui_tour_opts;
+enum { CUI_TOUR_NONE = 0, CUI_TOUR_NEXT, CUI_TOUR_BACK, CUI_TOUR_DONE, CUI_TOUR_SKIPPED };
+/* What happened this frame: one of CUI_TOUR_*. */
+CUI_API int cui_tour_ex(cui_ctx *ui, const char *id, const cui_tour_step *steps, int count, int *step, const cui_tour_opts *opts);
 CUI_API void cui_popover_open(cui_ctx *ui, const char *id);
 CUI_API void cui_popover_close(cui_ctx *ui, const char *id);
 CUI_API void cui_popover_toggle(cui_ctx *ui, const char *id);
@@ -2822,6 +2852,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_tabs(ui, id, items, n, idx, ...) cui_tabs_ex((ui), (id), (items), (n), (idx), CUI__OPTS(cui_tabs_opts, __VA_ARGS__))
 #define cui_nav_item(ui, label, ...)        cui_nav_item_ex((ui), (label), CUI__OPTS(cui_nav_opts, __VA_ARGS__))
 #define cui_popover(ui, id, ...)            CUI__SCOPE_IF(cui_popover_begin((ui), (id), CUI__OPTS(cui_popover_opts, __VA_ARGS__)), cui_popover_end(ui))
+#define cui_tour(ui, id, steps, count, step, ...) cui_tour_ex((ui), (id), (steps), (count), (step), CUI__OPTS(cui_tour_opts, __VA_ARGS__))
 #define cui_menu(ui, label, ...)            CUI__SCOPE_IF(cui_menu_begin((ui), (label), CUI__OPTS(cui_menu_opts, __VA_ARGS__)), cui_menu_end(ui))
 #define cui_context_menu(ui, id)            CUI__SCOPE_IF(cui_context_menu_begin((ui), (id)), cui_context_menu_end(ui))
 #define cui_menu_item(ui, label, ...)       cui_menu_item_ex((ui), (label), CUI__OPTS(cui_menu_item_opts, __VA_ARGS__))

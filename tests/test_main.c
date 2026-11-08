@@ -6329,6 +6329,58 @@ static void test_month(void) {
     cui_destroy(ui);
 }
 
+/* ---- guided tour ---- */
+typedef struct { int step, result, a_clicks, b_clicks; cui_rect ar, br; } tour_ctx;
+static void build_tour(cui_ctx *ui, void *u) {
+    tour_ctx *t = u;
+    static cui_tour_step steps[3] = { { 0, "One", "First", CUI_PLACE_BOTTOM_START }, { 0, "Two", "Second", CUI_PLACE_BOTTOM_START }, { 0, "Three", "Middle", 0 } };
+    cui_row(ui, .gap = 200, .pad = 40) {
+        if (cui_button(ui, "Alpha")) t->a_clicks++;
+        steps[0].target = cui_last_id(ui); t->ar = cui_last_rect(ui);
+        if (cui_button(ui, "Beta")) t->b_clicks++;
+        steps[1].target = cui_last_id(ui); t->br = cui_last_rect(ui);
+    }
+    t->result = cui_tour(ui, "t", steps, 3, &t->step);
+}
+static void test_tour(void) {
+    cui_ctx *ui = new_ctx();
+    tour_ctx t = { 0 };
+    run(ui, build_tour, &t, 4);
+    /* the spotlighted control still takes clicks; the one in the dark does not */
+    cui_vec2 a = center(t.ar), b = center(t.br);
+    click_at(ui, build_tour, &t, a.x, a.y);
+    CHECK(t.a_clicks == 1);
+    click_at(ui, build_tour, &t, b.x, b.y);
+    CHECK(t.b_clicks == 0 && t.step == 0);
+    /* Right goes on, Left back, and the spotlight moves to Beta */
+    key(ui, build_tour, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.step == 1 && t.result == CUI_TOUR_NEXT);
+    run(ui, build_tour, &t, 3);
+    click_at(ui, build_tour, &t, b.x, b.y);
+    CHECK(t.b_clicks == 1);
+    click_at(ui, build_tour, &t, a.x, a.y);
+    CHECK(t.a_clicks == 1);
+    key(ui, build_tour, &t, CUI_KEY_LEFT, 0);
+    CHECK(t.step == 0 && t.result == CUI_TOUR_BACK);
+    key(ui, build_tour, &t, CUI_KEY_RIGHT, 0);
+    key(ui, build_tour, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.step == 2);   /* no target: a card in the middle, and the whole window dims */
+    run(ui, build_tour, &t, 3);
+    click_at(ui, build_tour, &t, b.x, b.y);
+    CHECK(t.b_clicks == 1);
+    key(ui, build_tour, &t, CUI_KEY_RIGHT, 0);
+    CHECK(t.step == -1 && t.result == CUI_TOUR_DONE);
+    /* gone: clicks reach everything again; a new tour ends with Esc */
+    run(ui, build_tour, &t, 2);
+    click_at(ui, build_tour, &t, b.x, b.y);
+    CHECK(t.b_clicks == 2);
+    t.step = 0;
+    run(ui, build_tour, &t, 2);
+    key(ui, build_tour, &t, CUI_KEY_ESCAPE, 0);
+    CHECK(t.step == -1 && t.result == CUI_TOUR_SKIPPED);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6362,6 +6414,7 @@ int main(void) {
     test_dials();
     test_candles();
     test_month();
+    test_tour();
     test_planning();
     test_node_editor();
     test_flame();

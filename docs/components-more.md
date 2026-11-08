@@ -325,6 +325,28 @@ cui_expandable_card(ui, "Billing", &billing_open, .description = "Pro plan", .ic
 
 Expandable text clamps to `lines` with a fade (into `fade_to`, the background by default) and a Show more / Show less link; the height springs. The card's body opens with a height spring and its chevron turns; content inside is disabled while it closes.
 
+### Guided tour
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tour-dark.png"><img src="images/components/tour.png" alt="Guided tour"></picture>
+
+```c
+static cui_tour_step steps[] = {
+    { 0, "Welcome to Fieldnotes", "A quick look at the three things you will use every day." },
+    { 0, "Export anywhere", "Send a report to PDF, Markdown or your team's drive.", CUI_PLACE_BOTTOM_END },
+    { 0, "Search everything", "Ctrl K finds notes, people and commands." },
+};
+static int step = 0;                       /* -1 when no tour is running */
+
+cui_search(ui, "q", query, sizeof query);  steps[2].target = cui_last_id(ui);
+cui_button(ui, "Export");                  steps[1].target = cui_last_id(ui);
+/* ... the rest of the window ... */
+if (step >= 0 && cui_tour(ui, "intro", steps, 3, &step) == CUI_TOUR_DONE) save_tour_seen();
+```
+
+A spotlight on one control at a time, with a card beside it saying what the control does, for onboarding and "what's new". The window dims around a rounded hole over the step's `target`, and the hole glides from one control to the next. A step without a target puts its card in the middle of a fully dimmed window, which suits a welcome or a closing note. The card shows the step count, the `title` and `body`, progress dots, Back and Next (Done on the last step) and a close button; `placement` picks its side of the target and it flips to stay on screen.
+
+Call it after the controls it points at, so their positions are known, and keep calling it while `step` is 0 or more. It moves `step` itself and sets it to -1 when the tour ends, and returns what happened that frame: `CUI_TOUR_NEXT`, `CUI_TOUR_BACK`, `CUI_TOUR_DONE` or `CUI_TOUR_SKIPPED`. Right or Enter go to the next step, Left goes back and Esc ends the tour. The spotlighted control still takes the pointer, so people can try it as they read (`block_target` turns that off), while clicks anywhere else in the dark are swallowed. `width` sets the card, `padding` the room around the target, and `next_label`, `back_label`, `done_label` and `count_format` ("%d of %d") the text in another language.
+
 ### Table of contents
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toc-dark.png"><img src="images/components/toc.png" alt="Table of contents"></picture>
