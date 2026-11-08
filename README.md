@@ -9,7 +9,7 @@
 
 **Native UI components for C.**
 
-About 160 components with spring motion and full keyboard support.<br>
+About 170 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies, about 250 KB.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/yappologistic/CUI/ci.yml?branch=master&label=CI&style=flat-square&labelColor=24292f)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
@@ -92,7 +92,7 @@ int main(void) {
 
 **A complete library**
 
-Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtualized data grid, kanban boards, gantt charts, a dozen kinds of chart, AI chat components, and tool panels such as docking, a node editor, a code editor and a flame graph. They are designed together and look finished without styling.
+Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtualized data grid, kanban boards, gantt charts, a dozen kinds of chart, AI chat components, and tool panels such as docking, a node editor, a code editor, a terminal and a flame graph. They are designed together and look finished without styling.
 
 </td>
 <td width="50%" valign="top">
@@ -152,16 +152,17 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 | **Actions** | button, icon button, button group, split button, toggle group, copy button, hold to confirm, segmented control, menus, command palette |
 | **App chrome** | menu bar, toolbar, status bar, document tabs, docking layout with saved layouts |
 | **Inputs** | text field, password, search, text area, number, money and scrub fields, tag input, one time code, select, combobox, multi-select, shortcut recorder |
-| **Pickers** | date and date range, time, wheel and dial pickers, calendar, color picker, ruler and histogram sliders |
+| **Pickers** | date and date range, time, wheel and dial pickers, calendar, color picker, emoji picker, ruler and histogram sliders, knob and fader |
 | **Selection** | checkbox, switch, radio group and cards, sliders, chips, rating |
 | **Navigation** | tabs, sidebar, breadcrumb, pagination, stepper, table of contents, dock, tab bar |
-| **Overlays** | dialog, sheet, popover, hover card, tooltip, toast stack, confirm popover |
+| **Overlays** | dialog, sheet, popover, hover card, tooltip, toast stack, confirm popover, guided tour |
 | **Feedback** | alert, banner, progress bar and ring, meter, spinner, skeleton, badge, avatar, empty state, timeline |
-| **Data** | card, metric, table, virtualized data grid, tree table, path bar, list, tree, accordion, filter bar |
+| **Data** | card, metric, table, virtualized data grid, tree table, path bar, list, tree, accordion, filter bar, file browser and open/save dialog |
 | **Code** | code block, code editor, diff viewer, markdown view, JSON viewer |
-| **Tool panels** | property inspector, log console, node editor, flame graph, hex viewer, curve and gradient editors, timeline editor |
-| **Charts** | line, area, bar, donut, sparkline, gauge, heatmap, treemap, radar, funnel, sankey, waffle, scatter and more |
-| **Planning** | kanban board, week calendar, gantt chart with dependencies |
+| **Tool panels** | property inspector, log console, terminal, node editor, flame graph, hex viewer, curve and gradient editors, timeline editor, level meter |
+| **Charts** | line, area, bar, donut, sparkline, gauge and radial gauge, candlestick, heatmap, treemap, radar, funnel, sankey, waffle, scatter and more |
+| **Media** | image viewer with zoom and pan, image cropper, image compare, carousel |
+| **Planning** | kanban board, week and month calendars, gantt chart with dependencies |
 | **AI** | reasoning, tool calls, agent plan, sources and citations, context meter, prompt suggestions, model picker, chat composer |
 | **Custom** | a canvas with a full 2D drawing API, per component state and spring animation helpers |
 

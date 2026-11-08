@@ -909,8 +909,8 @@ function siteFooter() {
 
 // components added in the last two rounds; their cards and sidebar rows say "New".
 // Keep this to recent additions: drop ids from here once they have settled in.
-const NEW = new Set(['menu-bar', 'toolbar', 'status-bar', 'document-tabs', 'property-inspector', 'log-console',
-                     'node-editor', 'flame-graph', 'hex-viewer', 'curve-editor', 'gradient-editor',
+const NEW = new Set(['knob-fader-and-level-meter', 'radial-gauge', 'candlestick-chart', 'month-calendar', 'guided-tour',
+                     'image-viewer-and-cropper', 'file-browser-and-picker', 'terminal', 'emoji-picker',
                      'markdown-view', 'code-editor', 'diff-viewer', 'docking', 'tree-table-and-path-bar', 'timeline-editor'].filter((id) => CAT.items[id]));
 const newBadge = (id, cls = 'new-badge') => (NEW.has(id) ? h('span', { class: cls, title: 'Recently added' }, 'New') : null);
 
