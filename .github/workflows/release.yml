@@ -1,10 +1,20 @@
 name: Release
 
-# Pushing a tag like v1.2.0 publishes a GitHub release named "CUI 1.2" whose notes are
-# that version's section of CHANGELOG.md.
+# Publishes a GitHub release named "CUI 1.2" whose notes are that version's section of
+# CHANGELOG.md. Either push a tag like v1.2.0, or run this workflow by hand with the
+# version and the commit to release (it creates the tag).
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, like 1.2.0'
+        required: true
+      ref:
+        description: 'Commit or branch to release'
+        required: true
+        default: master
 
 permissions:
   contents: write
@@ -14,14 +24,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Notes from the changelog
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+      - name: Version and notes from the changelog
         run: |
-          tag="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then tag="v${{ inputs.version }}"; else tag="${GITHUB_REF_NAME}"; fi
           ver="${tag#v}"; short="${ver%.*}"
           awk -v v="· ${short}" 'index($0, "## ") == 1 { if (on) exit; if (index($0, v)) { on = 1; next } } on' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "No section for ${short} in CHANGELOG.md"; exit 1; fi
+          echo "tag=${tag}" >> "$GITHUB_ENV"
           echo "title=CUI ${short}" >> "$GITHUB_ENV"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --title "${title}" --notes-file notes.md --verify-tag
+        run: gh release create "${tag}" --target "${sha}" --title "${title}" --notes-file notes.md
