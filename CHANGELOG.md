@@ -2,7 +2,7 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
-## Unreleased · phones and tablets
+## 2026-11-08 · 1.2: phones, tablets, right to left and performance
 
 ### Added
 

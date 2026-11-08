@@ -1,0 +1,27 @@
+name: Release
+
+# Pushing a tag like v1.2.0 publishes a GitHub release named "CUI 1.2" whose notes are
+# that version's section of CHANGELOG.md.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notes from the changelog
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          ver="${tag#v}"; short="${ver%.*}"
+          awk -v v="· ${short}" 'index($0, "## ") == 1 { if (on) exit; if (index($0, v)) { on = 1; next } } on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "No section for ${short} in CHANGELOG.md"; exit 1; fi
+          echo "title=CUI ${short}" >> "$GITHUB_ENV"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "${title}" --notes-file notes.md --verify-tag

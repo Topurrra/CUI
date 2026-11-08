@@ -338,7 +338,7 @@ Set `CUI_RENDERER=software` to force the software renderer and `CUI_SCALE=2` to 
 
 ## Status and limitations
 
-CUI 1.1 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
+CUI 1.2 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
 
 - **Screen readers.** There is no accessibility tree yet. Keyboard navigation and focus are complete.
 - **Complex scripts.** Text is UTF-8 with kerning and font fallback. The optional `CUI_TEXT_SHAPING` CMake option adds Arabic-script shaping, Unicode bidi and shaped paragraph wrapping for static text (see [integration](docs/integration.md#optional-arabic-script-text-shaping)). Screens mirror for right-to-left languages with `.direction = CUI_DIRECTION_RTL` ([layout](docs/layout.md)). Explicit embeddings, overrides and isolates are unsupported. It is off by default. Editing and other complex scripts remain outside this experimental path. CJK works once you add a fallback font.
