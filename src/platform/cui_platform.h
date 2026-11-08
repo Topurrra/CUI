@@ -37,6 +37,7 @@ void cui__plat_shutdown(cui_app *app);
 bool cui__plat_gl_create(cui_app *app, bool vsync);
 void *cui__plat_gl_proc(const char *name);
 void cui__plat_gl_swap(cui_app *app);
+void cui__plat_gl_release(cui_app *app);   /* drop the GL context: the window goes on with software pictures */
 void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride);
 /* software: shows only the part (x, y, pw, ph) of the buffer that changed; false when the
  * backend cannot, and the whole buffer is shown instead */

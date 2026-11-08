@@ -595,7 +595,7 @@ static int run_window(const cui_app_desc *desc0, void (*frame)(cui_ctx *, void *
     driving = false;
     pthread_join(th, NULL);
     double wall = now_s() - start, cpu = cpu_s() - t0_cpu;
-    printf("app %s (%s): %.1f real minutes, %ld frames (%.1f per second)\n", desc.title ? desc.title : "?", cui_app_backend(app), wall / 60, frames, frames / wall);
+    printf("app %s (%s, %s): %.1f real minutes, %ld frames (%.1f per second)\n", desc.title ? desc.title : "?", cui_app_backend(app), cui_app_is_software(app) ? "software" : "OpenGL", wall / 60, frames, frames / wall);
     printf("  build ms: mean %.3f p50 %.3f p99 %.3f max %.2f\n", build.sum / CUI_MAX(1, build.n), stat_pct(&build, 0.5f), stat_pct(&build, 0.99f), build.max);
     printf("  frame to frame ms: p50 %.2f p99 %.2f max %.1f\n", stat_pct(&whole, 0.5f), stat_pct(&whole, 0.99f), whole.max);
     printf("  CPU %.1f s over %.1f s (%.1f%% of one core)\n", cpu, wall, 100 * cpu / wall);

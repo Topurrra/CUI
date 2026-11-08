@@ -59,6 +59,15 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     bool want_gl = d->renderer != CUI_RENDERER_SOFTWARE && !cui__env_is("CUI_RENDERER", "software");
     if (want_gl && cui__plat_gl_create(app, !d->no_vsync)) {
         app->gl = cui_gl_create(cui__plat_gl_proc);
+        /* OpenGL drawn on the CPU (a virtual machine, a remote session) costs several times
+         * what the software renderer does, as that one redraws only what changed. Where the
+         * window can take a software picture as well, Auto goes software. */
+        bool can_switch = !strcmp(cui__plat_name(), "x11") || !strcmp(cui__plat_name(), "win32");
+        if (app->gl && cui_gl_is_software(app->gl) && d->renderer == CUI_RENDERER_AUTO && can_switch && !cui__env_is("CUI_RENDERER", "opengl")) {
+            cui_gl_destroy(app->gl);
+            app->gl = NULL;
+            cui__plat_gl_release(app);
+        }
     }
     if (app->gl) {
         cui_renderer_iface iface = cui_gl_iface(app->gl);

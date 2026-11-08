@@ -207,6 +207,7 @@ For unit tests, skip the window entirely: create a context with the software ren
 | Variable | Effect |
 |---|---|
 | `CUI_RENDERER=software` | Use the software renderer even when OpenGL is available |
+| `CUI_RENDERER=opengl` | Keep OpenGL even when it is drawn on the CPU (without it, X11 and Win32 apps on a machine with no GPU switch to the software renderer, which costs several times less there) |
 | `CUI_SCALE=2` | Override the display scale |
 | `CUI_THEME=dark` | Start in the dark (or `light`) theme, whatever the app asks for |
 | `CUI_ACCENT=blue` | Start with another accent: `neutral`, `violet`, `blue`, `green`, `amber`, `orange`, `coral`, `rose` |

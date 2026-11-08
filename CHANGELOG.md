@@ -21,6 +21,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Changed
 
+- **No GPU, no OpenGL.** When the OpenGL driver draws on the CPU (Mesa llvmpipe, SwiftShader and the like, common in virtual machines and remote sessions), X11 and Win32 apps on the Auto renderer use CUI's software renderer instead, which redraws only what changed. Notes under llvmpipe went from 27% of a core to 4%. `cui_gl_is_software` tells, and `CUI_RENDERER=opengl` keeps OpenGL.
 - **Full software repaints are about twice as fast.** An opaque solid, or the inside of an opaque rounded rectangle, is filled as one run of a color instead of pixel by pixel, which was most of the work on a typical screen of panels and cards. The output is identical, byte for byte, on every screenshot.
 - **Per-frame buffers shrink again.** Vertices, indices, draw commands, nodes and the frame arena shrink once they have been more than four times bigger than needed for 600 frames, so a heavy page no longer leaves its buffers behind.
 - **Long lists keep less state.** Scrolling through thousands of rows used to leave three state entries per row for five seconds, and the table never shrank: paging through a 5,000 row grid held 15,000 entries. Now an entry that holds only last frame's rectangle expires after 30 frames, hover fades take state only once a row is hovered, buttons and links keep none until touched, and the table packs itself when mostly empty. The same paging holds about 1,700 live entries, and 150 at rest.

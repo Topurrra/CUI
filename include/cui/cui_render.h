@@ -66,6 +66,10 @@ CUI_API cui_renderer_iface cui_gl_iface(cui_gl_renderer *r);
 CUI_API void cui_gl_render(cui_gl_renderer *r, const cui_draw_data *dd, bool clear);
 /* Reads the bound framebuffer into a top-down RGBA buffer. */
 CUI_API void cui_gl_read_pixels(cui_gl_renderer *r, int width, int height, void *rgba);
+/* True when the OpenGL driver draws on the CPU (Mesa llvmpipe, SwiftShader and the
+ * like, as in virtual machines and remote sessions). CUI's own software renderer,
+ * which redraws only what changed, is then much cheaper. */
+CUI_API bool cui_gl_is_software(const cui_gl_renderer *r);
 
 #ifdef __cplusplus
 }

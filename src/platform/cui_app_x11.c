@@ -313,6 +313,11 @@ void *cui__plat_gl_proc(const char *name) {
     return p;
 }
 
+void cui__plat_gl_release(cui_app *app) {
+    cui__x11 *x = cui__x(app);
+    if (x->ctx) { x->MakeCurrent(x->dpy, None, NULL); x->DestroyContext(x->dpy, x->ctx); x->ctx = NULL; }
+}
+
 void cui__plat_gl_swap(cui_app *app) {
     cui__x11 *x = cui__x(app);
     if (x->ctx) x->SwapBuffers(x->dpy, x->win);

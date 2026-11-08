@@ -525,3 +525,8 @@ bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int st
     (void)app; (void)bgra; (void)w; (void)h; (void)stride; (void)x; (void)y; (void)pw; (void)ph;
     return false;   /* the whole buffer is shown each time */
 }
+
+void cui__plat_gl_release(cui_app *app) {
+    cui__win32 *w = cui__w(app);
+    if (w->glrc) { wglMakeCurrent(NULL, NULL); wglDeleteContext(w->glrc); w->glrc = NULL; }
+}

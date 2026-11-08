@@ -35,7 +35,7 @@ extern "C" {
 typedef struct cui_app cui_app;
 
 typedef enum cui_renderer_kind {
-    CUI_RENDERER_AUTO = 0,     /* OpenGL, falling back to software */
+    CUI_RENDERER_AUTO = 0,     /* OpenGL, or software when there is no GPU (CPU-drawn OpenGL, X11 and Win32) */
     CUI_RENDERER_OPENGL,
     CUI_RENDERER_SOFTWARE
 } cui_renderer_kind;
