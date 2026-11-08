@@ -299,6 +299,16 @@ cui_state_entry *cui__state_entry(cui_ctx *ui, cui_id id) {
     return e;
 }
 
+/* A 0..1 fade toward on, kept in state only while it is above zero, so rows that
+ * scroll past without being hovered cost no allocation. */
+float cui__hover_fade(cui_ctx *ui, cui_id id, bool on, float duration) {
+    cui_state_entry *e = cui__state_find(ui, id);
+    if (!on && (!e || !e->data || e->size < sizeof(float) || *(float *)e->data <= 0.0f)) return 0.0f;
+    float *v = cui_state(ui, id, sizeof(float));
+    cui__tween(ui, v, on ? 1.0f : 0.0f, duration);
+    return *v;
+}
+
 void *cui_state(cui_ctx *ui, cui_id id, size_t size) {
     cui_state_entry *e = cui__state_entry(ui, id);
     if (e->size < size) {
@@ -312,6 +322,7 @@ void *cui_state(cui_ctx *ui, cui_id id, size_t size) {
 void cui__state_set_dtor(cui_ctx *ui, cui_id id, void (*dtor)(cui_ctx *ui, void *data)) {
     cui__state_entry(ui, id)->dtor = dtor;
 }
+void cui_state_on_free(cui_ctx *ui, cui_id id, void (*fn)(cui_ctx *ui, void *data)) { if (ui) cui__state_set_dtor(ui, id, fn); }
 
 cui_rect cui__prev_rect(cui_ctx *ui, cui_id id) {
     cui_state_entry *e = cui__state_find(ui, id);
@@ -330,7 +341,10 @@ static void cui__state_gc(cui_ctx *ui) {
     if (ui->frame % 60) return;
     for (int i = 0; i < ui->state_count; i++) {
         cui_state_entry *e = &ui->states[i];
-        if (!e->id || ui->frame - e->last_frame < 300) continue;
+        /* an entry with only last frame's rectangle is needed for a frame or two; state
+         * someone keeps (data) stays for about five seconds unused */
+        uint64_t keep = (e->data || e->dtor) ? 300 : 30;
+        if (!e->id || ui->frame - e->last_frame < keep) continue;
         int b = (int)(e->id & (uint32_t)(ui->bucket_count - 1));
         int *link = &ui->state_buckets[b];
         while (*link >= 0 && *link != i) link = &ui->states[*link].next;
@@ -340,6 +354,21 @@ static void cui__state_gc(cui_ctx *ui) {
         memset(e, 0, sizeof *e);
         e->next = ui->state_free;
         ui->state_free = i;
+    }
+    /* after a burst (a long list scrolled through) most slots are free: pack the
+     * live ones so the table shrinks back; their data does not move */
+    int live = 0;
+    for (int i = 0; i < ui->state_count; i++) live += ui->states[i].id != 0;
+    if (ui->state_count > 2048 && live * 4 < ui->state_count) {
+        int cap = CUI_MAX(live * 2, 256);
+        cui_state_entry *ns = cui__alloc(ui, sizeof *ns * (size_t)cap);
+        int n = 0;
+        for (int i = 0; i < ui->state_count; i++) if (ui->states[i].id) ns[n++] = ui->states[i];
+        cui__free(ui, ui->states);
+        ui->states = ns; ui->state_count = n; ui->state_cap = cap; ui->state_free = -1;
+        int nb = 1024;
+        while (nb < n) nb *= 2;
+        cui__state_rehash(ui, nb);
     }
 }
 

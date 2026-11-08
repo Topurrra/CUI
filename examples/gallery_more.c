@@ -548,11 +548,18 @@ static void make_scene(unsigned char *px, int w, int h, bool color) {
         }
 }
 
+typedef struct { cui_texture before, after; } cmp_textures;
+static void cmp_textures_free(cui_ctx *ui, void *data) {
+    cmp_textures *tx = data;
+    cui_image_destroy(ui, tx->before);
+    cui_image_destroy(ui, tx->after);
+}
+
 static void page_social(cui_ctx *ui) {
     static int likes[3] = { 12, 3, 0 };
     static bool liked[3] = { true, false, false };
     static int slide = 1;
-    static cui_texture before, after;
+    static cui_texture before, after;   /* this frame's: from the state below */
     static float split = 0.45f;
     static int deck = 0;
     static double revenue = 48210;
@@ -562,16 +569,19 @@ static void page_social(cui_ctx *ui) {
         { "Aiko Tanaka", { 0xec, 0x48, 0x99, 255 }, 0, false }, { "Daniel Mensah", { 0x10, 0xb9, 0x81, 255 }, 0, false },
         { "Rosa Delgado", { 0xa8, 0x55, 0xf7, 255 }, 0, false },
     };
-    /* textures belong to one context: a flag in its state store says whether this one has them */
-    bool *made = cui_state(ui, cui_make_id(ui, "cmp-textures"), sizeof *made);
-    if (!*made) {
-        *made = true;
+    /* textures belong to one context, so they live in its state store; they are freed with
+     * the state, a few seconds after the page is left, and made again on the way back */
+    cui_id tid = cui_make_id(ui, "cmp-textures");
+    cmp_textures *tx = cui_state(ui, tid, sizeof *tx);
+    if (!tx->before) {
         static unsigned char a[640 * 400 * 4], b[640 * 400 * 4];
         make_scene(a, 640, 400, false);
         make_scene(b, 640, 400, true);
-        before = cui_image_create(ui, 640, 400, a);
-        after = cui_image_create(ui, 640, 400, b);
+        tx->before = cui_image_create(ui, 640, 400, a);
+        tx->after = cui_image_create(ui, 640, 400, b);
+        cui_state_on_free(ui, tid, cmp_textures_free);
     }
+    before = tx->before; after = tx->after;
     cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .width = CUI_FILL) {
         cui_column(ui, .width = CUI_GROW(1), .gap = 10) {
             section(ui, "Chat", "Grouped bubbles, read receipts and a typing indicator.");

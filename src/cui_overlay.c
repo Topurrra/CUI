@@ -1050,8 +1050,7 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
         int key = y * 10000 + m * 100 + day;
         cui_id did = cui__hash(&key, sizeof key, id);
         cui_interact r = cui__interact(ui, did, CUI_IF_FOCUSABLE);
-        float *hv = cui_state(ui, did, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        float hv_v = cui__hover_fade(ui, did, r.hovered, CUI__T_HOVER), *hv = &hv_v;
         bool sel = value && value->year == y && value->month == m && value->day == day;
         bool is_today = today.year == y && today.month == m && today.day == day;
         int c = cui__node_new(ui, did);
@@ -1099,8 +1098,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
     cui_popup *p = cui__popup_get(ui, pid, true);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
     int col = -1;
     if (o->label) {
         col = cui__node_new(ui, 0);

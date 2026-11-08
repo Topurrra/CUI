@@ -414,8 +414,7 @@ static void cui__json_rows(cui_ctx *ui, cui_id id, cui__jparse *p, cui__json_sta
     cui_id rid = cui__hash(&node, sizeof node, id);
     cui_interact r = cui__interact(ui, rid, 0);
     if (r.clicked && container && node < 4096) { st->collapsed[node >> 3] ^= (uint8_t)(1 << (node & 7)); collapsed = !collapsed; }
-    float *hv = cui_state(ui, rid, sizeof(float));
-    cui__tween(ui, hv, (r.hovered && container) ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    float hv_v = cui__hover_fade(ui, rid, (r.hovered && container), CUI__T_HIGHLIGHT), *hv = &hv_v;
     float fs = cui__fs(ui, 13);
     int row = cui__node_new(ui, rid);
     cui_node *rn = &ui->nodes[row];

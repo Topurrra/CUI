@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- `cui_state_on_free(ui, id, fn)`: a function that frees what a piece of state holds (textures, buffers) when the state is dropped or the context is destroyed.
 - `cui_request_wakeup(ui, seconds)`: a frame within that many seconds with no input, for content that changes on a timer (a clock, polling, messages arriving). An app that used to redraw continuously for that can now sleep in between.
 - **Soak test** (`tests/soak.c`): runs an app the way a person would, clicking what it drew, typing, scrolling, dragging, resizing and leaving it idle, for as long as asked. It records library memory, allocations per frame, frame times, textures and process memory, and fails if anything is left allocated after `cui_destroy`. It runs headless at many times real speed, or in a real window driven by real input events.
 - **Emoji picker and color emoji**: the 1,914 emoji of Unicode 17 with names, groups, search, recent emoji, skin tones and a preview. It has keys and touch scrolling. Emoji come from the system's color emoji font (sbix, CBDT or COLR version 0), read from the file as needed, with sequences found through the font's ligatures. `cui_emoji` and `cui_draw_emoji` draw an emoji anywhere. The built-in list adds about 16 KB.
@@ -20,6 +21,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Changed
 
+- **Long lists keep less state.** Scrolling through thousands of rows used to leave three state entries per row for five seconds, and the table never shrank: paging through a 5,000 row grid held 15,000 entries. Now an entry that holds only last frame's rectangle expires after 30 frames, hover fades take state only once a row is hovered, and the table packs itself when mostly empty. The same paging holds about 1,700 live entries, and 150 at rest.
 - **Emoji cost less.** The emoji texture is released once no emoji has been drawn for 600 frames, which frees 1 to 4 MB after the picker closes. Small emoji use a quarter of the texture. Bitmap emoji are scaled with precomputed weights, which makes drawing new ones about three times faster, and at most 12 are drawn per frame, so scrolling the picker stays near 2 ms a frame.
 - **The software renderer draws only what changed.** `cui_sw_set_incremental` keeps the last frame in the buffer and repaints only the 64 pixel tiles whose triangles changed, so a hover or a caret blink costs a few tiles rather than the window. A frame where nothing changed draws nothing, and `cui_sw_last_damage` tells the backend which part to copy to the screen. The app's software path and the browser build use it: with the same input, the Mail example used 3.9% of a core instead of 12.9%. Output is identical to a full repaint (tested frame by frame).
 - **The glyph atlas shrinks again.** It still grows when it fills up, but glyphs not drawn for five seconds (sizes from before a zoom or a change of display scale) are dropped, and the rest move into the smallest atlas they fit. A long session no longer keeps a 2048 or 4096 pixel atlas it no longer needs.

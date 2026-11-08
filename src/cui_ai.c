@@ -320,8 +320,6 @@ int cui_agent_plan_ex(cui_ctx *ui, const char *id_str, const cui_plan_step *step
         cui_id sid = cui__hash(&k, sizeof k, id ^ 0x57E9u);
         cui_interact r = cui__interact(ui, sid, 0);
         if (r.clicked) clicked = k;
-        float *hv = cui_state(ui, sid, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         cui_rect pr = cui__prev_rect(ui, sid);
         float cy = pr.y + 9 + 10;
         if (k == 0) first_y = cy;
@@ -463,8 +461,7 @@ int cui_source_list(cui_ctx *ui, const char *id_str, const cui_source *sources, 
         cui_id cid = cui__hash(&k, sizeof k, id ^ 0x50Cu);
         cui_interact r = cui__interact(ui, cid, CUI_IF_FOCUSABLE);
         if (r.clicked) clicked = k;
-        float *hv = cui_state(ui, cid, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        float hv_v = cui__hover_fade(ui, cid, r.hovered, CUI__T_HOVER), *hv = &hv_v;
         int c = cui__node_new(ui, cid);
         cui_node *cn = &ui->nodes[c];
         cn->w = CUI_PX(196); cn->gap = 6;
@@ -510,8 +507,7 @@ bool cui_citation(cui_ctx *ui, int number, const cui_source *s) {
     snprintf(key, sizeof key, "cite%d", number);
     cui_id id = cui_make_id(ui, key);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
     int n = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[n];
     nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->gap = 4;
@@ -756,8 +752,7 @@ static bool cui__model_item(cui_ctx *ui, const cui_model *m, bool checked) {
     cui_interact r = cui__interact(ui, id, 0);
     if (r.hovered && nav && (ui->mx != ui->pmx || ui->my != ui->pmy || !nav->keyboard)) { nav->highlight = index; nav->keyboard = false; }
     bool hl = nav && nav->highlight == index;
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, hl ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    float hv_v = cui__hover_fade(ui, id, hl, CUI__T_HIGHLIGHT), *hv = &hv_v;
     int n = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[n];
     nd->dir = CUI_ROW; nd->align = CUI_ALIGN_CENTER; nd->gap = 10;
@@ -809,8 +804,7 @@ bool cui_model_picker_ex(cui_ctx *ui, const char *id_str, const cui_model *model
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     bool key = ui->focus == id && ui->focus_visible && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE));
     if (r.clicked && !(open && key) && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, (r.hovered || open) ? 1.0f : 0.0f, CUI__T_HOVER);
+    float hv_v = cui__hover_fade(ui, id, (r.hovered || open), CUI__T_HOVER), *hv = &hv_v;
     int b = cui__node_new(ui, id);
     cui_node *bn = &ui->nodes[b];
     bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 6;

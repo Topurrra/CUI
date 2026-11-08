@@ -356,8 +356,7 @@ static void cui__range_month(cui_ctx *ui, cui_id cal_id, cui__rcal_state *st, in
         cui_id did = cui__hash(&days, sizeof days, cal_id);
         cui_interact r = cui__interact(ui, did, CUI_IF_FOCUSABLE);
         if (r.hovered) *new_hover = days;
-        float *hv = cui_state(ui, did, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        float hv_v = cui__hover_fade(ui, did, r.hovered, CUI__T_HOVER), *hv = &hv_v;
         bool in = have_s && days >= lo && days <= hi && (have_e && hi > lo);
         bool is_end = have_s && (days == s || (have_e && days == e));
         int wdk = cui__dow(days);
@@ -589,8 +588,7 @@ static bool cui__time_column(cui_ctx *ui, const char *sid, int count, int value,
         if (sel) sel_index = idx;
         cui_id iid = cui__hash(&k, sizeof k, scid);
         cui_interact r = cui__interact(ui, iid, 0);
-        float *hv = cui_state(ui, iid, sizeof(float));
-        cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+        float hv_v = cui__hover_fade(ui, iid, r.hovered, CUI__T_HIGHLIGHT), *hv = &hv_v;
         int it = cui__node_new(ui, iid);
         cui_node *n = &ui->nodes[it];
         n->h = CUI_PX(32); n->w = CUI_FILL;

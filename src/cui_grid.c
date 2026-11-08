@@ -226,8 +226,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
         const cui_grid_column *c = &cols[k];
         cui_id hid = cui__hash(&k, sizeof k, b->id ^ 0x4E1u);
         cui_interact hr = cui__interact(ui, hid, c->sortable ? CUI_IF_FOCUSABLE : 0);
-        float *hv = cui_state(ui, hid, sizeof(float));
-        cui__tween(ui, hv, (hr.hovered && c->sortable) ? 1.0f : 0.0f, CUI__T_HOVER);
+        float hv_v = cui__hover_fade(ui, hid, (hr.hovered && c->sortable), CUI__T_HOVER), *hv = &hv_v;
         if (hr.clicked && c->sortable && o->sort) {
             if (o->sort->column == k) o->sort->descending = !o->sort->descending;
             else { o->sort->column = k; o->sort->descending = false; }
@@ -327,8 +326,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
         if (b->o.cursor) *b->o.cursor = row;
         if (b->o.anchor) *b->o.anchor = st->anchor;
     }
-    float *hv = cui_state(ui, rid, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    float hv_v = cui__hover_fade(ui, rid, r.hovered, CUI__T_HIGHLIGHT), *hv = &hv_v;
     int n = cui__node_new(ui, rid);
     cui_node *rn = &ui->nodes[n];
     rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER;
@@ -567,8 +565,7 @@ bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fie
         cui_popup *p = cui__popup_get(ui, pid, true);
         cui_interact r = cui__interact(ui, cid, CUI_IF_FOCUSABLE);
         if (r.clicked && p) { cui__popup_set(ui, pid, !p->open); p->at_mouse = false; }
-        float *hv = cui_state(ui, cid, sizeof(float));
-        cui__tween(ui, hv, (r.hovered || (p && p->open)) ? 1.0f : 0.0f, CUI__T_HOVER);
+        float hv_v = cui__hover_fade(ui, cid, (r.hovered || (p && p->open)), CUI__T_HOVER), *hv = &hv_v;
         int chip = cui__node_new(ui, cid);
         cui_node *cn = &ui->nodes[chip];
         cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 6;
@@ -607,8 +604,7 @@ bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fie
                 cui_interact orr = cui__interact(ui, oid, 0);
                 bool on = (selected[k] & (1u << o)) != 0;
                 if (orr.clicked) { selected[k] ^= 1u << o; changed = true; on = !on; }
-                float *oh = cui_state(ui, oid, sizeof(float));
-                cui__tween(ui, oh, orr.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+                float oh_v = cui__hover_fade(ui, oid, orr.hovered, CUI__T_HIGHLIGHT), *oh = &oh_v;
                 int it = cui__node_new(ui, oid);
                 cui_node *in = &ui->nodes[it];
                 in->dir = CUI_ROW; in->align = CUI_ALIGN_CENTER; in->gap = 10;

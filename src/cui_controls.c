@@ -833,8 +833,7 @@ int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
         } else {
             cui_id id = cui_make_id(ui, items[k]);
             cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
-            float *hv = cui_state(ui, id, sizeof(float));
-            cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+            float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
             int t = cui__text_node(ui, items[k], cui__display_len(items[k]), CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body),
                                    cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), *hv), false);
             ui->nodes[t].id = id;
@@ -851,8 +850,7 @@ int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
 
 static bool cui__page_button(cui_ctx *ui, cui_id id, const char *text, bool selected) {
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->w = CUI_PX(32); n->h = CUI_PX(32);

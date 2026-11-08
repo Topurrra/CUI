@@ -2957,8 +2957,13 @@ typedef void (*cui_paint_fn)(cui_ctx *ui, cui_rect rect, void *user);
 typedef struct cui_canvas_result { cui_rect rect; bool hovered, pressed, clicked; cui_vec2 mouse; } cui_canvas_result;
 CUI_API cui_canvas_result cui_canvas(cui_ctx *ui, const char *id, cui_size width, cui_size height, cui_paint_fn paint, const void *user, size_t user_size);
 
-/* Persistent per-id storage for your own components (zeroed on first use). */
+/* Persistent per-id storage for your own components (zeroed on first use).
+ * State not used for about 300 frames is freed (and zeroed again if it comes
+ * back), so it suits what can be rebuilt. For resources held in it, such as
+ * textures, set a function that frees them: it runs when the state goes or
+ * the context is destroyed. */
 CUI_API void *cui_state(cui_ctx *ui, cui_id id, size_t size);
+CUI_API void cui_state_on_free(cui_ctx *ui, cui_id id, void (*fn)(cui_ctx *ui, void *data));
 
 /* Animation helpers. Values move toward target with a spring and request
  * frames while moving. Reduced motion makes them snap. */

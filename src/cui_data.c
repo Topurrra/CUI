@@ -194,8 +194,7 @@ bool cui_list_item_ex(cui_ctx *ui, const char *title, const cui_list_item_opts *
     if (!o) o = &d;
     cui_id id = cui_make_id(ui, title) ^ 0x115E0008u;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
-    float *hv = cui_state(ui, id, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
     int row = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[row];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 12;
@@ -425,8 +424,7 @@ bool cui_table_row(cui_ctx *ui, bool selected) {
     int ri = t->row_index++;
     cui_id rid = cui__hash(&ri, sizeof ri, t->id ^ 0x20Bu);
     cui_interact r = cui__interact(ui, rid, t->selectable ? CUI_IF_FOCUSABLE : 0);
-    float *hv = cui_state(ui, rid, sizeof(float));
-    cui__tween(ui, hv, r.hovered ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    float hv_v = cui__hover_fade(ui, rid, r.hovered, CUI__T_HIGHLIGHT), *hv = &hv_v;
     int row = cui__node_new(ui, rid);
     cui_node *n = &ui->nodes[row];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER;
