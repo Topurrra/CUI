@@ -354,13 +354,53 @@ static void keep_ltr(cui_sw_renderer *sw) {
     cui_destroy(ui);
     printf("LTR kept: keycaps, counter, code input, code block; Markdown paragraph at x=%d\n", left);
 }
+/* Sliders and radio cards read and answer the pointer and arrow keys the way they are drawn. */
+static float slider_value = 50;
+static int card = 0;
+static void controls_frame(cui_ctx *ui) {
+    static const cui_choice choices[] = { { "One", NULL, NULL, NULL }, { "Two", NULL, NULL, NULL }, { "Three", NULL, NULL, NULL } };
+    cui_begin_frame(ui, 1.0f/60);
+    cui_column(ui, .width = CUI_FILL, .pad = 20, .gap = 20) {
+        cui_slider(ui, "Volume", &slider_value, 0, 100);
+        cui_radio_cards(ui, "cards", choices, 3, &card, .columns = 3);
+    }
+    cui_end_frame(ui);
+}
+static void rtl_controls(cui_sw_renderer *sw) {
+    for (int d = 0; d < 2; d++) {
+        bool rtl = d == 1;
+        cui_ctx *ui = context(sw, rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR, NULL);
+        slider_value = 50; card = 0;
+        for (int f = 0; f < 3; f++) controls_frame(ui);
+        cui_rect tr = cui__prev_rect(ui, cui_make_id(ui, "Volume") ^ 0x51u);
+        /* press near the right end of the track */
+        cui_input_mouse_move(ui, tr.x + tr.w - 12, tr.y + tr.h / 2); controls_frame(ui);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); controls_frame(ui);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); controls_frame(ui);
+        CHECK(rtl ? slider_value < 10 : slider_value > 90, "slider pointer direction");
+        /* the slider has focus: Left moves toward the left end of the track */
+        float before = slider_value;
+        cui_input_key(ui, CUI_KEY_LEFT, true, 0); controls_frame(ui); cui_input_key(ui, CUI_KEY_LEFT, false, 0); controls_frame(ui);
+        CHECK(rtl ? slider_value > before : slider_value < before, "slider arrow direction");
+        /* radio cards: focus the first with Tab and press the arrow toward the second card */
+        cui_rect c0 = cui__prev_rect(ui, cui__hash(&(int){ 0 }, sizeof(int), cui_make_id(ui, "cards")));
+        cui_rect c1 = cui__prev_rect(ui, cui__hash(&(int){ 1 }, sizeof(int), cui_make_id(ui, "cards")));
+        if (fabsf(c0.y - c1.y) < 1) CHECK(rtl ? c1.x < c0.x : c1.x > c0.x, "radio cards order");   /* side by side when wide enough */
+        cui_input_key(ui, CUI_KEY_TAB, true, 0); controls_frame(ui); cui_input_key(ui, CUI_KEY_TAB, false, 0); controls_frame(ui);
+        cui_key toward = rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT;
+        cui_input_key(ui, toward, true, 0); controls_frame(ui); cui_input_key(ui, toward, false, 0); controls_frame(ui);
+        CHECK(card == 1, "radio card arrow direction");
+        cui_destroy(ui);
+    }
+    printf("RTL controls: slider pointer and arrows, radio card arrows\n");
+}
 int main(int argc,char **argv) {
     dark=argc>3;
     cui_sw_renderer *sw=cui_sw_create();
     column_alignment(sw);
     split_direction(sw);
     intrinsic_direction(sw, argc>1?argv[1]:NULL);
-    left_alignment(sw); scroll_overflow(sw); popover_direction(sw); keep_ltr(sw);
+    left_alignment(sw); scroll_overflow(sw); popover_direction(sw); keep_ltr(sw); rtl_controls(sw);
     placeholder_direction(sw, argc>1?argv[1]:NULL);
     cui_ctx *ltr=context(sw,CUI_DIRECTION_LTR,argc>1?argv[1]:NULL);
     cui_ctx *rtl=context(sw,CUI_DIRECTION_RTL,argc>1?argv[1]:NULL);

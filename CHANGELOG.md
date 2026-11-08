@@ -6,7 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
-- **Right-to-left layout** (pull request #2, by Omid Saadat): `cui_direction` with `CUI_DIRECTION_INHERIT`, `LTR`, `RTL` and `AUTO` (from the first strong character) on `cui_ctx_desc`, `cui_box` and `cui_text_opts`, inherited by children. Under RTL, rows, alignment, padding, grids, stacks and horizontal scrolling mirror, and so do directional icons, switches, progress fills, placeholders and popovers; clicks land on the mirrored rectangles. With `CUI_TEXT_SHAPING=ON` a container's direction is the base direction of its paragraphs. `cui_text_align` gains `CUI_TEXT_START` and `CUI_TEXT_END`. Code, numbers, times, key combinations, the week calendar and the gantt keep left to right inside an RTL screen. See [Layout](docs/layout.md).
+- **Right-to-left layout** (pull request #2, by Omid Saadat): `cui_direction` with `CUI_DIRECTION_INHERIT`, `LTR`, `RTL` and `AUTO` (from the first strong character) on `cui_ctx_desc`, `cui_box` and `cui_text_opts`, inherited by children. Under RTL, rows, alignment, padding, grids, stacks and horizontal scrolling mirror, and so do directional icons, switches, progress fills, placeholders and popovers; clicks land on the mirrored rectangles. With `CUI_TEXT_SHAPING=ON` a container's direction is the base direction of its paragraphs. `cui_text_align` gains `CUI_TEXT_START` and `CUI_TEXT_END`. Sliders fill from the right and follow the pointer and arrow keys that way; radio cards swap the arrow keys. Code, numbers, times, key combinations, the week calendar and the gantt keep left to right inside an RTL screen. See [Layout](docs/layout.md).
 - `cui_state_on_free(ui, id, fn)`: a function that frees what a piece of state holds (textures, buffers) when the state is dropped or the context is destroyed.
 - `cui_request_wakeup(ui, seconds)`: a frame within that many seconds with no input, for content that changes on a timer (a clock, polling, messages arriving). An app that used to redraw continuously for that can now sleep in between.
 - **Soak test** (`tests/soak.c`): runs an app the way a person would, clicking what it drew, typing, scrolling, dragging, resizing and leaving it idle, for as long as asked. It records library memory, allocations per frame, frame times, textures and process memory, and fails if anything is left allocated after `cui_destroy`. It runs headless at many times real speed, or in a real window driven by real input events.
@@ -47,6 +47,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- In radio cards, one press of an arrow key moved two cards: the card that took focus acted on the same press.
 - The gallery's image compare page made new textures each time it was visited and never freed the old ones, about 2 MB per visit. Found by the soak test.
 - Joined wheel pickers in the demo sit flush, so the selection band runs across all three.
 - A demo sankey read past the end of its link array.

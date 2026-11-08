@@ -80,9 +80,11 @@ Component coverage:
   recorder), and the week calendar and gantt, whose grids are drawn by hand under
   a header of layout boxes. A component that keeps LTR still shapes its Persian or
   Arabic text correctly; give it an explicit direction to change it.
-- Does not mirror yet: sliders, radio-card indicators, filled text fields, and
-  other custom-drawn components such as charts, gauges, the mixer controls and the
-  node editor. They draw the same in both directions.
+- Sliders and range sliders fill from the right, follow the pointer from the right
+  and swap the arrow keys; radio cards swap the arrow keys too.
+- Does not mirror yet: filled text fields (typed text and the caret stay left to
+  right), and other custom-drawn components such as charts, gauges, the mixer
+  controls and the node editor. They draw the same in both directions.
 
 Editing, cursor navigation and IME are unchanged.
 

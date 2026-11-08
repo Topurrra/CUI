@@ -190,9 +190,10 @@ typedef struct {
     float hover, focus, active;
     bool dragging;
     bool init;
+    bool rtl;   /* the direction the track was laid out in last frame (set when painted) */
 } cui__slider_state;
 
-typedef struct { float t, over, hover, active, focus; bool disabled; float lo_t; bool range; } cui__slider_paint;
+typedef struct { float t, over, hover, active, focus; bool disabled; float lo_t; bool range; bool *rtl_out; } cui__slider_paint;
 
 static float cui__rubber(float d) {
     /* stretch that grows fast at first then saturates, like rubber */
@@ -204,6 +205,9 @@ static float cui__rubber(float d) {
 static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
     cui__slider_paint *p = data;
     cui_rect r = n->rect;
+    if (p->rtl_out) *p->rtl_out = n->rtl;   /* the next frame reads the pointer the same way */
+    /* laid out left to right below; right to left mirrors each rectangle in the track */
+#define CUI__MIRROR(rc) do { if (n->rtl) (rc).x = 2.0f * r.x + r.w - ((rc).x + (rc).w); } while (0)
     float thumb = 18;
     float pad = thumb * 0.5f;
     float x0 = r.x + pad, x1 = r.x + r.w - pad;
@@ -215,6 +219,7 @@ static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
     float tx1 = x1 + pad + (over > 0 ? over : 0);
     float cy = r.y + r.h * 0.5f;
     cui_rect track = { tx0, cy - th * 0.5f, tx1 - tx0, th };
+    CUI__MIRROR(track);
     cui_draw_rect(ui, track, CUI_CORNERS(th * 0.5f), cui_mix(CUI_C(ui, CONTROL_TRACK), CUI_C(ui, CONTROL_TRACK_HOVER), p->hover));
     float tpos = x0 + (x1 - x0) * cui__clampf(p->t, 0, 1);
     if (p->t >= 1.0f && over > 0) tpos += over;
@@ -225,18 +230,21 @@ static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
         if (p->lo_t <= 0.0f && over < 0) fstart += over;
     }
     cui_rect fill = { fstart, track.y, CUI_MAX(0, tpos - fstart), th };
+    CUI__MIRROR(fill);
     cui_draw_rect(ui, fill, CUI_CORNERS(th * 0.5f), CUI_C(ui, CONTROL_ON));
     float positions[2] = { tpos, fstart };
     int thumbs = p->range ? 2 : 1;
     for (int k = 0; k < thumbs; k++) {
         float ts = thumb * (1.0f + 0.08f * p->hover - 0.06f * p->active);
         cui_rect tr = { positions[k] - ts * 0.5f, cy - ts * 0.5f, ts, ts };
+        CUI__MIRROR(tr);
         cui_vec2 o1 = { 0, 1 }, o2 = { 0, 2 };
         cui_draw_shadow(ui, tr, CUI_CORNERS(ts * 0.5f), 2, 0, o1, cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 90 : 38));
         cui_draw_shadow(ui, tr, CUI_CORNERS(ts * 0.5f), 6, 0, o2, cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 50 : 16));
         cui_draw_rect_border(ui, tr, CUI_CORNERS(ts * 0.5f), CUI_C(ui, CONTROL_THUMB), cui__rgba(0, 0, 0, 22), 0.5f);
         if (k == 0) cui__draw_focus_ring(ui, tr, CUI_CORNERS(ts * 0.5f), p->focus);
     }
+#undef CUI__MIRROR
 }
 
 static void cui__slider_header(cui_ctx *ui, const char *label, const char *value_text) {
@@ -273,14 +281,16 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     float x0 = pr.x + pad, x1 = pr.x + pr.w - pad;
     bool jumped = false;
     if (r.active && ui->mdown[0] && pr.w > 0) {
-        float mt = (ui->mx - x0) / (x1 - x0);
+        /* right to left, the minimum is at the right end */
+        float mx = st->rtl ? x0 + x1 - ui->mx : ui->mx;
+        float mt = (mx - x0) / (x1 - x0);
         if (ui->mpressed[0]) {
             st->dragging = true;
             jumped = fabsf(mt - t) > 0.02f;
         }
         float over = 0;
-        if (ui->mx < x0) over = cui__rubber(ui->mx - x0);
-        else if (ui->mx > x1) over = cui__rubber(ui->mx - x1);
+        if (mx < x0) over = cui__rubber(mx - x0);
+        else if (mx > x1) over = cui__rubber(mx - x1);
         st->over.x = over; st->over.v = 0;
         t = cui__clampf(mt, 0, 1);
     } else {
@@ -289,8 +299,9 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     /* keyboard */
     if (r.focused) {
         float step = o->step > 0 ? o->step / (max - min) : 0.01f;
-        if (cui_key_pressed(ui, CUI_KEY_LEFT) || cui_key_pressed(ui, CUI_KEY_DOWN)) t -= step * ((ui->mods & CUI_MOD_SHIFT) ? 10 : 1);
-        if (cui_key_pressed(ui, CUI_KEY_RIGHT) || cui_key_pressed(ui, CUI_KEY_UP)) t += step * ((ui->mods & CUI_MOD_SHIFT) ? 10 : 1);
+        cui_key less = st->rtl ? CUI_KEY_RIGHT : CUI_KEY_LEFT, more = st->rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT;
+        if (cui_key_pressed(ui, less) || cui_key_pressed(ui, CUI_KEY_DOWN)) t -= step * ((ui->mods & CUI_MOD_SHIFT) ? 10 : 1);
+        if (cui_key_pressed(ui, more) || cui_key_pressed(ui, CUI_KEY_UP)) t += step * ((ui->mods & CUI_MOD_SHIFT) ? 10 : 1);
         if (cui_key_pressed(ui, CUI_KEY_HOME)) t = 0;
         if (cui_key_pressed(ui, CUI_KEY_END)) t = 1;
         t = cui__clampf(t, 0, 1);
@@ -322,6 +333,7 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     cui__mark_interactive(ui, tr, CUI_IF_FOCUSABLE);
     cui__slider_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->t = st->thumb.x; p->over = st->over.x; p->hover = st->hover; p->active = st->active; p->focus = st->focus;
+    p->rtl_out = &st->rtl;
     ui->nodes[tr].paint = cui__paint_slider;
     ui->nodes[tr].paint_data = p;
     cui__close(ui);
@@ -329,7 +341,7 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     return *value != old;
 }
 
-typedef struct { int grabbed; cui_spring a, b; float hover; bool init; } cui__range_state;
+typedef struct { int grabbed; cui_spring a, b; float hover; bool init; bool rtl; } cui__range_state;
 
 bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, float min, float max) {
     if (max <= min) max = min + 1;
@@ -343,7 +355,8 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
     cui_rect pr = cui__prev_rect(ui, track_id);
     float x0 = pr.x + 9, x1 = pr.x + pr.w - 9;
     if (r.active && ui->mdown[0] && pr.w > 0) {
-        float mt = cui__clampf((ui->mx - x0) / (x1 - x0), 0, 1);
+        float mx = st->rtl ? x0 + x1 - ui->mx : ui->mx;
+        float mt = cui__clampf((mx - x0) / (x1 - x0), 0, 1);
         if (ui->mpressed[0]) st->grabbed = fabsf(mt - ta) < fabsf(mt - tb) ? 0 : 1;
         if (st->grabbed == 0) ta = CUI_MIN(mt, tb); else tb = CUI_MAX(mt, ta);
     }
@@ -363,6 +376,7 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
     cui__mark_interactive(ui, tr, CUI_IF_FOCUSABLE);
     cui__slider_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->t = st->b.x; p->lo_t = st->a.x; p->range = true; p->hover = st->hover;
+    p->rtl_out = &st->rtl;
     ui->nodes[tr].paint = cui__paint_slider;
     ui->nodes[tr].paint_data = p;
     cui__close(ui);

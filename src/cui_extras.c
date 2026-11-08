@@ -20,11 +20,12 @@ static void cui__focus_after(cui_ctx *ui, int node, bool show) {
 /* Radio cards                                                              */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { float t, hover; bool init; } cui__rc_state;
-typedef struct { float t, hover; } cui__dot_paint;
+typedef struct { float t, hover; bool init; bool rtl; } cui__rc_state;   /* rtl: laid out right to left last frame */
+typedef struct { float t, hover; bool *rtl_out; } cui__dot_paint;
 
 static void cui__paint_radio_dot(cui_ctx *ui, cui_node *n, void *data) {
     cui__dot_paint *p = data;
+    if (p->rtl_out) *p->rtl_out = n->rtl;
     cui_rect r = n->rect;
     float rr = r.w * 0.5f;
     cui_color on = CUI_C(ui, CONTROL_ON);
@@ -51,20 +52,23 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
     int grid = cui__node_new(ui, gid);
     cui__apply_box(ui, &ui->nodes[grid], &gb);
     cui__open(ui, grid);
+    bool moved = false;   /* one step per key press: the card that takes focus must not act on the same press */
     for (int k = 0; k < count; k++) {
         cui_id cid = cui__hash(&k, sizeof k, gid);
         cui_interact r = cui__interact(ui, cid, CUI_IF_FOCUSABLE);
         if (r.clicked) *index = k;
-        if (r.focus_visible) {
-            if ((cui_key_pressed(ui, CUI_KEY_RIGHT) || cui_key_pressed(ui, CUI_KEY_DOWN)) && k < count - 1) {
-                *index = k + 1; ui->focus = cui__hash(&(int){ k + 1 }, sizeof(int), gid);
+        cui__rc_state *st = cui_state(ui, cid, sizeof *st);
+        if (r.focus_visible && !moved) {
+            /* right to left, the next card is to the left */
+            cui_key next = st->rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT, prev = st->rtl ? CUI_KEY_RIGHT : CUI_KEY_LEFT;
+            if ((cui_key_pressed(ui, next) || cui_key_pressed(ui, CUI_KEY_DOWN)) && k < count - 1) {
+                *index = k + 1; ui->focus = cui__hash(&(int){ k + 1 }, sizeof(int), gid); moved = true;
             }
-            if ((cui_key_pressed(ui, CUI_KEY_LEFT) || cui_key_pressed(ui, CUI_KEY_UP)) && k > 0) {
-                *index = k - 1; ui->focus = cui__hash(&(int){ k - 1 }, sizeof(int), gid);
+            else if ((cui_key_pressed(ui, prev) || cui_key_pressed(ui, CUI_KEY_UP)) && k > 0) {
+                *index = k - 1; ui->focus = cui__hash(&(int){ k - 1 }, sizeof(int), gid); moved = true;
             }
         }
         bool sel = *index == k;
-        cui__rc_state *st = cui_state(ui, cid, sizeof *st);
         if (!st->init) { st->t = sel ? 1.0f : 0.0f; st->init = true; }
         cui__tween(ui, &st->t, sel ? 1.0f : 0.0f, CUI__T_STATE);
         cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
@@ -111,7 +115,7 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
         cui__close(ui);
         int dot = cui__leaf(ui, 0, CUI_PX(18), CUI_PX(18));
         cui__dot_paint *dp = cui__frame_alloc(ui, sizeof *dp);
-        dp->t = st->t; dp->hover = st->hover;
+        dp->t = st->t; dp->hover = st->hover; dp->rtl_out = &st->rtl;
         ui->nodes[dot].paint = cui__paint_radio_dot;
         ui->nodes[dot].paint_data = dp;
         cui__close(ui);
