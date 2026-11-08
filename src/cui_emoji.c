@@ -51,10 +51,12 @@ static uint32_t cui__t32(const uint8_t *t, uint32_t len, uint64_t off) { return 
 #define CUI__T16(t, len, off) cui__t16((t), (len), (uint64_t)(off))
 #define CUI__T32(t, len, off) cui__t32((t), (len), (uint64_t)(off))
 
+static void cui__emoji_hook(cui_ctx *ui, int what);
+
 static cui__emoji *cui__em(cui_ctx *ui) {
     if (!ui->emoji) {
         ui->emoji = cui__alloc(ui, sizeof(cui__emoji));
-        if (ui->emoji) memset(ui->emoji, 0, sizeof(cui__emoji));
+        if (ui->emoji) { memset(ui->emoji, 0, sizeof(cui__emoji)); ui->emoji_hook = cui__emoji_hook; }
     }
     return ui->emoji;
 }
@@ -84,7 +86,7 @@ static void cui__em_close_font(cui_ctx *ui, cui__emoji *e) {
     e->avail_font = false;
 }
 
-void cui__emoji_drop_texture(cui_ctx *ui) {
+static void cui__emoji_drop_texture(cui_ctx *ui) {
     cui__emoji *e = ui->emoji;
     if (!e) return;
     if (e->tex && ui->renderer.texture_destroy) ui->renderer.texture_destroy(ui->renderer.user, e->tex);
@@ -94,12 +96,12 @@ void cui__emoji_drop_texture(cui_ctx *ui) {
 
 /* once no emoji has been drawn for a while (the picker closed), the texture goes;
  * it is made again, and filled as needed, the next time one is drawn */
-void cui__emoji_frame(cui_ctx *ui) {
+static void cui__emoji_frame(cui_ctx *ui) {
     cui__emoji *e = ui->emoji;
     if (e && e->tex && ui->frame - e->last_draw > CUI__EM_IDLE) cui__emoji_drop_texture(ui);
 }
 
-void cui__emoji_shutdown(cui_ctx *ui) {
+static void cui__emoji_shutdown(cui_ctx *ui) {
     cui__emoji *e = ui->emoji;
     if (!e) return;
     cui__emoji_drop_texture(ui);
@@ -107,6 +109,12 @@ void cui__emoji_shutdown(cui_ctx *ui) {
     cui__free(ui, e->data); cui__free(ui, e->recs); cui__free(ui, e->avail);
     cui__free(ui, e);
     ui->emoji = NULL;
+}
+
+static void cui__emoji_hook(cui_ctx *ui, int what) {
+    if (what == 0) cui__emoji_frame(ui);
+    else if (what == 1) cui__emoji_drop_texture(ui);
+    else cui__emoji_shutdown(ui);
 }
 
 /* ------------------------------------------------------------------------ */

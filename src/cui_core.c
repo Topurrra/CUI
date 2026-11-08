@@ -228,7 +228,7 @@ cui_ctx *cui_create(const cui_ctx_desc *desc) {
 
 void cui_destroy(cui_ctx *ui) {
     if (!ui) return;
-    cui__emoji_shutdown(ui);
+    if (ui->emoji_hook) ui->emoji_hook(ui, 2);
     cui__fonts_shutdown(ui);
     for (int i = 0; i < ui->state_count; i++) {
         if (ui->states[i].dtor && ui->states[i].data) ui->states[i].dtor(ui, ui->states[i].data);
@@ -256,7 +256,7 @@ void cui_destroy(cui_ctx *ui) {
 }
 
 void cui_set_renderer(cui_ctx *ui, const cui_renderer_iface *r) {
-    cui__emoji_drop_texture(ui);   /* made by the old renderer */
+    if (ui->emoji_hook) ui->emoji_hook(ui, 1);   /* its texture was made by the old renderer */
     if (ui->atlas_tex && ui->renderer.texture_destroy) ui->renderer.texture_destroy(ui->renderer.user, ui->atlas_tex);
     ui->atlas_tex = 0;
     if (r) ui->renderer = *r; else memset(&ui->renderer, 0, sizeof ui->renderer);
@@ -770,7 +770,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
 
     cui__theme_update(ui);
     cui__fonts_begin_frame(ui);
-    if (ui->emoji) cui__emoji_frame(ui);
+    if (ui->emoji_hook) ui->emoji_hook(ui, 0);
     cui__draw_reset(ui);
 
     ui->node_count = 0;

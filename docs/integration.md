@@ -110,17 +110,18 @@ CUI is built to stay small. Measured with GCC, `-DCMAKE_BUILD_TYPE=MinSizeRel`, 
 
 | | Size |
 |---|---|
-| Whole library (every component, both renderers, X11 backend, fonts) | about 590 KB |
+| Whole library (about 170 components, both renderers, X11 backend, fonts) | about 990 KB |
 | of which embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons) | 95 KB, compressed |
 | `examples/hello` on Linux, whole executable | about 250 KB |
-| `examples/hello.exe` on Windows (MinGW), whole executable | about 380 KB |
-| `examples/assistant`, an AI chat app | about 330 KB |
-| `examples/gallery`, every component in use | about 690 KB |
+| `examples/hello.exe` on Windows (MinGW), whole executable | about 410 KB |
+| `examples/assistant`, an AI chat app | about 380 KB |
+| `examples/gallery`, every component in use | about 890 KB |
 
 What keeps it small:
 
 - The library is compiled with one section per function, so the linker can drop everything your app never calls. Turn that on in your own executable for release builds: `-Wl,--gc-sections` (GCC and Clang on Linux, MinGW), `-Wl,-dead_strip` (macOS), `/OPT:REF /OPT:ICF` (MSVC). The examples already do.
 - The embedded fonts are stored as DEFLATE streams (about 48% smaller) and unpacked into memory once, when a context is created (about 1.5 ms).
+- Parts only some apps use (color emoji, the file browser, the terminal, the image decoder) are reached only from their own components. MinGW and MSVC drop unused code a whole file at a time rather than a function at a time, so the core never calls into those files directly, and an app that does not use them does not carry them.
 - Image decoding covers PNG and JPEG only. `-DCUI_IMAGE_ALL_FORMATS=ON` adds BMP, GIF and TGA.
 
 Going smaller:

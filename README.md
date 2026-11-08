@@ -313,13 +313,16 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 | Measure | Result |
 |---|---|
 | `hello` on Linux, stripped, whole executable | about 250 KB |
-| `assistant` (the AI app above), whole executable | about 330 KB |
-| Whole library: every component, both renderers, X11 backend, fonts and icons | about 590 KB |
-| Build, layout and paint a frame (gallery pages, 1240 × 820 points at 2×) | 0.12 to 0.25 ms |
-| Software rasterization of the same frame (2480 × 1640 pixels, 4 threads) | 12 to 46 ms |
+| `assistant` (the AI app above), whole executable | about 380 KB |
+| Whole library: about 170 components, both renderers, X11 backend, fonts and icons | about 990 KB |
+| Build, layout and paint a frame (gallery pages, 1240 × 820 points at 2×) | 0.09 to 0.75 ms, most under 0.25 |
+| Software rasterization of the same frame, all of it (2480 × 1640 pixels, 4 threads) | 3.4 to 19 ms |
+| Software rasterization after the first frame | only what changed: 4 to 15% of the pixels in a typical frame |
+| A real app in use (Notes, Mail, an IDE; software renderer, 1280 × 800) | 2 to 3% of a core, 11 to 13 MB resident |
+| Library memory over an hour of use | 2 to 9 MB, flat, nothing left after `cui_destroy` |
 | Idle CPU | 0%, event driven |
 
-The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off ([Integration](docs/integration.md#binary-size)). Timings are wall clock on a 4 core cloud VM; `cui_bench` in [`tests/`](tests) reproduces them.
+The library is compiled for dead code stripping, so apps only carry what they use, and every heavy part (fonts, image decoding, the window layer) can be turned off ([Integration](docs/integration.md#binary-size)). Timings are wall clock on a 4 core cloud VM; `cui_bench` in [`tests/`](tests) reproduces them, and [Performance](docs/performance.md) has the hour-long soak tests behind the memory and CPU rows.
 
 ## Platforms
 

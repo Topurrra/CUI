@@ -50,22 +50,43 @@ The ranges are what memory moves between, not growth: the top end comes with lar
 
 ### A real window
 
-The same person driving a real X11 window through XTest for 8 minutes, at 1280×800. CPU is the share of one core over the whole run, including the idle spells.
+The same person driving a real X11 window through XTest for 5 minutes at 1280×800 with the software renderer, then 90 seconds of nobody touching it. CPU is the share of one core over the whole run, idle spells included.
 
-| App | Software renderer: CPU | Software: resident memory | OpenGL on llvmpipe: CPU | OpenGL: resident memory |
-|---|---|---|---|---|
-| Notes | 2.8% | 10.8 MB | 26.6% | 104 MB |
-| Mail | 4.2% | 11.8 MB | 29.0% | 105 MB |
-| Studio | 2.4% | 13.1 MB | 34.5% | 107 MB |
+| App | CPU in use | CPU left alone | Resident memory |
+|---|---|---|---|
+| Notes | 2.6% | 0.1% | 10.7 to 11.0 MB |
+| Mail | 3.3% | 0.1% | 11.6 to 11.7 MB |
+| Studio | 1.8% | 0.1% | 13.0 to 13.2 MB |
+| Chat | 2.9% | 0.1% | 36 to 38 MB, of which about 26 MB is the app's 120,000 messages |
+| Mixer, always animating | 4.6% | 7.3% | 12.4 to 12.6 MB |
+| Pulse, always animating | 23% | 21% | 12.4 to 13.2 MB |
 
-Resident memory stayed within 0.5 MB of its value at the first minute in every run. The machine has no GPU, so OpenGL is drawn on the CPU by Mesa's llvmpipe, which costs about ten times as much as CUI's own renderer and loads about 90 MB of driver. The default renderer therefore picks software when the OpenGL driver reports a software rasterizer (llvmpipe, softpipe, SwiftShader, Microsoft Basic Render and others); `CUI_RENDERER=opengl` overrides it. With a real GPU OpenGL is the better choice and stays the default.
+Mixer and Pulse animate all the time, so leaving them alone does not make them cheaper; they run at a steady 60 frames a second (99th percentile frame interval 17.0 ms). Pulse redraws over 40% of its window every frame. Left alone, the other apps draw only when the caret blinks or a timer is due.
 
-A window left alone for 90 seconds costs 0.1 to 0.3% of a core: it draws only when the caret blinks or a timer is due.
+The machine has no GPU. Through OpenGL on Mesa's llvmpipe, which draws on the CPU, the same Notes, Mail and Studio runs took 27 to 35% of a core and about 105 MB (most of it the driver), ten times the software renderer. The default renderer therefore picks software when the OpenGL driver reports a software rasterizer (llvmpipe, softpipe, SwiftShader, Microsoft Basic Render and others); `CUI_RENDERER=opengl` overrides it. With a real GPU OpenGL is the better choice and stays the default.
 
 ### Speed
 
-- In the real window runs a frame's build (the app's code plus layout and drawing into the draw list) took 0.02 to 0.04 ms on average and about 0.1 ms at the 99th percentile. The headless runs, which shared the machine with a dozen others, measured 0.06 to 1.0 ms on average.
-- A full software repaint of the Mail example at 1280×800 takes 219 million instructions, down from 547 million; Studio 299 million, down from 709 million. After the first frame the software renderer redrew 4 to 15% of the pixels per frame in most apps; the always-animating Mixer and Pulse redrew 22% and 42%.
+Ten simulated minutes of each app, run one at a time on an otherwise idle machine. Build is the app's code plus layout and drawing into the draw list; paint is the software renderer on one thread at 2× scale (2560×1600 pixels at desktop size), drawing only what changed.
+
+| App | Build ms, mean / 99th percentile | Paint ms, mean / 99th percentile | Pixels drawn per frame |
+|---|---|---|---|
+| Notes | 0.063 / 0.154 | 0.87 / 8.96 | 8.6% |
+| Mail | 0.078 / 0.239 | 4.30 / 42.62 | 12.7% |
+| Settings | 0.079 / 0.220 | 0.74 / 17.78 | 4.0% |
+| Tracker | 0.265 / 0.495 | 1.36 / 27.95 | 4.3% |
+| Music | 0.142 / 0.299 | 1.23 / 14.18 | 9.0% |
+| Finance | 0.208 / 0.403 | 1.66 / 18.48 | 4.8% |
+| Dashboard | 0.188 / 0.348 | 1.92 / 15.33 | 7.7% |
+| Assistant | 0.289 / 0.576 | 6.32 / 53.06 | 10.5% |
+| Gallery | 0.240 / 0.818 | 1.63 / 15.63 | 15.5% |
+| Studio | 0.089 / 0.196 | 0.55 / 6.07 | 10.3% |
+| Chat | 0.152 / 0.451 | 1.08 / 29.40 | 4.1% |
+| Pulse | 0.191 / 0.314 | 2.79 / 8.85 | 43.4% |
+| Mixer | 0.283 / 0.507 | 1.33 / 8.82 | 20.1% |
+
+- The 99th percentile paints are dialogs and sheets sliding over a dimmed window, which redraw the whole window every frame: up to about 60 ms on one thread at 2560×1600, and a quarter of that with the four threads an app uses.
+- A full software repaint of a gallery page at 2480×1640 takes 3.4 to 19 ms on four threads (`cui_bench`).
 - `cui_create` takes about 2 ms and the first frame about 2.4 ms.
 - The terminal parses 328 MB of output per second and keeps 0.2 ms frames while 2 MB arrives every frame.
 - The emoji picker builds a frame in about 2 ms.
@@ -83,6 +104,9 @@ A window left alone for 90 seconds costs 0.1 to 0.3% of a core: it draws only wh
 - Buttons and links took state on first draw. They now take it only when touched, which cut Chat's allocations per frame from 0.27 to 0.09.
 - The glyph atlas and per-frame buffers only ever grew. Both now shrink back after a burst (a large window, a zoom, a long page).
 - OpenGL through llvmpipe used ten times the CPU of the software renderer, so the default now picks software in that case.
+- Always-animating windows drew as fast as they could when the swap did not wait for the display: 115 to 160 frames a second on two to three cores through software OpenGL, and up to 120 with the software renderer. They now run at the display's refresh rate. On Windows, a timed wait could also return at once or sleep a whole 15.6 ms tick; it now uses a high-resolution timer.
+- A dialog fading in over a dimmed window took up to 320 ms a frame on one thread at 2560×1600, almost all of it in the dialog's soft shadow and the dim layer. Shadow insides, long translucent runs and the shadow falloff are now cheap, and the worst frame is about 60 ms.
+- Every Windows app carried the emoji picker and the PNG decoder (70 KB) because the core called into the emoji code, and MinGW and MSVC drop unused code by whole files. The core now reaches it through a hook set when emoji are first used.
 
 ## What keeps it low
 
