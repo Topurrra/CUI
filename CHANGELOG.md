@@ -21,6 +21,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Changed
 
+- **Full software repaints are about twice as fast.** An opaque solid, or the inside of an opaque rounded rectangle, is filled as one run of a color instead of pixel by pixel, which was most of the work on a typical screen of panels and cards. The output is identical, byte for byte, on every screenshot.
 - **Per-frame buffers shrink again.** Vertices, indices, draw commands, nodes and the frame arena shrink once they have been more than four times bigger than needed for 600 frames, so a heavy page no longer leaves its buffers behind.
 - **Long lists keep less state.** Scrolling through thousands of rows used to leave three state entries per row for five seconds, and the table never shrank: paging through a 5,000 row grid held 15,000 entries. Now an entry that holds only last frame's rectangle expires after 30 frames, hover fades take state only once a row is hovered, buttons and links keep none until touched, and the table packs itself when mostly empty. The same paging holds about 1,700 live entries, and 150 at rest.
 - **Emoji cost less.** The emoji texture is released once no emoji has been drawn for 600 frames, which frees 1 to 4 MB after the picker closes. Small emoji use a quarter of the texture. Bitmap emoji are scaled with precomputed weights, which makes drawing new ones about three times faster, and at most 12 are drawn per frame, so scrolling the picker stays near 2 ms a frame.

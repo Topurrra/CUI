@@ -403,7 +403,31 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
             }
             continue;
         }
+        /* An opaque solid, or the inside of an opaque rounded rectangle, is a plain run of one
+         * color: find it with the same test the loop below uses (it is one interval, found by
+         * walking in from both ends) and fill it in one go. The loop does the edges. */
+        int sx0 = x1, sx1 = x1;
+        if (ca >= 0.999f && (mode == CUI_SHADE_SOLID || mode == CUI_SHADE_RRECT)) {
+            if (mode == CUI_SHADE_SOLID) { sx0 = x0; sx1 = x1; }
+            else {
+                float inset = bw + 0.5f;
+#define CUI__DEEP(xx) (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset - rmax && ay <= hh - inset) || \
+                      (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset && ay <= hh - inset - rmax)
+                if (ay <= hh - inset) {
+                    int a = x0, b = x1;
+                    while (a < x1 && !(CUI__DEEP(a))) a++;
+                    while (b > a && !(CUI__DEEP(b - 1))) b--;
+                    if (a < b) { sx0 = a; sx1 = b; }
+                }
+#undef CUI__DEEP
+            }
+            if (sx0 < sx1) {
+                uint8_t *p = row + (size_t)sx0 * 4;
+                for (int k = 0, n = sx1 - sx0; k < n; k++) memcpy(p + (size_t)k * 4, opaque, 4);   /* any alignment */
+            }
+        }
         for (int x = x0; x < x1; x++) {
+            if (x == sx0) { x = sx1 - 1; continue; }   /* filled above */
             float px = (float)x + 0.5f;
             float lx = v0->lx + (px - qx0);
             cui__px o;
@@ -485,8 +509,8 @@ static void cui__sw_paint_rect(cui_sw_renderer *r, const cui_draw_data *dd, void
     uint8_t c4[4] = { cc.r, cc.g, cc.b, 255 };
     if (fmt == CUI_SW_BGRA) { c4[0] = cc.b; c4[2] = cc.r; }
     for (int y = y0; y < y1; y++) {
-        uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)stride;
-        for (int x = x0; x < x1; x++) memcpy(row + x * 4, c4, 4);
+        uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)stride + (size_t)x0 * 4;
+        for (int x = 0, n = x1 - x0; x < n; x++) memcpy(row + (size_t)x * 4, c4, 4);
     }
     int h = y1 - y0;
     int threads = r->threads;
