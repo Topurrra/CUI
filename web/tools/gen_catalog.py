@@ -151,7 +151,7 @@ def inline(text, anchors):
     return "".join(out)
 
 # the guide: docs/*.md in reading order (components have their own pages)
-GUIDES = ["getting-started", "layout", "theming", "icons", "custom-components", "integration", "rendering", "design"]
+GUIDES = ["getting-started", "layout", "theming", "icons", "custom-components", "integration", "rendering", "performance", "design"]
 GUIDE_IDS = set(GUIDES)
 
 IMG_RE = re.compile(r"images/(components|showcase)/([\w\-]+?)(?:-dark)?\.png")

@@ -354,6 +354,7 @@ CUI 1.1 is complete enough to build real desktop apps. Every push runs unit, int
 | [Custom components](docs/custom-components.md) | Canvas, drawing API, state and animation |
 | [Integration](docs/integration.md) | Your own window, input and renderer |
 | [Rendering](docs/rendering.md) | The vertex format and the reference shader |
+| [Performance](docs/performance.md) | How memory and speed are tested over hours of use, and the results |
 | [Design principles](docs/design.md) | The rules every component follows |
 
 **Live docs.** The same guide, with every component running in your browser, is at **https://yappologistic.github.io/CUI/**: the library compiled to WebAssembly and drawn with a WebGL2 port of its renderer. It is rebuilt from `master` on every push. To run it locally, use `web/tools/serve.sh` (needs clang with the `wasm32` target) and open http://localhost:8765. See [`web/`](web).
