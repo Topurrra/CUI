@@ -43,6 +43,42 @@ void *cui__frame_alloc(cui_ctx *ui, size_t size) {
     return p;
 }
 
+/* Per-frame buffers grow to the biggest frame. A page that needed a lot (a long
+ * table, a big chart) would otherwise keep them big after it is gone: every 600
+ * frames, a buffer more than four times what any of those frames used shrinks
+ * to twice that. Done at the start of a frame, when last frame's draw data has
+ * been rendered and nothing points into these buffers. */
+#define CUI__TRIM_FRAMES 600
+static void *cui__trim(cui_ctx *ui, void *p, int *cap, int peak, size_t elem) {
+    int want = CUI_MAX(peak * 2, (int)(16384 / elem));
+    if (*cap <= want * 2 || (size_t)*cap * elem < 65536) return p;
+    void *np = cui__realloc(ui, p, (size_t)want * elem);
+    *cap = want;
+    return np;
+}
+static void cui__trim_buffers(cui_ctx *ui) {
+    ui->peak_vtx = CUI_MAX(ui->peak_vtx, ui->dl.vtx_count);
+    ui->peak_idx = CUI_MAX(ui->peak_idx, ui->dl.idx_count);
+    ui->peak_cmd = CUI_MAX(ui->peak_cmd, ui->dl.cmd_count);
+    ui->peak_nodes = CUI_MAX(ui->peak_nodes, ui->node_count);
+    ui->peak_arena = CUI_MAX(ui->peak_arena, ui->arena_used);
+    if (ui->frame - ui->peak_since < CUI__TRIM_FRAMES) return;
+    ui->dl.vtx = cui__trim(ui, ui->dl.vtx, &ui->dl.vtx_cap, ui->peak_vtx, sizeof *ui->dl.vtx);
+    ui->dl.idx = cui__trim(ui, ui->dl.idx, &ui->dl.idx_cap, ui->peak_idx, sizeof *ui->dl.idx);
+    ui->dl.cmd = cui__trim(ui, ui->dl.cmd, &ui->dl.cmd_cap, ui->peak_cmd, sizeof *ui->dl.cmd);
+    ui->nodes = cui__trim(ui, ui->nodes, &ui->node_cap, ui->peak_nodes, sizeof *ui->nodes);
+    if (ui->arena_cap > 65536 && ui->arena_cap > ui->peak_arena * 4 && !ui->arena_overflow) {
+        size_t cap = 1 << 16;
+        while (cap < ui->peak_arena * 2) cap *= 2;
+        cui__free(ui, ui->arena);
+        ui->arena = cui__alloc(ui, cap);
+        ui->arena_cap = cap;
+    }
+    ui->peak_vtx = ui->peak_idx = ui->peak_cmd = ui->peak_nodes = 0;
+    ui->peak_arena = 0;
+    ui->peak_since = ui->frame;
+}
+
 static void cui__frame_arena_reset(cui_ctx *ui) {
     size_t demand = ui->arena_used;
     while (ui->arena_overflow) {
@@ -691,6 +727,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
     ui->cursor = CUI_CURSOR_ARROW;
     if (ui->settle_frames > 0) ui->settle_frames--;
 
+    cui__trim_buffers(ui);   /* before anything of this frame is in them */
     cui__frame_arena_reset(ui);
 
     /* swap hit lists and focus order */

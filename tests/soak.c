@@ -8,6 +8,8 @@
  *     --seed N        input seed
  *     --window        open a real window (X11) and drive it with real input events (XTest)
  *     --sw            windowed: software renderer instead of OpenGL
+ *     --idle          windowed, with no input at all: the cost of an app left alone
+ *     --storm         headless: a new window size and display scale every 10 frames
  *     --csv PATH      a sample every few seconds: time, memory, frame times, counts
  *     --sites         where live memory and later allocations come from (build with -fno-omit-frame-pointer)
  *
@@ -45,7 +47,7 @@
 /* ---- options ---- */
 static double opt_minutes = 10;
 static unsigned opt_seed = 1;
-static bool opt_window, opt_sw, opt_full;
+static bool opt_window, opt_sw, opt_full, opt_idle, opt_storm;
 static const char *opt_csv;
 
 bool soak_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap) {
@@ -218,6 +220,16 @@ static float stat_pct(soak_stat *s, float p) {
     return s->v[CUI_MIN(s->n - 1, (int)(p * s->n))];
 }
 
+/* ---- the slowest frames, with what happened just before ---- */
+typedef struct { float ms; double t; char what[48]; } soak_slow;
+static soak_slow slowest[5];
+static char last_action[48] = "start";
+static void note_slow(float ms, double t) {
+    int k = 0;
+    for (int i = 1; i < 5; i++) if (slowest[i].ms < slowest[k].ms) k = i;
+    if (ms > slowest[k].ms) { slowest[k].ms = ms; slowest[k].t = t; snprintf(slowest[k].what, sizeof slowest[k].what, "%s", last_action); }
+}
+
 /* ---- the person ---- */
 typedef enum { A_NONE, A_MOVE, A_DOWN, A_UP, A_SCROLL, A_KEY, A_TEXT, A_RESIZE, A_THEME, A_WAIT } soak_kind;
 typedef struct { soak_kind k; float x, y; int key, mods; char text[48]; double at; } soak_act;
@@ -362,6 +374,10 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
         while (!empty() && queue[qhead].at <= t) {
             soak_act a = queue[qhead];
             qhead = (qhead + 1) % 256;
+            if (a.k != A_MOVE && a.k != A_WAIT) {
+                static const char *const kinds[] = { "none", "move", "press", "release", "scroll", "key", "type", "resize", "theme", "wait" };
+                snprintf(last_action, sizeof last_action, "%s at %.0f,%.0f", kinds[a.k], px_, py_);
+            }
             switch (a.k) {
             case A_MOVE: cui_input_mouse_move(ui, a.x, a.y); break;
             case A_DOWN: cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); break;
@@ -376,6 +392,11 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
             }
             if (a.k != A_WAIT) plan_at = t + frand(0.15f, 1.2f);
         }
+        if (opt_storm && frames % 10 == 9) {
+            static const float scales[] = { 1, 1.25f, 1.5f, 2, 3 };
+            vw_ = frand(320, 1600); vh_ = frand(300, 1000);
+            cui_set_viewport(ui, vw_, vh_, scales[rnd() % 5]);
+        }
         /* a frame, but only when the app needs one, as a real loop does */
         bool need = cui_needs_redraw(ui) || frames < 3 || (wake_at >= 0 && t >= wake_at);
         if (need) {
@@ -387,6 +408,7 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
             float bms = (float)((b1 - b0) * 1000);
             stat_add(&build, bms);
             if (t > 30) stat_add(&build_steady, bms);
+            note_slow(bms, t);
             frames++;
             float wk = cui_next_wakeup(ui);
             wake_at = wk >= 0 ? t + wk : -1;   /* as a real loop sleeps until then */
@@ -435,6 +457,9 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
     printf("  allocations after warm-up: %.3f per frame (%llu over %ld frames)\n", steady_frames ? (double)(alloc_calls - allocs_at_warm) / steady_frames : 0.0,
            alloc_calls - allocs_at_warm, steady_frames);
     if (opt_sites) { dump_sites(); dump_calls(); }
+    printf("  slowest frames:");
+    for (int i = 0; i < 5; i++) if (slowest[i].ms > 0) printf(" %.1f ms at %.0f s (%s);", slowest[i].ms, slowest[i].t, slowest[i].what);
+    printf("\n");
     printf("  textures: %ld live, %ld KB | states %d | process RSS %.1f MB, heap %.1f MB\n", tex_live, tex_bytes / 1024, ui->state_count, rss_mb(), heap_mb());
     printf("  person: %ld clicks, %ld typing, %ld scrolls, %ld drags, %ld keys, %ld resizes, %ld idle spells\n", n_clicks, n_types, n_scrolls, n_drags, n_keys, n_resizes, n_idles);
     cui_destroy(ui);
@@ -516,6 +541,16 @@ static void *driver(void *arg) {
     return NULL;
 }
 
+/* idle runs: the app may sleep for good with nothing to do; one pointer move at the end wakes it */
+static double idle_end;
+static void *idle_waker(void *arg) {
+    (void)arg;
+    while (driving && now_s() < idle_end) usleep(50000);
+    Display *d = XOpenDisplay(NULL);
+    if (d) { XTestFakeMotionEvent(d, -1, (int)win_x + 5, (int)win_y + 5, 0); XFlush(d); XCloseDisplay(d); }
+    return NULL;
+}
+
 static int run_window(const cui_app_desc *desc0, void (*frame)(cui_ctx *, void *), void *user) {
     cui_app_desc desc = desc0 ? *desc0 : (cui_app_desc){ 0 };
     desc.renderer = opt_sw ? CUI_RENDERER_SOFTWARE : CUI_RENDERER_AUTO;
@@ -524,7 +559,8 @@ static int run_window(const cui_app_desc *desc0, void (*frame)(cui_ctx *, void *
     cui_ctx *ui = cui_app_ui(app);
     if (opt_full && app->sw) cui_sw_set_incremental(app->sw, false);   /* to compare: every frame drawn whole */
     pthread_t th;
-    pthread_create(&th, NULL, driver, NULL);
+    idle_end = now_s() + opt_minutes * 60;
+    pthread_create(&th, NULL, opt_idle ? idle_waker : driver, NULL);
     static soak_stat build, whole;
     double start = now_s(), end = start + opt_minutes * 60, next = start, last = start;
     t0_cpu = cpu_s(); t0_wall = start;
@@ -589,6 +625,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--window")) opt_window = true;
         else if (!strcmp(argv[i], "--sw")) opt_sw = true;
         else if (!strcmp(argv[i], "--full")) opt_full = true;
+        else if (!strcmp(argv[i], "--idle")) opt_idle = true;
+        else if (!strcmp(argv[i], "--storm")) opt_storm = true;   /* headless: a new window size and scale every 10 frames */   /* windowed, nobody touching it: what does waiting cost */
         else if (!strcmp(argv[i], "--sites")) opt_sites = true;
         else if (!strcmp(argv[i], "--deep")) opt_sites = opt_deep = true;
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc) opt_csv = argv[++i];

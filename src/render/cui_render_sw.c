@@ -33,11 +33,30 @@ struct cui_sw_renderer {
     int threads;
     /* incremental: repaint only the tiles whose triangles changed since the last frame */
     bool incremental;
-    uint32_t tex_gen, drawn_tex_gen;       /* a texture changed: everything is redrawn */
     const void *last_px; int last_w, last_h, last_stride; cui_sw_format last_fmt;
     uint64_t *tiles, *prev; int tiles_cap;
+    uint8_t *force;                        /* tiles that sample a part of a texture that changed */
     int damage[4];                         /* x0, y0, x1, y1 of the last frame's repaint */
+    /* texture parts written since the last frame: triangles sampling them are drawn again
+     * (new glyphs go to unused parts, so text already on screen stays put) */
+    struct { cui_texture t; int x0, y0, x1, y1; } changed[32];
+    int nchanged; bool changed_overflow;
 };
+
+static void cui__sw_note_change(cui_sw_renderer *r, cui_texture t, int x0, int y0, int x1, int y1) {
+    for (int i = 0; i < r->nchanged; i++)
+        if (r->changed[i].t == t) {
+            if (x0 < r->changed[i].x0) r->changed[i].x0 = x0;
+            if (y0 < r->changed[i].y0) r->changed[i].y0 = y0;
+            if (x1 > r->changed[i].x1) r->changed[i].x1 = x1;
+            if (y1 > r->changed[i].y1) r->changed[i].y1 = y1;
+            return;
+        }
+    if (r->nchanged == 32) { r->changed_overflow = true; return; }
+    r->changed[r->nchanged].t = t;
+    r->changed[r->nchanged].x0 = x0; r->changed[r->nchanged].y0 = y0; r->changed[r->nchanged].x1 = x1; r->changed[r->nchanged].y1 = y1;
+    r->nchanged++;
+}
 
 static void *cui__sw_xrealloc(void *p, size_t n) {
     void *q = realloc(p, n);
@@ -57,7 +76,7 @@ static cui_texture cui__sw_tex_create(void *user, int w, int h, cui_texture_form
         slot = r->tex_count++;
     }
     cui__sw_tex *t = &r->tex[slot];
-    r->tex_gen++;
+    cui__sw_note_change(r, (cui_texture)(slot + 1), 0, 0, w, h);
     t->w = w; t->h = h; t->fmt = fmt; t->used = true;
     size_t bytes = (size_t)w * (size_t)h * (size_t)fmt;
     t->data = cui__sw_xrealloc(NULL, bytes);
@@ -71,7 +90,7 @@ static void cui__sw_tex_update(void *user, cui_texture tex, int x, int y, int w,
     int slot = (int)tex - 1;
     if (slot < 0 || slot >= r->tex_count || !r->tex[slot].used) return;
     cui__sw_tex *t = &r->tex[slot];
-    r->tex_gen++;
+    cui__sw_note_change(r, tex, x, y, x + w, y + h);
     int bpp = (int)t->fmt;
     const uint8_t *src = pixels;
     for (int row = 0; row < h; row++) {
@@ -88,7 +107,6 @@ static void cui__sw_tex_destroy(void *user, cui_texture tex) {
     free(r->tex[slot].data);
     r->tex[slot].data = NULL;
     r->tex[slot].used = false;
-    r->tex_gen++;
 }
 
 static int cui__cpu_count(void) {
@@ -118,6 +136,7 @@ void cui_sw_destroy(cui_sw_renderer *r) {
     free(r->tex);
     free(r->tiles);
     free(r->prev);
+    free(r->force);
     free(r);
 }
 
@@ -507,13 +526,27 @@ static uint64_t cui__sw_hash_bytes(const void *p, size_t n, uint64_t h) {
     return h;
 }
 
-/* each tile's hash: everything drawn over it, in order, with its clip and texture */
-static void cui__sw_tile_hashes(const cui_draw_data *dd, uint64_t *tiles, int tw, int th) {
+/* each tile's hash: everything drawn over it, in order, with its clip and texture;
+ * force marks tiles with a triangle sampling a texture part written since last frame */
+static void cui__sw_tile_hashes(cui_sw_renderer *r, const cui_draw_data *dd, uint64_t *tiles, uint8_t *force, int tw, int th) {
     uint64_t seed = cui__sw_hash_bytes(&dd->clear_color, sizeof dd->clear_color, 1469598103934665603ull);
-    for (int i = 0; i < tw * th; i++) tiles[i] = seed;
+    for (int i = 0; i < tw * th; i++) { tiles[i] = seed; force[i] = 0; }
     for (int ci = 0; ci < dd->command_count; ci++) {
         const cui_draw_cmd *cmd = &dd->commands[ci];
-        uint64_t ch = cui__sw_hash_bytes(&cmd->clip, sizeof cmd->clip, (uint64_t)(cmd->texture ? cmd->texture : dd->font_atlas) + 7);
+        cui_texture tid = cmd->texture ? cmd->texture : dd->font_atlas;
+        uint64_t ch = cui__sw_hash_bytes(&cmd->clip, sizeof cmd->clip, (uint64_t)tid + 7);
+        /* a changed part of this command's texture, in texture pixels */
+        int cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+        float tw_px = 1, th_px = 1;
+        bool tex_changed = false;
+        for (int k = 0; k < r->nchanged; k++)
+            if (r->changed[k].t == tid) {
+                int slot = (int)tid - 1;
+                if (slot >= 0 && slot < r->tex_count && r->tex[slot].used) { tw_px = (float)r->tex[slot].w; th_px = (float)r->tex[slot].h; }
+                cx0 = r->changed[k].x0; cy0 = r->changed[k].y0; cx1 = r->changed[k].x1; cy1 = r->changed[k].y1;
+                tex_changed = true;
+                break;
+            }
         for (uint32_t k = 0; k + 2 < cmd->index_count; k += 3) {
             const uint32_t *ix = dd->indices + cmd->index_offset + k;
             const cui_vertex *a = &dd->vertices[ix[0]], *b = &dd->vertices[ix[1]], *c = &dd->vertices[ix[2]];
@@ -525,10 +558,19 @@ static void cui__sw_tile_hashes(const cui_draw_data *dd, uint64_t *tiles, int tw
             uint64_t h = cui__sw_hash_bytes(a, sizeof *a, ch);
             h = cui__sw_hash_bytes(b, sizeof *b, h);
             h = cui__sw_hash_bytes(c, sizeof *c, h);
+            bool forced = false;
+            if (tex_changed) {
+                float u0 = CUI_MIN(a->u, CUI_MIN(b->u, c->u)) * tw_px, u1 = CUI_MAX(a->u, CUI_MAX(b->u, c->u)) * tw_px;
+                float v0 = CUI_MIN(a->v, CUI_MIN(b->v, c->v)) * th_px, v1 = CUI_MAX(a->v, CUI_MAX(b->v, c->v)) * th_px;
+                forced = u1 >= (float)cx0 - 1 && u0 <= (float)cx1 + 1 && v1 >= (float)cy0 - 1 && v0 <= (float)cy1 + 1;
+            }
             int tx0 = CUI_MAX(0, (int)floorf(x0 - 1) / CUI__SW_TILE), ty0 = CUI_MAX(0, (int)floorf(y0 - 1) / CUI__SW_TILE);
             int tx1 = CUI_MIN(tw - 1, (int)ceilf(x1 + 1) / CUI__SW_TILE), ty1 = CUI_MIN(th - 1, (int)ceilf(y1 + 1) / CUI__SW_TILE);
             for (int ty = ty0; ty <= ty1; ty++)
-                for (int tx = tx0; tx <= tx1; tx++) tiles[ty * tw + tx] = cui__sw_mix(tiles[ty * tw + tx], h);
+                for (int tx = tx0; tx <= tx1; tx++) {
+                    tiles[ty * tw + tx] = cui__sw_mix(tiles[ty * tw + tx], h);
+                    if (forced) force[ty * tw + tx] = 1;
+                }
         }
     }
 }
@@ -536,22 +578,28 @@ static void cui__sw_tile_hashes(const cui_draw_data *dd, uint64_t *tiles, int tw
 void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt) {
     if (!r || !dd || !pixels) return;
     if (!r->incremental) {
+        r->nchanged = 0; r->changed_overflow = false;
         cui__sw_paint_rect(r, dd, pixels, width, height, stride, fmt, 0, 0, width, height);
         r->damage[0] = 0; r->damage[1] = 0; r->damage[2] = width; r->damage[3] = height;
         return;
     }
     int tw = (width + CUI__SW_TILE - 1) / CUI__SW_TILE, th = (height + CUI__SW_TILE - 1) / CUI__SW_TILE;
     if (tw * th > r->tiles_cap) {
-        free(r->tiles); free(r->prev);
+        free(r->tiles); free(r->prev); free(r->force);
         r->tiles_cap = tw * th;
         r->tiles = malloc(sizeof(uint64_t) * (size_t)r->tiles_cap);
         r->prev = malloc(sizeof(uint64_t) * (size_t)r->tiles_cap);
+        r->force = malloc((size_t)r->tiles_cap);
         r->last_px = NULL;
-        if (!r->tiles || !r->prev) { free(r->tiles); free(r->prev); r->tiles = r->prev = NULL; r->tiles_cap = 0; r->incremental = false; cui_sw_render(r, dd, pixels, width, height, stride, fmt); return; }
+        if (!r->tiles || !r->prev || !r->force) {
+            free(r->tiles); free(r->prev); free(r->force); r->tiles = r->prev = NULL; r->force = NULL; r->tiles_cap = 0;
+            r->incremental = false; cui_sw_render(r, dd, pixels, width, height, stride, fmt); return;
+        }
     }
-    cui__sw_tile_hashes(dd, r->tiles, tw, th);
-    bool full = pixels != r->last_px || width != r->last_w || height != r->last_h || stride != r->last_stride || fmt != r->last_fmt || r->tex_gen != r->drawn_tex_gen;
-    r->last_px = pixels; r->last_w = width; r->last_h = height; r->last_stride = stride; r->last_fmt = fmt; r->drawn_tex_gen = r->tex_gen;
+    cui__sw_tile_hashes(r, dd, r->tiles, r->force, tw, th);
+    bool full = pixels != r->last_px || width != r->last_w || height != r->last_h || stride != r->last_stride || fmt != r->last_fmt || r->changed_overflow;
+    r->last_px = pixels; r->last_w = width; r->last_h = height; r->last_stride = stride; r->last_fmt = fmt;
+    r->nchanged = 0; r->changed_overflow = false;
     r->damage[0] = width; r->damage[1] = height; r->damage[2] = 0; r->damage[3] = 0;
     if (full) {
         cui__sw_paint_rect(r, dd, pixels, width, height, stride, fmt, 0, 0, width, height);
@@ -561,7 +609,7 @@ void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, in
         int rx0 = 0, rx1 = 0, ry0 = -1, ry1 = 0, dirty_tiles = 0;
         for (int ty = 0; ty <= th; ty++) {
             int a = -1, b = -1;
-            if (ty < th) for (int tx = 0; tx < tw; tx++) if (r->tiles[ty * tw + tx] != r->prev[ty * tw + tx]) { if (a < 0) a = tx; b = tx; dirty_tiles++; }
+            if (ty < th) for (int tx = 0; tx < tw; tx++) if (r->tiles[ty * tw + tx] != r->prev[ty * tw + tx] || r->force[ty * tw + tx]) { if (a < 0) a = tx; b = tx; dirty_tiles++; }
             if (a >= 0 && ry0 >= 0 && a <= rx1 && b >= rx0 - 1) { rx0 = CUI_MIN(rx0, a); rx1 = CUI_MAX(rx1, b); ry1 = ty; continue; }
             if (ry0 >= 0) {   /* paint the rectangle so far */
                 int x0 = rx0 * CUI__SW_TILE, y0 = ry0 * CUI__SW_TILE, x1 = CUI_MIN(width, (rx1 + 1) * CUI__SW_TILE), y1 = CUI_MIN(height, (ry1 + 1) * CUI__SW_TILE);

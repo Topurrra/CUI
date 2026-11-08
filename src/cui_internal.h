@@ -423,6 +423,8 @@ struct cui_ctx {
 
     /* frame arena */
     char *arena; size_t arena_used, arena_cap;
+    /* the most each per-frame buffer needed lately: much bigger ones shrink (cui__trim_buffers) */
+    int peak_vtx, peak_idx, peak_cmd, peak_nodes; size_t peak_arena; uint64_t peak_since;
     struct cui_arena_block { struct cui_arena_block *next; } *arena_overflow;
 
     /* nodes */
