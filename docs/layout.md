@@ -71,8 +71,18 @@ Component coverage:
 - Mirrors: layout containers and directional icon nodes as described above,
   switch thumbs, progress fills, and empty input placeholders. Placeholders align
   at the start and use static shaping with their container's direction when enabled.
+- Mirrors because they are built from layout boxes: lists, tables, the data grid,
+  kanban, tabs, the stepper, the file browser, chat bubbles, the agent plan and
+  most cards and forms.
+- Keeps left to right on purpose: code (code block, code editor, JSON viewer, diff
+  viewer, terminal, hex viewer, log view), numbers and times (rolling counter,
+  one-time code, countdown, time dial), key combinations (keycaps, shortcut
+  recorder), and the week calendar and gantt, whose grids are drawn by hand under
+  a header of layout boxes. A component that keeps LTR still shapes its Persian or
+  Arabic text correctly; give it an explicit direction to change it.
 - Does not mirror yet: sliders, radio-card indicators, filled text fields, and
-  custom-drawn components such as charts, planning views and the node editor.
+  other custom-drawn components such as charts, gauges, the mixer controls and the
+  node editor. They draw the same in both directions.
 
 Editing, cursor navigation and IME are unchanged.
 

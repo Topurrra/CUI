@@ -213,7 +213,16 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
+static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o) {
+    int first = ui->node_count;
+    cui__code_block_ex_body(ui, id_str, code, o);
+    cui__keep_ltr(ui, first);
+}
+
+static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o) {
     cui_code_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
@@ -462,7 +471,17 @@ static void cui__json_rows(cui_ctx *ui, cui_id id, cui__jparse *p, cui__json_sta
     }
 }
 
+static bool cui__json_view_ex_body(cui_ctx *ui, const char *id_str, const char *json, const cui_json_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 bool cui_json_view_ex(cui_ctx *ui, const char *id_str, const char *json, const cui_json_opts *o) {
+    int first = ui->node_count;
+    bool r = cui__json_view_ex_body(ui, id_str, json, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static bool cui__json_view_ex_body(cui_ctx *ui, const char *id_str, const char *json, const cui_json_opts *o) {
     cui_json_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

@@ -1139,7 +1139,17 @@ static void cui__paint_rec_dot(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_circle(ui, c, 3.5f, cui_alpha(p->c, p->t));
 }
 
+static bool cui__shortcut_recorder_ex_body(cui_ctx *ui, const char *id_str, cui_key_combo *combo, const cui_shortcut_recorder_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id_str, cui_key_combo *combo, const cui_shortcut_recorder_opts *o) {
+    int first = ui->node_count;
+    bool r = cui__shortcut_recorder_ex_body(ui, id_str, combo, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static bool cui__shortcut_recorder_ex_body(cui_ctx *ui, const char *id_str, cui_key_combo *combo, const cui_shortcut_recorder_opts *o) {
     cui_shortcut_recorder_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

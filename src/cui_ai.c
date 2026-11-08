@@ -265,14 +265,14 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
 /* Agent plan                                                               */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { float y0, y1; float x; cui_color done, rest; float split; } cui__plan_rail;
+typedef struct { float y0, y1; float x0, x1; cui_color done, rest; float split; } cui__plan_rail;   /* x0, x1: the rail under the icons, left to right and right to left */
 static void cui__paint_plan_rail(cui_ctx *ui, cui_node *n, void *data) {
-    (void)n;
     cui__plan_rail *p = data;
     if (p->y1 <= p->y0) return;
+    float x = n->rtl ? p->x1 : p->x0;
     float split = cui__clampf(p->split, p->y0, p->y1);
-    if (split > p->y0) cui_draw_rect(ui, (cui_rect){ p->x - 0.75f, p->y0, 1.5f, split - p->y0 }, CUI_CORNERS(0.75f), p->done);
-    if (p->y1 > split) cui_draw_rect(ui, (cui_rect){ p->x - 0.75f, split, 1.5f, p->y1 - split }, CUI_CORNERS(0.75f), p->rest);
+    if (split > p->y0) cui_draw_rect(ui, (cui_rect){ x - 0.75f, p->y0, 1.5f, split - p->y0 }, CUI_CORNERS(0.75f), p->done);
+    if (p->y1 > split) cui_draw_rect(ui, (cui_rect){ x - 0.75f, split, 1.5f, p->y1 - split }, CUI_CORNERS(0.75f), p->rest);
 }
 
 int cui_agent_plan_ex(cui_ctx *ui, const char *id_str, const cui_plan_step *steps, int count, const cui_agent_plan_opts *o) {
@@ -325,7 +325,7 @@ int cui_agent_plan_ex(cui_ctx *ui, const char *id_str, const cui_plan_step *step
         if (k == 0) first_y = cy;
         if (k == count - 1) last_y = cy;
         if (s->status == CUI_TASK_DONE || s->status == CUI_TASK_SKIPPED || s->status == CUI_TASK_RUNNING) split = cy;
-        rail->x = pr.x + 10;
+        rail->x0 = pr.x + 10; rail->x1 = pr.x + pr.w - 10;
         int row = cui__node_new(ui, sid);
         cui_node *rn = &ui->nodes[row];
         rn->dir = CUI_ROW; rn->align = CUI_ALIGN_START; rn->gap = 12; rn->w = CUI_FILL;

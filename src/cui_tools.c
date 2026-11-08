@@ -744,7 +744,16 @@ static int cui__utf8_cut(const char *s, int len, int max) {
     return n;
 }
 
+static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const cui_log_view_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 void cui_log_view_ex(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const cui_log_view_opts *o) {
+    int first = ui->node_count;
+    cui__log_view_ex_body(ui, id_str, buf, o);
+    cui__keep_ltr(ui, first);
+}
+
+static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const cui_log_view_opts *o) {
     cui_log_view_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

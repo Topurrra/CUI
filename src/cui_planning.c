@@ -379,7 +379,17 @@ static const char *cui__wd_short[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
 
 #define CUI__WEEK_MIN_DAY 76   /* narrowest readable day column */
 
+static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date week_start, cui_cal_event *ev, int count, const cui_week_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 int cui_week_calendar_ex(cui_ctx *ui, const char *id_str, cui_date week_start, cui_cal_event *ev, int count, const cui_week_opts *o) {
+    int first = ui->node_count;
+    int r = cui__week_calendar_ex_body(ui, id_str, week_start, ev, count, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date week_start, cui_cal_event *ev, int count, const cui_week_opts *o) {
     cui_week_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
@@ -688,7 +698,17 @@ static void cui__paint_gantt_bar(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
+static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int count, cui_date origin, int days, const cui_gantt_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 int cui_gantt_ex(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int count, cui_date origin, int days, const cui_gantt_opts *o) {
+    int first = ui->node_count;
+    int r = cui__gantt_ex_body(ui, id_str, tasks, count, origin, days, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *tasks, int count, cui_date origin, int days, const cui_gantt_opts *o) {
     cui_gantt_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

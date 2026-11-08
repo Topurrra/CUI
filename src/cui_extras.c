@@ -271,7 +271,17 @@ bool cui_tag_input_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap, co
 
 typedef struct { float focus; bool was_complete; } cui__otp_state;
 
+static bool cui__otp_input_body(cui_ctx *ui, const char *id_str, char *code, int length);
+
+/* left to right in any interface: see cui__keep_ltr */
 bool cui_otp_input(cui_ctx *ui, const char *id_str, char *code, int length) {
+    int first = ui->node_count;
+    bool r = cui__otp_input_body(ui, id_str, code, length);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static bool cui__otp_input_body(cui_ctx *ui, const char *id_str, char *code, int length) {
     if (length <= 0) return false;
     if (length > 12) length = 12;
     cui_id id = cui_make_id(ui, id_str);

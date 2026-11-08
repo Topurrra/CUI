@@ -579,7 +579,17 @@ static int cui__ed_lang_kind(const char *lang) {
     return !strcmp(lang, "python") || !strcmp(lang, "py") ? 2 : 0;
 }
 
+static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *id_str, char *buf, size_t cap, const cui_code_editor_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap, const cui_code_editor_opts *o) {
+    int first = ui->node_count;
+    cui_code_editor_result r = cui__code_editor_ex_body(ui, id_str, buf, cap, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *id_str, char *buf, size_t cap, const cui_code_editor_opts *o) {
     cui_code_editor_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

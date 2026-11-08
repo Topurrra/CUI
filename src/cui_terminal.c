@@ -386,7 +386,17 @@ static size_t cui__tm_copy_line(const cui_terminal_buffer *t, int li, uint32_t c
     return n;
 }
 
+static cui_terminal_result cui__terminal_ex_body(cui_ctx *ui, const char *id_str, cui_terminal_buffer *t, const cui_terminal_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id_str, cui_terminal_buffer *t, const cui_terminal_opts *o) {
+    int first = ui->node_count;
+    cui_terminal_result r = cui__terminal_ex_body(ui, id_str, t, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static cui_terminal_result cui__terminal_ex_body(cui_ctx *ui, const char *id_str, cui_terminal_buffer *t, const cui_terminal_opts *o) {
     cui_terminal_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

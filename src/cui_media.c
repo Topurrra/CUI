@@ -434,7 +434,16 @@ static void cui__paint_digit(cui_ctx *ui, cui_node *n, void *data) {
     cui_pop_clip(ui);
 }
 
+static void cui__counter_ex_body(cui_ctx *ui, const char *id_str, double value, const cui_counter_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 void cui_counter_ex(cui_ctx *ui, const char *id_str, double value, const cui_counter_opts *o) {
+    int first = ui->node_count;
+    cui__counter_ex_body(ui, id_str, value, o);
+    cui__keep_ltr(ui, first);
+}
+
+static void cui__counter_ex_body(cui_ctx *ui, const char *id_str, double value, const cui_counter_opts *o) {
     cui_counter_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

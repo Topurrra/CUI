@@ -1071,7 +1071,17 @@ int cui_diff_view_rows(cui_ctx *ui, const char *id_str, cui_diff_row *rows, int 
     return c->nrows;
 }
 
+static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, const char *old_text, const char *new_text, const cui_diff_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 cui_diff_result cui_diff_view_ex(cui_ctx *ui, const char *id_str, const char *old_text, const char *new_text, const cui_diff_opts *o) {
+    int first = ui->node_count;
+    cui_diff_result r = cui__diff_view_ex_body(ui, id_str, old_text, new_text, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, const char *old_text, const char *new_text, const cui_diff_opts *o) {
     cui_diff_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

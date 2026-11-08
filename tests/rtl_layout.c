@@ -310,13 +310,57 @@ static void column_alignment(cui_sw_renderer *sw) {
     }
     printf("table/grid headers (with sort icons) and cells: all five alignments, inherited/explicit/AUTO passed\n");
 }
+/* Code, numbers, times and key combinations keep left to right inside an RTL screen, and
+ * so do a week calendar and a gantt (their grids are drawn by hand). Markdown paragraphs
+ * and left-aligned table columns stay at the left in LTR. */
+static void keep_ltr(cui_sw_renderer *sw) {
+    cui_ctx *ui = context(sw, CUI_DIRECTION_RTL, NULL);
+    static char code[8] = "418";
+    int first[4] = {0};
+    for (int f = 0; f < 2; f++) {
+        cui_begin_frame(ui, 1.0f/60);
+        cui_column(ui, .width = CUI_FILL) {
+            first[0] = ui->node_count; cui_kbd(ui, "Ctrl Shift P");
+            first[1] = ui->node_count; cui_counter(ui, "money", 48210, .group_thousands = true);
+            first[2] = ui->node_count; cui_otp_input(ui, "otp", code, 6);
+            first[3] = ui->node_count; cui_code_block(ui, "code", "int x = 1;");
+            cui_row(ui) { cui_text(ui, "a"); cui_text(ui, "b"); }
+        }
+        cui_end_frame(ui);
+    }
+    for (int k = 0; k < 4; k++) CHECK(!ui->nodes[first[k]].rtl, "component should keep LTR in an RTL screen");
+    /* keycaps run Ctrl, Shift, P from the left */
+    int caps[3], nc = 0;
+    for (int c = ui->nodes[first[0]].first; c >= 0 && nc < 3; c = ui->nodes[c].next) caps[nc++] = c;
+    CHECK(nc == 3 && ui->nodes[caps[0]].rect.x < ui->nodes[caps[1]].rect.x && ui->nodes[caps[1]].rect.x < ui->nodes[caps[2]].rect.x, "keycaps out of order");
+    /* while an ordinary row still mirrors */
+    int row = ui->node_count - 3;
+    CHECK(ui->nodes[row].rtl && ui->nodes[row + 1].rect.x > ui->nodes[row + 2].rect.x, "plain row should mirror");
+    cui_destroy(ui);
+
+    /* Markdown in LTR: a paragraph and a left column start at the left edge */
+    ui = context(sw, CUI_DIRECTION_LTR, NULL);
+    for (int f = 0; f < 2; f++) {
+        cui_begin_frame(ui, 1.0f/60);
+        cui_column(ui, .width = CUI_FILL, .pad = 0) { cui_markdown(ui, "md", "Hi\n\n| a | b |\n|---|--:|\n| x | y |"); }
+        cui_end_frame(ui);
+    }
+    unsigned char *px = malloc(W*H*4); CHECK(px, "pixels allocation failed");
+    cui_sw_render(sw, cui_get_draw_data(ui), px, W, H, W*4, CUI_SW_RGBA);
+    int left = W;   /* leftmost dark pixel of the first text line */
+    for (int y = 0; y < 30; y++) for (int x = 0; x < W; x++) if (px[(y*W + x)*4] < 128 && x < left) left = x;
+    CHECK(left < 40, "Markdown paragraph is not at the left");
+    free(px);
+    cui_destroy(ui);
+    printf("LTR kept: keycaps, counter, code input, code block; Markdown paragraph at x=%d\n", left);
+}
 int main(int argc,char **argv) {
     dark=argc>3;
     cui_sw_renderer *sw=cui_sw_create();
     column_alignment(sw);
     split_direction(sw);
     intrinsic_direction(sw, argc>1?argv[1]:NULL);
-    left_alignment(sw); scroll_overflow(sw); popover_direction(sw);
+    left_alignment(sw); scroll_overflow(sw); popover_direction(sw); keep_ltr(sw);
     placeholder_direction(sw, argc>1?argv[1]:NULL);
     cui_ctx *ltr=context(sw,CUI_DIRECTION_LTR,argc>1?argv[1]:NULL);
     cui_ctx *rtl=context(sw,CUI_DIRECTION_RTL,argc>1?argv[1]:NULL);

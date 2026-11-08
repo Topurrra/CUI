@@ -501,7 +501,16 @@ static void cui__roll_tile(cui_ctx *ui, cui_id sid, int value, float w, float h,
     cui__close(ui);
 }
 
+static void cui__countdown_ex_body(cui_ctx *ui, const char *id_str, double seconds_left, const cui_countdown_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 void cui_countdown_ex(cui_ctx *ui, const char *id_str, double seconds_left, const cui_countdown_opts *o) {
+    int first = ui->node_count;
+    cui__countdown_ex_body(ui, id_str, seconds_left, o);
+    cui__keep_ltr(ui, first);
+}
+
+static void cui__countdown_ex_body(cui_ctx *ui, const char *id_str, double seconds_left, const cui_countdown_opts *o) {
     cui_countdown_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

@@ -132,7 +132,16 @@ void cui_code(cui_ctx *ui, const char *text) {
     cui__close(ui);
 }
 
+static void cui__kbd_body(cui_ctx *ui, const char *keys);
+
+/* left to right in any interface: see cui__keep_ltr */
 void cui_kbd(cui_ctx *ui, const char *keys) {
+    int first = ui->node_count;
+    cui__kbd_body(ui, keys);
+    cui__keep_ltr(ui, first);
+}
+
+static void cui__kbd_body(cui_ctx *ui, const char *keys) {
     /* each space separated key becomes a keycap */
     int row = cui__node_new(ui, 0);
     cui_node *r = &ui->nodes[row];

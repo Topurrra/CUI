@@ -293,7 +293,17 @@ static int cui__hex_value(char c) {
     return -1;
 }
 
+static cui_hex_result cui__hex_view_ex_body(cui_ctx *ui, const char *id_str, const uint8_t *data, size_t size, cui_hex_selection *sel, const cui_hex_view_opts *o);
+
+/* left to right in any interface: see cui__keep_ltr */
 cui_hex_result cui_hex_view_ex(cui_ctx *ui, const char *id_str, const uint8_t *data, size_t size, cui_hex_selection *sel, const cui_hex_view_opts *o) {
+    int first = ui->node_count;
+    cui_hex_result r = cui__hex_view_ex_body(ui, id_str, data, size, sel, o);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static cui_hex_result cui__hex_view_ex_body(cui_ctx *ui, const char *id_str, const uint8_t *data, size_t size, cui_hex_selection *sel, const cui_hex_view_opts *o) {
     cui_hex_view_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;

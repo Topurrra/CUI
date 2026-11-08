@@ -903,7 +903,17 @@ static void cui__paint_time_dial(cui_ctx *ui, cui_node *n, void *data) {
     if (p->mode == 1 && p->minute % 5 != 0) cui_draw_circle(ui, tip, 3, p->glyph);   /* a minute between labels */
 }
 
+static bool cui__time_dial_body(cui_ctx *ui, const char *id_str, int *hour, int *minute, float size);
+
+/* left to right in any interface: see cui__keep_ltr */
 bool cui_time_dial(cui_ctx *ui, const char *id_str, int *hour, int *minute, float size) {
+    int first = ui->node_count;
+    bool r = cui__time_dial_body(ui, id_str, hour, minute, size);
+    cui__keep_ltr(ui, first);
+    return r;
+}
+
+static bool cui__time_dial_body(cui_ctx *ui, const char *id_str, int *hour, int *minute, float size) {
     if (size <= 0) size = 248;
     cui_id id = cui_make_id(ui, id_str);
     cui_id face_id = id ^ 0xFACEu;

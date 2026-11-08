@@ -301,6 +301,13 @@ typedef struct cui_scroll_state {
 } cui_scroll_state;
 
 int cui__node_new(cui_ctx *ui, cui_id id);
+/* Code, numbers, times and key combinations read left to right even in a right-to-left
+ * interface, and so do components whose grid is drawn by hand under a header made of
+ * layout boxes (a week calendar, a gantt): mirroring one without the other would put
+ * events under the wrong day. The component's first node (its root) keeps LTR unless
+ * the app gave it a direction itself. */
+#define cui__keep_ltr(ui, first) do { int f_ = (first); \
+    if (f_ < (ui)->node_count && !(ui)->nodes[f_].direction) (ui)->nodes[f_].direction = CUI_DIRECTION_LTR; } while (0)
 cui_node *cui__node(cui_ctx *ui, int index);
 int cui__open(cui_ctx *ui, int node);            /* push node as current parent */
 void cui__close(cui_ctx *ui);
