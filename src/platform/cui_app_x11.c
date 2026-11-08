@@ -28,6 +28,8 @@ typedef void (*PFN_glXDestroyContext)(Display *, GLXContext_);
 typedef GLXContext_ (*PFN_glXCreateContextAttribsARB)(Display *, GLXFBConfig_, GLXContext_, int, const int *);
 typedef void (*PFN_glXSwapIntervalEXT)(Display *, GLXDrawable_, int);
 typedef int (*PFN_glXSwapIntervalMESA)(unsigned int);
+typedef Bool (*PFN_glXGetMscRateOML)(Display *, GLXDrawable_, int32_t *, int32_t *);
+typedef const char *(*PFN_glXQueryExtensionsString)(Display *, int);
 typedef const char *(*PFN_glXQueryExtensionsString)(Display *, int);
 
 #define GLX_X_RENDERABLE_ 0x8012
@@ -73,6 +75,7 @@ typedef struct {
     PFN_glXMakeCurrent MakeCurrent;
     PFN_glXSwapBuffers SwapBuffers;
     PFN_glXDestroyContext DestroyContext;
+    PFN_glXGetMscRateOML GetMscRate;   /* refresh rate, when GLX_OML_sync_control is there */
     /* clipboard */
     char *clip_owned;
     char *clip_read;
@@ -303,6 +306,10 @@ bool cui__plat_gl_create(cui_app *app, bool vsync) {
     PFN_glXSwapIntervalMESA sim = (PFN_glXSwapIntervalMESA)x->GetProcAddress((const unsigned char *)"glXSwapIntervalMESA");
     if (sie) sie(x->dpy, x->win, vsync ? 1 : 0);
     else if (sim) sim(vsync ? 1 : 0);
+    PFN_glXQueryExtensionsString qes = (PFN_glXQueryExtensionsString)dlsym(x->libgl, "glXQueryExtensionsString");
+    const char *ext = qes ? qes(x->dpy, DefaultScreen(x->dpy)) : NULL;
+    if (ext && strstr(ext, "GLX_OML_sync_control"))
+        x->GetMscRate = (PFN_glXGetMscRateOML)x->GetProcAddress((const unsigned char *)"glXGetMscRateOML");
     return true;
 }
 
@@ -313,8 +320,16 @@ void *cui__plat_gl_proc(const char *name) {
     return p;
 }
 
+double cui__plat_refresh_hz(cui_app *app) {
+    cui__x11 *x = cui__x(app);
+    int32_t num = 0, den = 0;
+    if (x->ctx && x->GetMscRate && x->GetMscRate(x->dpy, x->win, &num, &den) && den > 0) return (double)num / den;
+    return 0;
+}
+
 void cui__plat_gl_release(cui_app *app) {
     cui__x11 *x = cui__x(app);
+    x->GetMscRate = NULL;
     if (x->ctx) { x->MakeCurrent(x->dpy, None, NULL); x->DestroyContext(x->dpy, x->ctx); x->ctx = NULL; }
 }
 

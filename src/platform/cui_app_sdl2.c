@@ -226,4 +226,9 @@ bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int st
     return false;   /* the whole buffer is shown each time */
 }
 
+double cui__plat_refresh_hz(cui_app *app) {
+    SDL_DisplayMode m;
+    return SDL_GetWindowDisplayMode(cui__s(app)->win, &m) == 0 ? m.refresh_rate : 0;
+}
+
 void cui__plat_gl_release(cui_app *app) { (void)app; }   /* not used: these keep OpenGL */

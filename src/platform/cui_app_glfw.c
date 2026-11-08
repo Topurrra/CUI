@@ -204,4 +204,11 @@ bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int st
     return false;   /* the whole buffer is shown each time */
 }
 
+double cui__plat_refresh_hz(cui_app *app) {
+    GLFWmonitor *m = glfwGetWindowMonitor(cui__g(app)->win);
+    if (!m) m = glfwGetPrimaryMonitor();
+    const GLFWvidmode *v = m ? glfwGetVideoMode(m) : NULL;
+    return v ? v->refreshRate : 0;
+}
+
 void cui__plat_gl_release(cui_app *app) { (void)app; }   /* not used: these keep OpenGL */

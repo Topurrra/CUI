@@ -21,6 +21,10 @@ struct cui_app {
     bool force_present;       /* software: the window needs the whole picture again (exposed, resized) */
     double last_time;
     double last_present;
+    double hz, hz_checked;     /* display refresh rate (60 when the backend cannot tell) and when it was asked */
+    double pace_start;         /* vsync check: start of the current run of animation frames */
+    int pace_frames, pace_fast;
+    bool vsync_off;            /* vsync was asked for, but the swap does not wait: pace by the clock */
     void (*frame_cb)(cui_ctx *ui, void *user);
     void *frame_user;
     bool in_live_resize;
@@ -37,6 +41,7 @@ void cui__plat_shutdown(cui_app *app);
 bool cui__plat_gl_create(cui_app *app, bool vsync);
 void *cui__plat_gl_proc(const char *name);
 void cui__plat_gl_swap(cui_app *app);
+double cui__plat_refresh_hz(cui_app *app);   /* refresh rate of the window's display, 0 when unknown */
 void cui__plat_gl_release(cui_app *app);   /* drop the GL context: the window goes on with software pictures */
 void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride);
 /* software: shows only the part (x, y, pw, ph) of the buffer that changed; false when the

@@ -209,14 +209,37 @@ bool cui_app_frame(cui_app *app) {
     cui_ctx *ui = app->ui;
     double timeout;
     if (app->desc.continuous || cui_needs_redraw(ui) || !app->presented_once) {
+        /* Animation frames come at the display's rate. With vsync the swap waits for it; the
+         * software renderer, and drivers that ignore the swap interval (software GL, settings
+         * that force vsync off), are paced by the clock instead of drawing frames nobody sees. */
         timeout = 0;
-        /* without vsync, pace animation frames to about 120 Hz */
-        if (!app->gl || app->desc.no_vsync) {
-            double since = cui__plat_now() - app->last_present;
-            double target = 1.0 / 120.0;
-            if (since < target) timeout = target - since;
+        double now = cui__plat_now();
+        if (now - app->hz_checked > 2.0) {
+            double hz = cui__plat_refresh_hz(app);
+            app->hz = hz >= 24 && hz <= 1000 ? hz : 60;
+            app->hz_checked = now;
+        }
+        if (app->gl && !app->desc.no_vsync && !app->vsync_off) {
+            /* two runs of 20 frames in a row faster than the display: the swap does not wait
+             * (one is not enough: after a pause a driver may queue a few frames without waiting) */
+            if (app->pace_frames++ == 0) app->pace_start = app->last_present;
+            else if (app->pace_frames == 21) {
+                double span = app->last_present - app->pace_start;
+                app->pace_fast = span > 0 && 20.0 / span > app->hz * 1.3 ? app->pace_fast + 1 : 0;
+                if (app->pace_fast >= 2) app->vsync_off = true;
+                app->pace_frames = 0;
+            }
+        }
+        if (!app->gl || app->desc.no_vsync || app->vsync_off) {
+            /* one frame per period, counted from when the last one began; events that come
+             * in the meantime are taken in but do not start the frame early */
+            double until = app->last_time + 1.0 / (app->desc.no_vsync && app->hz < 120 ? 120 : app->hz);
+            for (double left = until - now; left > 0.0005 && app->running; left = until - cui__plat_now())
+                cui__plat_wait(app, left);
         }
     } else {
+        app->pace_frames = 0;
+        app->pace_fast = 0;
         float wake = cui_next_wakeup(ui);
         timeout = wake >= 0 ? wake : -1;
     }

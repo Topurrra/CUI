@@ -425,4 +425,11 @@ bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int st
     return false;   /* the whole buffer is shown each time */
 }
 
+double cui__plat_refresh_hz(cui_app *app) {
+    NSScreen *s = cui__p(app).window.screen;
+    if (s && [s respondsToSelector:NSSelectorFromString(@"maximumFramesPerSecond")])   /* macOS 12 and later */
+        return [[s valueForKey:@"maximumFramesPerSecond"] doubleValue];
+    return 0;
+}
+
 void cui__plat_gl_release(cui_app *app) { (void)app; }   /* not used: these keep OpenGL */

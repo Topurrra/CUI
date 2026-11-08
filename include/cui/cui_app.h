@@ -46,7 +46,7 @@ typedef struct cui_app_desc {
     int min_width, min_height;  /* default 360 x 280 */
     bool fixed_size;            /* not resizable */
     bool continuous;            /* render every frame even when idle (games, video) */
-    bool no_vsync;
+    bool no_vsync;              /* OpenGL: do not wait for the display; frames are capped at 120 Hz or the refresh rate */
     bool hidden;                /* create the window hidden (tests) */
     cui_renderer_kind renderer;
     cui_theme_mode theme;

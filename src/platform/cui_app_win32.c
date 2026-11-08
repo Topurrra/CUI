@@ -27,6 +27,7 @@ typedef HRESULT (WINAPI *PFN_SetProcessDpiAwareness)(int);
 typedef UINT (WINAPI *PFN_GetDpiForWindow)(HWND);
 typedef BOOL (WINAPI *PFN_AdjustWindowRectExForDpi)(LPRECT, DWORD, BOOL, DWORD, UINT);
 typedef HRESULT (WINAPI *PFN_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
+typedef HANDLE (WINAPI *PFN_CreateWaitableTimerExW)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD);
 
 #define WGL_CONTEXT_MAJOR_VERSION_ARB_ 0x2091
 #define WGL_CONTEXT_MINOR_VERSION_ARB_ 0x2092
@@ -45,6 +46,7 @@ typedef struct {
     cui_cursor cursor;
     bool in_size_move;
     BITMAPINFO bmi;
+    HANDLE timer;          /* timed waits: high resolution where Windows has it (10 1803 and later) */
 } cui__win32;
 
 static HMODULE cui__opengl32;
@@ -424,6 +426,7 @@ void cui__plat_shutdown(cui_app *app) {
     if (!w) return;
     if (w->glrc) { wglMakeCurrent(NULL, NULL); wglDeleteContext(w->glrc); }
     if (w->hdc) ReleaseDC(w->hwnd, w->hdc);
+    if (w->timer) CloseHandle(w->timer);
     SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);   /* no more messages to the app */
     DestroyWindow(w->hwnd);
     free(w);
@@ -510,8 +513,22 @@ void *cui__plat_native(cui_app *app) { return cui__w(app)->hwnd; }
 
 void cui__plat_wait(cui_app *app, double timeout) {
     if (timeout != 0) {
-        DWORD ms = timeout < 0 ? INFINITE : (DWORD)(timeout * 1000.0 + 0.5);
-        MsgWaitForMultipleObjectsEx(0, NULL, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        /* QS_ALLINPUT without QS_RAWINPUT: CUI does not register for raw input, and Wine
+         * leaves that bit set, which made every wait return at once */
+        DWORD mask = QS_KEY | QS_MOUSE | QS_POSTMESSAGE | QS_TIMER | QS_PAINT | QS_SENDMESSAGE | QS_HOTKEY | QS_ALLPOSTMESSAGE;
+        cui__win32 *w = cui__w(app);
+        if (timeout > 0 && !w->timer) {
+            /* a plain timed wait rounds up to the 15.6 ms system tick, which turns 60 Hz pacing into 30 to 50 */
+            PFN_CreateWaitableTimerExW cwt = (PFN_CreateWaitableTimerExW)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateWaitableTimerExW");
+            if (cwt) w->timer = cwt(NULL, NULL, 0x2 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+            if (!w->timer) w->timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+        }
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)(timeout * 1e7);   /* relative, in 100 ns */
+        if (timeout > 0 && w->timer && SetWaitableTimer(w->timer, &due, 0, NULL, NULL, FALSE))
+            MsgWaitForMultipleObjectsEx(1, &w->timer, INFINITE, mask, MWMO_INPUTAVAILABLE);
+        else
+            MsgWaitForMultipleObjectsEx(0, NULL, timeout < 0 ? INFINITE : (DWORD)(timeout * 1000.0 + 0.5), mask, MWMO_INPUTAVAILABLE);
     }
     MSG msg;
     while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -524,6 +541,10 @@ void cui__plat_wait(cui_app *app, double timeout) {
 bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int stride, int x, int y, int pw, int ph) {
     (void)app; (void)bgra; (void)w; (void)h; (void)stride; (void)x; (void)y; (void)pw; (void)ph;
     return false;   /* the whole buffer is shown each time */
+}
+
+double cui__plat_refresh_hz(cui_app *app) {
+    return GetDeviceCaps(cui__w(app)->hdc, VREFRESH);   /* 0 or 1 means the hardware default: unknown */
 }
 
 void cui__plat_gl_release(cui_app *app) {

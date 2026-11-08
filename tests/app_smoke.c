@@ -19,6 +19,7 @@ int main(int argc, char **argv) {
     g.page = PAGE_SELECTION;
     int frame = 0;
     bool switched = false;
+    double t0 = 0, t1 = 0;
     while (cui_app_frame(app)) {
         cui_ctx *ui = cui_app_ui(app);
         /* click the Bluetooth switch after the layout settled, wherever the gallery put it.
@@ -32,7 +33,9 @@ int main(int argc, char **argv) {
         gallery_frame(ui, &g);
         if (g.bluetooth != before) switched = true;
         if (frame % 20 == 0) printf("frame %d\n", frame);
-        if (++frame >= 80) break;
+        if (frame == 110) t0 = cui_time(ui);
+        if (frame == 149) t1 = cui_time(ui);
+        if (++frame >= 150) break;
     }
     cui_vec2 sz = cui_app_size(app);
     const cui_draw_data *dd = cui_get_draw_data(cui_app_ui(app));
@@ -43,5 +46,9 @@ int main(int argc, char **argv) {
            g.bluetooth_rect.x, g.bluetooth_rect.y, g.bluetooth_rect.w, g.bluetooth_rect.h);
     free(px);
     cui_app_destroy(app);
-    return (ok && switched) ? 0 : 1;
+    /* a continuous app runs at the display's rate, not as fast as the machine can draw */
+    double fps = t1 > t0 ? 39.0 / (t1 - t0) : 0;
+    bool paced = fps > 0 && fps < 250;
+    printf("animation: %.0f frames per second%s\n", fps, paced ? "" : " (not paced)");
+    return (ok && switched && paced) ? 0 : 1;
 }
