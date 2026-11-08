@@ -403,12 +403,13 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
             }
             continue;
         }
-        /* An opaque solid, or the inside of an opaque rounded rectangle, is a plain run of one
-         * color: find it with the same test the loop below uses (it is one interval, found by
-         * walking in from both ends) and fill it in one go. The loop does the edges. */
+        /* The inside of a rounded rectangle (or all of a solid) is one color: find it with the
+         * same test the loop below uses (it is one interval, found by walking in from both ends)
+         * and do it in one go: fill it when opaque, skip it when clear (a border-only box),
+         * blend one color over it otherwise. The loop does the edges. */
         int sx0 = x1, sx1 = x1;
-        if (ca >= 0.999f && (mode == CUI_SHADE_SOLID || mode == CUI_SHADE_RRECT)) {
-            if (mode == CUI_SHADE_SOLID) { sx0 = x0; sx1 = x1; }
+        if (mode == CUI_SHADE_SOLID || mode == CUI_SHADE_RRECT) {
+            if (mode == CUI_SHADE_SOLID) { if (ca >= 0.999f) { sx0 = x0; sx1 = x1; } }
             else {
                 float inset = bw + 0.5f;
 #define CUI__DEEP(xx) (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset - rmax && ay <= hh - inset) || \
@@ -423,7 +424,12 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
             }
             if (sx0 < sx1) {
                 uint8_t *p = row + (size_t)sx0 * 4;
-                for (int k = 0, n = sx1 - sx0; k < n; k++) memcpy(p + (size_t)k * 4, opaque, 4);   /* any alignment */
+                int n = sx1 - sx0;
+                if (ca >= 0.999f) for (int k = 0; k < n; k++) memcpy(p + (size_t)k * 4, opaque, 4);   /* any alignment */
+                else if (ca > 0.0005f) {
+                    cui__px o = { cr * ca, cg * ca, cb * ca, ca };
+                    for (int k = 0; k < n; k++) cui__blend(p + (size_t)k * 4, o, bgra);
+                }
             }
         }
         for (int x = x0; x < x1; x++) {
