@@ -1764,6 +1764,45 @@ typedef struct cui_cal_event { const char *title; const char *detail; int day; f
 typedef struct cui_week_opts { int _; float start_hour, end_hour, hour_height; cui_size height; bool read_only; } cui_week_opts;
 CUI_API int cui_week_calendar_ex(cui_ctx *ui, const char *id, cui_date week_start, cui_cal_event *events, int count, const cui_week_opts *opts);
 
+/* Month calendar: a month grid with events. All-day and multi-day events
+ * are bars across the days they cover; timed events are a dot, a time and a
+ * title. A day with more than fits says "+N more" and opens a list of them.
+ * On a narrow screen the cells show colored dots and the selected day's
+ * events are listed under the grid.
+ *
+ *     static cui_date month = { 2026, 11, 1 }, day;
+ *     cui_month_result r = cui_month_calendar(ui, "cal", &month, events, count, .selected = &day);
+ *     if (r.event >= 0) open_event(r.event);
+ *     if (r.day_activated) new_event_on(day);
+ *
+ * With the grid focused the arrows move the selected day (into the next or
+ * previous month), Page Up and Page Down change month, Home goes to today
+ * and Enter activates the day. */
+typedef struct cui_month_event {
+    const char *title;
+    cui_date start, end;       /* inclusive; an unset or earlier end means one day */
+    float time;                /* hour of a timed event (9.5 is 9:30); ignored when all_day */
+    bool all_day;              /* a bar, like every event that spans days */
+    cui_tone tone;
+} cui_month_event;
+typedef struct cui_month_opts {
+    int _;
+    cui_date *selected;        /* the selected day: yours to read and set */
+    int first_weekday;         /* 0 Monday (default) .. 6 Sunday */
+    float cell_height;         /* default 104, 44 on a phone */
+    const char *const *month_names;   /* 12 names for another language, January first */
+    const char *const *day_names;     /* 7 short names, Monday first */
+    bool hour12;               /* 9:30a rather than 9:30 */
+    cui_date today;            /* overrides the system date when set (another time zone, tests) */
+} cui_month_opts;
+typedef struct cui_month_result {
+    int event;                 /* clicked event, or -1 */
+    bool day_clicked;          /* a day was clicked or moved to with the keys (see selected) */
+    bool day_activated;        /* double-clicked or Enter: add an event there */
+    bool month_changed;        /* the arrows, Today or the keys changed *month */
+} cui_month_result;
+CUI_API cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id, cui_date *month, const cui_month_event *events, int count, const cui_month_opts *opts);
+
 /* Gantt chart: a task list beside a timeline of bars. Drag a bar to move
  * it, its ends to resize it. Dependencies are drawn as elbow arrows.
  * Returns the index of a clicked task, or -1. */
@@ -2813,6 +2852,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_timeline_item(ui, title, ...)   cui_timeline_item_ex((ui), (title), CUI__OPTS(cui_timeline_opts, __VA_ARGS__))
 #define cui_kanban_column_begin(ui, title, count, ...) cui_kanban_column_begin_ex((ui), (title), (count), CUI__OPTS(cui_kanban_column_opts, __VA_ARGS__))
 #define cui_week_calendar(ui, id, week, events, count, ...) cui_week_calendar_ex((ui), (id), (week), (events), (count), CUI__OPTS(cui_week_opts, __VA_ARGS__))
+#define cui_month_calendar(ui, id, month, events, count, ...) cui_month_calendar_ex((ui), (id), (month), (events), (count), CUI__OPTS(cui_month_opts, __VA_ARGS__))
 #define cui_gantt(ui, id, tasks, count, origin, days, ...) cui_gantt_ex((ui), (id), (tasks), (count), (origin), (days), CUI__OPTS(cui_gantt_opts, __VA_ARGS__))
 #define cui_reasoning(ui, id, ...)          CUI__SCOPE_IF(cui_reasoning_begin((ui), (id), CUI__OPTS(cui_reasoning_opts, __VA_ARGS__)), cui_reasoning_end(ui))
 #define cui_tool_call(ui, id, name, ...)    cui_tool_call_ex((ui), (id), (name), CUI__OPTS(cui_tool_call_opts, __VA_ARGS__))

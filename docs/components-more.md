@@ -856,6 +856,28 @@ int clicked = cui_week_calendar(ui, "week", monday, events, 2, .start_hour = 8, 
 
 Drag an event to move it (it snaps to 15 minutes and keeps its length) or pull its bottom edge to resize it; the calendar writes the new times into your array. Overlapping events share the day side by side. Today is circled and a line marks the current time. `read_only` turns editing off but keeps clicks. With the keyboard, Up and Down move a focused event by 15 minutes, Left and Right by a day, and Shift with Up or Down changes its end.
 
+### Month calendar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/month-calendar-dark.png"><img src="images/components/month-calendar.png" alt="Month calendar"></picture>
+
+```c
+static const cui_month_event events[] = {
+    { "Design sprint", { 2026, 11, 2 }, { 2026, 11, 4 }, 0, true, CUI_TONE_VIOLET },   /* spans three days */
+    { "Standup", { 2026, 11, 2 }, { 0 }, 9.5f, false, CUI_TONE_INFO },                 /* 9:30 */
+};
+static cui_date month = { 2026, 11, 1 }, day;
+
+cui_month_result r = cui_month_calendar(ui, "cal", &month, events, 2, .selected = &day);
+if (r.event >= 0) open_event(r.event);
+if (r.day_activated) new_event_on(day);
+```
+
+A month of events. The header names the month, with Today and the previous and next month; the grid shows the weeks the month touches, Monday first (`first_weekday` picks another day), with today marked and the selected day tinted. All-day and multi-day events are bars that run across the days they cover and continue into the next week, sharing lanes so they never overlap; timed events are a colored dot, the time and the title, in time order under the bars of their day. When a day has more than its cell holds, its last line says "+N more" and opens a list of all its events. Event colors come from the theme's tones.
+
+Clicking an event returns it in `r.event`, clicking a day selects it (`selected` is yours to read and set) and double-clicking a day sets `r.day_activated`, the place to add an event. With the grid focused, the arrows move the selected day and carry on into the next or previous month, Page Up and Page Down change month, Home goes to today, Space selects and Enter activates the day. `month_names` and `day_names` take names in another language, `hour12` writes 9:30a, `cell_height` sets the rows (104 by default) and `today` overrides the system date.
+
+On a narrow screen (under 520 points) the cells show the day number and up to three colored dots, and the selected day's events are listed under the grid with their times. The events of the weeks in view are laid out once a frame by sorting the timed ones, so a month with thousands of events still builds in about a millisecond.
+
 ### Gantt chart
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gantt-dark.png"><img src="images/components/gantt.png" alt="Gantt chart"></picture>

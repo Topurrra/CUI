@@ -65,6 +65,7 @@ set(CUI_CORE_SOURCES
     src/cui_curves.c
     src/cui_timeline.c
     src/cui_dials.c
+    src/cui_month.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)
 

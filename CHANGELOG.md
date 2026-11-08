@@ -6,12 +6,14 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- **Month calendar**: a month grid with events. Multi-day and all-day events are bars that share lanes across a week; timed events show in time order with a dot and the time, and a full day says "+N more" and opens a list. It supports keyboard navigation across months, double-click to add, localized month and day names, any first weekday, and a phone layout with colored dots and an agenda of the selected day.
 - **Radial gauge**: a value on a dial with colored bands, labelled ticks, a target marker and a needle that springs to new values, or a filled arc without the needle.
 - **Candlestick chart**: open, high, low and close with volume, overlay lines and a last price tag. It zooms around the pointer, pans by dragging, follows new candles, and shows a crosshair with each candle's values. Zoomed out, candles merge per pixel column, so 100,000 of them build in about a millisecond.
 - **Knob, fader and level meter**: the controls of audio, synth and mixer panels. Knobs turn by dragging up and down with a fine mode on Shift, can be bipolar or logarithmic, and reset on double-click. Faders have a labelled scale and an optional meter beside the track. Level meters have peak hold, a falling bar, a clip light and LED segments. The wheel only turns a control that has focus.
 
 ### Changed
 
+- Truncated right-to-left text puts its ellipsis on the left, where the text ends (with text shaping).
 - **Every component page fits a phone.** Layouts that used to need more than a phone's width now rearrange instead of shrinking the preview. The calendar, countdown, radar chart, activity rings and donut legend scale down. The waffle legend moves under its grid, and the banner puts its action under the message. The player drops its previous button, and the stepper keeps only the current label. Pagination collapses to the first, current and last pages, and the status bar keeps icons and drops labels. Toolbars, path bars and inspectors fold, and the dock shrinks its icons and stops magnifying.
 - **Docking** shows every panel as a tab of one stack when the dockspace is too narrow for panes side by side. The saved layout is untouched, and the panes come back when there is room.
 - **Segmented controls and button groups** tighten their padding before a label truncates.

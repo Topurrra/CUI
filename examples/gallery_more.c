@@ -732,6 +732,20 @@ static void page_planning(cui_ctx *ui) {
         snprintf(dur, sizeof dur, "%d days", tasks[tk].end - tasks[tk].start);
         cui_toast(ui, tasks[tk].name, .description = tasks[tk].milestone ? "Milestone" : dur);
     }
+    section(ui, "Month calendar", "Bars for days off and trips, timed events in time order, +N more when a day is full.");
+    static cui_date month, picked;
+    cui_date now = cui_date_today();
+    int base = cui_date_to_days((cui_date){ now.year, now.month, 1 });
+    static cui_month_event mev[12];
+    static const char *const titles[12] = { "Standup", "Design review", "Offsite", "1:1", "Release", "Planning",
+                                            "Customer call", "Lunch", "Retro", "Holiday", "Demo", "Board meeting" };
+    for (int k = 0; k < 12; k++) {
+        bool span = k == 2 || k == 9;
+        mev[k] = (cui_month_event){ titles[k], cui_date_from_days(base + (k * 5) % 27), span ? cui_date_from_days(base + (k * 5) % 27 + 2) : (cui_date){ 0 },
+                                    9.0f + (float)(k % 8), span || k == 4, (cui_tone)(1 + k % 8) };
+    }
+    cui_month_result mr = cui_month_calendar(ui, "month", &month, mev, 12, .selected = &picked);
+    if (mr.event >= 0) cui_toast(ui, mev[mr.event].title, .description = "Opened from the month calendar");
 }
 
 /* ---- more charts --------------------------------------------------------- */

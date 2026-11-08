@@ -1036,10 +1036,20 @@ void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, fl
         cut_w = it.x;
     }
     while (cut > 0 && text[cut - 1] == ' ') { cut--; cut_w = cui__text_width(ui, font, size, text, cut, tabular); }
-    cui__draw_run(ui, font, size, x, y, color, text, cut, tabular, 1e30f);
+    /* right-to-left text ends on the left, so its ellipsis goes there */
+    bool rtl = false;
+#ifdef CUI_TEXT_SHAPING
+    for (int at = 0; at < len;) {
+        uint32_t cp;
+        at += cui__utf8_decode(text + at, len - at, &cp);
+        int dir = cui__bidi_strong_direction(cp);
+        if (dir >= 0) { rtl = dir == 1; break; }
+    }
+#endif
+    cui__draw_run(ui, font, size, rtl ? x + ew : x, y, color, text, cut, tabular, 1e30f);
     cui__text_fx_fn fx = ui->text_fx;
     ui->text_fx = NULL;   /* the ellipsis is not part of the text */
-    cui__draw_run(ui, font, size, x + cut_w, y, color, ell, 3, false, 1e30f);
+    cui__draw_run(ui, font, size, rtl ? x : x + cut_w, y, color, ell, 3, false, 1e30f);
     ui->text_fx = fx;
 }
 

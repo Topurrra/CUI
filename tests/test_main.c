@@ -6253,6 +6253,82 @@ static void test_candles(void) {
     cui_destroy(ui);
 }
 
+/* ---- month calendar ---- */
+typedef struct { cui_date month, sel; const cui_month_event *ev; int n; cui_month_result r; cui_rect gr; float w; } mc_ctx;
+static void build_mc(cui_ctx *ui, void *u) {
+    mc_ctx *c = u;
+    cui_box(ui, .width = CUI_PX(c->w), .pad = 10) {
+        c->r = cui_month_calendar(ui, "m", &c->month, c->ev, c->n, .selected = &c->sel, .today = (cui_date){ 2026, 11, 8 }, .cell_height = 100);
+        c->gr = cui_last_rect(ui);
+    }
+}
+static void test_month(void) {
+    static const cui_month_event ev[] = {
+        { "Sprint", { 2026, 11, 2 }, { 2026, 11, 4 }, 0, true, CUI_TONE_VIOLET },
+        { "A", { 2026, 11, 10 }, { 0 }, 9, false, CUI_TONE_INFO },
+        { "B", { 2026, 11, 10 }, { 0 }, 11, false, CUI_TONE_INFO },
+        { "C", { 2026, 11, 10 }, { 0 }, 13, false, CUI_TONE_INFO },
+        { "D", { 2026, 11, 10 }, { 0 }, 15, false, CUI_TONE_INFO },
+        { "E", { 2026, 11, 10 }, { 0 }, 17, false, CUI_TONE_INFO },
+    };
+    cui_ctx *ui = new_ctx();
+    mc_ctx c = { { 2026, 11, 1 }, { 0 }, ev, 6, { 0 }, { 0 }, 760 };
+    run(ui, build_mc, &c, 3);
+    /* November 2026 starts on a Sunday: six rows, Monday first */
+    float cw = c.gr.w / 7, ch = 100;
+    CHECK_NEAR(c.gr.h, 6 * ch, 0.5);
+    /* the sprint bar on Monday the 2nd (row 1): a click returns it */
+    click_at(ui, build_mc, &c, c.gr.x + cw * 1.5f, c.gr.y + ch + 26 + 9);
+    CHECK(c.r.event == 0);
+    /* the 10th has five timed events and lines for three: two, then "+3 more" */
+    float x10 = c.gr.x + cw * 1 + 20, y10 = c.gr.y + ch * 2;
+    click_at(ui, build_mc, &c, x10, y10 + 26 + 9);
+    CHECK(c.r.event == 1);
+    click_at(ui, build_mc, &c, x10, y10 + 26 + 19 + 9);
+    CHECK(c.r.event == 2);
+    run(ui, build_mc, &c, 30);
+    click_at(ui, build_mc, &c, x10, y10 + 26 + 38 + 9);   /* "+3 more" opens the day's list */
+    CHECK(c.r.event < 0);
+    run(ui, build_mc, &c, 2);
+    CHECK(cui_get_draw_data(ui) != NULL);
+    /* an empty spot selects the day; a double-click activates it */
+    run(ui, build_mc, &c, 30);
+    cui_input_key(ui, CUI_KEY_ESCAPE, true, 0); cui_input_key(ui, CUI_KEY_ESCAPE, false, 0); run(ui, build_mc, &c, 2);
+    click_at(ui, build_mc, &c, c.gr.x + cw * 4.5f, c.gr.y + ch * 3 + 80);   /* Friday the 20th */
+    CHECK(c.r.day_clicked && c.sel.day == 20 && c.sel.month == 11);
+    click_at(ui, build_mc, &c, c.gr.x + cw * 4.5f, c.gr.y + ch * 3 + 80);
+    CHECK(c.r.day_activated);
+    /* keys: Down a week, Right into December turns the page, Home is today */
+    key(ui, build_mc, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.sel.day == 27);
+    key(ui, build_mc, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.sel.month == 12 && c.sel.day == 4 && c.month.month == 12 && c.r.month_changed);
+    key(ui, build_mc, &c, CUI_KEY_PAGE_DOWN, 0);
+    CHECK(c.month.year == 2027 && c.month.month == 1 && c.sel.day == 4);
+    key(ui, build_mc, &c, CUI_KEY_HOME, 0);
+    CHECK(c.month.year == 2026 && c.month.month == 11 && c.sel.day == 8);
+    /* many events stay cheap: 5,000 in a month */
+    enum { M = 5000 };
+    cui_month_event *many = malloc(sizeof *many * M);
+    for (int i = 0; i < M; i++)
+        many[i] = (cui_month_event){ "Event", { 2026, 11, 1 + i % 30 }, i % 7 == 0 ? (cui_date){ 2026, 11, 1 + (i + 3) % 30 } : (cui_date){ 0 },
+                                     (float)(i % 24), i % 5 == 0, (cui_tone)(1 + i % 7) };
+    c.ev = many; c.n = M;
+    run(ui, build_mc, &c, 2);
+    clock_t t0 = clock();
+    for (int i = 0; i < 20; i++) { cui_input_mouse_move(ui, c.gr.x + 30 + i * 30, c.gr.y + 200); run(ui, build_mc, &c, 1); }
+    double ms = (double)(clock() - t0) / CLOCKS_PER_SEC * 1000 / 20;
+    printf("    month calendar: 5,000 events, %.2f ms per frame\n", ms);
+    CHECK(ms < 30);
+    /* narrow: dots and an agenda */
+    c.ev = ev; c.n = 6; c.w = 320;
+    c.sel = (cui_date){ 2026, 11, 10 };
+    run(ui, build_mc, &c, 4);
+    CHECK(c.gr.h < 6 * 50);
+    free(many);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6285,6 +6361,7 @@ int main(void) {
     test_diff();
     test_dials();
     test_candles();
+    test_month();
     test_planning();
     test_node_editor();
     test_flame();

@@ -2000,6 +2000,31 @@ SCENE(funnel_split) {
         }
     }
 }
+static const cui_month_event month_events[] = {
+    { "Design sprint", { 2026, 11, 2 }, { 2026, 11, 4 }, 0, true, CUI_TONE_VIOLET },
+    { "Standup", { 2026, 11, 2 }, { 0 }, 9.5f, false, CUI_TONE_INFO },
+    { "1:1 with Jonas", { 2026, 11, 3 }, { 0 }, 14, false, CUI_TONE_ROSE },
+    { "Release 1.2", { 2026, 11, 6 }, { 0 }, 0, true, CUI_TONE_SUCCESS },
+    { "Standup", { 2026, 11, 9 }, { 0 }, 9.5f, false, CUI_TONE_INFO },
+    { "Customer call", { 2026, 11, 10 }, { 0 }, 11, false, CUI_TONE_DANGER },
+    { "Lunch with Maya", { 2026, 11, 10 }, { 0 }, 12.5f, false, CUI_TONE_TEAL },
+    { "Review: docking", { 2026, 11, 10 }, { 0 }, 15, false, CUI_TONE_VIOLET },
+    { "Planning", { 2026, 11, 10 }, { 0 }, 16.5f, false, CUI_TONE_WARNING },
+    { "Offsite, Lisbon", { 2026, 11, 12 }, { 2026, 11, 14 }, 0, true, CUI_TONE_WARNING },
+    { "Standup", { 2026, 11, 16 }, { 0 }, 9.5f, false, CUI_TONE_INFO },
+    { "Accessibility audit", { 2026, 11, 17 }, { 2026, 11, 20 }, 0, true, CUI_TONE_TEAL },
+    { "Demo day", { 2026, 11, 20 }, { 0 }, 16, false, CUI_TONE_VIOLET },
+    { "Standup", { 2026, 11, 23 }, { 0 }, 9.5f, false, CUI_TONE_INFO },
+    { "Holiday", { 2026, 11, 26 }, { 2026, 11, 27 }, 0, true, CUI_TONE_SUCCESS },
+    { "Board meeting", { 2026, 11, 30 }, { 0 }, 10, false, CUI_TONE_DANGER },
+};
+SCENE(month_calendar) {
+    static cui_date month = { 2026, 11, 1 }, sel = { 2026, 11, 10 };
+    cui_box(ui, UPTO(880)) {
+        cui_month_calendar(ui, "month", &month, month_events, (int)(sizeof month_events / sizeof month_events[0]), .selected = &sel,
+                           .today = (cui_date){ 2026, 11, 8 }, .cell_height = 96);
+    }
+}
 SCENE(gauges) {
     static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
@@ -3343,7 +3368,7 @@ int main(int argc, char **argv) {
         { "flame-graph", scene_flame, 1000, 300, true },
         { "heatmap", scene_heatmap, 900, 330, true }, { "calendar-heatmap", scene_calendar_heatmap, 880, 220, true },
         { "treemap-radar", scene_treemap_radar, 1000, 370, true }, { "funnel-split", scene_funnel_split, 1000, 330, true },
-        { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
+        { "month-calendar", scene_month_calendar, 880, 720, true }, { "gauges", scene_gauges, 760, 250, true }, { "candlestick", scene_candlestick, 860, 400, true }, { "sankey", scene_sankey, 900, 360, true }, { "bar-list-rings", scene_bar_list_rings, 860, 260, true },
         { "scatter", scene_scatter, 860, 360, true },
         { "text-effects", scene_text_effects, 760, 220, true }, { "loaders", scene_loaders, 520, 110, true },
         { "dock", scene_dock, 760, 200, true }, { "tiles", scene_tiles, 360, 360, true },
