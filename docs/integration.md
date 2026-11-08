@@ -36,6 +36,8 @@ for (;;) {
 
 Coordinates are in points (logical pixels). `pixels_per_point` is 2 on a typical retina screen. Input events can arrive at any time between frames; CUI collects them for the next frame.
 
+An idle CUI app costs nothing: with no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that blink or wait (the caret, tooltips, toasts) set `cui_next_wakeup`. When your own content changes on a timer, such as a clock, a poll or messages arriving, call `cui_request_wakeup(ui, seconds)` during the frame. The loop then wakes for it instead of redrawing continuously. `cui_request_redraw` asks for the next frame right away, for things that change every frame.
+
 ### Input reference
 
 | Function | Notes |

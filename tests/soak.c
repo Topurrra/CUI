@@ -9,6 +9,7 @@
  *     --window        open a real window (X11) and drive it with real input events (XTest)
  *     --sw            windowed: software renderer instead of OpenGL
  *     --csv PATH      a sample every few seconds: time, memory, frame times, counts
+ *     --sites         where live memory and later allocations come from (build with -fno-omit-frame-pointer)
  *
  * Headless, the context gets a counting allocator, frames advance 1/60 s each
  * and run as fast as they can, so an hour of use takes a minute or two.
@@ -132,12 +133,12 @@ static void dump_sites(void) {
     }
 }
 static bool warm;   /* after the first minute: count calls by caller */
-typedef struct { void *site; unsigned long calls; size_t bytes; } soak_calls;
+typedef struct { void *site, *site2; unsigned long calls; size_t bytes; } soak_calls;
 static soak_calls calls_tab[512];
-static void count_call(void *site, size_t n) {
+static void count_call(void *site, void *site2, size_t n) {
     if (!warm || !opt_sites) return;
     for (int i = 0; i < 512; i++) {
-        if (calls_tab[i].site == site || !calls_tab[i].site) { calls_tab[i].site = site; calls_tab[i].calls++; calls_tab[i].bytes += n; return; }
+        if ((calls_tab[i].site == site && calls_tab[i].site2 == site2) || !calls_tab[i].site) { calls_tab[i].site = site; calls_tab[i].site2 = site2; calls_tab[i].calls++; calls_tab[i].bytes += n; return; }
     }
 }
 static void dump_calls(void) {
@@ -146,9 +147,9 @@ static void dump_calls(void) {
     printf("  allocation calls after warm-up by caller:\n");
     for (int i = 0; i < 12 && calls_tab[i].site; i++) {
         Dl_info di;
-        uintptr_t off = (uintptr_t)calls_tab[i].site;
-        if (dladdr(calls_tab[i].site, &di) && di.dli_fbase) off -= (uintptr_t)di.dli_fbase;
-        printf("    %8lu calls, %10zu bytes  0x%lx\n", calls_tab[i].calls, calls_tab[i].bytes, (unsigned long)off);
+        uintptr_t off = (uintptr_t)calls_tab[i].site, off2 = (uintptr_t)calls_tab[i].site2;
+        if (dladdr(calls_tab[i].site, &di) && di.dli_fbase) { off -= (uintptr_t)di.dli_fbase; off2 -= (uintptr_t)di.dli_fbase; }
+        printf("    %8lu calls, %10zu bytes  0x%lx 0x%lx\n", calls_tab[i].calls, calls_tab[i].bytes, (unsigned long)off, (unsigned long)off2);
     }
 }
 static void *soak_alloc(size_t n, void *u) {
@@ -156,8 +157,8 @@ static void *soak_alloc(size_t n, void *u) {
     soak_hdr *h = malloc(sizeof *h + n);
     if (!h) return NULL;
     live_add(h);
-    h->size = n; h->site = __builtin_return_address(1); live_bytes += n; alloc_calls++;
-    count_call(h->site, n);
+    h->size = n; h->site = opt_sites ? __builtin_return_address(1) : NULL; live_bytes += n; alloc_calls++;
+    if (opt_sites) count_call(h->site, __builtin_return_address(2), n);
     if (live_bytes > peak_bytes) peak_bytes = live_bytes;
     return h + 1;
 }
@@ -178,8 +179,8 @@ static void *soak_realloc(void *p, size_t n, void *u) {
     if (!g) { live_add(h); return NULL; }
     live_add(g);
     live_bytes = live_bytes - old + n; alloc_calls++;
-    g->size = n; g->site = __builtin_return_address(1);
-    count_call(g->site, n);
+    g->size = n; g->site = opt_sites ? __builtin_return_address(1) : NULL;
+    if (opt_sites) count_call(g->site, __builtin_return_address(2), n);
     if (live_bytes > peak_bytes) peak_bytes = live_bytes;
     return g + 1;
 }
@@ -333,6 +334,7 @@ static void sample(cui_ctx *ui, double t, soak_stat *build, soak_stat *paint, lo
 static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void *), void *user) {
     cui_sw_renderer *sw = cui_sw_create();
     cui_sw_set_threads(sw, 1);
+    cui_sw_set_incremental(sw, true);   /* as the app's software path does */
     inner = cui_sw_iface(sw);
     cui_renderer_iface wrap = inner;
     wrap.texture_create = soak_tex_create; wrap.texture_destroy = soak_tex_destroy;
@@ -342,14 +344,16 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
     cui_set_viewport(ui, vw_, vh_, 2);
     cui_input_focus(ui, true);
     static soak_stat build, paint, build_steady;
-    unsigned char *px = NULL;
+    unsigned char *px = NULL, *px_check = NULL;
     size_t px_cap = 0;
+    double painted_px = 0, total_px = 0;
+    long checks = 0, mismatches = 0;
     double t = 0, end = opt_minutes * 60, next_sample = 0;
     long frames = 0, drawn = 0, idle_frames = 0;
     size_t live_at_warm = 0, min_live_after = (size_t)-1, max_live_after = 0;
     unsigned long long allocs_at_warm = 0;
     long frames_at_warm = 0;
-    double plan_at = 1.0;
+    double plan_at = 1.0, wake_at = -1;
     bool waiting = false;
     t0_cpu = cpu_s(); t0_wall = now_s();
     while (t < end) {
@@ -373,7 +377,7 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
             if (a.k != A_WAIT) plan_at = t + frand(0.15f, 1.2f);
         }
         /* a frame, but only when the app needs one, as a real loop does */
-        bool need = cui_needs_redraw(ui) || frames < 3;
+        bool need = cui_needs_redraw(ui) || frames < 3 || (wake_at >= 0 && t >= wake_at);
         if (need) {
             double b0 = now_s();
             cui_begin_frame(ui, 1.0f / 60);
@@ -384,16 +388,30 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
             stat_add(&build, bms);
             if (t > 30) stat_add(&build_steady, bms);
             frames++;
+            float wk = cui_next_wakeup(ui);
+            wake_at = wk >= 0 ? t + wk : -1;   /* as a real loop sleeps until then */
             collect_targets(ui);
-            /* paint every frame for the first minute and then one in six, to keep the run quick */
-            if (t < 60 || frames % 6 == 0) {
+            /* paint every frame, incrementally; now and then check it against a full repaint */
+            {
                 const cui_draw_data *dd = cui_get_draw_data(ui);
                 size_t need_px = (size_t)dd->width_px * dd->height_px * 4;
-                if (need_px > px_cap) { free(px); px = malloc(need_px); px_cap = need_px; }
+                if (need_px > px_cap) { free(px); free(px_check); px = malloc(need_px); px_check = malloc(need_px); px_cap = need_px; }
                 double p0 = now_s();
                 cui_sw_render(sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
                 stat_add(&paint, (float)((now_s() - p0) * 1000));
                 drawn++;
+                int dx, dy, dw, dh;
+                if (cui_sw_last_damage(sw, &dx, &dy, &dw, &dh)) painted_px += (double)dw * dh;
+                total_px += (double)dd->width_px * dd->height_px;
+                if (frames % 1500 == 0) {
+                    cui_sw_render(sw, dd, px_check, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);   /* another buffer: drawn whole */
+                    checks++;
+                    if (memcmp(px, px_check, need_px)) {
+                        mismatches++;
+                        if (mismatches == 1) { cui_write_png("soak-incremental.png", px, dd->width_px, dd->height_px, dd->width_px * 4); cui_write_png("soak-full.png", px_check, dd->width_px, dd->height_px, dd->width_px * 4); }
+                    }
+                    /* the next frame draws whole into px again (a different buffer was last) */
+                }
             }
         } else idle_frames++;
         (void)waiting;
@@ -409,7 +427,9 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
     printf("  frames built %ld (%.0f%% of display frames; %ld skipped as idle), painted %ld\n", frames, 100.0 * frames / (frames + idle_frames), idle_frames, drawn);
     printf("  build ms: mean %.3f p50 %.3f p99 %.3f max %.2f | after warm-up p99 %.3f max %.2f\n", build.sum / CUI_MAX(1, build.n),
            stat_pct(&build, 0.5f), stat_pct(&build, 0.99f), build.max, stat_pct(&build_steady, 0.99f), build_steady.max);
-    printf("  paint ms (software, %dx%d max): mean %.2f p99 %.2f max %.2f\n", (int)(vw_ * 2), (int)(vh_ * 2), paint.sum / CUI_MAX(1, paint.n), stat_pct(&paint, 0.99f), paint.max);
+    printf("  paint ms (software, incremental): mean %.2f p99 %.2f max %.2f | %.1f%% of pixels drawn | %ld checks against a full repaint, %ld differ\n",
+           paint.sum / CUI_MAX(1, paint.n), stat_pct(&paint, 0.99f), paint.max, total_px > 0 ? 100 * painted_px / total_px : 0.0, checks, mismatches);
+    if (!frames_at_warm) { live_at_warm = live_bytes; min_live_after = max_live_after = live_bytes; }
     printf("  library memory: %.2f MB at 1 min, %.2f MB at the end, %.2f..%.2f MB after 1 min, peak %.2f MB\n", live_at_warm / 1048576.0,
            live_bytes / 1048576.0, min_live_after / 1048576.0, max_live_after / 1048576.0, peak_bytes / 1048576.0);
     printf("  allocations after warm-up: %.3f per frame (%llu over %ld frames)\n", steady_frames ? (double)(alloc_calls - allocs_at_warm) / steady_frames : 0.0,
@@ -420,8 +440,8 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
     cui_destroy(ui);
     printf("  after cui_destroy: %zu bytes still allocated by the library, %ld textures\n", live_bytes, tex_live);
     cui_sw_destroy(sw);
-    free(px);
-    return live_bytes != 0;   /* a leak fails the run */
+    free(px); free(px_check);
+    return live_bytes != 0 || mismatches != 0;   /* a leak, or a wrong incremental frame, fails the run */
 }
 
 /* ---- windowed: a real window, real events through XTest ---- */

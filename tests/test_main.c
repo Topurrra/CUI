@@ -6992,6 +6992,47 @@ static void test_sw_incremental(void) {
     free(A); free(B);
 }
 
+/* ---- the emoji texture goes when no emoji is drawn for a while ---- */
+static cui_renderer_iface et_inner;
+static int et_rgba_live;
+static cui_texture et_ids[16];
+static cui_texture et_create(void *u, int w, int h, cui_texture_format f, const void *px) {
+    cui_texture t = et_inner.texture_create(u, w, h, f, px);
+    if (f == CUI_TEXTURE_RGBA8) { et_rgba_live++; for (int i = 0; i < 16; i++) if (!et_ids[i]) { et_ids[i] = t; break; } }
+    return t;
+}
+static void et_destroy(void *u, cui_texture t) {
+    for (int i = 0; i < 16; i++) if (et_ids[i] == t) { et_ids[i] = 0; et_rgba_live--; break; }
+    et_inner.texture_destroy(u, t);
+}
+typedef struct { bool show; } et_ctx;
+static void build_et(cui_ctx *ui, void *u) {
+    et_ctx *c = u;
+    cui_column(ui, .pad = 10) { cui_text(ui, "Hello"); if (c->show) cui_emoji(ui, "\xf0\x9f\x8e\x89", 24); }
+}
+static void test_emoji_release(void) {
+    printf("emoji: the texture goes when no emoji is drawn for a while, and comes back\n");
+    et_inner = cui_sw_iface(g_sw);
+    cui_renderer_iface r = et_inner;
+    r.texture_create = et_create;
+    r.texture_destroy = et_destroy;
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = r });
+    cui_set_platform(ui, &(cui_platform_iface){ .draw_emoji = em_fake_draw });
+    cui_set_viewport(ui, 300, 200, 1);
+    et_ctx c = { true };
+    run(ui, build_et, &c, 3);
+    int with = et_rgba_live;
+    CHECK(with == 1);
+    c.show = false;
+    for (int i = 0; i < 700; i++) { cui_input_mouse_move(ui, (float)(i % 40), 3); run(ui, build_et, &c, 1); }
+    CHECK(et_rgba_live == 0);
+    c.show = true;
+    run(ui, build_et, &c, 3);
+    CHECK(et_rgba_live == 1);
+    cui_destroy(ui);
+    CHECK(et_rgba_live == 0);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -7032,6 +7073,7 @@ int main(void) {
     test_emoji();
     test_atlas_shrink();
     test_sw_incremental();
+    test_emoji_release();
     test_planning();
     test_node_editor();
     test_flame();

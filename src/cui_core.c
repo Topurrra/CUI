@@ -696,6 +696,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
 
     cui__theme_update(ui);
     cui__fonts_begin_frame(ui);
+    if (ui->emoji) cui__emoji_frame(ui);
     cui__draw_reset(ui);
 
     ui->node_count = 0;
@@ -768,3 +769,4 @@ void cui_end_frame(cui_ctx *ui) {
 const cui_draw_data *cui_get_draw_data(cui_ctx *ui) { return &ui->draw_data; }
 
 void cui__wakeup_after(cui_ctx *ui, float seconds) { cui__wake_in(ui, seconds); }
+void cui_request_wakeup(cui_ctx *ui, float seconds) { if (ui) cui__wake_in(ui, seconds); }

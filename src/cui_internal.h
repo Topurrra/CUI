@@ -52,6 +52,7 @@ size_t cui__inflate(const void *src, size_t src_len, void *dst, size_t dst_cap);
 /* color emoji (cui_emoji.c), PNG for its bitmaps (cui_image.c), outlines for its layers (cui_text.c) */
 void cui__emoji_shutdown(cui_ctx *ui);
 void cui__emoji_drop_texture(cui_ctx *ui);
+void cui__emoji_frame(cui_ctx *ui);
 unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *h);
 void cui__png_free(unsigned char *px);
 typedef struct cui__tt cui__tt;

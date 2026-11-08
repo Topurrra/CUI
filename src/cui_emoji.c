@@ -12,9 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define CUI__EM_ATLAS 1024
+#define CUI__EM_ATLAS_MAX 1024
+#define CUI__EM_IDLE 600   /* frames without an emoji before the texture is let go */
 #define CUI__EM_SLOTS_MAX 1024
-#define CUI__EM_BUDGET 24   /* new emoji drawn per frame; the rest come next frame */
+#define CUI__EM_BUDGET 12   /* new emoji drawn per frame; the rest come next frame */
 
 typedef struct { uint32_t key; uint16_t px; uint8_t state; bool mono; uint64_t used; } cui__em_slot;   /* state: 0 empty, 1 drawn, 2 missing */
 
@@ -34,7 +35,8 @@ typedef struct cui__emoji {
     int num_glyphs;
     bool loaded, tried_system;
     /* the texture */
-    cui_texture tex; int cell, per_row, nslots;
+    cui_texture tex; int atlas, cell, per_row, nslots;
+    uint64_t last_draw;                     /* the frame an emoji was last drawn */
     cui__em_slot slots[CUI__EM_SLOTS_MAX];
     uint64_t budget_frame; int budget;
     /* the picker's list */
@@ -88,6 +90,13 @@ void cui__emoji_drop_texture(cui_ctx *ui) {
     if (e->tex && ui->renderer.texture_destroy) ui->renderer.texture_destroy(ui->renderer.user, e->tex);
     e->tex = 0;
     for (int i = 0; i < e->nslots; i++) e->slots[i].state = 0;
+}
+
+/* once no emoji has been drawn for a while (the picker closed), the texture goes;
+ * it is made again, and filled as needed, the next time one is drawn */
+void cui__emoji_frame(cui_ctx *ui) {
+    cui__emoji *e = ui->emoji;
+    if (e && e->tex && ui->frame - e->last_draw > CUI__EM_IDLE) cui__emoji_drop_texture(ui);
 }
 
 void cui__emoji_shutdown(cui_ctx *ui) {
@@ -475,7 +484,7 @@ static bool cui__em_png(cui_ctx *ui, cui__emoji *e, int gid, int px, uint8_t **d
 }
 
 /* src (sw by sh, straight alpha) scaled into dst at (dx, dy) as dw by dh, an area average */
-static void cui__em_resample(const uint8_t *src, int sw, int sh, uint8_t *dst, int dstride, int dx, int dy, int dw, int dh) {
+static void cui__em_resample(cui_ctx *ui, const uint8_t *src, int sw, int sh, uint8_t *dst, int dstride, int dx, int dy, int dw, int dh) {
     if (dw > sw || dh > sh) {   /* enlarging: bilinear, weighted by alpha so edges keep their color */
         for (int y = 0; y < dh; y++) {
             float fy = CUI_CLAMP(((float)y + 0.5f) * sh / dh - 0.5f, 0.0f, (float)(sh - 1));
@@ -500,29 +509,66 @@ static void cui__em_resample(const uint8_t *src, int sw, int sh, uint8_t *dst, i
         }
         return;
     }
-    for (int y = 0; y < dh; y++) {
-        float sy0 = (float)y * sh / dh, sy1 = (float)(y + 1) * sh / dh;
-        for (int x = 0; x < dw; x++) {
-            float sx0 = (float)x * sw / dw, sx1 = (float)(x + 1) * sw / dw;
-            float acc[4] = { 0, 0, 0, 0 }, wsum = 0;
-            for (int yy = (int)sy0; yy < sh && yy < sy1; yy++) {
-                float wy = CUI_MIN((float)yy + 1, sy1) - CUI_MAX((float)yy, sy0);
-                for (int xx = (int)sx0; xx < sw && xx < sx1; xx++) {
-                    float w = wy * (CUI_MIN((float)xx + 1, sx1) - CUI_MAX((float)xx, sx0));
-                    const uint8_t *p = src + ((size_t)yy * sw + xx) * 4;
-                    float a = p[3] * w;
-                    acc[0] += p[0] * a; acc[1] += p[1] * a; acc[2] += p[2] * a; acc[3] += a;
-                    wsum += w;
-                }
+    /* shrinking: an area average in two passes (across, then down), with each output
+     * column's and row's source pixels and weights worked out once; colors weighted by alpha */
+    enum { TAPS = 8 };
+    if ((sw + dw - 1) / dw + 1 > TAPS || (sh + dh - 1) / dh + 1 > TAPS) return;   /* more than 7 to 1: not worth a path */
+    size_t tbytes = sizeof(float) * 4 * (size_t)dw * (size_t)sh;
+    size_t wbytes = (sizeof(int) + sizeof(float) * TAPS) * (size_t)(dw + dh);
+    uint8_t *mem = cui__alloc(ui, tbytes + wbytes);
+    if (!mem) return;
+    float *tmp = (float *)mem;
+    int *cs = (int *)(mem + tbytes), *rs = cs + dw;
+    float *cw = (float *)(rs + dh), *rw = cw + (size_t)dw * TAPS;
+    /* weights: the overlap of each source pixel with the output pixel, summing to 1 */
+    for (int pass = 0; pass < 2; pass++) {
+        int n = pass ? dh : dw, sn = pass ? sh : sw;
+        int *st = pass ? rs : cs;
+        float *wt = pass ? rw : cw;
+        for (int o = 0; o < n; o++) {
+            float a = (float)o * sn / n, b = (float)(o + 1) * sn / n, inv = (float)n / sn;
+            st[o] = (int)a;
+            for (int k = 0; k < TAPS; k++) {
+                float p0 = (float)(st[o] + k), p1 = p0 + 1;
+                float w = CUI_MIN(p1, b) - CUI_MAX(p0, a);
+                wt[(size_t)o * TAPS + k] = (w > 0 && st[o] + k < sn) ? w * inv : 0;
             }
-            uint8_t *o = dst + (size_t)(dy + y) * dstride + (size_t)(dx + x) * 4;
-            if (acc[3] <= 0 || wsum <= 0) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
-            o[0] = (uint8_t)CUI_MIN(255.0f, acc[0] / acc[3] + 0.5f);
-            o[1] = (uint8_t)CUI_MIN(255.0f, acc[1] / acc[3] + 0.5f);
-            o[2] = (uint8_t)CUI_MIN(255.0f, acc[2] / acc[3] + 0.5f);
-            o[3] = (uint8_t)CUI_MIN(255.0f, acc[3] / wsum + 0.5f);
         }
     }
+    for (int y = 0; y < sh; y++) {
+        const uint8_t *row = src + (size_t)y * sw * 4;
+        float *t = tmp + (size_t)y * dw * 4;
+        for (int x = 0; x < dw; x++) {
+            const uint8_t *p = row + (size_t)cs[x] * 4;
+            const float *w = cw + (size_t)x * TAPS;
+            float r = 0, g = 0, b = 0, al = 0;
+            for (int k = 0; k < TAPS; k++, p += 4) {
+                if (w[k] == 0) break;
+                float a = p[3] * w[k];
+                r += p[0] * a; g += p[1] * a; b += p[2] * a; al += a;
+            }
+            t[0] = r; t[1] = g; t[2] = b; t[3] = al; t += 4;
+        }
+    }
+    for (int y = 0; y < dh; y++) {
+        const float *w = rw + (size_t)y * TAPS;
+        uint8_t *q = dst + (size_t)(dy + y) * dstride + (size_t)dx * 4;
+        for (int x = 0; x < dw; x++, q += 4) {
+            const float *t = tmp + ((size_t)rs[y] * dw + x) * 4;
+            float r = 0, g = 0, b = 0, al = 0;
+            for (int k = 0; k < TAPS; k++, t += (size_t)dw * 4) {
+                if (w[k] == 0) break;
+                r += t[0] * w[k]; g += t[1] * w[k]; b += t[2] * w[k]; al += t[3] * w[k];
+            }
+            if (al <= 0) { q[0] = q[1] = q[2] = q[3] = 0; continue; }
+            float inv = 1.0f / al;
+            q[0] = (uint8_t)CUI_MIN(255.0f, r * inv + 0.5f);
+            q[1] = (uint8_t)CUI_MIN(255.0f, g * inv + 0.5f);
+            q[2] = (uint8_t)CUI_MIN(255.0f, b * inv + 0.5f);
+            q[3] = (uint8_t)CUI_MIN(255.0f, al + 0.5f);
+        }
+    }
+    cui__free(ui, mem);
 }
 
 /* layers (COLR) or one outline into out, px by px; *mono when it is one color to be tinted */
@@ -611,7 +657,7 @@ static bool cui__em_raster(cui_ctx *ui, cui__emoji *e, const char *utf8, int len
                 cui__free(ui, png);
                 if (!img) return false;
                 int m = CUI_MAX(w, h), dw = CUI_MAX(1, px * w / m), dh = CUI_MAX(1, px * h / m);
-                cui__em_resample(img, w, h, out, stride, (px - dw) / 2, (px - dh) / 2, dw, dh);
+                cui__em_resample(ui, img, w, h, out, stride, (px - dw) / 2, (px - dh) / 2, dw, dh);
                 cui__png_free(img);
                 return true;
             }
@@ -647,15 +693,17 @@ static int cui__em_get_slot(cui_ctx *ui, cui__emoji *e, const char *utf8, int le
     if (!ui->renderer.texture_create || !ui->renderer.texture_update) return -1;
     px = CUI_CLAMP(px, 8, 254);
     int need = (px + 2 + 7) & ~7;
+    e->last_draw = ui->frame;
     if (need > e->cell) {   /* bigger cells: start over */
         cui__emoji_drop_texture(ui);
         e->cell = need;
-        e->per_row = CUI__EM_ATLAS / e->cell;
+        e->atlas = e->cell <= 40 ? 512 : CUI__EM_ATLAS_MAX;   /* small emoji fit a quarter of the texture */
+        e->per_row = e->atlas / e->cell;
         e->nslots = CUI_MIN(e->per_row * e->per_row, CUI__EM_SLOTS_MAX);
         memset(e->slots, 0, sizeof e->slots);
     }
     if (!e->tex) {
-        e->tex = ui->renderer.texture_create(ui->renderer.user, CUI__EM_ATLAS, CUI__EM_ATLAS, CUI_TEXTURE_RGBA8, NULL);
+        e->tex = ui->renderer.texture_create(ui->renderer.user, e->atlas, e->atlas, CUI_TEXTURE_RGBA8, NULL);
         if (!e->tex) return -1;
         for (int i = 0; i < e->nslots; i++) e->slots[i].state = 0;
     }
@@ -703,7 +751,7 @@ static bool cui__em_draw(cui_ctx *ui, const char *utf8, int len, cui_rect r, flo
     if (missing) *missing = miss;
     if (i < 0) return false;
     px = e->slots[i].px;
-    float c = (float)e->cell, A = (float)CUI__EM_ATLAS;
+    float c = (float)e->cell, A = (float)e->atlas;
     float x = (float)(i % e->per_row) * c + 1, y = (float)(i / e->per_row) * c + 1;
     cui_rect uv = { x / A, y / A, px / A, px / A };
     cui_rect d = { r.x + (r.w - side) * 0.5f, r.y + (r.h - side) * 0.5f, side, side };

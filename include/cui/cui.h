@@ -200,6 +200,11 @@ CUI_API bool cui_needs_redraw(cui_ctx *ui);
  * Negative means "only on input". */
 CUI_API float cui_next_wakeup(cui_ctx *ui);
 CUI_API void cui_request_redraw(cui_ctx *ui);
+/* Asks for a frame within this many seconds even with no input, for things
+ * that change on a timer (a clock, polling, a countdown). Call it each frame
+ * while it is needed; an idle app then sleeps until the soonest one instead
+ * of redrawing continuously. */
+CUI_API void cui_request_wakeup(cui_ctx *ui, float seconds);
 CUI_API double cui_time(cui_ctx *ui);
 CUI_API float cui_delta_time(cui_ctx *ui);   /* seconds since the last frame */
 CUI_API uint64_t cui_frame_count(cui_ctx *ui);
