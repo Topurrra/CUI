@@ -51,16 +51,16 @@ static float cui__x_at(cui_ctx *ui, const cui__edit_paint *p, const char *line, 
 
 static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
     bool unshaped = ui->text_unshaped;
-    ui->text_unshaped = true;
     cui__edit_paint *p = data;
     cui_rect r = n->rect;
     cui_push_clip(ui, r);
     float fh = cui__font_line_height(ui, p->font, p->size);
     int s0 = CUI_MIN(p->cursor, p->anchor), s1 = CUI_MAX(p->cursor, p->anchor);
-    if (p->len == 0 && p->placeholder) {
+    if (p->len == 0 && p->placeholder) {   /* shaped like any label: no caret goes in it */
         float y = r.y + (p->multiline ? (p->line_h - fh) * 0.5f : (r.h - fh) * 0.5f);
         cui__draw_text_ellipsis(ui, p->font, p->size, r.x, y, r.w, p->placeholder_color, p->placeholder, (int)strlen(p->placeholder), false);
     }
+    ui->text_unshaped = true;   /* the text being edited: caret positions follow the glyphs one by one */
     if (!p->multiline) {
         float y = r.y + (r.h - fh) * 0.5f;
         float x = r.x - p->scroll_x;

@@ -53,7 +53,7 @@ export function compileModule(url) {
 }
 
 export async function loadModule(source, hooks = {}) {
-  let mem;
+  let mem, emojiCanvas = null, emojiCtx = null;
   const owners = new Map();
   const u8 = () => new Uint8Array(mem.buffer);
   const str = (p, n) => dec.decode(u8().subarray(p, n === undefined ? u8().indexOf(0, p) : p + n));
@@ -88,6 +88,28 @@ export async function loadModule(source, hooks = {}) {
       r.updateTexture(tex, x0, y0, w, h, new Uint8Array(mem.buffer, p, (h - 1) * stride + w * e.fmt), stride);
     },
     js_tex_destroy(owner, tex) { const r = owners.get(owner); if (r) r.destroyTexture(tex); },
+    js_draw_emoji(p, n, px, out) {
+      // the browser's color emoji, drawn on a canvas and copied back with straight alpha
+      if (!emojiCanvas) {
+        emojiCanvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(px, px) : document.createElement('canvas');
+        emojiCtx = emojiCanvas.getContext('2d', { willReadFrequently: true });
+      }
+      if (!emojiCtx) return 0;
+      if (emojiCanvas.width < px) { emojiCanvas.width = px; emojiCanvas.height = px; }
+      const c = emojiCtx;
+      c.clearRect(0, 0, emojiCanvas.width, emojiCanvas.height);
+      c.font = `${Math.round(px * 0.84)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillStyle = '#000';
+      c.fillText(str(p, n), px / 2, px * 0.54);
+      const d = c.getImageData(0, 0, px, px).data;
+      let ink = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i]) { ink = 1; break; }
+      if (!ink) return 0;
+      u8().set(d, out);
+      return 1;
+    },
     js_clipboard_set(p, n) {
       const text = str(p, n);
       if (hooks.clipboardSet) hooks.clipboardSet(text);

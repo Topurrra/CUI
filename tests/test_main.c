@@ -6726,6 +6726,138 @@ static void test_terminal(void) {
     cui_destroy(ui);
 }
 
+/* ---- emoji ---- */
+static int em_draws;
+static bool em_fake_draw(void *u, const char *s, int len, int px, unsigned char *rgba) {
+    (void)u;
+    em_draws++;
+    unsigned h = 2166136261u;
+    for (int i = 0; i < len; i++) h = (h ^ (unsigned char)s[i]) * 16777619u;
+    for (int i = 0; i < px * px; i++) { rgba[i * 4] = (unsigned char)h; rgba[i * 4 + 1] = (unsigned char)(h >> 8); rgba[i * 4 + 2] = (unsigned char)(h >> 16); rgba[i * 4 + 3] = 255; }
+    return true;
+}
+typedef struct { const char *picked; char recent[256]; int tone; cui_id grid, flags_tab; } em_ctx;
+static void build_em(cui_ctx *ui, void *u) {
+    em_ctx *c = u;
+    cui_column(ui, .pad = 20) {
+        const char *p = cui_emoji_picker(ui, "emoji", .recent = c->recent, .recent_cap = sizeof c->recent, .tone = &c->tone);
+        if (p) c->picked = p;
+    }
+    cui_push_id(ui, "emoji");
+    c->grid = cui_make_id(ui, "#grid");
+    cui_push_id_int(ui, 9);
+    c->flags_tab = cui_make_id(ui, "#tab");
+    cui_pop_id(ui);
+    cui_pop_id(ui);
+}
+static void test_emoji(void) {
+    printf("emoji: list, search, tones, recent, keys, clicks, font tables\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_platform(ui, &(cui_platform_iface){ .set_clipboard = clip_set, .get_clipboard = clip_get, .draw_emoji = em_fake_draw });
+    em_ctx c;
+    memset(&c, 0, sizeof c);
+    run(ui, build_em, &c, 3);
+    CHECK(em_draws > 0 && em_draws <= 24 * 3);   /* a few per frame, not the whole list at once */
+    CHECK(cui_emoji_supported(ui, "\xf0\x9f\x98\x80", -1));
+    /* search, then Enter picks the first result; names starting with the query come first */
+    cui_input_mouse_move(ui, 60, 45); run(ui, build_em, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_em, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_em, &c, 1);
+    type(ui, build_em, &c, "red heart");
+    key(ui, build_em, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.picked && !strcmp(c.picked, "\xe2\x9d\xa4\xef\xb8\x8f"));
+    CHECK(!strcmp(c.recent, "\xe2\x9d\xa4\xef\xb8\x8f"));
+    /* a tone goes after each person */
+    c.tone = 3; c.picked = NULL;
+    key(ui, build_em, &c, CUI_KEY_A, CUI_MOD_PRIMARY);
+    type(ui, build_em, &c, "thumbs up");
+    key(ui, build_em, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.picked && !strcmp(c.picked, "\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd"));
+    c.picked = NULL;
+    key(ui, build_em, &c, CUI_KEY_A, CUI_MOD_PRIMARY);
+    type(ui, build_em, &c, "people holding hands");
+    key(ui, build_em, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.picked && !strcmp(c.picked, "\xf0\x9f\xa7\x91\xf0\x9f\x8f\xbd\xe2\x80\x8d\xf0\x9f\xa4\x9d\xe2\x80\x8d\xf0\x9f\xa7\x91\xf0\x9f\x8f\xbd"));
+    /* the arrows move through results; nothing found picks nothing */
+    c.tone = 0; c.picked = NULL;
+    key(ui, build_em, &c, CUI_KEY_A, CUI_MOD_PRIMARY);
+    type(ui, build_em, &c, "zzqqx");
+    key(ui, build_em, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.picked == NULL);
+    /* recent: newest first, no repeats */
+    CHECK(!strncmp(c.recent, "\xf0\x9f\xa7\x91", 4) && strstr(c.recent, "\xe2\x9d\xa4"));
+    /* a tab clicked during a search leaves it and goes to the group: the first flag is then a click away */
+    {
+        cui_rect tr = rect_of(ui, c.flags_tab);
+        click_at(ui, build_em, &c, tr.x + tr.w / 2, tr.y + tr.h / 2);
+        run(ui, build_em, &c, 3);
+        cui_rect g2 = rect_of(ui, c.grid);
+        c.picked = NULL;
+        click_at(ui, build_em, &c, g2.x + 30, g2.y + 30 + 19);
+        CHECK(c.picked && !strcmp(c.picked, "\xf0\x9f\x8f\x81"));   /* chequered flag, the first of the group */
+        c.recent[0] = 0;
+        c.picked = NULL;
+        run(ui, build_em, &c, 2);
+    }
+
+    /* cleared search: Down goes into the grid, Right moves, Enter picks */
+    key(ui, build_em, &c, CUI_KEY_A, CUI_MOD_PRIMARY);
+    key(ui, build_em, &c, CUI_KEY_BACKSPACE, 0);
+    c.recent[0] = 0;
+    run(ui, build_em, &c, 2);
+    key(ui, build_em, &c, CUI_KEY_DOWN, 0);
+    key(ui, build_em, &c, CUI_KEY_RIGHT, 0);
+    key(ui, build_em, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.picked && !strcmp(c.picked, "\xf0\x9f\x98\x83"));   /* the second smiley */
+    /* a click on a cell picks it; a drag scrolls instead */
+    cui_rect gr = rect_of(ui, c.grid);
+    c.picked = NULL;
+    c.recent[0] = 0;
+    run(ui, build_em, &c, 30);
+    click_at(ui, build_em, &c, gr.x + gr.w / 2 - 60, gr.y + 30 + 20);
+    CHECK(c.picked != NULL);
+    c.picked = NULL;
+    c.recent[0] = 0;
+    run(ui, build_em, &c, 30);
+    cui_input_mouse_move(ui, gr.x + 100, gr.y + 200); run(ui, build_em, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_em, &c, 1);
+    for (int k = 1; k <= 10; k++) { cui_input_mouse_move(ui, gr.x + 100, gr.y + 200 - k * 15); run(ui, build_em, &c, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_em, &c, 1);
+    CHECK(c.picked == NULL);
+    /* the whole list scrolled through stays cheap */
+    {
+        clock_t t0 = clock();
+        for (int k = 0; k < 60; k++) { cui_input_mouse_move(ui, gr.x + 100, gr.y + 100); cui_input_scroll(ui, 0, -3); run(ui, build_em, &c, 1); }
+        double ms = (double)(clock() - t0) / CLOCKS_PER_SEC * 1000 / 60;
+        printf("    emoji picker: %.2f ms per frame while scrolling\n", ms);
+        CHECK(ms < 20);
+    }
+    /* things that are not fonts are refused */
+    static const unsigned char junk[64] = { 0, 1, 0, 0, 0, 40 };
+    CHECK(!cui_emoji_font_load_memory(ui, junk, sizeof junk, false));
+    CHECK(!cui_emoji_font_load_file(ui, "/nonexistent/emoji.ttf"));
+    cui_destroy(ui);
+
+    /* a real color font, where there is one: sequences through its ligatures */
+    const char *noto = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf";
+    FILE *f = fopen(noto, "rb");
+    if (f) {
+        fclose(f);
+        ui = new_ctx();
+        CHECK(cui_emoji_font_load_file(ui, noto));
+        CHECK(cui_emoji_supported(ui, "\xf0\x9f\x98\x80", -1));                                  /* grinning face */
+        CHECK(cui_emoji_supported(ui, "\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd", -1));                  /* thumbs up, medium tone */
+        CHECK(cui_emoji_supported(ui, "\xf0\x9f\x87\xa9\xf0\x9f\x87\xaa", -1));                  /* flag: Germany */
+        CHECK(cui_emoji_supported(ui, "\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7", -1));   /* family */
+        CHECK(cui_emoji_supported(ui, "#\xef\xb8\x8f\xe2\x83\xa3", -1));                         /* keycap # */
+        CHECK(!cui_emoji_supported(ui, "A", -1));
+        em_ctx c2;
+        memset(&c2, 0, sizeof c2);
+        run(ui, build_em, &c2, 6);   /* draws real bitmaps */
+        cui_destroy(ui);
+    } else printf("    (no Noto Color Emoji here: font checks skipped)\n");
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6763,6 +6895,7 @@ int main(void) {
     test_photo();
     test_files();
     test_terminal();
+    test_emoji();
     test_planning();
     test_node_editor();
     test_flame();

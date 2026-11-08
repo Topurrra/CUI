@@ -285,6 +285,25 @@ void cui__fonts_shutdown(cui_ctx *ui) {
     ui->atlas_tex = 0;
 }
 
+/* ---- outlines for color layer emoji fonts (cui_emoji.c) ---- */
+
+struct cui__tt { stbtt_fontinfo info; };
+cui__tt *cui__tt_open(cui_ctx *ui, const unsigned char *data, int offset) {
+    cui__tt *t = cui__alloc(ui, sizeof *t);
+    if (!t) return NULL;
+    if (!stbtt_InitFont(&t->info, data, offset)) { cui__free(ui, t); return NULL; }
+    return t;
+}
+float cui__tt_scale(cui__tt *t, float px_per_em) { return stbtt_ScaleForMappingEmToPixels(&t->info, px_per_em); }
+void cui__tt_vmetrics(cui__tt *t, int *ascent, int *descent) { int gap; stbtt_GetFontVMetrics(&t->info, ascent, descent, &gap); }
+bool cui__tt_box(cui__tt *t, int gid, float scale, int *x0, int *y0, int *x1, int *y1) {
+    stbtt_GetGlyphBitmapBox(&t->info, gid, scale, scale, x0, y0, x1, y1);
+    return *x1 > *x0 && *y1 > *y0;
+}
+void cui__tt_render(cui__tt *t, int gid, float scale, unsigned char *out, int w, int h, int stride) {
+    stbtt_MakeGlyphBitmap(&t->info, out, w, h, stride, scale, scale, gid);
+}
+
 /* ---- glyph lookup with fallback ---- */
 
 static int cui__glyph_index(cui_font_data *fd, uint32_t cp) {

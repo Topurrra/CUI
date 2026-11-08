@@ -34,6 +34,13 @@
 #pragma GCC diagnostic pop
 #endif
 
+/* color emoji bitmaps (sbix, CBDT) are PNG */
+unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *h) {
+    int comp = 0;
+    return stbi_load_from_memory(data, len, w, h, &comp, 4);
+}
+void cui__png_free(unsigned char *px) { stbi_image_free(px); }
+
 cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h) {
     int iw = 0, ih = 0, comp = 0;
     unsigned char *px = stbi_load(path, &iw, &ih, &comp, 4);
@@ -45,6 +52,8 @@ cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h) {
     return t;
 }
 #else
+unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *h) { (void)data; (void)len; (void)w; (void)h; return NULL; }
+void cui__png_free(unsigned char *px) { (void)px; }
 cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h) {
     (void)ui; (void)path; (void)w; (void)h;
     return 0;

@@ -49,6 +49,17 @@ static inline bool cui__color_set(cui_color c) { return c.a != 0 || cui__is_toke
 /* ---- memory ---- */
 void *cui__alloc(cui_ctx *ui, size_t size);
 size_t cui__inflate(const void *src, size_t src_len, void *dst, size_t dst_cap);  /* raw DEFLATE */
+/* color emoji (cui_emoji.c), PNG for its bitmaps (cui_image.c), outlines for its layers (cui_text.c) */
+void cui__emoji_shutdown(cui_ctx *ui);
+void cui__emoji_drop_texture(cui_ctx *ui);
+unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *h);
+void cui__png_free(unsigned char *px);
+typedef struct cui__tt cui__tt;
+cui__tt *cui__tt_open(cui_ctx *ui, const unsigned char *data, int offset);
+float cui__tt_scale(cui__tt *t, float px_per_em);
+void cui__tt_vmetrics(cui__tt *t, int *ascent, int *descent);
+bool cui__tt_box(cui__tt *t, int gid, float scale, int *x0, int *y0, int *x1, int *y1);
+void cui__tt_render(cui__tt *t, int gid, float scale, unsigned char *out, int w, int h, int stride);
 void *cui__realloc(cui_ctx *ui, void *p, size_t size);
 void cui__free(cui_ctx *ui, void *p);
 void *cui__frame_alloc(cui_ctx *ui, size_t size);       /* freed at frame start */
@@ -387,7 +398,9 @@ typedef struct cui__vlist_build { int count; float row_h; int first; } cui__vlis
 #define CUI_ID_STACK 64
 #define CUI_PARENT_STACK 256
 
+struct cui__emoji;
 struct cui_ctx {
+    struct cui__emoji *emoji;   /* color emoji: font, cache and data (cui_emoji.c) */
     cui_allocator alloc;
     cui_renderer_iface renderer;
     cui_platform_iface platform;

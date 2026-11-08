@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- **Emoji picker and color emoji**: the 1,914 emoji of Unicode 17 with names, groups, search, recent emoji, skin tones and a preview. It has keys and touch scrolling. Emoji come from the system's color emoji font (sbix, CBDT or COLR version 0), read from the file as needed, with sequences found through the font's ligatures. `cui_emoji` and `cui_draw_emoji` draw an emoji anywhere. The built-in list adds about 16 KB.
 - **Terminal**: output over an input line. It reads ANSI colors (16, 256 and 24-bit), bold, dim, underline and inverse, `\r` progress bars, tabs and clear sequences, and drops the escapes it does not draw. Lines wrap at the panel width, only the rows in view are drawn, and it follows new output. It has drag-to-copy without the colors, command history, Ctrl+C to interrupt and Ctrl+L to clear. The app owns a fixed ring buffer, so writing never allocates.
 - **File browser and file picker**: a folder view with sorting, natural name order, a filter, back, forward and up, a typeable path bar, places, type-ahead and keys. The open, save and folder dialog is drawn by CUI. Listing goes through a callback (the local disk by default), and big folders are read once and built only where they show.
 - **Image viewer and cropper**: zoom around the pointer, pan, double-click for actual pixels, keys, eased motion and a zoom pill. The cropper has corner and edge handles, aspect lock, a round mask for avatars, thirds lines and the size while dragging.
@@ -18,6 +19,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 ### Changed
 
 - Truncated right-to-left text puts its ellipsis on the left, where the text ends (with text shaping).
+- Text field placeholders are shaped like other labels, so Arabic and other joined scripts read correctly in them (with text shaping). The text being edited stays unshaped, as before.
 - **Every component page fits a phone.** Layouts that used to need more than a phone's width now rearrange instead of shrinking the preview. The calendar, countdown, radar chart, activity rings and donut legend scale down. The waffle legend moves under its grid, and the banner puts its action under the message. The player drops its previous button, and the stepper keeps only the current label. Pagination collapses to the first, current and last pages, and the status bar keeps icons and drops labels. Toolbars, path bars and inspectors fold, and the dock shrinks its icons and stops magnifying.
 - **Docking** shows every panel as a tab of one stack when the dockspace is too narrow for panes side by side. The saved layout is untouched, and the panes come back when there is room.
 - **Segmented controls and button groups** tighten their padding before a label truncates.

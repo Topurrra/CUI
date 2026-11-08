@@ -2151,6 +2151,24 @@ SCENE(terminal) {
         if (r.command && r.command[0]) cui_terminal_printf(&g_term, "%s: command not found\n", r.command);
     }
 }
+SCENE(emoji_picker) {
+    static char recent[256] = "\xf0\x9f\x91\x8d \xf0\x9f\x8e\x89 \xe2\x9c\x85 \xf0\x9f\x98\x82 \xf0\x9f\x9a\x80 \xf0\x9f\x91\x80 \xe2\x9d\xa4\xef\xb8\x8f \xf0\x9f\x99\x8f";
+    static int tone = 0;
+    static char note[96] = "Shipped the fix ";
+    cui_row(ui, .gap = 24, .align = CUI_ALIGN_START, .wrap = true, .width = CUI_FILL) {
+        const char *e = cui_emoji_picker(ui, "emoji", .recent = recent, .recent_cap = sizeof recent, .tone = &tone);
+        if (e && strlen(note) + strlen(e) < sizeof note) strcat(note, e);
+        cui_column(ui, .gap = 10, .width = CUI_GROW(1), .min_width = 240) {
+            cui_label(ui, "Status");
+            cui_input(ui, "note", note, sizeof note, .width = CUI_FILL);
+            cui_row(ui, .gap = 6, .align = CUI_ALIGN_CENTER) {
+                cui_emoji(ui, "\xf0\x9f\x8e\x89", 18); cui_text(ui, "3", .size = 13);
+                cui_emoji(ui, "\xf0\x9f\x91\x80", 18); cui_text(ui, "5", .size = 13);
+                cui_emoji(ui, "\xf0\x9f\x9a\x80", 18); cui_text(ui, "2", .size = 13);
+            }
+        }
+    }
+}
 SCENE(gauges) {
     static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
@@ -3483,7 +3501,7 @@ int main(int argc, char **argv) {
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },
-        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "chat", scene_chat, 560, 440, true },
+        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
         { "timeline-editor", scene_timeline_editor, 960, 660, true },

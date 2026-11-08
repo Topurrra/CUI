@@ -13,6 +13,9 @@ double js_perf_now(void) WASM_IMPORT(js_perf_now);
 int js_tex_create(int owner, int w, int h, int fmt, const void *px) WASM_IMPORT(js_tex_create);
 void js_tex_update(int owner, int tex, int x, int y, int w, int h, const void *px, int stride) WASM_IMPORT(js_tex_update);
 void js_tex_destroy(int owner, int tex) WASM_IMPORT(js_tex_destroy);
+/* Emoji come from the browser's own emoji font, drawn on a canvas (site/js/runtime.js). */
+int js_draw_emoji(const char *s, int n, int px, unsigned char *rgba) WASM_IMPORT(js_draw_emoji);
+static bool draw_emoji(void *u, const char *s, int n, int px, unsigned char *rgba) { (void)u; return js_draw_emoji(s, n, px, rgba) != 0; }
 static cui_texture gpu_create(void *user, int w, int h, cui_texture_format fmt, const void *px) { return (cui_texture)js_tex_create((int)(uintptr_t)user, w, h, (int)fmt, px); }
 static void gpu_update(void *user, cui_texture t, int x, int y, int w, int h, const void *px, int stride) { js_tex_update((int)(uintptr_t)user, (int)t, x, y, w, h, px, stride); }
 static void gpu_destroy(void *user, cui_texture t) { js_tex_destroy((int)(uintptr_t)user, (int)t); }
@@ -91,7 +94,7 @@ EXPORT(inst_new) web_inst *inst_new(int content, float w, float h, float scale, 
     in->ui = cui_create(&(cui_ctx_desc){ .renderer = iface, .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT,
                                         .accent = accent >= 0 ? (cui_accent)accent : CUI_ACCENT_NEUTRAL });
     cui_set_platform(in->ui, &(cui_platform_iface){ .set_clipboard = clip_set, .get_clipboard = clip_get,
-                                                   .set_cursor = set_cursor, .set_text_input_rect = set_text_rect });
+                                                   .set_cursor = set_cursor, .set_text_input_rect = set_text_rect, .draw_emoji = draw_emoji });
     cui_set_viewport(in->ui, w, h, scale);
     cui_input_focus(in->ui, true);
     warm_up(in);

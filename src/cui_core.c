@@ -192,6 +192,7 @@ cui_ctx *cui_create(const cui_ctx_desc *desc) {
 
 void cui_destroy(cui_ctx *ui) {
     if (!ui) return;
+    cui__emoji_shutdown(ui);
     cui__fonts_shutdown(ui);
     for (int i = 0; i < ui->state_count; i++) {
         if (ui->states[i].dtor && ui->states[i].data) ui->states[i].dtor(ui, ui->states[i].data);
@@ -219,6 +220,7 @@ void cui_destroy(cui_ctx *ui) {
 }
 
 void cui_set_renderer(cui_ctx *ui, const cui_renderer_iface *r) {
+    cui__emoji_drop_texture(ui);   /* made by the old renderer */
     if (ui->atlas_tex && ui->renderer.texture_destroy) ui->renderer.texture_destroy(ui->renderer.user, ui->atlas_tex);
     ui->atlas_tex = 0;
     if (r) ui->renderer = *r; else memset(&ui->renderer, 0, sizeof ui->renderer);

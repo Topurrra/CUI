@@ -267,6 +267,9 @@ typedef struct cui_platform_iface {
     const char *(*get_clipboard)(void *user);   /* returned string stays valid until next call */
     void (*set_cursor)(void *user, cui_cursor cursor);
     void (*set_text_input_rect)(void *user, cui_rect caret);  /* IME candidate window position */
+    /* Optional: draws one emoji (UTF-8) into a px by px RGBA buffer (straight alpha), for
+     * when no emoji font is loaded; the browser build uses the browser's emoji. */
+    bool (*draw_emoji)(void *user, const char *utf8, int len, int px, unsigned char *rgba);
 } cui_platform_iface;
 CUI_API void cui_set_platform(cui_ctx *ui, const cui_platform_iface *platform);
 CUI_API cui_cursor cui_get_cursor(cui_ctx *ui);
@@ -2548,6 +2551,40 @@ typedef struct cui_terminal_result {
     bool interrupt;            /* Ctrl+C with nothing selected */
 } cui_terminal_result;
 CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_terminal_buffer *t, const cui_terminal_opts *opts);
+
+/* ---- Emoji ----
+ * Color emoji come from an emoji font: the system's (cui_emoji_font_load_system, which
+ * the picker calls by itself when nothing is loaded) or one the app ships. Bitmap color
+ * fonts (sbix as on macOS, CBDT as on Linux and Android) and layered ones (COLR version 0,
+ * as on Windows) are read, as is a plain outline font for one-color emoji. Sequences with
+ * skin tones, joined people and flags are looked up through the font's ligatures. Big
+ * fonts are read from the file as needed rather than loaded whole. Drawn emoji are kept in
+ * one texture and reused. */
+CUI_API bool cui_emoji_font_load_file(cui_ctx *ui, const char *path);
+CUI_API bool cui_emoji_font_load_memory(cui_ctx *ui, const void *data, size_t size, bool copy);
+CUI_API bool cui_emoji_font_load_system(cui_ctx *ui);
+CUI_API bool cui_emoji_supported(cui_ctx *ui, const char *utf8, int len);   /* the font (or platform) can draw it */
+CUI_API void cui_draw_emoji(cui_ctx *ui, const char *utf8, int len, cui_rect r);
+CUI_API void cui_emoji(cui_ctx *ui, const char *utf8, float size);           /* one emoji as a component */
+
+/* Emoji picker: search, groups with tabs, recent emoji, skin tones and a preview with the
+ * name. Returns the emoji picked this frame (UTF-8, valid until the next frame) or NULL.
+ * Put it in a popover to open it from a button. */
+typedef struct cui_emoji_picker_opts {
+    int _;
+    cui_size width;                   /* default up to 360 */
+    float height;                     /* the grid; default 280 */
+    float size;                       /* emoji size; default 26 */
+    char *recent; size_t recent_cap;  /* the app's copy of recent emoji, newest first, space separated */
+    int *tone;                        /* skin tone, 0 (none) to 5 (dark), kept by the app */
+    const char *placeholder;          /* "Search emoji" */
+    const char *empty_text;           /* "No emoji found" */
+    const char *hint;                 /* the preview with nothing to show: "Pick an emoji" */
+    const char *const *group_names;   /* 10 names: recent, then Unicode's nine groups */
+    bool no_search, no_preview, no_tone;
+} cui_emoji_picker_opts;
+CUI_API const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id, const cui_emoji_picker_opts *opts);
+#define cui_emoji_picker(ui, id, ...) cui_emoji_picker_ex((ui), (id), CUI__OPTS(cui_emoji_picker_opts, __VA_ARGS__))
 
 /* ---- Hex viewer ---- */
 

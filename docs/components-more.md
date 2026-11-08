@@ -246,6 +246,31 @@ Both take `step`, `format` and `unit`, and both answer the same keys and gesture
 
 The level meter takes linear sample peaks, where 1.0 is 0 dBFS. Bars jump up to each new peak and fall back at `decay` dB per second (20 by default), the peak mark holds for `hold` seconds (1.5) and then falls, and a clip light at the loud end stays on after a peak reaches 0 dBFS until it is clicked. The colors run green to -18 dB, amber to -6 dB and red above. `scale` labels the dB marks that fit, `segmented` draws LED segments, and `min_db`, `max_db`, `length`, `thickness` and `horizontal` set the shape. Up to eight channels share one meter. Each control is a single painted node, so a mixer with dozens of strips costs little more than one.
 
+### Emoji picker
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/emoji-picker-dark.png"><img src="images/components/emoji-picker.png" alt="Emoji picker"></picture>
+
+```c
+static char recent[256];   /* save and restore it to keep recent emoji between runs */
+static int tone;           /* 0 for none, 1 (light) to 5 (dark) */
+
+if (cui_icon_button(ui, CUI_ICON_SMILE, .tooltip = "Emoji")) cui_popover_toggle(ui, "emoji");
+cui_popover(ui, "emoji", .placement = CUI_PLACE_BOTTOM_END, .width = 340, .pad = 0) {
+    const char *e = cui_emoji_picker(ui, "picker", .recent = recent, .recent_cap = sizeof recent, .tone = &tone);
+    if (e) { insert_text(e); cui_popover_close(ui, "emoji"); }
+}
+
+cui_emoji(ui, "\xf0\x9f\x8e\x89", 18);             /* one emoji anywhere, e.g. a reaction */
+```
+
+The 1,914 emoji of Unicode 17 in Unicode's order and nine groups, with their names. The list is built in, compressed to about 16 KB, and unpacked the first time a picker is shown. Search matches the start of words in the name ("red he" finds the red heart), and names that start with the query come first. The tabs jump to a group and show which one is in view, while the name of the group in view stays at the top of the grid. The preview below shows the name of the emoji under the pointer.
+
+The hand next to the search opens the six skin tones. A tone goes after each person in an emoji, so families and people holding hands take it as well. Picked emoji go to the front of the recent list, which the app owns as a space separated string, so it can save it. With the search focused, Down moves into the grid and Enter picks the first result. In the grid the arrows move by cell and by row across groups, Home and End go to the ends, and Enter or Space picks. A tap picks and a drag scrolls, so it works with touch.
+
+Emoji are drawn from a color emoji font. CUI reads the one the system has: Segoe UI Emoji on Windows, Apple Color Emoji on macOS, Noto Color Emoji on Linux and Android. The picker loads it the first time it is shown, or the app can call `cui_emoji_font_load_system`, or load its own font with `cui_emoji_font_load_file` / `_memory`. Bitmap color fonts (sbix and CBDT, with PNG images) and layered ones (COLR version 0) work, and a plain outline font gives emoji in the text color. Skin tones, joined sequences, flags and keycaps are found through the font's own ligatures. A big font is read from its file as needed: only its lookup tables stay in memory, not the images. The picker lists only what the font can draw. Drawn emoji are kept in one 1024 × 1024 texture and reused: a frame draws at most 24 new ones, and the grid draws only the rows in view. In the browser build, emoji come from the browser through `cui_platform_iface.draw_emoji`, which any platform can provide. With no emoji font at all the picker says so.
+
+`.group_names` takes ten translated names (recent, then the nine groups), `.placeholder`, `.empty_text` and `.hint` the other text. Search matches the English names. `.no_search`, `.no_tone` and `.no_preview` leave those parts out. `.size` sets the emoji size (26 by default) and `.height` the grid height (280).
+
 ## Capture
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/capture-dark.png"><img src="images/components/capture.png" alt="Dropzone, signature and avatar upload"></picture>

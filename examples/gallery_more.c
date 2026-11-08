@@ -150,6 +150,19 @@ static void page_inputs(cui_ctx *ui) {
         cui_shortcut_recorder(ui, "palette-key", &combo);
         cui_shortcut_recorder(ui, "search-key", &combo2, .placeholder = "Record shortcut");
     }
+
+    static char message[160] = "Release notes are up ";
+    static char recent[256];
+    static int tone;
+    section(ui, "Emoji picker", "Search by name, jump by group, pick a skin tone. Recent emoji come first.");
+    cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .width = CUI_FILL, .max_width = 480) {
+        cui_input(ui, "message", message, sizeof message, .width = CUI_FILL);
+        if (cui_icon_button(ui, CUI_ICON_SMILE, .tooltip = "Emoji")) cui_popover_toggle(ui, "emoji-pop");
+        cui_popover(ui, "emoji-pop", .placement = CUI_PLACE_BOTTOM_END, .width = 340, .pad = 0) {
+            const char *e = cui_emoji_picker(ui, "emoji", .recent = recent, .recent_cap = sizeof recent, .tone = &tone, .height = 260);
+            if (e && strlen(message) + strlen(e) < sizeof message) { strcat(message, e); cui_popover_close(ui, "emoji-pop"); }
+        }
+    }
 }
 
 
