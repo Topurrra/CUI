@@ -122,7 +122,8 @@ typedef struct cui_glyph {
     uint16_t font;
     uint16_t size_q;     /* pixel size * 4 */
     uint8_t subpx;
-    uint8_t used;
+    uint8_t pad_;
+    uint32_t stamp;      /* the frame it was last drawn in, so a full atlas can drop old sizes */
     int16_t x0, y0;      /* offset of bitmap from pen position (pixels) */
     uint16_t w, h;
     uint16_t ax, ay;     /* atlas position */
@@ -498,6 +499,7 @@ struct cui_ctx {
     cui_font roles[5];
     cui_glyph *glyphs; int glyph_count, glyph_cap;
     int glyph_buckets[4096];
+    uint64_t atlas_check_frame;   /* when the atlas last looked at shrinking */
     uint8_t *atlas; int atlas_w, atlas_h;
     int pack_x, pack_y, pack_row_h;
     bool atlas_dirty; int dirty_x0, dirty_y0, dirty_x1, dirty_y1;

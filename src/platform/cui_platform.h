@@ -18,6 +18,7 @@ struct cui_app {
     bool running;
     bool in_frame;
     bool presented_once;
+    bool force_present;       /* software: the window needs the whole picture again (exposed, resized) */
     double last_time;
     double last_present;
     void (*frame_cb)(cui_ctx *ui, void *user);
@@ -37,6 +38,9 @@ bool cui__plat_gl_create(cui_app *app, bool vsync);
 void *cui__plat_gl_proc(const char *name);
 void cui__plat_gl_swap(cui_app *app);
 void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride);
+/* software: shows only the part (x, y, pw, ph) of the buffer that changed; false when the
+ * backend cannot, and the whole buffer is shown instead */
+bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int stride, int x, int y, int pw, int ph);
 void cui__plat_wait(cui_app *app, double timeout);   /* < 0 waits for the next event */
 void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w, int *fb_h);
 void cui__plat_set_title(cui_app *app, const char *title);

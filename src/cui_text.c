@@ -739,7 +739,7 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     uint32_t h = cui__hash(key, sizeof key, 77) & 4095;
     for (int i = ui->glyph_buckets[h]; i >= 0; i = ui->glyphs[i].next) {
         cui_glyph *g = &ui->glyphs[i];
-        if (g->key_cp == (uint32_t)gi && g->font == font && g->size_q == sq && g->subpx == subpx) return g;
+        if (g->key_cp == (uint32_t)gi && g->font == font && g->size_q == sq && g->subpx == subpx) { g->stamp = (uint32_t)ui->frame; return g; }
     }
     if (!cui__gamma_ready) {
         for (int i = 0; i < 256; i++) cui__gamma_lut[i] = (uint8_t)(powf(i / 255.0f, 0.82f) * 255.0f + 0.5f);
@@ -771,7 +771,7 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     }
     CUI__GROW(ui, ui->glyphs, ui->glyph_count, ui->glyph_cap, 1);
     cui_glyph *g = &ui->glyphs[ui->glyph_count];
-    g->key_cp = (uint32_t)gi; g->font = (uint16_t)font; g->size_q = sq; g->subpx = (uint8_t)subpx;
+    g->key_cp = (uint32_t)gi; g->font = (uint16_t)font; g->size_q = sq; g->subpx = (uint8_t)subpx; g->stamp = (uint32_t)ui->frame;
     g->x0 = (int16_t)x0; g->y0 = (int16_t)y0; g->w = (uint16_t)CUI_MAX(w, 0); g->h = (uint16_t)CUI_MAX(hgt, 0);
     g->ax = (uint16_t)ax; g->ay = (uint16_t)ay;
     g->next = ui->glyph_buckets[h];
@@ -779,7 +779,76 @@ static cui_glyph *cui__glyph_get(cui_ctx *ui, cui_font font, int gi, float px_si
     return &ui->glyphs[ui->glyph_count++];
 }
 
+/* The atlas grows when it fills up, and the glyphs of sizes no longer shown
+ * (after a zoom, a change of display scale, a page that is gone) would keep it
+ * big. Every few seconds, before anything is drawn, the glyphs drawn in the
+ * last five seconds move into the smallest atlas they fill no more than half
+ * of, and the rest are dropped; they are drawn again if they come back. */
+#define CUI__ATLAS_KEEP 300   /* frames */
+typedef struct { uint16_t h; int i; } cui__glyph_ord;
+static int cui__glyph_ord_cmp(const void *a, const void *b) {
+    const cui__glyph_ord *x = a, *y = b;
+    return x->h != y->h ? (int)y->h - (int)x->h : x->i - y->i;
+}
+static void cui__atlas_compact(cui_ctx *ui) {
+    uint32_t now = (uint32_t)ui->frame;
+    size_t area = 0;
+    int live = 0;
+    for (int i = 0; i < ui->glyph_count; i++) {
+        cui_glyph *g = &ui->glyphs[i];
+        if (now - g->stamp > CUI__ATLAS_KEEP) continue;
+        area += (size_t)(g->w + 1) * (size_t)(g->h + 1);
+        live++;
+    }
+    int nw = ui->atlas_w;
+    while (nw > CUI_ATLAS_MIN && area * 2 <= (size_t)(nw / 2) * (size_t)(nw / 2)) nw /= 2;
+    if (nw == ui->atlas_w) return;
+    cui__glyph_ord *ord = cui__alloc(ui, sizeof *ord * (size_t)CUI_MAX(live, 1));
+    cui_glyph *ng = cui__alloc(ui, sizeof *ng * (size_t)CUI_MAX(live, 1));
+    uint8_t *na = cui__alloc(ui, (size_t)nw * (size_t)nw);
+    if (!ord || !ng || !na) { cui__free(ui, ord); cui__free(ui, ng); cui__free(ui, na); return; }
+    int n = 0;
+    for (int i = 0; i < ui->glyph_count; i++)
+        if (now - ui->glyphs[i].stamp <= CUI__ATLAS_KEEP) ord[n++] = (cui__glyph_ord){ ui->glyphs[i].h, i };
+    qsort(ord, (size_t)n, sizeof *ord, cui__glyph_ord_cmp);   /* tall first: shelves waste less */
+    memset(na, 0, (size_t)nw * (size_t)nw);
+    int px = 1, py = 1, row = 0;
+    for (int k = 0; k < n; k++) {
+        cui_glyph g = ui->glyphs[ord[k].i];
+        if (g.w > 0 && g.h > 0) {
+            if (px + g.w + 1 > nw) { px = 1; py += row + 1; row = 0; }
+            if (py + g.h + 1 > nw) { cui__free(ui, ord); cui__free(ui, ng); cui__free(ui, na); return; }   /* does not fit after all */
+            for (int y = 0; y < g.h; y++)
+                memcpy(na + (size_t)(py + y) * (size_t)nw + (size_t)px, ui->atlas + (size_t)(g.ay + y) * (size_t)ui->atlas_w + g.ax, g.w);
+            g.ax = (uint16_t)px; g.ay = (uint16_t)py;
+            px += g.w + 1;
+            if (g.h > row) row = g.h;
+        }
+        ng[k] = g;
+    }
+    cui__free(ui, ord);
+    cui__free(ui, ui->glyphs);
+    cui__free(ui, ui->atlas);
+    ui->glyphs = ng; ui->glyph_count = n; ui->glyph_cap = CUI_MAX(n, 1);
+    ui->atlas = na; ui->atlas_w = ui->atlas_h = nw;
+    ui->pack_x = px; ui->pack_y = py; ui->pack_row_h = row;
+    for (int i = 0; i < 4096; i++) ui->glyph_buckets[i] = -1;
+    for (int i = 0; i < n; i++) {
+        cui_glyph *g = &ui->glyphs[i];
+        uint32_t key[3] = { g->key_cp, (uint32_t)g->font | ((uint32_t)g->size_q << 16), (uint32_t)g->subpx };
+        uint32_t h = cui__hash(key, sizeof key, 77) & 4095;
+        g->next = ui->glyph_buckets[h];
+        ui->glyph_buckets[h] = i;
+    }
+    ui->atlas_dirty = true;
+    ui->dirty_x0 = 0; ui->dirty_y0 = 0; ui->dirty_x1 = nw; ui->dirty_y1 = nw;
+}
+
 void cui__fonts_begin_frame(cui_ctx *ui) {
+    if (!ui->atlas_reset_pending && ui->atlas_w > CUI_ATLAS_MIN && ui->frame - ui->atlas_check_frame >= CUI__ATLAS_KEEP) {
+        ui->atlas_check_frame = ui->frame;
+        cui__atlas_compact(ui);
+    }
     if (!ui->atlas_reset_pending) return;
     ui->atlas_reset_pending = false;
     ui->glyph_count = 0;

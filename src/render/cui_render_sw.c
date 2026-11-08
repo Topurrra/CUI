@@ -25,10 +25,18 @@ typedef struct cui__sw_tex {
     bool used;
 } cui__sw_tex;
 
+#define CUI__SW_TILE 64
+
 struct cui_sw_renderer {
     cui__sw_tex *tex;
     int tex_count, tex_cap;
     int threads;
+    /* incremental: repaint only the tiles whose triangles changed since the last frame */
+    bool incremental;
+    uint32_t tex_gen, drawn_tex_gen;       /* a texture changed: everything is redrawn */
+    const void *last_px; int last_w, last_h, last_stride; cui_sw_format last_fmt;
+    uint64_t *tiles, *prev; int tiles_cap;
+    int damage[4];                         /* x0, y0, x1, y1 of the last frame's repaint */
 };
 
 static void *cui__sw_xrealloc(void *p, size_t n) {
@@ -49,6 +57,7 @@ static cui_texture cui__sw_tex_create(void *user, int w, int h, cui_texture_form
         slot = r->tex_count++;
     }
     cui__sw_tex *t = &r->tex[slot];
+    r->tex_gen++;
     t->w = w; t->h = h; t->fmt = fmt; t->used = true;
     size_t bytes = (size_t)w * (size_t)h * (size_t)fmt;
     t->data = cui__sw_xrealloc(NULL, bytes);
@@ -62,6 +71,7 @@ static void cui__sw_tex_update(void *user, cui_texture tex, int x, int y, int w,
     int slot = (int)tex - 1;
     if (slot < 0 || slot >= r->tex_count || !r->tex[slot].used) return;
     cui__sw_tex *t = &r->tex[slot];
+    r->tex_gen++;
     int bpp = (int)t->fmt;
     const uint8_t *src = pixels;
     for (int row = 0; row < h; row++) {
@@ -78,6 +88,7 @@ static void cui__sw_tex_destroy(void *user, cui_texture tex) {
     free(r->tex[slot].data);
     r->tex[slot].data = NULL;
     r->tex[slot].used = false;
+    r->tex_gen++;
 }
 
 static int cui__cpu_count(void) {
@@ -105,10 +116,21 @@ void cui_sw_destroy(cui_sw_renderer *r) {
     if (!r) return;
     for (int i = 0; i < r->tex_count; i++) free(r->tex[i].data);
     free(r->tex);
+    free(r->tiles);
+    free(r->prev);
     free(r);
 }
 
 void cui_sw_set_threads(cui_sw_renderer *r, int threads) { r->threads = threads < 1 ? 1 : (threads > 32 ? 32 : threads); }
+void cui_sw_set_incremental(cui_sw_renderer *r, bool on) { if (r) { r->incremental = on; r->last_px = NULL; } }
+bool cui_sw_last_damage(const cui_sw_renderer *r, int *x, int *y, int *w, int *h) {
+    if (!r) return false;
+    if (x) *x = r->damage[0];
+    if (y) *y = r->damage[1];
+    if (w) *w = r->damage[2] - r->damage[0];
+    if (h) *h = r->damage[3] - r->damage[1];
+    return r->damage[2] > r->damage[0] && r->damage[3] > r->damage[1];
+}
 
 cui_renderer_iface cui_sw_iface(cui_sw_renderer *r) {
     cui_renderer_iface i;
@@ -186,7 +208,7 @@ typedef struct {
     uint8_t *pixels;
     int width, height, stride;
     cui_sw_format fmt;
-    int y0, y1;   /* band */
+    int x0, y0, x1, y1;   /* the part this job paints */
 } cui__sw_job;
 
 static void cui__blend(uint8_t *p, cui__px s, bool bgra) {
@@ -412,9 +434,9 @@ static void cui__sw_run(cui__sw_job *job) {
     cui_sw_renderer *r = job->r;
     for (int ci = 0; ci < dd->command_count; ci++) {
         const cui_draw_cmd *cmd = &dd->commands[ci];
-        int cx0 = CUI_MAX(0, (int)floorf(cmd->clip.x));
+        int cx0 = CUI_MAX(job->x0, (int)floorf(cmd->clip.x));
         int cy0 = CUI_MAX(job->y0, (int)floorf(cmd->clip.y));
-        int cx1 = CUI_MIN(job->width, (int)ceilf(cmd->clip.x + cmd->clip.w));
+        int cx1 = CUI_MIN(job->x1, (int)ceilf(cmd->clip.x + cmd->clip.w));
         int cy1 = CUI_MIN(job->y1, (int)ceilf(cmd->clip.y + cmd->clip.h));
         if (cx0 >= cx1 || cy0 >= cy1) continue;
         cui_texture tid = cmd->texture ? cmd->texture : dd->font_atlas;
@@ -437,25 +459,27 @@ static DWORD WINAPI cui__sw_thread(LPVOID p) { cui__sw_run(p); return 0; }
 static void *cui__sw_thread(void *p) { cui__sw_run(p); return NULL; }
 #endif
 
-void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt) {
-    if (!r || !dd || !pixels) return;
-    /* clear */
+/* paints one rectangle of the frame, split in bands over the threads */
+static void cui__sw_paint_rect(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt,
+                               int x0, int y0, int x1, int y1) {
     cui_color cc = dd->clear_color;
     uint8_t c4[4] = { cc.r, cc.g, cc.b, 255 };
     if (fmt == CUI_SW_BGRA) { c4[0] = cc.b; c4[2] = cc.r; }
-    for (int y = 0; y < height; y++) {
+    for (int y = y0; y < y1; y++) {
         uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)stride;
-        for (int x = 0; x < width; x++) memcpy(row + x * 4, c4, 4);
+        for (int x = x0; x < x1; x++) memcpy(row + x * 4, c4, 4);
     }
+    int h = y1 - y0;
     int threads = r->threads;
-    if (height < 64 || dd->index_count < 600) threads = 1;
-    if (threads > height / 16) threads = CUI_MAX(1, height / 16);
+    if (h < 64 || dd->index_count < 600 || (size_t)(x1 - x0) * (size_t)h < 200000) threads = 1;
+    if (threads > h / 16) threads = CUI_MAX(1, h / 16);
     cui__sw_job jobs[32];
-    int band = (height + threads - 1) / threads;
+    int band = (h + threads - 1) / threads;
     for (int t = 0; t < threads; t++) {
         jobs[t].dd = dd; jobs[t].r = r; jobs[t].pixels = pixels;
         jobs[t].width = width; jobs[t].height = height; jobs[t].stride = stride; jobs[t].fmt = fmt;
-        jobs[t].y0 = t * band; jobs[t].y1 = CUI_MIN(height, (t + 1) * band);
+        jobs[t].x0 = x0; jobs[t].x1 = x1;
+        jobs[t].y0 = y0 + t * band; jobs[t].y1 = CUI_MIN(y1, y0 + (t + 1) * band);
     }
     if (threads == 1) { cui__sw_run(&jobs[0]); return; }
 #if defined(_WIN32)
@@ -470,6 +494,87 @@ void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, in
     cui__sw_run(&jobs[0]);
     for (int t = 1; t < threads; t++) { if (ok[t]) pthread_join(th[t], NULL); else cui__sw_run(&jobs[t]); }
 #endif
+}
+
+static inline uint64_t cui__sw_mix(uint64_t h, uint64_t v) {
+    h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+    return h * 0xFF51AFD7ED558CCDull;
+}
+static uint64_t cui__sw_hash_bytes(const void *p, size_t n, uint64_t h) {
+    const uint8_t *b = p;
+    while (n >= 8) { uint64_t v; memcpy(&v, b, 8); h = cui__sw_mix(h, v); b += 8; n -= 8; }
+    while (n--) h = cui__sw_mix(h, *b++);
+    return h;
+}
+
+/* each tile's hash: everything drawn over it, in order, with its clip and texture */
+static void cui__sw_tile_hashes(const cui_draw_data *dd, uint64_t *tiles, int tw, int th) {
+    uint64_t seed = cui__sw_hash_bytes(&dd->clear_color, sizeof dd->clear_color, 1469598103934665603ull);
+    for (int i = 0; i < tw * th; i++) tiles[i] = seed;
+    for (int ci = 0; ci < dd->command_count; ci++) {
+        const cui_draw_cmd *cmd = &dd->commands[ci];
+        uint64_t ch = cui__sw_hash_bytes(&cmd->clip, sizeof cmd->clip, (uint64_t)(cmd->texture ? cmd->texture : dd->font_atlas) + 7);
+        for (uint32_t k = 0; k + 2 < cmd->index_count; k += 3) {
+            const uint32_t *ix = dd->indices + cmd->index_offset + k;
+            const cui_vertex *a = &dd->vertices[ix[0]], *b = &dd->vertices[ix[1]], *c = &dd->vertices[ix[2]];
+            float x0 = CUI_MIN(a->x, CUI_MIN(b->x, c->x)), x1 = CUI_MAX(a->x, CUI_MAX(b->x, c->x));
+            float y0 = CUI_MIN(a->y, CUI_MIN(b->y, c->y)), y1 = CUI_MAX(a->y, CUI_MAX(b->y, c->y));
+            x0 = CUI_MAX(x0, cmd->clip.x); y0 = CUI_MAX(y0, cmd->clip.y);
+            x1 = CUI_MIN(x1, cmd->clip.x + cmd->clip.w); y1 = CUI_MIN(y1, cmd->clip.y + cmd->clip.h);
+            if (x1 <= x0 || y1 <= y0) continue;
+            uint64_t h = cui__sw_hash_bytes(a, sizeof *a, ch);
+            h = cui__sw_hash_bytes(b, sizeof *b, h);
+            h = cui__sw_hash_bytes(c, sizeof *c, h);
+            int tx0 = CUI_MAX(0, (int)floorf(x0 - 1) / CUI__SW_TILE), ty0 = CUI_MAX(0, (int)floorf(y0 - 1) / CUI__SW_TILE);
+            int tx1 = CUI_MIN(tw - 1, (int)ceilf(x1 + 1) / CUI__SW_TILE), ty1 = CUI_MIN(th - 1, (int)ceilf(y1 + 1) / CUI__SW_TILE);
+            for (int ty = ty0; ty <= ty1; ty++)
+                for (int tx = tx0; tx <= tx1; tx++) tiles[ty * tw + tx] = cui__sw_mix(tiles[ty * tw + tx], h);
+        }
+    }
+}
+
+void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt) {
+    if (!r || !dd || !pixels) return;
+    if (!r->incremental) {
+        cui__sw_paint_rect(r, dd, pixels, width, height, stride, fmt, 0, 0, width, height);
+        r->damage[0] = 0; r->damage[1] = 0; r->damage[2] = width; r->damage[3] = height;
+        return;
+    }
+    int tw = (width + CUI__SW_TILE - 1) / CUI__SW_TILE, th = (height + CUI__SW_TILE - 1) / CUI__SW_TILE;
+    if (tw * th > r->tiles_cap) {
+        free(r->tiles); free(r->prev);
+        r->tiles_cap = tw * th;
+        r->tiles = malloc(sizeof(uint64_t) * (size_t)r->tiles_cap);
+        r->prev = malloc(sizeof(uint64_t) * (size_t)r->tiles_cap);
+        r->last_px = NULL;
+        if (!r->tiles || !r->prev) { free(r->tiles); free(r->prev); r->tiles = r->prev = NULL; r->tiles_cap = 0; r->incremental = false; cui_sw_render(r, dd, pixels, width, height, stride, fmt); return; }
+    }
+    cui__sw_tile_hashes(dd, r->tiles, tw, th);
+    bool full = pixels != r->last_px || width != r->last_w || height != r->last_h || stride != r->last_stride || fmt != r->last_fmt || r->tex_gen != r->drawn_tex_gen;
+    r->last_px = pixels; r->last_w = width; r->last_h = height; r->last_stride = stride; r->last_fmt = fmt; r->drawn_tex_gen = r->tex_gen;
+    r->damage[0] = width; r->damage[1] = height; r->damage[2] = 0; r->damage[3] = 0;
+    if (full) {
+        cui__sw_paint_rect(r, dd, pixels, width, height, stride, fmt, 0, 0, width, height);
+        r->damage[0] = 0; r->damage[1] = 0; r->damage[2] = width; r->damage[3] = height;
+    } else {
+        /* one span of changed tiles per tile row; rows with overlapping spans are joined */
+        int rx0 = 0, rx1 = 0, ry0 = -1, ry1 = 0, dirty_tiles = 0;
+        for (int ty = 0; ty <= th; ty++) {
+            int a = -1, b = -1;
+            if (ty < th) for (int tx = 0; tx < tw; tx++) if (r->tiles[ty * tw + tx] != r->prev[ty * tw + tx]) { if (a < 0) a = tx; b = tx; dirty_tiles++; }
+            if (a >= 0 && ry0 >= 0 && a <= rx1 && b >= rx0 - 1) { rx0 = CUI_MIN(rx0, a); rx1 = CUI_MAX(rx1, b); ry1 = ty; continue; }
+            if (ry0 >= 0) {   /* paint the rectangle so far */
+                int x0 = rx0 * CUI__SW_TILE, y0 = ry0 * CUI__SW_TILE, x1 = CUI_MIN(width, (rx1 + 1) * CUI__SW_TILE), y1 = CUI_MIN(height, (ry1 + 1) * CUI__SW_TILE);
+                cui__sw_paint_rect(r, dd, pixels, width, height, stride, fmt, x0, y0, x1, y1);
+                r->damage[0] = CUI_MIN(r->damage[0], x0); r->damage[1] = CUI_MIN(r->damage[1], y0);
+                r->damage[2] = CUI_MAX(r->damage[2], x1); r->damage[3] = CUI_MAX(r->damage[3], y1);
+                ry0 = -1;
+            }
+            if (a >= 0) { rx0 = a; rx1 = b; ry0 = ry1 = ty; }
+        }
+        (void)dirty_tiles;
+    }
+    uint64_t *t = r->prev; r->prev = r->tiles; r->tiles = t;
 }
 
 /* ---- PNG writer ---- */

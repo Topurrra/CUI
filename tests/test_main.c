@@ -6858,6 +6858,140 @@ static void test_emoji(void) {
     } else printf("    (no Noto Color Emoji here: font checks skipped)\n");
 }
 
+/* ---- glyph atlas: grows for many sizes, shrinks back when they are gone ---- */
+static cui_renderer_iface at_inner;
+static int at_w, at_creates;
+static cui_texture at_create(void *u, int w, int h, cui_texture_format f, const void *px) {
+    if (f == CUI_TEXTURE_R8) { at_w = w; at_creates++; }
+    return at_inner.texture_create(u, w, h, f, px);
+}
+typedef struct { bool many; } at_ctx;
+static void build_at(cui_ctx *ui, void *u) {
+    at_ctx *c = u;
+    cui_column(ui, .pad = 10, .gap = 2) {
+        cui_text(ui, "The quick brown fox jumps over the lazy dog 0123456789", .size = 14);
+        if (c->many)
+            for (int s = 0; s < 60; s++) {
+                cui_push_id_int(ui, s);
+                cui_text(ui, "ABCDEFGHIJKLMNabcdefghijklm0123456789", .size = 12.0f + s * 0.75f, .nowrap = true);
+                cui_pop_id(ui);
+            }
+    }
+}
+static void test_atlas_shrink(void) {
+    printf("glyph atlas: grows for many sizes, shrinks back, text unchanged\n");
+    at_inner = cui_sw_iface(g_sw);
+    cui_renderer_iface r = at_inner;
+    r.texture_create = at_create;
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = r });
+    cui_set_viewport(ui, 900, 3200, 2);
+    cui_set_reduced_motion(ui, true);
+    at_ctx c = { false };
+    run(ui, build_at, &c, 2);
+    int w0 = at_w;
+    static unsigned char before[900 * 2 * 60 * 2 * 4], after[sizeof before];
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    memcpy(before, px, sizeof before);   /* the top rows: the line that stays */
+    free(px);
+    c.many = true;
+    run(ui, build_at, &c, 3);
+    CHECK(at_w > w0);                    /* the sizes needed more room */
+    c.many = false;
+    for (int i = 0; i < 700; i++) { cui_input_mouse_move(ui, (float)(i % 50), 5); run(ui, build_at, &c, 1); }
+    CHECK(at_w == w0);                   /* back to where it started */
+    dd = cui_get_draw_data(ui);
+    px = malloc((size_t)dd->width_px * dd->height_px * 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    memcpy(after, px, sizeof after);
+    free(px);
+    CHECK(!memcmp(before, after, sizeof before));
+    /* and the sizes come back when asked */
+    c.many = true;
+    run(ui, build_at, &c, 3);
+    CHECK(at_w > w0);
+    cui_destroy(ui);
+}
+
+/* ---- software renderer: incremental frames equal full ones ---- */
+static cui_sw_renderer *inc_a, *inc_b;
+static cui_texture inc_create(void *u, int w, int h, cui_texture_format f, const void *px) {
+    (void)u;
+    cui_renderer_iface a = cui_sw_iface(inc_a), b = cui_sw_iface(inc_b);
+    cui_texture t = a.texture_create(a.user, w, h, f, px);
+    cui_texture t2 = b.texture_create(b.user, w, h, f, px);
+    if (t != t2) printf("  texture ids differ\n");
+    return t;
+}
+static void inc_update(void *u, cui_texture t, int x, int y, int w, int h, const void *px, int stride) {
+    (void)u;
+    cui_renderer_iface a = cui_sw_iface(inc_a), b = cui_sw_iface(inc_b);
+    a.texture_update(a.user, t, x, y, w, h, px, stride);
+    b.texture_update(b.user, t, x, y, w, h, px, stride);
+}
+static void inc_destroy(void *u, cui_texture t) {
+    (void)u;
+    cui_renderer_iface a = cui_sw_iface(inc_a), b = cui_sw_iface(inc_b);
+    a.texture_destroy(a.user, t);
+    b.texture_destroy(b.user, t);
+}
+typedef struct { char name[64]; bool on; float v; int tab; } inc_ctx;
+static void build_inc(cui_ctx *ui, void *u) {
+    inc_ctx *c = u;
+    cui_row(ui, .pad = 16, .gap = 16, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_column(ui, .gap = 10, .width = CUI_PX(260)) {
+            cui_input(ui, "name", c->name, sizeof c->name, .placeholder = "Name");
+            cui_switch(ui, "Notifications", &c->on);
+            cui_slider(ui, "Volume", &c->v, 0, 100);
+            static const char *tabs[] = { "One", "Two", "Three" };
+            cui_segmented(ui, "tabs", tabs, 3, &c->tab);
+            for (int i = 0; i < 4; i++) { cui_push_id_int(ui, i); cui_button(ui, "Button"); cui_pop_id(ui); }
+        }
+        cui_scroll(ui, "list", .width = CUI_FILL, .height = CUI_FILL) {
+            for (int i = 0; i < 60; i++) { cui_push_id_int(ui, i); cui_text(ui, "A row of text in a scrolling list"); cui_pop_id(ui); }
+        }
+    }
+}
+static void test_sw_incremental(void) {
+    printf("software renderer: incremental frames match full ones, and skip unchanged parts\n");
+    inc_a = cui_sw_create(); inc_b = cui_sw_create();
+    cui_sw_set_incremental(inc_a, true);
+    cui_renderer_iface r = { NULL, inc_create, inc_update, inc_destroy };
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = r });
+    cui_set_viewport(ui, 640, 400, 2);
+    inc_ctx c = { "", false, 30, 0 };
+    int W = 1280, H = 800;
+    unsigned char *A = malloc((size_t)W * H * 4), *B = malloc((size_t)W * H * 4);
+    int mismatches = 0, frames = 0, skipped = 0;
+    long painted = 0;
+    for (int f = 0; f < 240; f++) {
+        if (f % 7 == 0) cui_input_mouse_move(ui, 20.0f + (f * 37) % 600, 20.0f + (f * 53) % 360);
+        if (f == 40) { cui_input_mouse_move(ui, 100, 32); cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); }
+        if (f == 41) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (f > 45 && f < 60) cui_input_text(ui, "x");
+        if (f > 80 && f < 120 && f % 3 == 0) { cui_input_mouse_move(ui, 450, 200); cui_input_scroll(ui, 0, -1); }
+        if (f == 150) cui_set_theme(ui, CUI_THEME_DARK);
+        cui_begin_frame(ui, 1.0f / 60);
+        build_inc(ui, &c);
+        cui_end_frame(ui);
+        const cui_draw_data *dd = cui_get_draw_data(ui);
+        cui_sw_render(inc_a, dd, A, W, H, W * 4, CUI_SW_RGBA);
+        cui_sw_render(inc_b, dd, B, W, H, W * 4, CUI_SW_RGBA);
+        int x, y, w, h;
+        if (cui_sw_last_damage(inc_a, &x, &y, &w, &h)) painted += (long)w * h; else skipped++;
+        if (memcmp(A, B, (size_t)W * H * 4)) mismatches++;
+        frames++;
+    }
+    CHECK(mismatches == 0);
+    CHECK(skipped > 20);                                  /* frames with nothing new draw nothing */
+    CHECK(painted < (long)frames * W * H / 3);            /* most frames repaint a small part */
+    printf("    incremental: %d of %d frames drew nothing, %.0f%% of the pixels drawn overall\n", skipped, frames, 100.0 * painted / ((double)frames * W * H));
+    cui_destroy(ui);
+    cui_sw_destroy(inc_a); cui_sw_destroy(inc_b);
+    free(A); free(B);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6896,6 +7030,8 @@ int main(void) {
     test_files();
     test_terminal();
     test_emoji();
+    test_atlas_shrink();
+    test_sw_incremental();
     test_planning();
     test_node_editor();
     test_flame();

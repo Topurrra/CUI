@@ -88,6 +88,7 @@ EXPORT(inst_new) web_inst *inst_new(int content, float w, float h, float scale, 
     } else {
         in->sw = cui_sw_create();
         cui_sw_set_threads(in->sw, 1);
+        cui_sw_set_incremental(in->sw, true);   /* the pixel buffer is kept: draw only what changed */
         iface = cui_sw_iface(in->sw);
     }
     in->content = content;

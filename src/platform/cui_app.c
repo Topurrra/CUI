@@ -13,6 +13,7 @@ static bool cui__env_is(const char *name, const char *value) {
 
 static void cui__app_make_software(cui_app *app) {
     if (!app->sw) app->sw = cui_sw_create();
+    cui_sw_set_incremental(app->sw, true);   /* only what changed is drawn again */
     app->software = true;
     cui_renderer_iface iface = cui_sw_iface(app->sw);
     cui_set_renderer(app->ui, &iface);
@@ -157,7 +158,11 @@ void cui__app_render(cui_app *app) {
         }
         if (!app->sw_pixels) return;
         cui_sw_render(app->sw, dd, app->sw_pixels, w, h, w * 4, CUI_SW_BGRA);
-        cui__plat_present(app, app->sw_pixels, w, h, w * 4);
+        int dx, dy, dw, dh;
+        bool changed = cui_sw_last_damage(app->sw, &dx, &dy, &dw, &dh);
+        if (app->force_present || !app->presented_once || (changed && !cui__plat_present_part(app, app->sw_pixels, w, h, w * 4, dx, dy, dw, dh)))
+            cui__plat_present(app, app->sw_pixels, w, h, w * 4);
+        app->force_present = false;
     }
     app->presented_once = true;
     app->last_present = cui__plat_now();

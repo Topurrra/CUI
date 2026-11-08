@@ -330,6 +330,16 @@ void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride)
     XFlush(x->dpy);
 }
 
+bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int stride, int px, int py, int pw, int ph) {
+    cui__x11 *x = cui__x(app);
+    if (!x->image || x->image->width != w || x->image->height != h) return false;
+    x->image->data = (char *)bgra;
+    (void)stride;
+    XPutImage(x->dpy, x->win, x->gc, x->image, px, py, px, py, (unsigned)pw, (unsigned)ph);
+    XFlush(x->dpy);
+    return true;
+}
+
 void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w, int *fb_h) {
     cui__x11 *x = cui__x(app);
     *scale = x->scale;
@@ -601,6 +611,7 @@ static void cui__x11_event(cui_app *app, XEvent *ev) {
         }
         break;
     case Expose:
+        app->force_present = true;
         cui_request_redraw(ui);
         break;
     case MotionNotify:
