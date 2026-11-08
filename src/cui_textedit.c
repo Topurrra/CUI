@@ -58,7 +58,19 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
     int s0 = CUI_MIN(p->cursor, p->anchor), s1 = CUI_MAX(p->cursor, p->anchor);
     if (p->len == 0 && p->placeholder) {   /* shaped like any label: no caret goes in it */
         float y = r.y + (p->multiline ? (p->line_h - fh) * 0.5f : (r.h - fh) * 0.5f);
-        cui__draw_text_ellipsis(ui, p->font, p->size, r.x, y, r.w, p->placeholder_color, p->placeholder, (int)strlen(p->placeholder), false);
+        /* A placeholder is static display text; editing retains its original path. */
+        ui->text_unshaped = unshaped;
+#ifdef CUI_TEXT_SHAPING
+        cui_direction direction = ui->text_direction;
+        ui->text_direction = n->rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR;
+#endif
+        float w = cui__text_width(ui, p->font, p->size, p->placeholder, -1, false);
+        float x = n->rtl ? r.x + CUI_MAX(0, r.w - w) : r.x;
+        cui__draw_text_ellipsis(ui, p->font, p->size, x, y, r.w, p->placeholder_color, p->placeholder, (int)strlen(p->placeholder), false);
+#ifdef CUI_TEXT_SHAPING
+        ui->text_direction = direction;
+#endif
+        ui->text_unshaped = true;
     }
     ui->text_unshaped = true;   /* the text being edited: caret positions follow the glyphs one by one */
     if (!p->multiline) {

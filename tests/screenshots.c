@@ -15,7 +15,8 @@ static int shoot(const char *path, int page, bool dark, int accent, float W, flo
                  void (*interact)(cui_ctx *ui, int frame, gallery *g)) {
     cui_sw_renderer *sw = cui_sw_create();
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT,
-                                              .accent = (cui_accent)accent });
+                                              .accent = (cui_accent)accent,
+                                              .direction = getenv("CUI_GALLERY_RTL") ? CUI_DIRECTION_RTL : CUI_DIRECTION_INHERIT });
     cui_set_viewport(ui, W, H, g_scale);
     gallery g;
     gallery_init(&g);

@@ -222,6 +222,8 @@ typedef struct cui_node {
     uint32_t flags;
 
     /* layout input */
+    uint8_t direction;
+    bool rtl;
     uint8_t dir, align, justify, self_align;   /* self_align: 0 = inherit */
     cui_size w, h;
     float min_w, max_w, min_h, max_h;
@@ -237,7 +239,7 @@ typedef struct cui_node {
     cui_font font;
     float font_size;
     float line_height;        /* multiplier */
-    uint8_t text_align;
+    uint8_t text_align;      /* text or row-cell content alignment */
     cui_color text_color;
 
     /* style */
@@ -411,6 +413,7 @@ struct cui_ctx {
 
     /* viewport */
     float vw, vh, scale;
+    cui_direction direction;
 
     /* time */
     double time;
@@ -498,6 +501,7 @@ struct cui_ctx {
     int shape_cache_count;
     const char *text_paragraph;
     int text_paragraph_len;
+    cui_direction text_direction;
 #endif
     bool text_unshaped;             /* editing keeps logical glyph positions */
     cui_font_data *fonts; int font_count, font_cap;

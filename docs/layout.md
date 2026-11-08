@@ -29,6 +29,80 @@ Every container accepts the same options (`cui_box` struct):
 | `opacity` | 0 to 1 |
 | `id` | A stable name, needed for scroll state and for `cui_get_rect` |
 
+## Reading direction
+
+Set `.direction = CUI_DIRECTION_RTL` in `cui_ctx_desc` for a Persian interface.
+Containers (`cui_box`, `cui_row`, `cui_column`) and `cui_text` accept the same named
+option. Zero (`CUI_DIRECTION_INHERIT`) inherits; the context defaults to LTR.
+`CUI_DIRECTION_LTR` overrides an RTL parent. With `CUI_TEXT_SHAPING=ON`,
+`CUI_DIRECTION_AUTO` finds the first
+strong Unicode character in descendant text, skipping explicitly directed
+subtrees and icon glyphs. Digits and punctuation are not strong. With no strong
+character it inherits. With shaping OFF, `AUTO` resolves to LTR, including inside
+an RTL parent. A row's subtitle inherits the row's result too:
+
+```c
+cui_row(ui, .direction = CUI_DIRECTION_AUTO, .width = CUI_FILL) {
+    cui_column(ui, .width = CUI_FILL) {
+        cui_text(ui, "سلام دنیا");
+        cui_secondary(ui, "Ready for review");
+    }
+    cui_button(ui, "Open");
+}
+```
+
+RTL mirrors flow children within each container: rows, wrapped rows, columns,
+grids, and stacks. Start/end alignment and horizontal padding follow direction;
+vertical positioning is unchanged. Absolute offsets remain physical coordinates
+(the segmented indicator already follows the selected child's physical bounds).
+Pointer hit rectangles use the final positions. Horizontal overflow stays
+reachable in RTL: scrolling moves the content toward the right from its start.
+Floating layers inherit their opening container's resolved direction.
+
+Text defaults to `CUI_TEXT_START`; `CUI_TEXT_END` follows direction too.
+`CUI_TEXT_LEFT` and `CUI_TEXT_RIGHT` are physical.
+Explicit `CUI_TEXT_LEFT` keeps the same row centering as default text.
+Horizontal chevrons, double chevrons and horizontal arrows in icon nodes swap
+glyphs; checks and non-directional symbols do not. Raw `cui_draw_*` calls retain
+physical coordinates.
+
+Component coverage:
+
+- Mirrors: layout containers and directional icon nodes as described above,
+  switch thumbs, progress fills, and empty input placeholders. Placeholders align
+  at the start and use static shaping with their container's direction when enabled.
+- Does not mirror yet: sliders, radio-card indicators, filled text fields, and
+  custom-drawn components such as charts, planning views and the node editor.
+
+Editing, cursor navigation and IME are unchanged.
+
+With `CUI_TEXT_SHAPING=ON`, the resolved container direction sets the paragraph
+base, including English-first mixed text in a forced RTL container. Direct drawing
+uses the context direction; AUTO/INHERIT use first-strong, default LTR. Shaped
+wrapping preserves paragraph levels; see [integration](integration.md).
+Auto classification reuses CUI bidi's Unicode 17.0.0 data when shaping is enabled;
+the OFF build includes no Unicode direction table.
+
+**Compatibility:** the new `direction` fields change the sizes of `cui_ctx_desc`,
+`cui_box` and `cui_text_opts`. Shared-library users must rebuild the library and
+their applications against the updated header. Stored numeric `cui_text_align`
+values change meaning: 0 now means `CUI_TEXT_START`, and `CUI_TEXT_LEFT` is now 3.
+Use the named constants and update any saved numeric alignments.
+
+`cui_rtl_layout` checks every node rectangle and clicks six distinct RTL buttons.
+It also checks physical LEFT row alignment, horizontal overflow in both directions,
+popover direction inheritance and placeholder independence from context direction.
+With optional `FONT.ttf OUT_PREFIX` arguments it also renders the two probe
+screens. `CUI_GALLERY_RTL=1 cui_screenshots OUT_DIR PAGE 1` renders gallery pages
+in RTL; it does not imply all custom-painted components support RTL.
+
+The fixture is rendered by `cui_rtl_layout FONT.ttf OUT_PREFIX [dark]`:
+
+| | Before (LTR) | After (RTL) |
+|---|---|---|
+| Light | ![LTR](images/rtl/layout-before-light.png) | ![RTL](images/rtl/layout-after-light.png) |
+| Dark | ![LTR](images/rtl/layout-before-dark.png) | ![RTL](images/rtl/layout-after-dark.png) |
+
 ## Sizes
 
 | Size | Meaning |

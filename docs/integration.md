@@ -140,8 +140,10 @@ paths share the shaped advances; labels, headings, buttons and `cui_text` need n
 API changes. Load a trusted Arabic-script font, such as Vazirmatn, and assign it to
 a font role or add it as a fallback. The embedded Latin fonts do not cover Persian.
 
-Each paragraph takes its bidi base from its first strong character, defaulting
-to LTR for neutral-only text. This switch does not change container direction.
+Text inherits its resolved context/container direction. Explicit RTL/LTR set the
+paragraph base. AUTO finds the first strong character and neutral containers inherit.
+Direct drawing uses the context direction; AUTO/INHERIT use first-strong, default LTR.
+See [reading direction](layout.md#reading-direction).
 CUI resolves the Unicode embedding levels and visual run order. CUI's internal
 `cui_shape.c` reads OpenType substitutions and positioning directly from the loaded
 font bytes, including lam-alef, ZWNJ and ZWJ. It needs no additional library. Only
@@ -232,7 +234,7 @@ build/tests/Release/cui_rtl path/to/Vazirmatn-Regular.ttf rtl.png
 
 The font is not bundled. The ordinary CTest suite needs no external font.
 
-`cui_rtl_paragraph FONT.ttf OUT_PREFIX` checks shaped wrapping and captures the
+`cui_rtl_paragraph FONT.ttf OUT_PREFIX` checks forced-container direction and shaped wrapping and captures the
 mixed Persian paragraph at 240, 360 and 600 px. Append `bench` for 200 measured
 build/layout/draw-list frames after 30 warm-up frames, excluding rasterization.
 It also benchmarks two copies joined into one 156-word Persian paragraph.

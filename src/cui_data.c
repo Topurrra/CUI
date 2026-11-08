@@ -384,7 +384,7 @@ bool cui_table_begin_ex(cui_ctx *ui, const char *id_str, const cui_table_column 
         cn->w = c->width.kind ? c->width : CUI_FILL;
         cn->h = CUI_FILL;
         cn->pad[1] = cn->pad[3] = 8;
-        cn->justify = c->align == CUI_TEXT_RIGHT ? CUI_JUSTIFY_END : c->align == CUI_TEXT_CENTER ? CUI_JUSTIFY_CENTER : CUI_JUSTIFY_START;
+        cn->text_align = (uint8_t)c->align;
         if (c->sortable && o->sort) {
             cui__mark_interactive(ui, cell, CUI_IF_FOCUSABLE);
             if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
@@ -457,7 +457,7 @@ void cui_table_cell(cui_ctx *ui) {
     cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->gap = 8;
     cn->w = c->width.kind ? c->width : CUI_FILL;
     cn->pad[0] = cn->pad[2] = 6; cn->pad[1] = cn->pad[3] = 8;
-    cn->justify = c->align == CUI_TEXT_RIGHT ? CUI_JUSTIFY_END : c->align == CUI_TEXT_CENTER ? CUI_JUSTIFY_CENTER : CUI_JUSTIFY_START;
+    cn->text_align = (uint8_t)c->align;
     cn->flags |= CUI_NF_CLIP;
     cui__open(ui, cell);
 }

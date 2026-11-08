@@ -70,10 +70,11 @@ void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *o) {
     int i = cui__text_node(ui, text, -1, o->font, cui__fs(ui, size), c, !o->nowrap);
     cui_node *n = &ui->nodes[i];
     n->text_align = (uint8_t)o->align;
+    n->direction = (uint8_t)o->direction;
     if (o->tabular) n->flags |= CUI_NF_TABULAR;
     if (o->line_height > 0) n->line_height = o->line_height;
     if (o->width.kind != CUI_SIZE_FIT) n->w = o->width;
-    if (o->align != CUI_TEXT_LEFT && o->width.kind == CUI_SIZE_FIT) n->self_align = CUI_ALIGN_STRETCH;
+    if (o->align != CUI_TEXT_LEFT && o->align != CUI_TEXT_START && o->width.kind == CUI_SIZE_FIT) n->self_align = CUI_ALIGN_STRETCH;
     if (o->nowrap && text && text[0]) {
         /* a single line cut short by an ellipsis shows its whole text on hover. The
          * text stays non-interactive, so a row or card around it keeps its clicks. */
@@ -676,12 +677,14 @@ static void cui__paint_progress(cui_ctx *ui, cui_node *n, void *data) {
         float w = r.w * 0.35f;
         float x = r.x - w + (r.w + w) * (t * t * (3 - 2 * t));
         cui_push_clip(ui, r);
+        if (n->rtl) x = r.x + r.w - (x - r.x) - w;
         cui_rect f = { x, r.y, w, r.h };
         cui_draw_rect(ui, f, CUI_CORNERS(rad), p->fill);
         cui_pop_clip(ui);
         ui->animating = true;
     } else if (p->value > 0) {
         cui_rect f = { r.x, r.y, CUI_MAX(r.h, r.w * cui__clampf(p->value, 0, 1)), r.h };
+        if (n->rtl) f.x = r.x + r.w - f.w;
         cui_draw_rect(ui, f, CUI_CORNERS(rad), p->fill);
     }
 }
@@ -1098,7 +1101,7 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
         float lt = fw > 0 ? cui__clampf(st->x / fw, 0, 1) : 0, rt = fw > 0 ? cui__clampf((max_x - st->x) / fw, 0, 1) : 0;
         cui_color clear = st->fade; clear.a = 0;
         for (int side = 0; side < 2; side++) {
-            float k = side ? rt : lt;
+            float k = (side != n->rtl) ? rt : lt;
             if (k <= 0) continue;
             enum { S = 6 };
             cui_cvert v[(S + 1) * 2];
@@ -1138,7 +1141,7 @@ void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip) {
     if ((n->flags & CUI_NF_SCROLL_X) && max_x > 0.5f && st->bar_t > 0.01f) {
         float thumb_w = CUI_MAX(28.0f, r.w * r.w / st->content_w);
         float track = r.w - thumb_w - 6;
-        float x = r.x + 3 + cui__clampf(st->x / max_x, 0, 1) * track;
+        float x = r.x + 3 + cui__clampf(n->rtl ? 1 - st->x / max_x : st->x / max_x, 0, 1) * track;
         cui_rect th = { x, r.y + r.h - 9, thumb_w, 6 };
         cui_draw_rect(ui, th, CUI_CORNERS(3), cui_alpha(CUI_C(ui, FOREGROUND), 0.26f * st->bar_t));
     }
@@ -1179,7 +1182,12 @@ void cui_scroll_to(cui_ctx *ui, const char *scroll_id, float y) {
 /* ------------------------------------------------------------------------ */
 
 struct cui_split_build { cui_id id; float *ratio; bool vertical; int container; float min1, min2; struct cui_split_build *prev; float hover; };
-typedef struct { float hover; bool drag; } cui__split_state;
+typedef struct { float hover; bool rtl; } cui__split_state;
+
+static void cui__paint_split(cui_ctx *ui, cui_node *n, void *data) {
+    /* Input on the next frame must use the direction that placed these panes. */
+    ((cui__split_state *)data)->rtl = n->rtl;
+}
 
 void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_split_opts *o) {
     cui_split_opts d;
@@ -1198,7 +1206,7 @@ void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_sp
     cui__split_state *st = cui_state(ui, hid, sizeof *st);
     float total = o->vertical ? pr.h : pr.w;
     if (r.active && ui->mdown[0] && total > 0) {
-        float pos = o->vertical ? ui->my - pr.y : ui->mx - pr.x;
+        float pos = o->vertical ? ui->my - pr.y : st->rtl ? pr.x + pr.w - ui->mx : ui->mx - pr.x;
         pos = cui__clampf(pos, b->min1, total - b->min2);
         *ratio = pos / total;
     }
@@ -1212,6 +1220,7 @@ void cui_split_begin(cui_ctx *ui, const char *id_str, float *ratio, const cui_sp
     n->h = o->height.kind ? o->height : CUI_FILL;
     n->self_align = CUI_ALIGN_STRETCH;
     b->container = i;
+    n->paint = cui__paint_split; n->paint_data = st;
     cui__open(ui, i);
     float rr = cui__clampf(*ratio, 0.02f, 0.98f);
     int p1 = cui__node_new(ui, 0);

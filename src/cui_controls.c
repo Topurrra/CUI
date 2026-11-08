@@ -58,6 +58,7 @@ static void cui__paint_toggle(cui_ctx *ui, cui_node *n, void *data) {
         float tw = (d + stretch) * sx, tht = d * sy;
         float grow = tw - (d + stretch);   /* anchored at the end it leaves from, so it never pokes out of the track */
         x = cui__clampf(x - grow * t, r.x + pad, r.x + w - pad - tw);
+        if (n->rtl) x = r.x + r.w - (x - r.x) - tw;
         cui_rect th = { x, r.y + pad + (d - tht) * 0.5f, tw, tht };
         cui_vec2 o1 = { 0, 1 }, o2 = { 0, 2 };
         cui_draw_shadow(ui, th, CUI_CORNERS(d * 0.5f), 2, 0, o1, cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 90 : 36));
