@@ -221,14 +221,15 @@ static float stat_pct(soak_stat *s, float p) {
 }
 
 /* ---- the slowest frames, with what happened just before ---- */
-typedef struct { float ms; double t; char what[48]; } soak_slow;
-static soak_slow slowest[5];
+typedef struct { float ms; double t; char what[80]; } soak_slow;
+static soak_slow slowest[5], slowest_paint[5];
 static char last_action[48] = "start";
-static void note_slow(float ms, double t) {
+static void note_slow_in(soak_slow *list, float ms, double t, const char *extra) {
     int k = 0;
-    for (int i = 1; i < 5; i++) if (slowest[i].ms < slowest[k].ms) k = i;
-    if (ms > slowest[k].ms) { slowest[k].ms = ms; slowest[k].t = t; snprintf(slowest[k].what, sizeof slowest[k].what, "%s", last_action); }
+    for (int i = 1; i < 5; i++) if (list[i].ms < list[k].ms) k = i;
+    if (ms > list[k].ms) { list[k].ms = ms; list[k].t = t; snprintf(list[k].what, sizeof list[k].what, "%s%s", last_action, extra); }
 }
+static void note_slow(float ms, double t) { note_slow_in(slowest, ms, t, ""); }
 
 /* ---- the person ---- */
 typedef enum { A_NONE, A_MOVE, A_DOWN, A_UP, A_SCROLL, A_KEY, A_TEXT, A_RESIZE, A_THEME, A_WAIT } soak_kind;
@@ -420,10 +421,15 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
                 if (need_px > px_cap) { free(px); free(px_check); px = malloc(need_px); px_check = malloc(need_px); px_cap = need_px; }
                 double p0 = now_s();
                 cui_sw_render(sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
-                stat_add(&paint, (float)((now_s() - p0) * 1000));
+                float pms = (float)((now_s() - p0) * 1000);
+                stat_add(&paint, pms);
                 drawn++;
                 int dx, dy, dw, dh;
-                if (cui_sw_last_damage(sw, &dx, &dy, &dw, &dh)) painted_px += (double)dw * dh;
+                bool dmg = cui_sw_last_damage(sw, &dx, &dy, &dw, &dh);
+                if (dmg) painted_px += (double)dw * dh;
+                char extra[24];
+                snprintf(extra, sizeof extra, ", %d%% of the frame", dmg ? (int)(100.0 * dw * dh / ((double)dd->width_px * dd->height_px)) : 0);
+                if (frames > 2) note_slow_in(slowest_paint, pms, t, extra);
                 total_px += (double)dd->width_px * dd->height_px;
                 if (frames % 1500 == 0) {
                     cui_sw_render(sw, dd, px_check, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);   /* another buffer: drawn whole */
@@ -459,6 +465,8 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
     if (opt_sites) { dump_sites(); dump_calls(); }
     printf("  slowest frames:");
     for (int i = 0; i < 5; i++) if (slowest[i].ms > 0) printf(" %.1f ms at %.0f s (%s);", slowest[i].ms, slowest[i].t, slowest[i].what);
+    printf("\n  slowest paints:");
+    for (int i = 0; i < 5; i++) if (slowest_paint[i].ms > 0) printf(" %.1f ms at %.0f s (%s);", slowest_paint[i].ms, slowest_paint[i].t, slowest_paint[i].what);
     printf("\n");
     printf("  textures: %ld live, %ld KB | states %d | process RSS %.1f MB, heap %.1f MB\n", tex_live, tex_bytes / 1024, ui->state_count, rss_mb(), heap_mb());
     printf("  person: %ld clicks, %ld typing, %ld scrolls, %ld drags, %ld keys, %ld resizes, %ld idle spells\n", n_clicks, n_types, n_scrolls, n_drags, n_keys, n_resizes, n_idles);

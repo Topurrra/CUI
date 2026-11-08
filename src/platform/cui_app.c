@@ -214,7 +214,7 @@ bool cui_app_frame(cui_app *app) {
          * that force vsync off), are paced by the clock instead of drawing frames nobody sees. */
         timeout = 0;
         double now = cui__plat_now();
-        if (now - app->hz_checked > 2.0) {
+        if (app->hz <= 0 || now - app->hz_checked > 2.0) {   /* some clocks start at 0 */
             double hz = cui__plat_refresh_hz(app);
             app->hz = hz >= 24 && hz <= 1000 ? hz : 60;
             app->hz_checked = now;
