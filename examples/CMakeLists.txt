@@ -19,6 +19,9 @@ function(cui_example name)
         target_link_options(${name} PRIVATE $<$<CONFIG:Release,MinSizeRel>:/OPT:REF /OPT:ICF>)
     elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_link_options(${name} PRIVATE $<$<CONFIG:Release,MinSizeRel>:-Wl,--gc-sections>)
+        if(MINGW)   # see the top CMakeLists.txt: MinGW drops unused code only through LTO
+            target_link_options(${name} PRIVATE $<$<CONFIG:Release,MinSizeRel>:-flto=auto>)
+        endif()
     endif()
 endfunction()
 

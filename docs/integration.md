@@ -110,18 +110,20 @@ CUI is built to stay small. Measured with GCC, `-DCMAKE_BUILD_TYPE=MinSizeRel`, 
 
 | | Size |
 |---|---|
-| Whole library (about 170 components, both renderers, X11 backend, fonts) | about 990 KB |
+| Whole library (about 170 components, both renderers, X11 backend, fonts) | about 930 KB |
 | of which embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons) | 95 KB, compressed |
-| `examples/hello` on Linux, whole executable | about 250 KB |
-| `examples/hello.exe` on Windows (MinGW), whole executable | about 410 KB |
-| `examples/assistant`, an AI chat app | about 380 KB |
-| `examples/gallery`, every component in use | about 890 KB |
+| `examples/hello` on Linux, whole executable | about 240 KB |
+| `examples/hello.exe` on Windows (MinGW, linked with `-flto`), whole executable | about 300 KB |
+| `examples/assistant`, an AI chat app | about 350 KB |
+| `examples/gallery`, every component in use | about 840 KB |
 
 What keeps it small:
 
-- The library is compiled with one section per function, so the linker can drop everything your app never calls. Turn that on in your own executable for release builds: `-Wl,--gc-sections` (GCC and Clang on Linux, MinGW), `-Wl,-dead_strip` (macOS), `/OPT:REF /OPT:ICF` (MSVC). The examples already do.
+- The library is compiled with one section per function, so the linker can drop everything your app never calls. Turn that on in your own executable for release builds: `-Wl,--gc-sections` (GCC and Clang on Linux), `-Wl,-dead_strip` (macOS), `/OPT:REF /OPT:ICF` (MSVC). The examples already do.
+- **MinGW:** its linker cannot drop single functions (every function has an unwind record, and it keeps them all), so it keeps whole files. Release builds of CUI also carry link-time optimization data, so link your app with `-flto` (or set `CMAKE_INTERPROCEDURAL_OPTIMIZATION`) and only what you call remains: `assistant.exe` is 420 KB that way and 740 KB without. Without `-flto` everything still links and works, only bigger.
+- Release builds on Linux and BSD leave out unwind tables (6 to 7% of an app; CUI is C and throws nothing). `-DCUI_KEEP_UNWIND_TABLES=ON` keeps them, for backtraces from release builds or C++ exceptions thrown through CUI callbacks.
 - The embedded fonts are stored as DEFLATE streams (about 48% smaller) and unpacked into memory once, when a context is created (about 1.5 ms).
-- Parts only some apps use (color emoji, the file browser, the terminal, the image decoder) are reached only from their own components. MinGW and MSVC drop unused code a whole file at a time rather than a function at a time, so the core never calls into those files directly, and an app that does not use them does not carry them.
+- Parts only some apps use (color emoji, the file browser, the terminal, the image decoder) are reached only from their own components; the core never calls into those files directly, so even a linker that keeps whole files leaves them out of an app that does not use them.
 - Image decoding covers PNG and JPEG only. `-DCUI_IMAGE_ALL_FORMATS=ON` adds BMP, GIF and TGA.
 
 Going smaller:

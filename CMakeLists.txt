@@ -146,6 +146,22 @@ else()
     target_compile_options(cui PRIVATE -ffunction-sections -fdata-sections)
 endif()
 
+# No unwind tables in release builds on ELF systems: CUI is C and throws nothing, and they
+# were 6 to 7% of an app. Debug builds keep them, and Windows and macOS need theirs. Keep
+# them for backtraces from release builds, or C++ exceptions thrown through CUI callbacks.
+option(CUI_KEEP_UNWIND_TABLES "Keep unwind tables in release builds on Linux and BSD" OFF)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN AND NOT CUI_KEEP_UNWIND_TABLES)
+    target_compile_options(cui PRIVATE $<$<CONFIG:Release,MinSizeRel>:-fno-asynchronous-unwind-tables -fno-unwind-tables>)
+endif()
+
+# MinGW's linker cannot drop unused functions (each has an unwind record it keeps), so a
+# whole file came along for any function used. Release builds also carry link-time
+# optimization data ("fat" objects: apps that do not use LTO link as before), and an app
+# linked with -flto keeps only what it calls: assistant.exe 740 KB to 417 KB.
+if(MINGW AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(cui PRIVATE $<$<CONFIG:Release,MinSizeRel>:-flto -ffat-lto-objects>)
+endif()
+
 if(MSVC)
     target_compile_options(cui PRIVATE /W4 /wd4100 /wd4201 /wd4204 /wd4221 /wd4244 /wd4267 /wd4305 /wd4996 /utf-8)
     target_compile_definitions(cui PRIVATE _CRT_SECURE_NO_WARNINGS)
