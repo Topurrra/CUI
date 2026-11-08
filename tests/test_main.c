@@ -6585,6 +6585,147 @@ static void test_files(void) {
     cui_destroy(ui);
 }
 
+/* ---- terminal ---- */
+static const char *tm_text(const cui_terminal_buffer *t, int i) {
+    static char out[512];
+    const cui_terminal_line *L = &t->lines[(t->first + i) % t->line_cap];
+    snprintf(out, sizeof out, "%.*s", (int)L->len, t->text + L->offset);
+    return out;
+}
+static uint32_t tm_cols(const cui_terminal_buffer *t, int i) { return t->lines[(t->first + i) % t->line_cap].cols; }
+typedef struct { cui_terminal_buffer *t; cui_terminal_result r; const char *cmd; bool interrupted; cui_rect field; } tm_ctx;
+static void build_tm(cui_ctx *ui, void *u) {
+    tm_ctx *c = u;
+    cui_column(ui, .pad = 20) {
+        c->r = cui_terminal(ui, "term", c->t, .height = 300);
+        c->field = cui_last_rect(ui);
+        if (c->r.command) c->cmd = c->r.command;
+        if (c->r.interrupt) c->interrupted = true;
+    }
+}
+static void test_terminal(void) {
+    printf("terminal: parsing, ring buffer, input, history, copy\n");
+    static char text[4096];
+    static cui_terminal_line lines[64];
+    cui_terminal_buffer t;
+    cui_terminal_init(&t, text, sizeof text, lines, 64);
+    CHECK(t.count == 1 && tm_cols(&t, 0) == 0);
+    cui_terminal_write(&t, "one\ntwo", -1);
+    CHECK(t.count == 2 && !strcmp(tm_text(&t, 0), "one") && !strcmp(tm_text(&t, 1), "two"));
+    /* \r then text starts the line over: progress output */
+    cui_terminal_write(&t, "\n 10%\r 50%\r100%", -1);
+    CHECK(!strcmp(tm_text(&t, 2), "100%") && tm_cols(&t, 2) == 4);
+    /* \r\n is a plain line break */
+    cui_terminal_write(&t, "\r\nx", -1);
+    CHECK(!strcmp(tm_text(&t, 2), "100%") && !strcmp(tm_text(&t, 3), "x"));
+    /* colors stay in the text but take no columns, even split across writes */
+    cui_terminal_write(&t, "\n\x1b[3", -1);
+    cui_terminal_write(&t, "1mred\x1b[0m", -1);
+    CHECK(!strcmp(tm_text(&t, 4), "\x1b[31mred\x1b[0m") && tm_cols(&t, 4) == 3);
+    /* other sequences are dropped: cursor moves, titles */
+    cui_terminal_write(&t, "\n\x1b[2Aa\x1b]0;title\x07" "b\x1b]8;;x\x1b\\c", -1);
+    CHECK(!strcmp(tm_text(&t, 5), "abc"));
+    /* tabs go to the next stop of 8; backspace takes the last character; UTF-8 counts once */
+    cui_terminal_write(&t, "\nab\tc\nxyz\b\b!\n\xc3\xa9t\xc3\xa9", -1);
+    CHECK(tm_cols(&t, 6) == 9 && !strcmp(tm_text(&t, 7), "x!") && tm_cols(&t, 8) == 3);
+    /* erase to end of line after \r restarts it too */
+    cui_terminal_write(&t, "\nold\r\x1b[Knew", -1);
+    CHECK(!strcmp(tm_text(&t, 9), "new"));
+    /* ESC [ 2 J clears */
+    cui_terminal_write(&t, "\x1b[2J", -1);
+    CHECK(t.count == 1 && tm_cols(&t, 0) == 0);
+    cui_terminal_printf(&t, "%d files", 3);
+    CHECK(!strcmp(tm_text(&t, 0), "3 files"));
+
+    /* ring: old lines go when lines or text run out, the newest stay whole */
+    {
+        static char small[256];
+        static cui_terminal_line sl[8];
+        cui_terminal_buffer r;
+        cui_terminal_init(&r, small, sizeof small, sl, 8);
+        for (int i = 0; i < 100; i++) cui_terminal_printf(&r, "line %d\n", i);
+        CHECK(r.count == 8 && !strcmp(tm_text(&r, 6), "line 99") && !strcmp(tm_text(&r, 0), "line 93"));
+        for (int i = 0; i < 50; i++) cui_terminal_printf(&r, "%050d\n", i);   /* longer lines: the text is what runs out */
+        CHECK(r.count <= 8 && r.count >= 3);
+        bool okay = true;
+        for (int i = 0; i < r.count - 1; i++) {
+            const char *s = tm_text(&r, i);
+            okay &= strlen(s) == 50 && s[0] == '0';
+        }
+        CHECK(okay && atoi(tm_text(&r, r.count - 2)) == 49);
+        /* a line longer than the whole buffer stops growing instead of breaking anything */
+        for (int i = 0; i < 400; i++) cui_terminal_write(&r, "z", 1);
+        CHECK(r.lines[(r.first + r.count - 1) % 8].len <= 256);
+        cui_terminal_write(&r, "\nafter", -1);
+        CHECK(!strcmp(tm_text(&r, r.count - 1), "after"));
+    }
+
+    /* the view: typing, Enter, history, Ctrl+C, a selection copied without its colors */
+    cui_ctx *ui = new_ctx();
+    cui_terminal_init(&t, text, sizeof text, lines, 64);
+    cui_terminal_write(&t, "\x1b[32mhello\x1b[0m world\nsecond line\n", -1);
+    tm_ctx c = { &t };
+    run(ui, build_tm, &c, 2);
+    click_at(ui, build_tm, &c, c.field.x + 40, c.field.y + c.field.h / 2);
+    type(ui, build_tm, &c, "ls -la");
+    key(ui, build_tm, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.cmd && !strcmp(c.cmd, "ls -la"));
+    CHECK(!strcmp(tm_text(&t, 2), "\x1b[2m$ \x1b[0mls -la"));
+    c.cmd = NULL;
+    type(ui, build_tm, &c, "pwd");
+    key(ui, build_tm, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.cmd && !strcmp(c.cmd, "pwd"));
+    c.cmd = NULL;
+    key(ui, build_tm, &c, CUI_KEY_UP, 0);
+    key(ui, build_tm, &c, CUI_KEY_UP, 0);
+    key(ui, build_tm, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.cmd && !strcmp(c.cmd, "ls -la"));
+    key(ui, build_tm, &c, CUI_KEY_UP, 0);
+    key(ui, build_tm, &c, CUI_KEY_DOWN, 0);   /* past the newest: empty again */
+    c.cmd = NULL;
+    key(ui, build_tm, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.cmd && c.cmd[0] == 0);
+    type(ui, build_tm, &c, "sleep 9");
+    key(ui, build_tm, &c, CUI_KEY_C, CUI_MOD_CTRL);
+    CHECK(c.interrupted);
+    CHECK(!strcmp(tm_text(&t, t.count - 2), "^C"));
+    /* select the first two lines by dragging and copy */
+    key(ui, build_tm, &c, CUI_KEY_L, CUI_MOD_CTRL);
+    CHECK(t.count == 1);
+    cui_terminal_write(&t, "\x1b[32mhello\x1b[0m world\nsecond line\nthird\n", -1);
+    run(ui, build_tm, &c, 2);
+    float x0 = 20 + 10, y0 = 20 + 6, lh = ceilf(13 * 1.45f);
+    cui_input_mouse_move(ui, x0 + 1, y0 + lh * 0.5f);
+    run(ui, build_tm, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_tm, &c, 1);
+    cui_input_mouse_move(ui, x0 + 600, y0 + lh * 1.5f);
+    run(ui, build_tm, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_tm, &c, 1);
+    g_clip[0] = 0;
+    key(ui, build_tm, &c, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(!strcmp(g_clip, "hello world\nsecond line"));
+    c.interrupted = false;
+
+    /* many lines: only the rows in view are drawn */
+    {
+        static char big[4 << 20];
+        static cui_terminal_line bl[50000];
+        cui_terminal_buffer b;
+        cui_terminal_init(&b, big, sizeof big, bl, 50000);
+        for (int i = 0; i < 60000; i++) cui_terminal_printf(&b, "\x1b[3%dm%6d\x1b[0m compiling module %d of 60000, a long line that wraps once the panel is narrow\n", i % 8, i, i);
+        tm_ctx bc = { &b };
+        run(ui, build_tm, &bc, 2);
+        clock_t t0 = clock();
+        run(ui, build_tm, &bc, 20);
+        double ms = (double)(clock() - t0) / CLOCKS_PER_SEC * 1000 / 20;
+        printf("    terminal: %d lines, %.2f ms per frame\n", b.count, ms);
+        CHECK(b.count > 40000 && ms < 20);
+    }
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6621,6 +6762,7 @@ int main(void) {
     test_tour();
     test_photo();
     test_files();
+    test_terminal();
     test_planning();
     test_node_editor();
     test_flame();

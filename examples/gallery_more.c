@@ -1147,6 +1147,41 @@ static void page_files(cui_ctx *ui) {
     }
     cui_file_picker(ui, "open", &open_dlg, chosen, sizeof chosen, .list = files_list);
     cui_file_picker(ui, "save", &save_dlg, chosen, sizeof chosen, .list = files_list, .save = true, .name = "untitled.txt");
+
+    /* a small shell over the same folder */
+    static cui_terminal_buffer term;
+    static char term_text[64 * 1024];
+    static cui_terminal_line term_lines[1024];
+    if (!term.line_cap) {
+        cui_terminal_init(&term, term_text, sizeof term_text, term_lines, 1024);
+        cui_terminal_write(&term, "Type \x1b[1mhelp\x1b[0m for the commands.\n", -1);
+    }
+    section(ui, "Terminal", "Colors, \\r progress, history on Up and Down, Ctrl+C, Ctrl+L, drag to select.");
+    cui_terminal_result tr = cui_terminal(ui, "shell", &term, .height = 300, .prompt = "> ");
+    if (tr.command) {
+        const char *c = tr.command;
+        if (!strcmp(c, "help")) cui_terminal_write(&term, "  \x1b[36mls\x1b[0m      the folder above\n  \x1b[36mcolors\x1b[0m  the 16 colors\n  \x1b[36mbuild\x1b[0m   a progress bar\n  \x1b[36mecho\x1b[0m    prints its words\n  \x1b[36mclear\x1b[0m   empties the screen\n", -1);
+        else if (!strcmp(c, "ls")) {
+            static cui_file_entry ents[256];
+            static char names[16384];
+            int n = files_list(NULL, folder, ents, 256, names, sizeof names, false);
+            for (int k = 0; k < n; k++) cui_terminal_printf(&term, ents[k].dir ? "\x1b[1;34m%s/\x1b[0m\n" : "%s\n", ents[k].name);
+            if (n < 0) cui_terminal_write(&term, "\x1b[31mls: cannot read this folder\x1b[0m\n", -1);
+        } else if (!strcmp(c, "colors")) {
+            for (int k = 0; k < 16; k++) cui_terminal_printf(&term, "\x1b[%dm\xe2\x96\x88\xe2\x96\x88\x1b[0m%s", k < 8 ? 30 + k : 82 + k, k == 7 || k == 15 ? "\n" : " ");
+        } else if (!strcmp(c, "build")) {
+            for (int k = 0; k <= 20; k++) {
+                char bar[96];
+                int m = 0;
+                for (int j = 0; j < 20; j++) m += snprintf(bar + m, sizeof bar - m, "%s", j < k ? "\xe2\x96\x88" : "\xe2\x96\x91");
+                cui_terminal_printf(&term, "\r\x1b[32m%s\x1b[0m %3d%%", bar, k * 5);
+            }
+            cui_terminal_write(&term, "\n\x1b[32mdone\x1b[0m\n", -1);
+        } else if (!strncmp(c, "echo", 4) && (c[4] == ' ' || !c[4])) cui_terminal_printf(&term, "%s\n", c[4] ? c + 5 : "");
+        else if (!strcmp(c, "clear")) cui_terminal_clear(&term);
+        else if (c[0]) cui_terminal_printf(&term, "\x1b[31m%s: command not found\x1b[0m\n", c);
+    }
+    if (tr.interrupt) cui_toast(ui, "Interrupted");
 }
 
 /* ---- registry ------------------------------------------------------------ */

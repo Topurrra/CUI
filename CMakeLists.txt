@@ -69,6 +69,7 @@ set(CUI_CORE_SOURCES
     src/cui_tour.c
     src/cui_photo.c
     src/cui_files.c
+    src/cui_terminal.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)
 

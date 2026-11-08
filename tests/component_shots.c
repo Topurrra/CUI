@@ -2117,6 +2117,40 @@ SCENE(file_browser) {
         cui_file_picker(ui, "save", &open, picked, sizeof picked, .save = true, .name = "report.pdf", .start = "/Users/maya/Documents", .list = demo_fs);
     }
 }
+static cui_terminal_buffer g_term;
+static void term_demo_fill(void) {
+    static char text[16384];
+    static cui_terminal_line lines[256];
+    cui_terminal_init(&g_term, text, sizeof text, lines, 256);
+    cui_terminal_buffer *t = &g_term;
+    cui_terminal_write(t, "\x1b[2m~/fieldnotes $ \x1b[0mcmake --build build -j8\n", -1);
+    static const char *const units[] = { "cui_core.c", "cui_layout.c", "cui_text.c", "cui_widgets.c", "cui_viz.c", "cui_month.c" };
+    for (int i = 0; i < 6; i++)
+        cui_terminal_printf(t, "[%3d%%] \x1b[32mBuilding C object\x1b[0m src/CMakeFiles/cui.dir/%s.o\n", (i + 1) * 14, units[i]);
+    cui_terminal_write(t, "\x1b[1msrc/cui_month.c:212:14: \x1b[35mwarning:\x1b[0m\x1b[1m unused variable 'span'\x1b[0m\n", -1);
+    cui_terminal_write(t, "  212 |     float span = r.w / 7;\n", -1);
+    cui_terminal_write(t, "      |           \x1b[32m^~~~\x1b[0m\n", -1);
+    cui_terminal_write(t, "[ 92%] \x1b[1;32mLinking C static library libcui.a\x1b[0m\n", -1);
+    cui_terminal_write(t, "[100%] Built target cui\n", -1);
+    cui_terminal_write(t, "\x1b[2m~/fieldnotes $ \x1b[0mctest --output-on-failure\n", -1);
+    /* a progress bar that redraws itself in place */
+    for (int k = 0; k <= 40; k += 8) {
+        char bar[64];
+        int n = 0;
+        for (int j = 0; j < 20; j++) n += snprintf(bar + n, sizeof bar - n, "%s", j < k / 2 ? "\xe2\x96\x88" : "\xe2\x96\x91");
+        cui_terminal_printf(t, "\r\x1b[36m%s\x1b[0m %2d/40 tests", bar, k);
+    }
+    cui_terminal_write(t, "\n\x1b[32m100% tests passed\x1b[0m, 0 tests failed out of 40\n", -1);
+    cui_terminal_write(t, "Total Test time (real) =   3.18 sec\n", -1);
+}
+SCENE(terminal) {
+    static bool filled;
+    if (!filled) { term_demo_fill(); filled = true; }
+    cui_box(ui, UPTO(820)) {
+        cui_terminal_result r = cui_terminal(ui, "term", &g_term, .height = 380, .prompt = "~/fieldnotes $ ");
+        if (r.command && r.command[0]) cui_terminal_printf(&g_term, "%s: command not found\n", r.command);
+    }
+}
 SCENE(gauges) {
     static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
@@ -3449,7 +3483,7 @@ int main(int argc, char **argv) {
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },
-        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "chat", scene_chat, 560, 440, true },
+        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
         { "timeline-editor", scene_timeline_editor, 960, 660, true },

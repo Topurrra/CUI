@@ -1266,6 +1266,7 @@ CUI_API bool cui_file_picker_ex(cui_ctx *ui, const char *id, bool *open, char *o
 #define cui_tree_table_begin(ui, id, cols, ncols, nodes, n, ...) cui_tree_table_begin_ex((ui), (id), (cols), (ncols), (nodes), (n), CUI__OPTS(cui_tree_table_opts, __VA_ARGS__))
 #define cui_path_bar(ui, id, segs, n, ...) cui_path_bar_ex((ui), (id), (segs), (n), CUI__OPTS(cui_path_bar_opts, __VA_ARGS__))
 #define cui_file_browser(ui, id, path, cap, ...) cui_file_browser_ex((ui), (id), (path), (cap), CUI__OPTS(cui_file_browser_opts, __VA_ARGS__))
+#define cui_terminal(ui, id, t, ...) cui_terminal_ex((ui), (id), (t), CUI__OPTS(cui_terminal_opts, __VA_ARGS__))
 #define cui_file_picker(ui, id, open, out, cap, ...) cui_file_picker_ex((ui), (id), (open), (out), (cap), CUI__OPTS(cui_file_picker_opts, __VA_ARGS__))
 
 /* ------------------------------------------------------------------------ */
@@ -2496,6 +2497,57 @@ typedef struct cui_log_view_opts {
  * arrows move, Shift+arrows extend, Ctrl+A selects all, Ctrl+C copies, Esc
  * clears the selection, End follows again. */
 CUI_API void cui_log_view_ex(cui_ctx *ui, const char *id, cui_log_buffer *buf, const cui_log_view_opts *opts);
+
+/* ---- Terminal ---- */
+/* Terminal: program output with ANSI colors over an input line with a
+ * prompt and history, for consoles, REPLs and build tools. Output goes into
+ * a buffer you own (appending never allocates; the oldest lines go when it
+ * is full) and is parsed as it arrives: \n starts a line, \r returns to its
+ * start (progress bars redraw in place), \t, \b, and ESC [ ... m sets
+ * colors and styles (16 colors, 256 and 24-bit; bold, dim, italic,
+ * underline, inverse). Other escape sequences are skipped.
+ *
+ *     static char text[512 * 1024]; static cui_terminal_line lines[8192];
+ *     static cui_terminal_buffer term;
+ *     cui_terminal_init(&term, text, sizeof text, lines, 8192);    // once
+ *     cui_terminal_write(&term, output, n);                          // as output arrives
+ *     cui_terminal_result r = cui_terminal(ui, "term", &term, .height = 360);
+ *     if (r.command) run_command(r.command);                         // echoed for you
+ *
+ * Long lines wrap. The view follows the newest line until you scroll up.
+ * Drag to select, Ctrl+C copies the selection (or, with none, sets
+ * r.interrupt), Ctrl+L clears, Up and Down walk the history and clicking the
+ * output puts the keyboard in the input line. Only the rows in view are
+ * drawn. Text is left to right, one cell per character. */
+typedef struct cui_terminal_line { uint32_t offset, len, cols; } cui_terminal_line;
+typedef struct cui_terminal_buffer {
+    /* managed by cui_terminal_*; read it, do not write it */
+    char *text; uint32_t text_cap;
+    cui_terminal_line *lines; int line_cap;
+    int first, count;          /* ring of lines; the last one is still being written */
+    uint32_t end;              /* where the next byte goes */
+    uint64_t total;            /* lines ever started */
+    uint8_t mode;              /* parser: text, escape, CSI or OSC */
+    uint8_t seq_n; char seq[30];   /* the escape sequence being read, so a write can split one */
+    bool cr;                   /* a \r was seen: the next character starts the line over */
+} cui_terminal_buffer;
+CUI_API void cui_terminal_init(cui_terminal_buffer *t, char *text, size_t text_cap, cui_terminal_line *lines, int line_cap);
+CUI_API void cui_terminal_write(cui_terminal_buffer *t, const char *data, int len);   /* len -1: up to the terminator */
+CUI_API void cui_terminal_printf(cui_terminal_buffer *t, const char *fmt, ...) CUI_PRINTF(2, 3);
+CUI_API void cui_terminal_clear(cui_terminal_buffer *t);
+typedef struct cui_terminal_opts {
+    int _;
+    cui_size width;            /* default fill */
+    float height;              /* default 320; negative fills the space */
+    float size;                /* font size, default 13 */
+    const char *prompt;        /* default "$ " */
+    bool no_input;             /* output only */
+} cui_terminal_opts;
+typedef struct cui_terminal_result {
+    const char *command;       /* the line entered (Enter), already echoed; valid this frame */
+    bool interrupt;            /* Ctrl+C with nothing selected */
+} cui_terminal_result;
+CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_terminal_buffer *t, const cui_terminal_opts *opts);
 
 /* ---- Hex viewer ---- */
 

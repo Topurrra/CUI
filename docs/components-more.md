@@ -650,6 +650,32 @@ A log view for many thousands of lines, with level filters, search, follow and c
 
 Each line shows its level as a quiet tag (warnings and errors also tint their row), an optional `HH:MM:SS.mmm` time and the text in the code font. The toolbar filters by level (warning and error counts appear on their toggles, which shorten to initials when the console is narrow), searches as you type (matches are marked and the field counts the lines found), and Follow keeps the newest line in view: scrolling up turns it off, coming back to the bottom turns it on. Copy takes the selected lines or, with no selection, every line shown; Clear empties the buffer. Click a line to select it, drag or Shift+click for a range. With the list focused, the arrows move through lines, Shift+arrows extend the selection, Page Up, Page Down and Home jump, End returns to following, Ctrl+A selects all, Ctrl+C copies and Esc clears the selection.
 
+### Terminal
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/terminal-dark.png"><img src="images/components/terminal.png" alt="Terminal"></picture>
+
+```c
+static char text[256 * 1024];
+static cui_terminal_line lines[4096];
+static cui_terminal_buffer term;
+cui_terminal_init(&term, text, sizeof text, lines, 4096);   /* once */
+
+cui_terminal_write(&term, child_output, n);                  /* bytes as they come, escapes and all */
+cui_terminal_printf(&term, "\x1b[32mdone\x1b[0m in %.1f s\n", secs);
+
+cui_terminal_result r = cui_terminal(ui, "term", &term, .height = 320, .prompt = "$ ");
+if (r.command) run_command(r.command);                       /* Enter: the line typed, already echoed */
+if (r.interrupt) stop_child();                               /* Ctrl+C with nothing selected */
+```
+
+Output over an input line, for build logs, a game console or a REPL. Like the log console, the app owns the storage, a byte ring and an array of line records, and nothing is allocated while writing: when either fills up, the oldest lines go.
+
+Output is read as it is written. `\n` starts a line, `\r` makes the next text start the line over (so progress bars redraw in place), tabs go to the next stop of 8, and backspace takes the last character. Color sequences (`ESC [ … m`: the 16 colors, 256 colors and 24-bit color, bold, dim, underline and inverse) are kept and drawn. `ESC [ K` after `\r` clears the line, `ESC [ 2 J` clears the screen, and other sequences (cursor moves, titles, links) are dropped, so the output of most command line tools reads cleanly. A sequence split across two writes still works. The 16 colors are tuned separately for light and dark mode, so every one of them reads on the panel. The block characters `▀ ▄ █ ▌ ▐ ░ ▒ ▓` and the eighth blocks are drawn as cells rather than taken from the font, so bars join without gaps.
+
+Long lines wrap at the panel width. Each line keeps its count of characters, so wrapping costs nothing extra, and only the rows in view are drawn: 40,000 lines take about a millisecond per frame. The view follows new output while it is at the bottom; scrolling up stops that and shows a thin bar, and scrolling back down turns it on again. Text in right-to-left scripts is shaped and put in reading order.
+
+Drag over the output to select, and press Ctrl+C (Cmd+C on macOS) to copy it without the color codes. With nothing selected, Ctrl+C clears the input, prints `^C` and sets `interrupt`. Ctrl+L clears the screen, Up and Down walk back through the last 32 commands, and clicking the output puts the caret at the prompt. `.no_input = true` leaves just the output. `.size` sets the text size (13 by default) and a `.height` of -1 fills the parent.
+
 ### Hex viewer
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hex-viewer-dark.png"><img src="images/components/hex-viewer.png" alt="Hex viewer"></picture>

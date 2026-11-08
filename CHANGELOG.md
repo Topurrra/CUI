@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- **Terminal**: output over an input line. It reads ANSI colors (16, 256 and 24-bit), bold, dim, underline and inverse, `\r` progress bars, tabs and clear sequences, and drops the escapes it does not draw. Lines wrap at the panel width, only the rows in view are drawn, and it follows new output. It has drag-to-copy without the colors, command history, Ctrl+C to interrupt and Ctrl+L to clear. The app owns a fixed ring buffer, so writing never allocates.
 - **File browser and file picker**: a folder view with sorting, natural name order, a filter, back, forward and up, a typeable path bar, places, type-ahead and keys. The open, save and folder dialog is drawn by CUI. Listing goes through a callback (the local disk by default), and big folders are read once and built only where they show.
 - **Image viewer and cropper**: zoom around the pointer, pan, double-click for actual pixels, keys, eased motion and a zoom pill. The cropper has corner and edge handles, aspect lock, a round mask for avatars, thirds lines and the size while dragging.
 - **Guided tour**: a spotlight that glides from control to control with a card saying what each one does. It has Back, Next and Done, progress dots and keys, and can show a centered card for steps without a target. The spotlighted control can still be tried, and the button text can be translated.
