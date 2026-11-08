@@ -24,7 +24,7 @@ int main(void) {
     gallery_init(&g);
     printf("%-14s %10s %10s %10s\n", "page", "frame ms", "vertices", "raster ms");
     unsigned char *px = malloc(2480 * 1640 * 4);
-    for (int p = 0; p < PAGE_COUNT; p++) {
+    for (int p = 0; p < gallery_page_total(); p++) {
         g.page = p;
         for (int i = 0; i < 30; i++) { cui_begin_frame(ui, 1 / 60.0f); gallery_frame(ui, &g); cui_end_frame(ui); }
         int n = 200;

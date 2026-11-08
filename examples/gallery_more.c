@@ -1026,6 +1026,43 @@ static void page_ai(cui_ctx *ui) {
     }
 }
 
+/* ---- audio ---------------------------------------------------------------- */
+
+static void page_audio(cui_ctx *ui) {
+    static float cutoff = 1800, res = 0.3f, attack = 12, pan = 0.15f, faders[6] = { -4, -9, 0, -15, -6, -2 };
+    static int tick;
+    tick++;
+    static const char *names[6] = { "Kick", "Snare", "Bass", "Keys", "Vocals", "FX" };
+    static const float marks[] = { 6, 0, -6, -12, -24, -48 };
+    float lv[6][2];
+    for (int k = 0; k < 6; k++)
+        for (int c = 0; c < 2; c++) {
+            float t = (tick + c * 5) / 60.0f, beat = fmodf(t * (1.8f + 0.2f * k) + k * 0.31f, 1.0f);
+            lv[k][c] = (0.3f + 0.1f * k) * (0.2f + 0.8f * expf(-beat * (2.5f + k)));
+        }
+    cui_row(ui, .gap = 16, .wrap = true, .align = CUI_ALIGN_START) {
+        cui_card(ui, .gap = 16, .min_width = 280) {
+            cui_heading(ui, "Synth", 4);
+            cui_row(ui, .gap = 14, .wrap = true) {
+                cui_knob(ui, "Cutoff", &cutoff, 20, 20000, .unit = "Hz", .log_scale = true, .reset = 1000);
+                cui_knob(ui, "Resonance", &res, 0, 1, .format = "%.2f");
+                cui_knob(ui, "Attack", &attack, 1, 2000, .unit = "ms", .log_scale = true, .reset = 10);
+                cui_knob(ui, "Pan", &pan, -1, 1, .bipolar = true, .format = "%+.2f");
+            }
+            float master[2] = { lv[0][0] * 1.4f, lv[4][1] * 1.3f };
+            cui_level_meter(ui, "master", master, 2, .horizontal = true, .length = 240, .scale = true, .segmented = true);
+        }
+        cui_card(ui, .dir = CUI_ROW, .gap = 8, .wrap = true) {
+            for (int k = 0; k < 6; k++) {
+                cui_push_id_int(ui, k);
+                cui_fader(ui, names[k], &faders[k], -48, 6, .unit = "dB", .length = 180, .ticks = k == 0 ? marks : NULL,
+                          .tick_count = k == 0 ? 6 : 0, .meter = lv[k], .meter_channels = 2);
+                cui_pop_id(ui);
+            }
+        }
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -1044,6 +1081,7 @@ static const more_page pages[] = {
     { "More charts", CUI_ICON_CHART_PIE, page_viz },
     { "Motion", CUI_ICON_ACTIVITY, page_motion },
     { "AI", CUI_ICON_MESSAGE_SQUARE, page_ai },
+    { "Audio", CUI_ICON_AUDIO_LINES, page_audio },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

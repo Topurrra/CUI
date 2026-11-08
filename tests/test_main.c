@@ -6086,6 +6086,105 @@ static void test_diff(void) {
     cui_destroy(ui);
 }
 
+/* ---- knob, fader and level meter ---- */
+typedef struct { float knob, freq, pan, fader, levels[2]; cui_rect kr, fr, lr, pr, vr; bool cleared; } dial_ctx;
+static void build_dials(cui_ctx *ui, void *u) {
+    dial_ctx *d = u;
+    static const float ticks[] = { 0, -12, -24 };
+    cui_row(ui, .gap = 20, .align = CUI_ALIGN_START, .pad_top = 300) {
+        cui_knob(ui, "Gain", &d->knob, 0, 100, .reset = 50);
+        d->kr = cui_last_rect(ui);
+        cui_knob(ui, "Freq", &d->freq, 20, 20000, .log_scale = true);
+        d->lr = cui_last_rect(ui);
+        cui_knob(ui, "Pan", &d->pan, -1, 1, .bipolar = true);
+        d->pr = cui_last_rect(ui);
+        cui_fader(ui, "Level", &d->fader, -48, 6, .length = 160, .ticks = ticks, .tick_count = 3, .meter = d->levels, .meter_channels = 2);
+        d->fr = cui_last_rect(ui);
+        d->cleared |= cui_level_meter(ui, "vu", d->levels, 2, .scale = true, .hold = 0.5f, .decay = 30);
+        d->vr = cui_last_rect(ui);
+    }
+}
+static void test_dials(void) {
+    cui_ctx *ui = new_ctx();
+    dial_ctx d = { 25, 20, 0.5f, -12, { 0, 0 } };
+    run(ui, build_dials, &d, 3);
+    CHECK(d.kr.w == 48 && d.kr.h == 48);
+    /* drag up turns right: 200 points for the range */
+    cui_vec2 c = center(d.kr);
+    cui_input_mouse_move(ui, c.x, c.y); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_dials, &d, 1);
+    cui_input_mouse_move(ui, c.x, c.y - 50); run(ui, build_dials, &d, 1);
+    CHECK_NEAR(d.knob, 50, 0.6);
+    /* Shift is ten times finer, from where the pointer is */
+    cui_input_key(ui, CUI_KEY_NONE, true, CUI_MOD_SHIFT); run(ui, build_dials, &d, 1);
+    cui_input_mouse_move(ui, c.x, c.y - 150); run(ui, build_dials, &d, 1);
+    CHECK_NEAR(d.knob, 55, 0.6);
+    cui_input_key(ui, CUI_KEY_NONE, true, 0);
+    cui_input_mouse_move(ui, c.x, c.y - 320); run(ui, build_dials, &d, 1);
+    CHECK(d.knob == 100);   /* clamped */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_dials, &d, 1);
+    /* keys on the focused knob; Delete resets */
+    key(ui, build_dials, &d, CUI_KEY_DOWN, 0);
+    CHECK_NEAR(d.knob, 99, 0.01);
+    key(ui, build_dials, &d, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+    CHECK_NEAR(d.knob, 89, 0.01);
+    key(ui, build_dials, &d, CUI_KEY_HOME, 0);
+    CHECK(d.knob == 0);
+    key(ui, build_dials, &d, CUI_KEY_DELETE, 0);
+    CHECK_NEAR(d.knob, 50, 0.01);
+    /* the wheel turns the focused knob under the pointer, and only that one */
+    cui_input_mouse_move(ui, c.x, c.y); run(ui, build_dials, &d, 2);
+    cui_input_scroll(ui, 0, 2); run(ui, build_dials, &d, 2);
+    CHECK_NEAR(d.knob, 52, 0.01);
+    cui_vec2 pc = center(d.pr);
+    cui_input_mouse_move(ui, pc.x, pc.y); run(ui, build_dials, &d, 2);
+    cui_input_scroll(ui, 0, 2); run(ui, build_dials, &d, 2);
+    CHECK_NEAR(d.pan, 0.5f, 0.001);   /* not focused: the wheel leaves it alone */
+    /* double-click: a bipolar knob goes back to its middle */
+    click_at(ui, build_dials, &d, pc.x, pc.y);
+    click_at(ui, build_dials, &d, pc.x, pc.y);
+    CHECK_NEAR(d.pan, 0, 0.001);
+    /* a log knob: halfway up the travel is the geometric middle */
+    cui_vec2 lc = center(d.lr);
+    cui_input_mouse_move(ui, lc.x, lc.y); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_dials, &d, 1);
+    cui_input_mouse_move(ui, lc.x, lc.y - 100); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_dials, &d, 1);
+    CHECK_NEAR(d.freq, 632.5, 8);
+
+    /* fader: a press on the track jumps there, a press on the thumb drags from where it is */
+    float travel = 160 - 16, top = d.fr.y + 8;
+    float x = d.fr.x + d.fr.w * 0.5f;
+    cui_input_mouse_move(ui, x, top); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_dials, &d, 1);
+    CHECK_NEAR(d.fader, 6, 0.01);
+    float ty = top;   /* the thumb is at the top now */
+    run(ui, build_dials, &d, 30);   /* past the double-click time */
+    cui_input_mouse_move(ui, x, ty + 3); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_dials, &d, 1);
+    CHECK_NEAR(d.fader, 6, 0.01);   /* grabbing the thumb does not move it */
+    cui_input_mouse_move(ui, x, ty + 3 + travel * 0.5f); run(ui, build_dials, &d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_dials, &d, 1);
+    CHECK_NEAR(d.fader, -21, 0.3);
+    key(ui, build_dials, &d, CUI_KEY_BACKSPACE, 0);
+    CHECK_NEAR(d.fader, 0, 0.01);
+
+    /* meter: up at once, back down at the decay rate, the peak mark holds, the clip light latches */
+    cui_set_reduced_motion(ui, false);
+    d.levels[0] = 1.0f; d.levels[1] = 0.5f;
+    run(ui, build_dials, &d, 1);
+    d.levels[0] = d.levels[1] = 0;
+    run(ui, build_dials, &d, 30);   /* half a second at 30 dB/s: down 15 dB */
+    CHECK(!d.cleared);
+    click_at(ui, build_dials, &d, d.vr.x + d.vr.w - 3, d.vr.y + 2);   /* the clip light, above the bars */
+    CHECK(d.cleared);
+    d.cleared = false;
+    click_at(ui, build_dials, &d, d.vr.x + d.vr.w - 3, d.vr.y + 2);
+    CHECK(!d.cleared);   /* off now: nothing to clear */
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -6116,6 +6215,7 @@ int main(void) {
     test_markdown();
     test_code_editor();
     test_diff();
+    test_dials();
     test_planning();
     test_node_editor();
     test_flame();

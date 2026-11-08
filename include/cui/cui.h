@@ -1832,6 +1832,68 @@ typedef struct cui_histogram_opts { int _; float height; const char *format; } c
 CUI_API bool cui_histogram_slider_ex(cui_ctx *ui, const char *label, const float *bins, int bin_count, float *lo, float *hi,
                                      float min, float max, const cui_histogram_opts *opts);
 
+/* Knob, fader and level meter: the controls of audio, synth and mixer panels.
+ *
+ *     cui_knob(ui, "Cutoff", &cutoff, 20, 20000, .format = "%.0f", .unit = "Hz", .reset = 1000);
+ *     cui_knob(ui, "Pan", &pan, -1, 1, .bipolar = true, .format = "%+.2f");
+ *     cui_fader(ui, "Vocals", &gain_db, -60, 6, .unit = "dB", .ticks = marks, .tick_count = 6);
+ *     cui_level_meter(ui, "vu", peaks, 2, .scale = true);   // peaks: linear sample peaks, 1.0 = 0 dBFS
+ *
+ * Knobs turn by dragging up and down (Shift for fine steps); the wheel turns a
+ * focused knob or fader. Double-click, Delete or Backspace go back to `reset`
+ * (0 unless set, kept within the range: 0 dB, the middle of -1..1, or the
+ * minimum of 20..20000). Arrows step, Shift+arrows and Page Up/Down step ten
+ * times as far, Home and End go to the ends. */
+typedef struct cui_knob_opts {
+    int _;
+    const char *label;         /* under the knob; the id when NULL */
+    const char *format;        /* printf format for the value, default "%.0f" */
+    const char *unit;          /* after the value, e.g. "Hz" or "dB" */
+    float size;                /* diameter, default 48 */
+    float step;                /* 0 = continuous (keys move 1% of the range) */
+    float reset;               /* double-click value, default 0 (clamped to the range) */
+    bool bipolar;              /* the arc grows from the middle: pan, EQ gain */
+    bool log_scale;            /* equal turns multiply the value: frequency, time (min > 0) */
+    bool hide_value;
+    bool disabled;
+    cui_color color;           /* the value arc, default the control color */
+} cui_knob_opts;
+CUI_API bool cui_knob_ex(cui_ctx *ui, const char *id, float *value, float min, float max, const cui_knob_opts *opts);
+
+typedef struct cui_fader_opts {
+    int _;
+    const char *label;         /* under a vertical fader, before a horizontal one; the id when NULL */
+    const char *format;        /* default "%.1f" */
+    const char *unit;
+    float length;              /* track length, default 160 */
+    bool horizontal;
+    float step;
+    float reset;               /* double-click value, default 0 (clamped to the range) */
+    const float *ticks; int tick_count;   /* scale marks in value units, labelled beside the track */
+    const float *meter; int meter_channels;   /* a level meter beside the track (linear peaks, up to 8); a dB fader's range sets its scale */
+    bool hide_value;
+    bool disabled;
+} cui_fader_opts;
+CUI_API bool cui_fader_ex(cui_ctx *ui, const char *id, float *value, float min, float max, const cui_fader_opts *opts);
+
+/* Level meter: bars that jump up to each new peak and fall back at `decay`
+ * dB per second, with a peak mark that holds for `hold` seconds and a clip
+ * light that stays on until clicked. Levels are linear sample peaks (1.0 is
+ * 0 dBFS); green runs to -18 dB, amber to -6 dB, red above. */
+typedef struct cui_level_meter_opts {
+    int _;
+    float min_db, max_db;      /* default -60 and +6 */
+    float length;              /* default 160 */
+    float thickness;           /* each channel's bar, default 6 */
+    bool horizontal;
+    bool scale;                /* dB labels beside the bars */
+    bool segmented;            /* LED segments instead of a solid bar */
+    float hold;                /* peak hold, seconds; default 1.5, < 0 none */
+    float decay;               /* fall rate, dB per second; default 20 */
+} cui_level_meter_opts;
+/* Returns true when the clip light was clicked to clear it. */
+CUI_API bool cui_level_meter_ex(cui_ctx *ui, const char *id, const float *levels, int channels, const cui_level_meter_opts *opts);
+
 /* ------------------------------------------------------------------------ */
 /* Capture                                                                  */
 /* ------------------------------------------------------------------------ */
@@ -2762,6 +2824,9 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_wheel_picker(ui, id, items, count, index, ...) cui_wheel_picker_ex((ui), (id), (items), (count), (index), CUI__OPTS(cui_wheel_opts, __VA_ARGS__))
 #define cui_ruler_slider(ui, label, value, min, max, ...) cui_ruler_slider_ex((ui), (label), (value), (min), (max), CUI__OPTS(cui_ruler_opts, __VA_ARGS__))
 #define cui_histogram_slider(ui, label, bins, n, lo, hi, min, max, ...) cui_histogram_slider_ex((ui), (label), (bins), (n), (lo), (hi), (min), (max), CUI__OPTS(cui_histogram_opts, __VA_ARGS__))
+#define cui_knob(ui, id, value, min, max, ...) cui_knob_ex((ui), (id), (value), (min), (max), CUI__OPTS(cui_knob_opts, __VA_ARGS__))
+#define cui_fader(ui, id, value, min, max, ...) cui_fader_ex((ui), (id), (value), (min), (max), CUI__OPTS(cui_fader_opts, __VA_ARGS__))
+#define cui_level_meter(ui, id, levels, channels, ...) cui_level_meter_ex((ui), (id), (levels), (channels), CUI__OPTS(cui_level_meter_opts, __VA_ARGS__))
 #define cui_signature_pad(ui, id, ...)      cui_signature_pad_ex((ui), (id), CUI__OPTS(cui_signature_opts, __VA_ARGS__))
 #define cui_dropzone(ui, id, ...)           cui_dropzone_ex((ui), (id), CUI__OPTS(cui_dropzone_opts, __VA_ARGS__))
 #define cui_split_button(ui, label, items, count, ...) cui_split_button_ex((ui), (label), (items), (count), CUI__OPTS(cui_split_button_opts, __VA_ARGS__))

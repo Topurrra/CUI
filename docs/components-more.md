@@ -223,6 +223,29 @@ cui_histogram_slider(ui, "Price", bins, 24, &lo, &hi, 0, 240, .format = "$%.0f")
 
 The ruler is a tape that slides under a fixed marker; throw it and it glides, then snaps to `step`. Options: `step`, `major_every` (labelled ticks), `spacing` (points per step), `format`, `unit`, `width`. The histogram slider is a range slider with the distribution it filters drawn above it; bars inside the range light up.
 
+### Knob, fader and level meter
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/mixer-dark.png"><img src="images/components/mixer.png" alt="Knobs, faders and level meters"></picture>
+
+```c
+static float cutoff = 2400, pan, gain_db;
+static const float marks[] = { 6, 0, -6, -12, -24, -48 };
+
+cui_knob(ui, "Cutoff", &cutoff, 20, 20000, .unit = "Hz", .log_scale = true, .reset = 1000);
+cui_knob(ui, "Pan", &pan, -1, 1, .bipolar = true, .format = "%+.2f");
+cui_fader(ui, "Vocals", &gain_db, -48, 6, .unit = "dB", .ticks = marks, .tick_count = 6,
+          .meter = peaks, .meter_channels = 2);           /* peaks: linear, 1.0 = 0 dBFS */
+cui_level_meter(ui, "master", peaks, 2, .horizontal = true, .segmented = true, .scale = true);
+```
+
+The controls of audio, synth and mixer panels. A knob turns by dragging up and down: 200 points cover the whole range, and holding Shift makes it ten times finer from wherever the pointer is. A ring shows the value against a 270 degree track; `bipolar` grows it from the middle for pan or EQ gain, and `log_scale` makes equal turns multiply the value, which is what frequency and time knobs need. The value and the label sit under the knob in a column as wide as the longest value, so a row of knobs never shifts while one turns.
+
+A fader is a track with a thumb: press the thumb to drag it from where it is, or press the track and the thumb jumps there first. `ticks` puts a labelled scale beside the track, and `meter` draws level bars right next to it on the fader's own dB scale, so a channel strip is a single call. Faders are vertical unless `horizontal` is set.
+
+Both take `step`, `format` and `unit`, and both answer the same keys and gestures once focused: the arrows step (1% of the range without a step), Shift+arrows and Page Up and Page Down step ten times as far, Home and End go to the ends, and double-click, Delete or Backspace go back to `reset`, which is 0 kept within the range (0 dB, the middle of -1 to 1, or the minimum of 20 to 20000). The wheel turns a control only after it has been clicked or tabbed to, so scrolling a page past a mixer never moves a level.
+
+The level meter takes linear sample peaks, where 1.0 is 0 dBFS. Bars jump up to each new peak and fall back at `decay` dB per second (20 by default), the peak mark holds for `hold` seconds (1.5) and then falls, and a clip light at the loud end stays on after a peak reaches 0 dBFS until it is clicked. The colors run green to -18 dB, amber to -6 dB and red above. `scale` labels the dB marks that fit, `segmented` draws LED segments, and `min_db`, `max_db`, `length`, `thickness` and `horizontal` set the shape. Up to eight channels share one meter. Each control is a single painted node, so a mixer with dozens of strips costs little more than one.
+
 ## Capture
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/capture-dark.png"><img src="images/components/capture.png" alt="Dropzone, signature and avatar upload"></picture>

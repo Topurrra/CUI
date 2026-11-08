@@ -554,6 +554,44 @@ SCENE(rulers) {
         }
     }
 }
+/* a channel's level for the demo meters: a beat with some movement, the same on every run */
+static float mixer_level(int ch, int tick) {
+    float t = tick / 60.0f;
+    float beat = fmodf(t * 2.1f + ch * 0.37f, 1.0f);
+    float env = expf(-beat * (3.0f + ch));
+    float wob = 0.5f + 0.5f * sinf(t * (1.3f + ch * 0.7f) + ch);
+    static const float gain[] = { 0.62f, 0.45f, 0.82f, 0.95f, 0.5f };
+    return gain[ch % 5] * (0.25f + 0.75f * env) * (0.75f + 0.25f * wob);
+}
+SCENE(mixer) {
+    static float cutoff = 2400, res = 0.35f, drive = 4.5f, pan = -0.2f, faders[4] = { -6, 0, -12.5f, -3 };
+    static int tick = 0;
+    tick++;
+    static const char *names[4] = { "Vocals", "Guitar", "Bass", "Drums" };
+    static const float marks[] = { 6, 0, -6, -12, -24, -48 };
+    cui_row(ui, .gap = 24, .wrap = true, .align = CUI_ALIGN_START) {
+        cui_card(ui, .pad = 18, .gap = 16) {
+            cui_label(ui, "Filter");
+            cui_row(ui, .gap = 14, .wrap = true) {
+                cui_knob(ui, "Cutoff", &cutoff, 20, 20000, .unit = "Hz", .log_scale = true, .reset = 1000);
+                cui_knob(ui, "Resonance", &res, 0, 1, .format = "%.2f");
+                cui_knob(ui, "Drive", &drive, 0, 12, .format = "%.1f", .unit = "dB");
+                cui_knob(ui, "Pan", &pan, -1, 1, .bipolar = true, .format = "%+.2f");
+            }
+            float out[2] = { mixer_level(4, tick), mixer_level(3, tick + 7) };
+            cui_level_meter(ui, "out", out, 2, .horizontal = true, .length = 200, .segmented = true, .scale = true);
+        }
+        cui_card(ui, .pad = 18, .dir = CUI_ROW, .gap = 10, .wrap = true) {
+            for (int k = 0; k < 4; k++) {
+                cui_push_id_int(ui, k);
+                float lv[2] = { mixer_level(k, tick), mixer_level(k, tick + 3) * 0.92f };
+                cui_fader(ui, names[k], &faders[k], -48, 6, .unit = "dB", .length = 170, .ticks = k == 0 ? marks : NULL,
+                          .tick_count = k == 0 ? 6 : 0, .meter = lv, .meter_channels = 2);
+                cui_pop_id(ui);
+            }
+        }
+    }
+}
 static void body_capture(cui_ctx *ui) {
     static cui_texture avatar;
     cui_row(ui, .gap = 20, .width = CUI_FILL, .align = CUI_ALIGN_START, .wrap = true) {
@@ -3232,7 +3270,7 @@ int main(int argc, char **argv) {
         { "shortcut-recorder", scene_shortcut_rec, 760, 110, true },
         { "multi-select", scene_multi, 380, 420, true }, { "date-range", scene_range, 760, 440, true },
         { "time-picker", scene_time, 420, 330, true }, { "wheels", scene_wheels, 700, 340, true },
-        { "ruler-histogram", scene_rulers, 860, 224, true }, { "capture", scene_capture, 900, 300, true },
+        { "ruler-histogram", scene_rulers, 860, 224, true }, { "mixer", scene_mixer, 760, 330, true }, { "capture", scene_capture, 900, 300, true },
         { "hover-card", scene_hover_card, 460, 220, true }, { "confirm-popover", scene_confirm_pop, 420, 260, true },
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
