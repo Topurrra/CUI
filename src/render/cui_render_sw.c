@@ -122,9 +122,12 @@ static int cui__cpu_count(void) {
 #endif
 }
 
+static void cui__shadow_lut_init(void);
+
 cui_sw_renderer *cui_sw_create(void) {
     cui_sw_renderer *r = calloc(1, sizeof *r);
     if (!r) return NULL;
+    cui__shadow_lut_init();
     int n = cui__cpu_count();
     r->threads = n > 8 ? 8 : (n < 1 ? 1 : n);
     return r;
@@ -185,6 +188,29 @@ static inline float cui__erf(float x) {
 
 static inline float cui__sat(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
+/* Shadow falloff 0.5 * (1 - erf(z)) over the z a shadow uses (-4 to 2.8, outside it the
+ * value is 1 or ignored), as a table read with linear interpolation: within 2e-6 of the
+ * formula, so at most a rare one-step difference in a pixel, at a fraction of the cost. */
+#define CUI__SHADOW_N 1024
+#define CUI__SHADOW_Z0 (-4.0f)
+#define CUI__SHADOW_Z1 2.8f
+static float cui__shadow_lut[CUI__SHADOW_N + 2];
+static void cui__shadow_lut_init(void) {
+    if (cui__shadow_lut[0] != 0) return;
+    for (int i = CUI__SHADOW_N + 1; i >= 0; i--) {   /* entry 0 last: it marks the table done */
+        float z = CUI__SHADOW_Z0 + (CUI__SHADOW_Z1 - CUI__SHADOW_Z0) * (float)i / CUI__SHADOW_N;
+        cui__shadow_lut[i] = 0.5f * (1.0f - cui__erf(z));
+    }
+}
+static inline float cui__shadow_falloff(float z) {
+    if (z <= CUI__SHADOW_Z0) return 1.0f;
+    float f = (z - CUI__SHADOW_Z0) * ((float)CUI__SHADOW_N / (CUI__SHADOW_Z1 - CUI__SHADOW_Z0));
+    int i = (int)f;
+    if (i >= CUI__SHADOW_N) return cui__shadow_lut[CUI__SHADOW_N];
+    float t = f - (float)i;
+    return cui__shadow_lut[i] + (cui__shadow_lut[i + 1] - cui__shadow_lut[i]) * t;
+}
+
 typedef struct { float r, g, b, a; } cui__px;  /* premultiplied */
 
 static float cui__sample_r8(const cui__sw_tex *t, float u, float v) {
@@ -230,7 +256,20 @@ typedef struct {
     int x0, y0, x1, y1;   /* the part this job paints */
 } cui__sw_job;
 
-static void cui__blend(uint8_t *p, cui__px s, bool bgra) {
+static inline uint8_t cui__blend_ch(float s, uint8_t d, float ia) {
+    return (uint8_t)(cui__sat(s + (d / 255.0f) * ia) * 255.0f + 0.5f);
+}
+
+#if defined(_MSC_VER)
+#define CUI__HOT_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define CUI__HOT_INLINE inline __attribute__((always_inline))
+#else
+#define CUI__HOT_INLINE inline
+#endif
+
+/* inlined: it runs once per drawn pixel that is not a plain fill */
+static CUI__HOT_INLINE void cui__blend(uint8_t *p, cui__px s, bool bgra) {
     if (s.a <= 0.0005f) return;
     if (s.a >= 0.9995f) {
         int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
@@ -240,12 +279,33 @@ static void cui__blend(uint8_t *p, cui__px s, bool bgra) {
     }
     float ia = 1.0f - s.a;
     int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
-    float dr = p[ri] / 255.0f, dg = p[1] / 255.0f, db = p[bi] / 255.0f, da = p[3] / 255.0f;
-    float r = s.r + dr * ia, g = s.g + dg * ia, b = s.b + db * ia, a = s.a + da * ia;
-    p[ri] = (uint8_t)(cui__sat(r) * 255.0f + 0.5f);
-    p[1] = (uint8_t)(cui__sat(g) * 255.0f + 0.5f);
-    p[bi] = (uint8_t)(cui__sat(b) * 255.0f + 0.5f);
-    p[3] = (uint8_t)(cui__sat(a) * 255.0f + 0.5f);
+    p[ri] = cui__blend_ch(s.r, p[ri], ia);
+    p[1] = cui__blend_ch(s.g, p[1], ia);
+    p[bi] = cui__blend_ch(s.b, p[bi], ia);
+    p[3] = cui__blend_ch(s.a, p[3], ia);
+}
+
+/* One color over a run of pixels. A long run looks each channel up in a table built from the
+ * same arithmetic as cui__blend (with one color, a channel's result depends only on the byte
+ * underneath), so the output is identical. The table is built once per quad. */
+typedef struct { cui__px o; bool ok; uint8_t t[4][256]; } cui__blend_lut;
+static void cui__blend_run(uint8_t *p, int n, cui__px o, bool bgra, cui__blend_lut *lut) {
+    if (o.a <= 0.0005f) return;
+    if (n < 96 || o.a >= 0.9995f) { for (int k = 0; k < n; k++) cui__blend(p + (size_t)k * 4, o, bgra); return; }
+    int ri = bgra ? 2 : 0, bi = bgra ? 0 : 2;
+    if (!lut->ok || memcmp(&lut->o, &o, sizeof o) != 0) {
+        float ia = 1.0f - o.a;
+        for (int v = 0; v < 256; v++) {
+            lut->t[ri][v] = cui__blend_ch(o.r, (uint8_t)v, ia);
+            lut->t[1][v] = cui__blend_ch(o.g, (uint8_t)v, ia);
+            lut->t[bi][v] = cui__blend_ch(o.b, (uint8_t)v, ia);
+            lut->t[3][v] = cui__blend_ch(o.a, (uint8_t)v, ia);
+        }
+        lut->o = o; lut->ok = true;
+    }
+    for (int k = 0; k < n; k++, p += 4) {
+        p[0] = lut->t[0][p[0]]; p[1] = lut->t[1][p[1]]; p[2] = lut->t[2][p[2]]; p[3] = lut->t[3][p[3]];
+    }
 }
 
 static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const cui_vertex *b, const cui_vertex *c,
@@ -325,7 +385,9 @@ static void cui__raster_tri(const cui__sw_job *job, const cui_vertex *a, const c
                     o.r = cr * fa + bcr * ba; o.g = cg * fa + bcg * ba; o.b = cb * fa + bcb * ba; o.a = fa + ba;
                 } else if (mode == CUI_SHADE_SHADOW) {
                     float sigma = bw > 0.01f ? bw : 0.01f;
-                    float al = ca * 0.5f * (1.0f - cui__erf(d / (sigma * 1.41421356f)));
+                    float z = d / (sigma * 1.41421356f);
+                    if (z > CUI__SHADOW_Z1) continue;
+                    float al = ca * cui__shadow_falloff(z);
                     o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
                 } else { /* image */
                     float cov = cui__sat(0.5f - d);
@@ -365,6 +427,8 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
     float bcr = v0->border_color.r / 255.0f, bcg = v0->border_color.g / 255.0f, bcb = v0->border_color.b / 255.0f, bca = v0->border_color.a / 255.0f;
     float du = (v1->u - v0->u) / qw, dv = (v3->v - v0->v) / qh;
     bool text_exact = mode == CUI_SHADE_TEXT && tex && fabsf(du * (float)tex->w - 1.0f) < 0.001f && fabsf(dv * (float)tex->h - 1.0f) < 0.001f;
+    cui__blend_lut lut;
+    lut.ok = false;
     for (int y = y0; y < y1; y++) {
         float py = (float)y + 0.5f;
         float ty = (py - qy0) / qh;
@@ -408,10 +472,12 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
          * and do it in one go: fill it when opaque, skip it when clear (a border-only box),
          * blend one color over it otherwise. The loop does the edges. */
         int sx0 = x1, sx1 = x1;
-        if (mode == CUI_SHADE_SOLID || mode == CUI_SHADE_RRECT) {
-            if (mode == CUI_SHADE_SOLID) { if (ca >= 0.999f) { sx0 = x0; sx1 = x1; } }
+        if (mode == CUI_SHADE_SOLID || mode == CUI_SHADE_RRECT || mode == CUI_SHADE_SHADOW) {
+            if (mode == CUI_SHADE_SOLID) { sx0 = x0; sx1 = x1; }
             else {
-                float inset = bw + 0.5f;
+                /* a rounded rectangle: inside its border; a shadow: four blur widths inside the
+                 * shape, where erf is exactly -1 in float and the shadow is the plain color */
+                float inset = mode == CUI_SHADE_SHADOW ? 4.0f * 1.41421356f * (bw > 0.01f ? bw : 0.01f) : bw + 0.5f;
 #define CUI__DEEP(xx) (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset - rmax && ay <= hh - inset) || \
                       (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset && ay <= hh - inset - rmax)
                 if (ay <= hh - inset) {
@@ -425,11 +491,8 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
             if (sx0 < sx1) {
                 uint8_t *p = row + (size_t)sx0 * 4;
                 int n = sx1 - sx0;
-                if (ca >= 0.999f) for (int k = 0; k < n; k++) memcpy(p + (size_t)k * 4, opaque, 4);   /* any alignment */
-                else if (ca > 0.0005f) {
-                    cui__px o = { cr * ca, cg * ca, cb * ca, ca };
-                    for (int k = 0; k < n; k++) cui__blend(p + (size_t)k * 4, o, bgra);
-                }
+                if (ca >= 0.999f && mode != CUI_SHADE_SHADOW) for (int k = 0; k < n; k++) memcpy(p + (size_t)k * 4, opaque, 4);   /* any alignment */
+                else if (ca > 0.0005f) cui__blend_run(p, n, (cui__px){ cr * ca, cg * ca, cb * ca, ca }, bgra, &lut);
             }
         }
         for (int x = x0; x < x1; x++) {
@@ -461,7 +524,7 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
                 float sigma = bw > 0.01f ? bw : 0.01f;
                 float z = d / (sigma * 1.41421356f);
                 if (z > 2.8f) continue;
-                float al = ca * 0.5f * (1.0f - cui__erf(z));
+                float al = ca * cui__shadow_falloff(z);
                 o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
             } else {
                 float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
