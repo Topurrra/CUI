@@ -150,6 +150,10 @@ When a component grows past a screen or two, split it by phase rather than by li
   ./soak-mail --minutes 2 --seed 5 --hash
   ```
 
+  The harness only reaches what the app shows. For a component that no example uses, write a small app that shows it (a `main` that calls `cui_app_run`, in a few variants: narrow, read only, empty), build it with `-DSOAK_APP='"path/to/app.c"'` against both libraries and compare several seeds. Each library must be built with its own headers. To check that the run reaches the code you changed, break that code on purpose once: the fingerprint should change.
+
+- **Phases:** when you split a long function, keep every `cui__interact`, `cui_state` and node call in the same order. Order is behavior: it decides ids, hit testing and state lifetimes. Name the struct the phases share after the component (`cui__tle_frame` for the timeline editor) and keep the original function as a short driver that reads top to bottom: setup, input, build, result.
+
 - **Size:** check what a change adds to `examples/hello` in a `MinSizeRel` build. The core must not call into a component's file directly (Windows linkers keep whole files), so optional parts are reached through hooks they install themselves (see `ui->emoji_hook`).
 
 ## Rules that keep it fast and small
