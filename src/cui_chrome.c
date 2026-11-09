@@ -528,8 +528,8 @@ void cui_status_bar_begin(cui_ctx *ui, const char *id_str, const cui_status_bar_
     cui_rect pr = cui__prev_rect(ui, id);
     b->avail = pr.w > 0 ? pr.w - 12 : 1e9f;
     b->compact = b->avail + 0.5f < b->st->need;
-    b->prev = (struct cui_status_build *)ui->status_bar;
-    ui->status_bar = b;
+    b->prev = (struct cui_status_build *)ui->building.status_bar;
+    ui->building.status_bar = b;
     int row = cui__bar_row(ui, id, 3, 6, !o->no_border, true);
     ui->nodes[row].gap = 4;
     cui__open(ui, row);
@@ -537,15 +537,15 @@ void cui_status_bar_begin(cui_ctx *ui, const char *id_str, const cui_status_bar_
 }
 
 void cui_status_bar_end(cui_ctx *ui) {
-    struct cui_status_build *b = (struct cui_status_build *)ui->status_bar;
-    if (b) { b->st->need = b->need; ui->status_bar = b->prev; }
+    struct cui_status_build *b = (struct cui_status_build *)ui->building.status_bar;
+    if (b) { b->st->need = b->need; ui->building.status_bar = b->prev; }
     cui_pop_id(ui);
     cui__close(ui);
 }
 
 /* Books an item's width. *icon_only says to drop its label; false means leave the item out. */
 static bool cui__status_fits(cui_ctx *ui, float label_w, bool has_icon, float extra, bool *icon_only) {
-    struct cui_status_build *b = (struct cui_status_build *)ui->status_bar;
+    struct cui_status_build *b = (struct cui_status_build *)ui->building.status_bar;
     *icon_only = false;
     if (!b) return true;
     float full = 12 + (has_icon ? 18 : 0) + label_w + extra + (b->need > 0 ? 4 : 0);

@@ -55,8 +55,8 @@ void cui_kanban_begin(cui_ctx *ui, const char *id_str) {
     struct cui_kanban_build *b = cui__frame_alloc(ui, sizeof *b);
     memset(b, 0, sizeof *b);
     b->id = cui_make_id(ui, id_str);
-    b->prev = (struct cui_kanban_build *)ui->kanban;
-    ui->kanban = b;
+    b->prev = (struct cui_kanban_build *)ui->building.kanban;
+    ui->building.kanban = b;
     cui__kb_state *st = cui_state(ui, b->id, sizeof *st);
     if (!st->init) { st->drag_card = -1; st->settle_card = -1; st->init = true; }
     b->st = st;
@@ -103,7 +103,7 @@ bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, 
     cui_kanban_column_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
-    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->kanban;
+    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->building.kanban;
     if (!b) return false;
     cui__kb_state *st = b->st;
     b->col++;
@@ -167,7 +167,7 @@ bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, 
 }
 
 bool cui_kanban_card_begin(cui_ctx *ui, int card_id) {
-    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->kanban;
+    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->building.kanban;
     if (!b) { cui__open(ui, cui__node_new(ui, 0)); cui_push_id_int(ui, card_id); return false; }
     cui__kb_state *st = b->st;
     cui_id kid = cui__hash(&card_id, sizeof card_id, b->id ^ 0xCA2Du);
@@ -265,7 +265,7 @@ void cui_kanban_card_end(cui_ctx *ui) {
 }
 
 void cui_kanban_column_end(cui_ctx *ui) {
-    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->kanban;
+    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->building.kanban;
     cui_pop_id(ui);
     if (b) {
         cui__kb_state *st = b->st;
@@ -292,7 +292,7 @@ void cui_kanban_column_end(cui_ctx *ui) {
 }
 
 bool cui_kanban_end(cui_ctx *ui, cui_kanban_move *move) {
-    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->kanban;
+    struct cui_kanban_build *b = (struct cui_kanban_build *)ui->building.kanban;
     if (!b) return false;
     cui_pop_id(ui);
     cui__close(ui);
@@ -330,7 +330,7 @@ bool cui_kanban_end(cui_ctx *ui, cui_kanban_move *move) {
         st->settle_pending = true;
         st->drag_card = -1;
     }
-    ui->kanban = b->prev;
+    ui->building.kanban = b->prev;
     ui->last_id = b->id;
     return dropped;
 }

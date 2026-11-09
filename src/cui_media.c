@@ -26,7 +26,7 @@ struct cui_carousel_build {
     struct cui_carousel_build *prev;
 };
 
-static struct cui_carousel_build *cui__car_top(cui_ctx *ui) { return (struct cui_carousel_build *)ui->carousel; }
+static struct cui_carousel_build *cui__car_top(cui_ctx *ui) { return (struct cui_carousel_build *)ui->building.carousel; }
 
 bool cui_carousel_begin(cui_ctx *ui, const char *id_str, int count, int *index, const cui_carousel_opts *o) {
     cui_carousel_opts d;
@@ -39,8 +39,8 @@ bool cui_carousel_begin(cui_ctx *ui, const char *id_str, int count, int *index, 
     b->count = count < 0 ? 0 : count;
     b->index = index;
     b->o = *o;
-    b->prev = (struct cui_carousel_build *)ui->carousel;
-    ui->carousel = b;
+    b->prev = (struct cui_carousel_build *)ui->building.carousel;
+    ui->building.carousel = b;
     cui__car_state *st = cui_state(ui, b->id, sizeof *st);
     b->st = st;
     if (*index < 0) *index = 0;
@@ -183,7 +183,7 @@ void cui_carousel_end(cui_ctx *ui) {
         cui__close(ui);
     }
     cui__close(ui);   /* column */
-    ui->carousel = b->prev;
+    ui->building.carousel = b->prev;
     ui->last_id = b->id;
 }
 
@@ -299,8 +299,8 @@ void cui_card_stack_begin(cui_ctx *ui, const char *id_str, int count, const cui_
     b->count = count;
     b->visible = o->visible > 0 ? o->visible : 3;
     b->h = o->height > 0 ? o->height : 320;
-    b->prev = (struct cui_stack_build *)ui->card_stack;
-    ui->card_stack = b;
+    b->prev = (struct cui_stack_build *)ui->building.card_stack;
+    ui->building.card_stack = b;
     cui__stack_state *st = cui_state(ui, b->id, sizeof *st);
     b->st = st;
     cui_id top_id = b->id ^ 0x70Bu;
@@ -353,7 +353,7 @@ void cui_card_stack_begin(cui_ctx *ui, const char *id_str, int count, const cui_
 }
 
 void cui_card_stack_item_begin(cui_ctx *ui, int depth) {
-    struct cui_stack_build *b = (struct cui_stack_build *)ui->card_stack;
+    struct cui_stack_build *b = (struct cui_stack_build *)ui->building.card_stack;
     if (!b) { int n = cui__node_new(ui, 0); cui__open(ui, n); return; }
     cui__stack_state *st = b->st;
     bool top = depth == 0;
@@ -389,7 +389,7 @@ void cui_card_stack_item_end(cui_ctx *ui) {
 }
 
 int cui_card_stack_end(cui_ctx *ui) {
-    struct cui_stack_build *b = (struct cui_stack_build *)ui->card_stack;
+    struct cui_stack_build *b = (struct cui_stack_build *)ui->building.card_stack;
     if (!b) return 0;
     /* paint deeper cards first: reverse the children so the top card is last */
     cui__close(ui);
@@ -402,7 +402,7 @@ int cui_card_stack_end(cui_ctx *ui) {
         while (c >= 0) { int nx = ui->nodes[c].next; ui->nodes[c].next = prev; prev = c; c = nx; }
         bn->first = prev;
     }
-    ui->card_stack = b->prev;
+    ui->building.card_stack = b->prev;
     ui->last_id = b->id;
     return b->result;
 }

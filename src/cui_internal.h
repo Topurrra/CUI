@@ -548,11 +548,6 @@ struct cui_ctx {
     struct cui_edit_state *edit;   /* edit state of the focused text field */
     cui_id tab_owner;              /* the focused control types Tab instead of moving focus (code editor); set every frame */
     double caret_time;
-    /* table being built */
-    struct cui_table_build *table;
-    int table_depth;
-    /* split being built */
-    struct cui_split_build *split;
     /* scope stacks */
     cui__popup_build pb_stack[16]; int pb_depth;
     cui__modal_build mb_stack[8]; int mb_depth;
@@ -561,28 +556,35 @@ struct cui_ctx {
     int tree_depth;
     int button_group_depth;
     int layer_seq;             /* increments whenever a popup or modal opens */
-    struct cui_reorder_build *reorder;
     /* one shot font override for the next text field (inline edit) */
     bool tf_override;
     cui_font tf_font;
     float tf_size;
-    cui_id tf_select_all;
+    cui_id tf_select_all;      /* this field selects all of its text when it next has focus */
     /* files dropped from the OS, valid for one frame */
     char *drop_buf; size_t drop_used, drop_cap;
     int drop_off[64]; int drop_count;
     float drop_x, drop_y;
     bool drop_claimed;
     bool drag_hover; float drag_x, drag_y;
-    bool slider_no_header;     /* next range slider skips its label row */      /* this field selects all of its text when it next has focus */
-    struct cui_swipe_build *swipe;
-    struct cui_grid_build *grid;   /* data grid being built (grids do not nest) */
-    void *carousel;                /* carousel being built */
-    void *status_bar;              /* status bar being built: its width budget */
-    void *card_stack;              /* card stack being built */
-    void *kanban;                  /* kanban board being built */
-    void *dock;                    /* dock being built */
-    void *spot;                    /* spotlight card being built */
-    void *reasoning;               /* reasoning block being built */
+    bool slider_no_header;     /* next range slider skips its label row */
+    /* Containers being built. A component's _begin sets its pointer (frame memory), the
+     * items between begin and end read it, and _end clears it. They do not nest unless
+     * noted, so a new begin/end component adds its pointer here and nowhere else. */
+    struct {
+        struct cui_table_build *table; int table_depth;   /* tables nest: depth counts them */
+        struct cui_split_build *split;
+        struct cui_reorder_build *reorder;
+        struct cui_swipe_build *swipe;
+        struct cui_grid_build *grid;
+        void *carousel;
+        void *status_bar;          /* its width budget */
+        void *card_stack;
+        void *kanban;
+        void *dock;
+        void *spot;                /* spotlight card */
+        void *reasoning;
+    } building;
     cui__text_fx_fn text_fx;       /* set while a node with a text effect paints */
     void *text_fx_data;
     int text_fx_base;              /* byte offset of the line being drawn */

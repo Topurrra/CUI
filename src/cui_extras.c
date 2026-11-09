@@ -704,8 +704,8 @@ void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
     b->order = order;
     b->count = count < CUI__REORDER_MAX ? count : CUI__REORDER_MAX;
     b->st = cui_state(ui, b->id, sizeof(cui__reorder_state));
-    b->prev = ui->reorder;
-    ui->reorder = b;
+    b->prev = ui->building.reorder;
+    ui->building.reorder = b;
     cui__reorder_state *st = b->st;
     if (!st->init) { st->from = -1; st->init = true; }   /* state memory starts zeroed */
     if (st->from >= b->count) st->from = -1;
@@ -767,7 +767,7 @@ void cui_reorder_begin(cui_ctx *ui, const char *id_str, int *order, int count) {
 }
 
 void cui_reorder_item_begin(cui_ctx *ui, int pos) {
-    struct cui_reorder_build *b = ui->reorder;
+    struct cui_reorder_build *b = ui->building.reorder;
     if (!b || pos < 0 || pos >= b->count) {
         /* outside a list or past its capacity: a plain row, kept balanced with item_end */
         int n = cui__node_new(ui, 0);
@@ -820,9 +820,9 @@ void cui_reorder_item_end(cui_ctx *ui) {
 }
 
 bool cui_reorder_end(cui_ctx *ui) {
-    struct cui_reorder_build *b = ui->reorder;
+    struct cui_reorder_build *b = ui->building.reorder;
     if (!b) return false;
     cui__close(ui);
-    ui->reorder = b->prev;
+    ui->building.reorder = b->prev;
     return b->changed;
 }

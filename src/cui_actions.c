@@ -713,8 +713,8 @@ void cui_swipe_item_begin(cui_ctx *ui, const char *id_str, const cui_swipe_actio
                           const cui_swipe_action *right, int right_count) {
     struct cui_swipe_build *b = cui__frame_alloc(ui, sizeof *b);
     b->result = -1;
-    b->prev = ui->swipe;
-    ui->swipe = b;
+    b->prev = ui->building.swipe;
+    ui->building.swipe = b;
     cui_id id = cui_make_id(ui, id_str);
     cui_id fid = id ^ 0x5F1Fu;
     cui__swipe_state *st = cui_state(ui, id, sizeof *st);
@@ -800,12 +800,12 @@ void cui_swipe_item_begin(cui_ctx *ui, const char *id_str, const cui_swipe_actio
 }
 
 int cui_swipe_item_end(cui_ctx *ui) {
-    struct cui_swipe_build *b = ui->swipe;
+    struct cui_swipe_build *b = ui->building.swipe;
     if (!b) return -1;
     cui_pop_id(ui);
     cui__close(ui);   /* foreground row */
     cui__close(ui);   /* stack */
-    ui->swipe = b->prev;
+    ui->building.swipe = b->prev;
     return b->result;
 }
 

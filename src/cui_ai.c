@@ -108,20 +108,20 @@ bool cui_reasoning_begin(cui_ctx *ui, const char *id_str, const cui_reasoning_op
     ct->paint_data = rp;
     ui->nodes[cui__current(ui)].gap = 6;
     struct cui_reasoning_build *b = cui__frame_alloc(ui, sizeof *b);
-    b->id = id; b->open = st->open; b->prev = (struct cui_reasoning_build *)ui->reasoning;
-    ui->reasoning = b;
+    b->id = id; b->open = st->open; b->prev = (struct cui_reasoning_build *)ui->building.reasoning;
+    ui->building.reasoning = b;
     /* thoughts read quieter than the answer */
     cui_push_id(ui, id_str);
     return true;
 }
 
 void cui_reasoning_end(cui_ctx *ui) {
-    struct cui_reasoning_build *b = (struct cui_reasoning_build *)ui->reasoning;
+    struct cui_reasoning_build *b = (struct cui_reasoning_build *)ui->building.reasoning;
     if (!b) return;
     cui_pop_id(ui);
     cui__fold_body_end(ui, b->open);
     cui__close(ui);
-    ui->reasoning = b->prev;
+    ui->building.reasoning = b->prev;
 }
 
 /* ------------------------------------------------------------------------ */

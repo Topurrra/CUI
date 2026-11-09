@@ -325,8 +325,8 @@ bool cui_table_begin_ex(cui_ctx *ui, const char *id_str, const cui_table_column 
     struct cui_table_build *t = cui__frame_alloc(ui, sizeof *t);
     t->id = id; t->cols = cols; t->ncols = ncols;
     t->compact = o->compact; t->striped = o->striped; t->selectable = o->selectable;
-    t->prev = ui->table;
-    ui->table = t;
+    t->prev = ui->building.table;
+    ui->building.table = t;
     cui_push_id(ui, id_str);
     int wrap = cui__node_new(ui, id);
     cui_node *wn = &ui->nodes[wrap];
@@ -413,7 +413,7 @@ bool cui_table_begin_ex(cui_ctx *ui, const char *id_str, const cui_table_column 
 }
 
 bool cui_table_row(cui_ctx *ui, bool selected) {
-    struct cui_table_build *t = ui->table;
+    struct cui_table_build *t = ui->building.table;
     if (!t) return false;
     cui__table_close_row(ui, t);
     if (t->row_index > 0) {
@@ -446,7 +446,7 @@ bool cui_table_row(cui_ctx *ui, bool selected) {
 }
 
 void cui_table_cell(cui_ctx *ui) {
-    struct cui_table_build *t = ui->table;
+    struct cui_table_build *t = ui->building.table;
     if (!t || !t->in_row) return;
     if (t->col > 0) cui__close(ui);
     if (t->col >= t->ncols) { t->col++; int c = cui__node_new(ui, 0); cui__open(ui, c); return; }
@@ -463,7 +463,7 @@ void cui_table_cell(cui_ctx *ui) {
 
 void cui_table_cell_text(cui_ctx *ui, const char *text) {
     cui_table_cell(ui);
-    struct cui_table_build *t = ui->table;
+    struct cui_table_build *t = ui->building.table;
     bool right = t && t->col - 1 < t->ncols && t->cols[t->col - 1].align == CUI_TEXT_RIGHT;
     int tx = cui__text_node(ui, text, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
     ui->nodes[tx].line_height = 1.3f;
@@ -479,7 +479,7 @@ void cui_table_cell_textf(cui_ctx *ui, const char *fmt, ...) {
 }
 
 void cui_table_end(cui_ctx *ui) {
-    struct cui_table_build *t = ui->table;
+    struct cui_table_build *t = ui->building.table;
     if (!t) return;
     cui__table_close_row(ui, t);
     if (t->scroll) cui__scroll_end_ex(ui);
@@ -487,5 +487,5 @@ void cui_table_end(cui_ctx *ui) {
     cui__scroll_end_ex(ui);
     cui__close(ui);   /* wrap */
     cui_pop_id(ui);
-    ui->table = t->prev;
+    ui->building.table = t->prev;
 }

@@ -495,14 +495,14 @@ void cui_spotlight_begin(cui_ctx *ui, const char *id_str, const cui_spotlight_op
     ui->nodes[over].paint = cui__paint_spot_under;
     ui->nodes[over].paint_data = p;
     struct cui_spot_build *b = cui__frame_alloc(ui, sizeof *b);
-    b->node = over; b->prev = (struct cui_spot_build *)ui->spot;
-    ui->spot = b;
+    b->node = over; b->prev = (struct cui_spot_build *)ui->building.spot;
+    ui->building.spot = b;
     ui->last_id = id;
 }
 
 void cui_spotlight_end(cui_ctx *ui) {
-    struct cui_spot_build *b = (struct cui_spot_build *)ui->spot;
-    if (b) ui->spot = b->prev;
+    struct cui_spot_build *b = (struct cui_spot_build *)ui->building.spot;
+    if (b) ui->building.spot = b->prev;
     cui__close(ui);
 }
 
@@ -616,8 +616,8 @@ void cui_dock_begin(cui_ctx *ui, const char *id_str, const cui_dock_opts *o) {
         /* squeezed onto a narrow screen there is no room to magnify (and no hover on a phone) */
         if (fit < b->size) { b->size = CUI_MAX(24.0f, fit); b->mag = 1; }
     }
-    b->prev = (struct cui_dock_build *)ui->dock;
-    ui->dock = b;
+    b->prev = (struct cui_dock_build *)ui->building.dock;
+    ui->building.dock = b;
     cui_rect pr = cui__prev_rect(ui, b->id);
     float reach = b->size * (b->mag - 1) + 16;
     b->hot = pr.w > 0 && ui->mx >= pr.x - 8 && ui->mx < pr.x + pr.w + 8 && ui->my >= pr.y - reach && ui->my < pr.y + pr.h + 4 && ui->mouse_inside;
@@ -662,7 +662,7 @@ bool cui_dock_item_ex(cui_ctx *ui, const char *icon, const char *label, const cu
     cui_dock_item_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
-    struct cui_dock_build *b = (struct cui_dock_build *)ui->dock;
+    struct cui_dock_build *b = (struct cui_dock_build *)ui->building.dock;
     if (!b) return false;
     int k = b->k++;
     cui_id iid = cui__hash(&k, sizeof k, b->id ^ 0xD0Cu);
@@ -698,7 +698,7 @@ bool cui_dock_item_ex(cui_ctx *ui, const char *icon, const char *label, const cu
 }
 
 void cui_dock_separator(cui_ctx *ui) {
-    struct cui_dock_build *b = (struct cui_dock_build *)ui->dock;
+    struct cui_dock_build *b = (struct cui_dock_build *)ui->building.dock;
     float h = b ? b->size * 0.7f : 30;
     int n = cui__leaf(ui, 0, CUI_PX(1), CUI_PX(h));
     ui->nodes[n].bg = CUI_C(ui, BORDER);
@@ -707,13 +707,13 @@ void cui_dock_separator(cui_ctx *ui) {
 }
 
 void cui_dock_end(cui_ctx *ui) {
-    struct cui_dock_build *b = (struct cui_dock_build *)ui->dock;
+    struct cui_dock_build *b = (struct cui_dock_build *)ui->building.dock;
     if (!b) return;
     cui_pop_id(ui);
     cui__close(ui);
     cui__dock_count *dc = cui_state(ui, b->id ^ 0xD0C5u, sizeof *dc);
     dc->items = b->k; dc->seps = b->seps;
-    ui->dock = b->prev;
+    ui->building.dock = b->prev;
     ui->last_id = b->id;
 }
 
