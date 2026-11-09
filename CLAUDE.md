@@ -1,6 +1,6 @@
 # CUI: guide for AI agents
 
-CUI is an immediate-mode UI library in C99: about 170 components, a software and an OpenGL renderer, Win32, Cocoa, X11, SDL2 and GLFW backends. The human docs are the source of truth; this file only points at them and lists what agents most often get wrong.
+CUI is an immediate-mode UI library in C99: about 190 components, a software and an OpenGL renderer, Win32, Cocoa, X11, SDL2 and GLFW backends. The human docs are the source of truth; this file only points at them and lists what agents most often get wrong.
 
 ## Read first
 

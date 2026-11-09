@@ -168,7 +168,7 @@ Open the images and look at them, in light and dark. Then copy into `docs/images
 
 ## Keeping the code readable
 
-CUI has about 170 components in plain C. That stays workable only if every file reads the same way, so these rules matter as much as the ones above. [How CUI is built](architecture.md) shows the outline every component follows and where things live.
+CUI has about 190 components in plain C. That stays workable only if every file reads the same way, so these rules matter as much as the ones above. [How CUI is built](architecture.md) shows the outline every component follows and where things live.
 
 **Where code goes**
 

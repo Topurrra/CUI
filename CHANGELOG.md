@@ -2,7 +2,7 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
-## Unreleased
+## 2026-11-09 · 1.3: developer tools
 
 ### Added
 
@@ -30,6 +30,10 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
   - **Uptime bars**: a status page. Each service has its state, its uptime and a bar per day colored by availability, with hover details. Narrow panels keep the latest days.
   - **Time histogram**: event counts over time, stacked by series. Drag to select whole buckets, and hover for the counts. The time labels adapt from seconds to weeks.
 - The code editor takes `marks`, ranges of bytes to highlight in the accent or a series color. The highlighter takes `"text"` for no highlighting.
+
+### Fixed
+
+- `CUI_VERSION_STRING` said "1.1.0" in 1.2. It now matches `CUI_VERSION_MAJOR`, `MINOR` and `PATCH`, and the gallery shows the version from them.
 
 ## 2026-11-09 · 1.2: phones, tablets, right to left and performance
 

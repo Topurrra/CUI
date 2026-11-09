@@ -77,7 +77,9 @@ static void sidebar(cui_ctx *ui, gallery *g, bool drawer) {
             }
             cui_text(ui, "CUI", .font = CUI_FONT_MEDIUM, .size = 15, .nowrap = true);
             cui_spacer(ui);
-            cui_badge(ui, "v1.0", .size = CUI_SIZE_SM);
+            char ver[16];
+            snprintf(ver, sizeof ver, "v%d.%d", CUI_VERSION_MAJOR, CUI_VERSION_MINOR);
+            cui_badge(ui, ver, .size = CUI_SIZE_SM);
         }
         cui_scroll(ui, .id = "nav", .height = CUI_FILL, .gap = 2) {
             cui_nav_section(ui, "Components");

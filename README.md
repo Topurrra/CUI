@@ -9,7 +9,7 @@
 
 **Native UI components for C.**
 
-About 170 components with spring motion and full keyboard support.<br>
+About 190 components with spring motion and full keyboard support.<br>
 Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/yappologistic/CUI/ci.yml?branch=master&label=CI&style=flat-square&labelColor=24292f)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
@@ -315,7 +315,7 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 |---|---|
 | `hello` on Linux, stripped, whole executable | about 240 KB |
 | `assistant` (the AI app above), whole executable | about 350 KB |
-| Whole library: about 170 components, both renderers, X11 backend, fonts and icons | about 930 KB |
+| Whole library: about 190 components, both renderers, X11 backend, fonts and icons | about 1,050 KB |
 | Build, layout and paint a frame (gallery pages, 1240 × 820 points at 2×) | 0.09 to 0.75 ms, most under 0.25 |
 | Software rasterization of the same frame, all of it (2480 × 1640 pixels, 4 threads) | 3.4 to 19 ms |
 | Software rasterization after the first frame | only what changed: 4 to 15% of the pixels in a typical frame |
@@ -340,7 +340,7 @@ Set `CUI_RENDERER=software` to force the software renderer and `CUI_SCALE=2` to 
 
 ## Status and limitations
 
-CUI 1.2 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
+CUI 1.3 is complete enough to build real desktop apps. Every push runs unit, interaction and render tests, a randomized input fuzzer under AddressSanitizer and UndefinedBehaviorSanitizer, and real windows on Windows, macOS and Linux. What it does not do yet:
 
 - **Screen readers.** There is no accessibility tree yet. Keyboard navigation and focus are complete.
 - **Complex scripts.** Text is UTF-8 with kerning and font fallback. The optional `CUI_TEXT_SHAPING` CMake option adds Arabic-script shaping, Unicode bidi and shaped paragraph wrapping for static text (see [integration](docs/integration.md#optional-arabic-script-text-shaping)). Screens mirror for right-to-left languages with `.direction = CUI_DIRECTION_RTL` ([layout](docs/layout.md)). Explicit embeddings, overrides and isolates are unsupported. It is off by default. Editing and other complex scripts remain outside this experimental path. CJK works once you add a fallback font.
