@@ -54,7 +54,6 @@ unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *
 void cui__png_free(unsigned char *px);
 typedef struct cui__tt cui__tt;
 cui__tt *cui__tt_open(cui_ctx *ui, const unsigned char *data, int offset);
-float cui__tt_scale(cui__tt *t, float px_per_em);
 void cui__tt_vmetrics(cui__tt *t, int *ascent, int *descent);
 bool cui__tt_box(cui__tt *t, int gid, float scale, int *x0, int *y0, int *x1, int *y1);
 void cui__tt_render(cui__tt *t, int gid, float scale, unsigned char *out, int w, int h, int stride);
@@ -80,6 +79,8 @@ int cui__utf8_encode(uint32_t cp, char *out);
 int cui__utf8_prev(const char *s, int pos);
 int cui__utf8_next(const char *s, int len, int pos);
 int cui__display_len(const char *label);                      /* length before "##" */
+static inline int cui__ascii_lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+bool cui__contains_ci(const char *hay, const char *needle);   /* ASCII case-insensitive substring; an empty needle matches */
 
 /* ---- hashing ---- */
 uint32_t cui__hash(const void *data, size_t len, uint32_t seed);
@@ -148,6 +149,9 @@ float cui__text_min_width(cui_ctx *ui, cui_font font, float size, const char *te
 /* Draw single line text with top-left at pos (points). */
 void cui__draw_text_line(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color,
                          const char *text, int len, bool tabular);
+typedef enum { CUI__AT_LEFT, CUI__AT_CENTER, CUI__AT_RIGHT } cui__text_anchor;
+/* one line of text placed by a point: x is its left edge, center or right edge, y its vertical middle */
+void cui__draw_text_at(cui_ctx *ui, cui_font font, float size, float x, float y, cui__text_anchor anchor, cui_color color, const char *s, bool tab);
 /* Draw text truncated with an ellipsis to max_w. */
 void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, float y, float max_w,
                              cui_color color, const char *text, int len, bool tabular);
@@ -591,6 +595,13 @@ void cui__theme_update(cui_ctx *ui);
 void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent);
 cui_color cui__tone_color(cui_ctx *ui, cui_tone tone);
 #define CUI_C(ui, tok) ((ui)->theme.colors[CUI_TOKEN_##tok])
+/* a font size in points, scaled by the theme's text size setting */
+static inline float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
+/* the color that marks a selected or active thing: the accent, or the text color under the
+ * neutral accent (a neutral theme has no accent hue to spend) */
+static inline cui_color cui__emphasis(cui_ctx *ui) {
+    return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+}
 
 /* ---- widgets internal ---- */
 void cui__widgets_begin_frame(cui_ctx *ui);
@@ -619,7 +630,6 @@ cui_id cui__position_id(cui_ctx *ui, uint32_t salt);
 void cui__chevron_node(cui_ctx *ui, float angle, float size, cui_color color);   /* 0 points down */   /* stable id from the parent and child index */   /* keyboard focus ring painted after the node */
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *trailing_icon_default);
 int cui__edit_lines(cui_ctx *ui, cui_font f, float size, const char *buf, int len, float width, cui_text_layout_line **out);   /* wrapped lines of an edit buffer */
-static inline float cui__fsz(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color);
 void cui__icon_node(cui_ctx *ui, const char *icon, float size, cui_color color);
 void cui__field_label(cui_ctx *ui, const char *label);

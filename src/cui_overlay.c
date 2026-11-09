@@ -3,7 +3,6 @@
  * color picker and the command palette. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *search_icon);
 void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
 
@@ -297,23 +296,6 @@ void cui_menu_label(cui_ctx *ui, const char *text) {
 /* ------------------------------------------------------------------------ */
 
 typedef struct { float hover, focus; char query[96]; } cui__select_state;
-
-static bool cui__contains_ci(const char *hay, const char *needle) {
-    if (!needle || !*needle) return true;
-    size_t nl = strlen(needle);
-    for (const char *h = hay; *h; h++) {
-        size_t k = 0;
-        while (k < nl && h[k]) {
-            char a = h[k], b = needle[k];
-            if (a >= 'A' && a <= 'Z') a += 32;
-            if (b >= 'A' && b <= 'Z') b += 32;
-            if (a != b) break;
-            k++;
-        }
-        if (k == nl) return true;
-    }
-    return false;
-}
 
 bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, int count, int *index, const cui_select_opts *o) {
     cui_select_opts d;

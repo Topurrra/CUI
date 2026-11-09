@@ -15,7 +15,6 @@
 #include <sys/stat.h>
 #endif
 
-#define cui__fs cui__fsz
 
 #if defined(_WIN32)
 #define CUI__SEP '\\'
@@ -143,8 +142,8 @@ static bool cui__glob1(const char *p, const char *pe, const char *s) {
         }
         if (!*s) return false;
         char a = *p, b = *s;
-        if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
-        if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+        a = (char)cui__ascii_lower(a);
+        b = (char)cui__ascii_lower(b);
         if (a != '?' && a != b) return false;
         p++; s++;
     }
@@ -160,23 +159,6 @@ static bool cui__glob(const char *list, const char *name) {
         while (t > p && t[-1] == ' ') t--;
         if (t > p && cui__glob1(p, t, name)) return true;
         p = e;
-    }
-    return false;
-}
-
-static bool cui__contains_ci(const char *hay, const char *needle) {
-    if (!needle || !*needle) return true;
-    size_t nl = strlen(needle);
-    for (; *hay; hay++) {
-        size_t k = 0;
-        while (k < nl && hay[k]) {
-            char a = hay[k], b = needle[k];
-            if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
-            if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
-            if (a != b) break;
-            k++;
-        }
-        if (k == nl) return true;
     }
     return false;
 }
@@ -290,8 +272,8 @@ static int cui__fb_cmp(const void *pa, const void *pb) {
                 x = xe; y = ye;
             } else {
                 char p = *x, q = *y;
-                if (p >= 'A' && p <= 'Z') p = (char)(p + 32);
-                if (q >= 'A' && q <= 'Z') q = (char)(q + 32);
+                p = (char)cui__ascii_lower(p);
+                q = (char)cui__ascii_lower(q);
                 c = (unsigned char)p < (unsigned char)q ? -1 : (unsigned char)p > (unsigned char)q;
                 x++; y++;
             }
@@ -534,8 +516,8 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
                 bool ok = true;
                 for (int c = 0; c < s->typed_n && ok; c++) {
                     char a = nm[c], b = s->typed[c];
-                    if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
-                    if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                    a = (char)cui__ascii_lower(a);
+                    b = (char)cui__ascii_lower(b);
                     ok = a == b;
                 }
                 if (ok) { np = k; break; }
@@ -580,7 +562,7 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
             cui_node *rn = &ui->nodes[row];
             rn->dir = CUI_ROW; rn->gap = 12; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(CUI__FB_ROW);
             rn->pad[1] = rn->pad[3] = 12;
-            rn->bg = sel ? (lr.focused ? cui_mix(CUI_C(ui, SURFACE), ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT), ui->accent == CUI_ACCENT_NEUTRAL ? 0.08f : 0.16f) : CUI_C(ui, ACTIVE)) : rr.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
+            rn->bg = sel ? (lr.focused ? cui_mix(CUI_C(ui, SURFACE), cui__emphasis(ui), ui->accent == CUI_ACCENT_NEUTRAL ? 0.08f : 0.16f) : CUI_C(ui, ACTIVE)) : rr.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
             cui__mark_interactive(ui, row, 0);
             cui__open(ui, row);
             int nm = cui__node_new(ui, 0);

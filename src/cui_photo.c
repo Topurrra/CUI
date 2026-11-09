@@ -3,7 +3,6 @@
  * costs what a fitted one does. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 /* draw the part of an image rect (dst, in points) that falls inside clip; where
    it reaches a corner of the clip, that corner is rounded by rad */

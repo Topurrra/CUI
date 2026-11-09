@@ -4,7 +4,6 @@
  * the hole, so the spotlighted control can still be tried. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 typedef struct { cui_spring x, y, w, h, show; int shown_step, hole_step; bool init, gliding; } cui__tour_state;
 typedef struct { cui_rect hole; float radius, alpha; bool has_hole; cui_color scrim, ring; } cui__tour_paint;

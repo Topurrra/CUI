@@ -3,7 +3,6 @@
  * built and very large buffers stay exact. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 #define CUI__HEX_SALT  0x4E3A11u
 #define CUI__HEX_BAR   12.0f            /* scrollbar zone along the right edge */

@@ -10,7 +10,7 @@
  * themselves from the current rectangle. */
 #include "cui_internal.h"
 
-static cui_color cui__cv_accent(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT); }
+static cui_color cui__cv_accent(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* ======================================================================== */
 /* Curve math                                                               */
@@ -658,7 +658,7 @@ cui_curve_result cui_curve_editor_ex(cui_ctx *ui, const char *id_str, cui_curve_
         if (del) remove = sel;
     } else {
         int t = cui__text_node(ui, n < capacity ? "Double-click the plot to add a key, or select one to edit it." : "Select a key to edit it.", -1,
-                               CUI_FONT_BODY, cui__fsz(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), true);
+                               CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), true);
         ui->nodes[t].line_height = 1.4f;
     }
     cui__close(ui);   /* footer */

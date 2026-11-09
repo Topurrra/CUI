@@ -3,9 +3,8 @@
 
 #include <time.h>
 
-#define cui__fs cui__fsz
 
-static cui_color cui__acc(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT); }
+static cui_color cui__acc(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* ------------------------------------------------------------------------ */
 /* Kanban                                                                   */

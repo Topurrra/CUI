@@ -2,12 +2,11 @@
  * loaders, dock, tab bar, control tiles, waveform and a now playing card. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 static bool cui__still(cui_ctx *ui) { return ui->theme.motion <= 0.0f; }
 
 static cui_color cui__mo_accent(cui_ctx *ui) {
-    return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    return cui__emphasis(ui);
 }
 
 static int cui__fx_text_node(cui_ctx *ui, const char *text, const cui_text_fx_opts *o, cui_color c) {
@@ -483,7 +482,7 @@ void cui_spotlight_begin(cui_ctx *ui, const char *id_str, const cui_spotlight_op
     nd->border = 1; nd->border_color = CUI_C(ui, BORDER);   /* rests on its edge, like any card: no shadow */
     cui__spot_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->hover = st->hover; p->mx = st->mx; p->my = st->my;
-    p->c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT));
+    p->c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (cui__emphasis(ui));
     p->beam = o->beam && !cui__still(ui);
     p->t = (float)fmod(ui->time, 10000.0);
     nd->paint = cui__paint_spot_over;   /* the lit edge, above the content */

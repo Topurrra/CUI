@@ -1,7 +1,6 @@
 /* Data grid, tree cells and the filter bar. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 #define CUI__GRID_COLS 32
 #define CUI__GRID_HEAD 40.0f
 #define CUI__GRID_CHECK 44.0f
@@ -37,7 +36,6 @@ struct cui_grid_build {
 };
 
 
-static cui_color cui__accent_or_fg_c(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT); }
 
 typedef struct { float t, mixed; } cui__gcheck_paint;
 static void cui__paint_grid_check(cui_ctx *ui, cui_node *n, void *data) {
@@ -266,7 +264,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
             if (rr.hovered || active) {
                 cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
                 int bar = cui__absolute(ui, 0, 5, 9, 2, CUI__GRID_HEAD - 18);
-                ui->nodes[bar].bg = active ? cui__accent_or_fg_c(ui) : CUI_C(ui, BORDER_STRONG);
+                ui->nodes[bar].bg = active ? cui__emphasis(ui) : CUI_C(ui, BORDER_STRONG);
                 ui->nodes[bar].radius = CUI_CORNERS(1);
                 (void)bar;
             }
@@ -346,7 +344,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
     if (b->focused && st->cursor == row && ui->focus_visible) {
         /* keyboard cursor: an accent bar on the left edge */
         int bar = cui__absolute(ui, 0, 0, 0, 2, b->row_h);
-        ui->nodes[bar].bg = cui__accent_or_fg_c(ui);
+        ui->nodes[bar].bg = cui__emphasis(ui);
     }
     cui_push_id_int(ui, row);
     b->row = row; b->col = 0; b->in_row = true;

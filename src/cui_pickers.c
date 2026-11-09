@@ -2,11 +2,6 @@
  * ruler and histogram sliders, signature pad, dropzone and avatar upload. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
-
-static cui_color cui__accent_or_fg(cui_ctx *ui) {
-    return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
-}
 
 static int cui__label_wrap_begin(cui_ctx *ui, const char *label, cui_size width) {
     if (!label) return -1;
@@ -94,8 +89,8 @@ static bool cui__contains_nocase(const char *hay, const char *needle) {
         size_t k = 0;
         while (k < nl && h[k]) {
             char a = h[k], b = needle[k];
-            if (a >= 'A' && a <= 'Z') a += 32;
-            if (b >= 'A' && b <= 'Z') b += 32;
+            a = (char)cui__ascii_lower(a);
+            b = (char)cui__ascii_lower(b);
             if (a != b) break;
             k++;
         }
@@ -938,7 +933,7 @@ static bool cui__time_dial_body(cui_ctx *ui, const char *id_str, int *hour, int 
         cui_node *bn = &ui->nodes[b];
         bn->pad[1] = bn->pad[3] = 10; bn->pad[0] = bn->pad[2] = 2;
         bn->radius = CUI_CORNERS(10);
-        bn->bg = sel ? cui_mix(CUI_C(ui, SURFACE), cui__accent_or_fg(ui), ui->mode == CUI_THEME_DARK ? 0.2f : 0.12f) : (pr.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0));
+        bn->bg = sel ? cui_mix(CUI_C(ui, SURFACE), cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.2f : 0.12f) : (pr.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0));
         cui__mark_interactive(ui, b, CUI_IF_FOCUSABLE);
         if (pr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
         cui__open(ui, b);
@@ -1131,7 +1126,7 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
     p->tick = cui__control_edge(ui, st->hover);
     p->major_c = CUI_C(ui, TEXT_SECONDARY);
     p->label = CUI_C(ui, TEXT_MUTED);
-    p->marker = cui__accent_or_fg(ui);
+    p->marker = cui__emphasis(ui);
     ui->nodes[tape].paint = cui__paint_ruler;
     ui->nodes[tape].paint_data = p;
     cui__focus_ring(ui, tape, r.focus_visible ? 1.0f : 0.0f);
@@ -1200,7 +1195,7 @@ bool cui_histogram_slider_ex(cui_ctx *ui, const char *label, const float *bins, 
     p->bins = cui__frame_alloc(ui, sizeof(float) * (size_t)CUI_MAX(1, bin_count));
     memcpy((float *)p->bins, bins, sizeof(float) * (size_t)bin_count);
     p->n = bin_count; p->lo_t = anim[0]; p->hi_t = anim[1]; p->tmax = tmax;
-    p->on = cui__accent_or_fg(ui);
+    p->on = cui__emphasis(ui);
     p->off = CUI_C(ui, CONTROL_TRACK);
     ui->nodes[bars].paint = cui__paint_hist;
     ui->nodes[bars].paint_data = p;
@@ -1398,8 +1393,8 @@ bool cui_path_has_extension(const char *path, const char *accept) {
             size_t k = 0;
             for (; k < el; k++) {
                 char a = dot[k], b = p[k];
-                if (a >= 'A' && a <= 'Z') a += 32;
-                if (b >= 'A' && b <= 'Z') b += 32;
+                a = (char)cui__ascii_lower(a);
+                b = (char)cui__ascii_lower(b);
                 if (a != b) break;
             }
             if (k == el) return true;
@@ -1500,7 +1495,7 @@ int cui_dropzone_ex(cui_ctx *ui, const char *id_str, const cui_dropzone_opts *o)
     cui__spring(ui, &st->lift, over ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
     bool recent = st->done_at > 0 && ui->time - st->done_at < 2.2;
     if (recent) cui__wakeup_after(ui, (float)(2.2 - (ui->time - st->done_at)) + 0.01f);
-    cui_color accent = cui__accent_or_fg(ui);
+    cui_color accent = cui__emphasis(ui);
     int box = cui__node_new(ui, id);
     cui_node *bn = &ui->nodes[box];
     bn->dir = o->compact ? CUI_ROW : CUI_COLUMN;
@@ -1606,7 +1601,7 @@ int cui_avatar_upload(cui_ctx *ui, const char *id_str, const char *name, cui_tex
     cui__mark_interactive(ui, wrap, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__avup_paint *ap = cui__frame_alloc(ui, sizeof *ap);
-    ap->hover = st->hover; ap->scrim = cui__rgba(0, 0, 0, 255); ap->ring = cui__accent_or_fg(ui); ap->ring_t = st->drag;
+    ap->hover = st->hover; ap->scrim = cui__rgba(0, 0, 0, 255); ap->ring = cui__emphasis(ui); ap->ring_t = st->drag;
     wn->paint = cui__paint_avatar_overlay;
     wn->paint_data = ap;
     wn->flags |= CUI_NF_PAINT_AFTER;

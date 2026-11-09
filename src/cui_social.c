@@ -1,10 +1,8 @@
 /* Conversation: chat bubbles, typing indicator, comments and presence. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 static cui_color cui__accent_bg(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_ON) : CUI_C(ui, ACCENT); }
-static cui_color cui__accent_or_fg_any(cui_ctx *ui) { return cui__edge_on(ui); }
 static cui_color cui__accent_text(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_GLYPH) : CUI_C(ui, ACCENT_FOREGROUND); }
 
 /* ------------------------------------------------------------------------ */
@@ -87,7 +85,7 @@ void cui_chat_message_ex(cui_ctx *ui, const char *text, const cui_chat_opts *o) 
         int st = cui__node_new(ui, 0);
         ui->nodes[st].dir = CUI_ROW; ui->nodes[st].gap = 4; ui->nodes[st].align = CUI_ALIGN_CENTER; ui->nodes[st].pad[1] = 4;
         cui__open(ui, st);
-        cui__icon_node(ui, CUI_ICON_CHECK_CHECK, 12, cui__accent_or_fg_any(ui));
+        cui__icon_node(ui, CUI_ICON_CHECK_CHECK, 12, cui__edge_on(ui));
         int s = cui__text_node(ui, o->time ? cui__frame_printf(ui, "%s %s", o->status, o->time) : o->status, -1, CUI_FONT_BODY,
                                cui__fs(ui, ui->theme.text_xs), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[s].line_height = 1.3f;

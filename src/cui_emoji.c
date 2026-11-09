@@ -877,7 +877,6 @@ static int cui__em_toned(const char *s, int len, int tone, char *out, int cap) {
     return o;
 }
 
-static int cui__em_lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
 /* every word of the query starts a word of the name */
 static bool cui__em_match(const char *name, int nlen, const char *q) {
@@ -891,7 +890,7 @@ static bool cui__em_match(const char *name, int nlen, const char *q) {
         for (int i = 0; i + wl <= nlen && !found; i++) {
             if (i > 0 && name[i - 1] != ' ' && name[i - 1] != '-' && name[i - 1] != ':' && name[i - 1] != '(') continue;
             int k = 0;
-            while (k < wl && cui__em_lower((unsigned char)name[i + k]) == cui__em_lower((unsigned char)w[k])) k++;
+            while (k < wl && cui__ascii_lower((unsigned char)name[i + k]) == cui__ascii_lower((unsigned char)w[k])) k++;
             found = k == wl;
         }
         if (!found) return false;
@@ -1010,7 +1009,7 @@ static void cui__paint_emoji_grid(cui_ctx *ui, cui_node *n, void *data) {
     cui__paint_wheel_hit(ui, p->wheel, r);
     const cui__em_geo *g = &p->g;
     if (p->none || g->nsec == 0) {
-        float fs = cui__fsz(ui, 13);
+        float fs = cui__fs(ui, 13);
         const char *msg = p->none ? "No emoji font found" : p->empty;
         float w = cui__text_width(ui, CUI_FONT_BODY, fs, msg, -1, false);
         cui__draw_text_line(ui, CUI_FONT_BODY, fs, r.x + (r.w - w) * 0.5f, r.y + r.h * 0.4f, CUI_C(ui, TEXT_MUTED), msg, -1, false);
@@ -1018,7 +1017,7 @@ static void cui__paint_emoji_grid(cui_ctx *ui, cui_node *n, void *data) {
     }
     cui_push_clip(ui, r);
     float y = r.y - p->top;
-    float hs = cui__fsz(ui, 12);
+    float hs = cui__fs(ui, 12);
     int sticky = -1;
     for (int si = 0; si < g->nsec; si++) {
         const cui__em_section *s = &g->sec[si];
@@ -1071,7 +1070,7 @@ static void cui__paint_emoji_tab(cui_ctx *ui, cui_node *n, void *data) {
 typedef struct { char s[256]; } cui__em_name_paint;
 static void cui__paint_emoji_name(cui_ctx *ui, cui_node *n, void *data) {
     cui__em_name_paint *p = data;
-    float fs = cui__fsz(ui, 13);
+    float fs = cui__fs(ui, 13);
     cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, fs, n->rect.x, n->rect.y + (n->rect.h - cui__font_line_height(ui, CUI_FONT_MEDIUM, fs)) * 0.5f,
                             n->rect.w, CUI_C(ui, FOREGROUND), p->s, -1, false);
 }
@@ -1111,7 +1110,7 @@ static void cui__em_build(cui__emoji *e, cui__em_state *st, int nrecent) {
                 if (!m) continue;
                 size_t ql = strlen(st->query);
                 bool lead = ql <= rec->name_len;
-                for (size_t k = 0; k < ql && lead; k++) lead = cui__em_lower((unsigned char)name[k]) == cui__em_lower((unsigned char)st->query[k]);
+                for (size_t k = 0; k < ql && lead; k++) lead = cui__ascii_lower((unsigned char)name[k]) == cui__ascii_lower((unsigned char)st->query[k]);
                 if ((pass == 0) == lead) st->items[st->nitems++] = i;
             }
         s->count = st->nitems;
@@ -1382,7 +1381,7 @@ const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id_str, const cui_emoji
             tp->len = (int)strlen(tp->s);
             tp->alpha = kind == active_kind || ti.hovered ? 1 : 0.5f;
             tp->active = kind == active_kind;
-            tp->bar = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+            tp->bar = cui__emphasis(ui);
             ui->nodes[b].paint = cui__paint_emoji_tab; ui->nodes[b].paint_data = tp;
             cui_tooltip(ui, names[kind]);
             cui_pop_id(ui);
@@ -1439,7 +1438,7 @@ const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id_str, const cui_emoji
             memcpy(np->s, cap, (size_t)cl + 1);
             ui->nodes[tn].paint = cui__paint_emoji_name; ui->nodes[tn].paint_data = np;
         } else if (can) {
-            int tn = cui__text_node(ui, o->hint ? o->hint : "Pick an emoji", -1, CUI_FONT_BODY, cui__fsz(ui, 13), CUI_C(ui, TEXT_MUTED), false);
+            int tn = cui__text_node(ui, o->hint ? o->hint : "Pick an emoji", -1, CUI_FONT_BODY, cui__fs(ui, 13), CUI_C(ui, TEXT_MUTED), false);
             (void)tn;
         }
         cui__close(ui);

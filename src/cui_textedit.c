@@ -3,7 +3,6 @@
  * clipboard, undo/redo, placeholder, clear button and IME positioning. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 
 /* cui_edit_state and CUI__UNDO_MAX live in cui_internal.h (the code editor shares them) */
 
@@ -645,7 +644,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     p->placeholder = o->placeholder;
     p->text = CUI_C(ui, FOREGROUND);
     p->placeholder_color = CUI_C(ui, TEXT_MUTED);
-    p->caret = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    p->caret = cui__emphasis(ui);
     p->selection = ui->accent == CUI_ACCENT_NEUTRAL ? cui_alpha(cui_oklch(0.6f, 0.13f, 250, 1), 0.28f) : cui_alpha(CUI_C(ui, ACCENT), 0.26f);
     p->line_h = line_h;
     if (multiline) {

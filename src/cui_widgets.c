@@ -11,7 +11,6 @@ float cui__control_height(cui_ctx *ui, cui_control_size s) {
     return s == CUI_SIZE_SM ? t->control_sm : s == CUI_SIZE_LG ? t->control_lg : t->control_md;
 }
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 
 void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color) {
     int len = cui__display_len(label);

@@ -2,11 +2,6 @@
  * card, table of contents, banner, countdown and onboarding checklist. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
-
-static cui_color cui__accent_or_fg(cui_ctx *ui) {
-    return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
-}
 
 /* ------------------------------------------------------------------------ */
 /* Hover card                                                               */
@@ -355,7 +350,7 @@ int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int c
     p->y = st->y.x; p->h = st->init ? st->h.x : 0; p->progress = st->progress;
     p->track = CUI_C(ui, BORDER);
     p->fill = CUI_C(ui, BORDER_STRONG);
-    p->mark = cui__accent_or_fg(ui);
+    p->mark = cui__emphasis(ui);
     ui->nodes[rail].paint = cui__paint_toc_rail;
     ui->nodes[rail].paint_data = p;
     if (clicked >= 0) {

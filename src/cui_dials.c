@@ -3,7 +3,6 @@
  * channel strips stays cheap: the layout sees a few fixed size boxes. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 #define CUI__KNOB_SPAN (1.5f * CUI_PI)    /* 270 degrees, the gap at the bottom */
 #define CUI__KNOB_A0   (0.75f * CUI_PI)   /* where the arc starts: down and to the left */
@@ -57,13 +56,6 @@ static float cui__dl_input(cui_ctx *ui, cui_interact r, cui_id wheel_id, float t
         ui->scroll_dy = ui->scroll_dx = 0;   /* consumed */
     }
     return cui__clampf(t, 0, 1);
-}
-
-static void cui__dl_text_at(cui_ctx *ui, cui_font f, float size, float x, float y, int align, cui_color c, const char *s) {
-    float w = cui__text_width(ui, f, size, s, -1, true);
-    float fh = cui__font_line_height(ui, f, size);
-    float tx = align == 1 ? x - w * 0.5f : align == 2 ? x - w : x;
-    cui__draw_text_line(ui, f, size, tx, y - fh * 0.5f, c, s, -1, true);
 }
 
 /* width that every value of the control fits in, so neighbours never shift as it turns */
@@ -228,8 +220,8 @@ static void cui__meter_bars(cui_ctx *ui, const cui__meter_paint *p, cui_rect r) 
             if (fabsf(at - last) < (hz ? 26.0f : 13.0f)) continue;
             last = at;
             const char *s = cui__frame_printf(ui, "%g", (double)db);
-            if (hz) cui__dl_text_at(ui, CUI_FONT_BODY, fx, r.x + at, r.y + p->n * (p->th + 2) + 8, 1, p->muted, s);
-            else cui__dl_text_at(ui, CUI_FONT_BODY, fx, r.x + p->lw - 5, r.y + r.h - at, 2, p->muted, s);
+            if (hz) cui__draw_text_at(ui, CUI_FONT_BODY, fx, r.x + at, r.y + p->n * (p->th + 2) + 8, CUI__AT_CENTER, p->muted, s, true);
+            else cui__draw_text_at(ui, CUI_FONT_BODY, fx, r.x + p->lw - 5, r.y + r.h - at, CUI__AT_RIGHT, p->muted, s, true);
         }
     }
     for (int c = 0; c < p->n; c++) {
@@ -328,10 +320,10 @@ static void cui__paint_fader(cui_ctx *ui, cui_node *n, void *data) {
         if (p->horizontal) {
             float below = cr + CUI__FADER_TW * 0.5f + (p->meter ? p->mw + 4 : 0);
             cui_draw_rect(ui, (cui_rect){ tp - 0.5f, below - 2, 1, 4 }, CUI_CORNERS(0), p->line);
-            cui__dl_text_at(ui, CUI_FONT_BODY, fx, tp, below + 9, 1, p->muted, p->tick_text[k]);
+            cui__draw_text_at(ui, CUI_FONT_BODY, fx, tp, below + 9, CUI__AT_CENTER, p->muted, p->tick_text[k], true);
         } else {
             cui_draw_rect(ui, (cui_rect){ cr - CUI__FADER_TW * 0.5f - 2, tp - 0.5f, 6, 1 }, CUI_CORNERS(0), p->line);
-            cui__dl_text_at(ui, CUI_FONT_BODY, fx, cr - CUI__FADER_TW * 0.5f - 5, tp, 2, p->muted, p->tick_text[k]);
+            cui__draw_text_at(ui, CUI_FONT_BODY, fx, cr - CUI__FADER_TW * 0.5f - 5, tp, CUI__AT_RIGHT, p->muted, p->tick_text[k], true);
         }
     }
     if (p->meter) {

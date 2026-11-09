@@ -48,6 +48,23 @@
 static double opt_minutes = 10;
 static unsigned opt_seed = 1;
 static bool opt_window, opt_sw, opt_full, opt_idle, opt_storm;
+/* --hash: a fingerprint of every frame's draw data. Runs are deterministic (seeded input, fixed
+ * time step), so a refactor that keeps behavior keeps the hash; any change in what is drawn,
+ * anywhere in the run, changes it. */
+static bool opt_hash;
+static uint64_t frame_hash = 1469598103934665603ull;
+static void hash_bytes(const void *p, size_t n) {
+    const unsigned char *b = p;
+    for (size_t i = 0; i < n; i++) { frame_hash ^= b[i]; frame_hash *= 1099511628211ull; }
+}
+static void hash_draw_data(const cui_draw_data *dd) {
+    hash_bytes(dd->vertices, sizeof dd->vertices[0] * (size_t)dd->vertex_count);
+    hash_bytes(dd->indices, sizeof dd->indices[0] * (size_t)dd->index_count);
+    for (int i = 0; i < dd->command_count; i++) {
+        const cui_draw_cmd *c = &dd->commands[i];
+        hash_bytes(&c->clip, sizeof c->clip); hash_bytes(&c->index_offset, sizeof c->index_offset); hash_bytes(&c->index_count, sizeof c->index_count);
+    }
+}
 static const char *opt_csv;
 
 bool soak_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap) {
@@ -405,6 +422,7 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
             cui_begin_frame(ui, 1.0f / 60);
             frame(ui, user);
             cui_end_frame(ui);
+            if (opt_hash) hash_draw_data(cui_get_draw_data(ui));
             double b1 = now_s();
             float bms = (float)((b1 - b0) * 1000);
             stat_add(&build, bms);
@@ -472,6 +490,7 @@ static int run_headless(const cui_app_desc *desc, void (*frame)(cui_ctx *, void 
     printf("  person: %ld clicks, %ld typing, %ld scrolls, %ld drags, %ld keys, %ld resizes, %ld idle spells\n", n_clicks, n_types, n_scrolls, n_drags, n_keys, n_resizes, n_idles);
     cui_destroy(ui);
     printf("  after cui_destroy: %zu bytes still allocated by the library, %ld textures\n", live_bytes, tex_live);
+    if (opt_hash) printf("  draw hash: %016llx\n", (unsigned long long)frame_hash);
     cui_sw_destroy(sw);
     free(px); free(px_check);
     return live_bytes != 0 || mismatches != 0;   /* a leak, or a wrong incremental frame, fails the run */
@@ -635,6 +654,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--full")) opt_full = true;
         else if (!strcmp(argv[i], "--idle")) opt_idle = true;
         else if (!strcmp(argv[i], "--storm")) opt_storm = true;   /* headless: a new window size and scale every 10 frames */   /* windowed, nobody touching it: what does waiting cost */
+        else if (!strcmp(argv[i], "--hash")) opt_hash = true;
         else if (!strcmp(argv[i], "--sites")) opt_sites = true;
         else if (!strcmp(argv[i], "--deep")) opt_sites = opt_deep = true;
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc) opt_csv = argv[++i];

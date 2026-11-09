@@ -3,7 +3,6 @@
  * progress ring. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *search_icon);
 void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
 
@@ -77,7 +76,7 @@ bool cui_radio_cards_ex(cui_ctx *ui, const char *id_str, const cui_choice *choic
         n->dir = CUI_ROW; n->gap = 12; n->align = CUI_ALIGN_START;
         n->pad[0] = n->pad[1] = n->pad[2] = n->pad[3] = 16;
         n->radius = CUI_CORNERS(ui->theme.radius_control);
-        cui_color sel_border = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+        cui_color sel_border = cui__emphasis(ui);
         n->bg = cui_mix(CUI_C(ui, SURFACE), cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, ACCENT_SUBTLE), 1.0f), st->t * 0.6f);
         n->border = 1 + 0.5f * st->t;
         n->border_color = cui_mix(cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), st->hover), sel_border, st->t);
@@ -320,7 +319,7 @@ static bool cui__otp_input_body(cui_ctx *ui, const char *id_str, char *code, int
     cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_TEXT);
     cui__open(ui, row);
-    cui_color accent = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    cui_color accent = cui__emphasis(ui);
     double phase = ui->time - ui->caret_time;
     for (int k = 0; k < length; k++) {
         bool current = focused && k == CUI_MIN(len, length - 1) && (len < length || k == length - 1);

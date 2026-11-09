@@ -1,9 +1,8 @@
 /* Tool panels: a property inspector and a log console. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
-static cui_color cui__tools_accent(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT); }
+static cui_color cui__tools_accent(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* ======================================================================== */
 /* Property inspector                                                       */
@@ -577,14 +576,13 @@ static void cui__logv_dtor(cui_ctx *ui, void *data) {
     s->nrows = s->cap = 0;
 }
 
-static int cui__lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
 /* case-insensitive (ASCII) search; the index of the first match or -1 */
 static int cui__ci_find(const char *h, int hn, const char *q, int qn) {
     if (qn <= 0) return 0;
     for (int i = 0; i + qn <= hn; i++) {
         int k = 0;
-        while (k < qn && cui__lower((unsigned char)h[i + k]) == cui__lower((unsigned char)q[k])) k++;
+        while (k < qn && cui__ascii_lower((unsigned char)h[i + k]) == cui__ascii_lower((unsigned char)q[k])) k++;
         if (k == qn) return i;
     }
     return -1;

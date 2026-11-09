@@ -149,8 +149,8 @@ static bool cui__tt_prefix(const char *s, const char *p, int n) {
     for (int k = 0; k < n; k++) {
         char a = s[k], c = p[k];
         if (!a) return false;
-        if (a >= 'A' && a <= 'Z') a += 32;
-        if (c >= 'A' && c <= 'Z') c += 32;
+        a = (char)cui__ascii_lower(a);
+        c = (char)cui__ascii_lower(c);
         if (a != c) return false;
     }
     return true;
@@ -324,7 +324,7 @@ static void cui__tt_loading_cell(cui_ctx *ui, cui__tt_build *b, int depth) {
     cui__leaf(ui, 0, CUI_PX(CUI__TT_CHEV + 6), CUI_PX(1));
     cui_spinner(ui, 14);
     cui__leaf(ui, 0, CUI_PX(8), CUI_PX(1));
-    int t = cui__text_node(ui, "Loading", -1, CUI_FONT_BODY, cui__fsz(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
+    int t = cui__text_node(ui, "Loading", -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
     ui->nodes[t].line_height = 1.3f;
 }
 
@@ -613,7 +613,7 @@ cui_path_bar_result cui_path_bar_ex(cui_ctx *ui, const char *id_str, const char 
     }
     /* how many segments fit: the first and the last stay, the middle ones
      * collapse into "..." from the start */
-    float fs = cui__fsz(ui, ui->theme.text_body);
+    float fs = cui__fs(ui, ui->theme.text_body);
     float sep_w = o->menus ? 20.0f : 18.0f, more_w = 30.0f;
     float pad_l = o->icon ? 10.0f : 4.0f, pad_r = 4.0f;
     float avail = 1e9f;

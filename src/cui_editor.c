@@ -6,7 +6,6 @@
  * many thousands of lines stay fast. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 #define CUI__ED_SALT  0xED17C0DEu
 #define CUI__ED_BAR   12.0f     /* scrollbar zones along the right and bottom edges */
@@ -203,11 +202,10 @@ static void cui__ed_brackets(const cui__ed *E, int caret, int *a, int *b) {
 
 /* ---- find ---- */
 
-static int cui__ed_lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
 static bool cui__ed_hit(const char *s, int len, int i, const char *q, int qn) {
     if (qn <= 0 || i < 0 || i + qn > len) return false;
-    for (int k = 0; k < qn; k++) if (cui__ed_lower((unsigned char)s[i + k]) != cui__ed_lower((unsigned char)q[k])) return false;
+    for (int k = 0; k < qn; k++) if (cui__ascii_lower((unsigned char)s[i + k]) != cui__ascii_lower((unsigned char)q[k])) return false;
     return true;
 }
 

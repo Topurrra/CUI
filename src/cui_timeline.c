@@ -236,7 +236,7 @@ static void cui__tl_shape(cui_ctx *ui, float x, float y, float r, int shape, cui
 }
 
 static cui_color cui__tl_tone(cui_ctx *ui, int tone) { return ui->theme.colors[CUI_TOKEN_SERIES_1 + tone % 6]; }
-static cui_color cui__tl_accent(cui_ctx *ui) { return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT); }
+static cui_color cui__tl_accent(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* A fill inside the panel that meets the bottom border: its bottom corners
  * follow the panel's (concentric), so nothing shows past the rounded edge. */
@@ -282,7 +282,7 @@ static void cui__paint_timeline(cui_ctx *ui, cui_node *n, void *data) {
     cui_color accent = cui__tl_accent(ui);
     cui_color grid = cui_alpha(sub, dark ? 0.8f : 1.0f);
     cui_color group_bg = cui_alpha(CUI_C(ui, SURFACE_MUTED), dark ? 0.55f : 0.7f);
-    float fs = cui__fsz(ui, ui->theme.text_xs), fsm = cui__fsz(ui, ui->theme.text_sm);
+    float fs = cui__fs(ui, ui->theme.text_xs), fsm = cui__fs(ui, ui->theme.text_sm);
     float fh = cui__font_line_height(ui, CUI_FONT_BODY, fs), fhm = cui__font_line_height(ui, CUI_FONT_BODY, fsm);
 
     double step = cui__tl_step(ui, p, k, fs);

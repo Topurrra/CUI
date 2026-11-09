@@ -181,6 +181,17 @@ int cui__display_len(const char *label) {
     return p ? (int)(p - label) : (int)strlen(label);
 }
 
+bool cui__contains_ci(const char *hay, const char *needle) {
+    if (!needle || !*needle) return true;
+    size_t nl = strlen(needle);
+    for (; *hay; hay++) {
+        size_t k = 0;
+        while (k < nl && hay[k] && cui__ascii_lower((unsigned char)hay[k]) == cui__ascii_lower((unsigned char)needle[k])) k++;
+        if (k == nl) return true;
+    }
+    return false;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Hashing (FNV-1a with a final avalanche)                                  */
 /* ------------------------------------------------------------------------ */

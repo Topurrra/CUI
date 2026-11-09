@@ -4,7 +4,6 @@
  * reorder pattern of the reorderable list, laid on its side. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 /* the menu bar and toolbar being built (they do not nest) */
 typedef struct cui__menubar_state cui__menubar_state;
@@ -56,7 +55,6 @@ static int cui__key_for_char(char c) {
     if (c >= '0' && c <= '9') return CUI_KEY_0 + (c - '0');
     return 0;
 }
-static char cui__lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
 
 /* ------------------------------------------------------------------------ */
 /* Menu bar                                                                 */
@@ -309,7 +307,7 @@ bool cui_menu_bar_menu_begin(cui_ctx *ui, const char *label, const cui_menu_bar_
     ui->nodes[t].line_height = 1.3f;
     if (mn && (st->kbd || st->alt_now) && !disabled) {
         int at = -1;
-        for (int c = 0; c < len && at < 0; c++) if (cui__lower(label[c]) == cui__lower(mn)) at = c;
+        for (int c = 0; c < len && at < 0; c++) if (cui__ascii_lower(label[c]) == cui__ascii_lower(mn)) at = c;
         if (at >= 0) {
             cui__mnemonic_paint *mp = CUI_PAINT_DATA(ui, cui__mnemonic_paint);
             mp->at = at; mp->len = 1; mp->c = CUI_C(ui, FOREGROUND);

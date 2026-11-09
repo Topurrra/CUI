@@ -1139,7 +1139,7 @@ void cui_dockspace_end(cui_ctx *ui) {
         n->elevation_alpha = st->lift.x;
         n->opacity = CUI_MAX(0.001f, CUI_MIN(1.0f, st->lift.x)) * 0.96f;
         if (p->icon[0]) cui__icon_node(ui, p->icon, 14, CUI_C(ui, FOREGROUND));
-        int t = cui__text_node(ui, p->label, cui__display_len(p->label), CUI_FONT_BODY, cui__fsz(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
+        int t = cui__text_node(ui, p->label, cui__display_len(p->label), CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
         ui->nodes[t].line_height = 1.3f;
         ui->nodes[t].max_w = 200;
         cui__float_end(ui);

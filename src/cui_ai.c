@@ -3,10 +3,9 @@
  * composer and a voice orb. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 static cui_color cui__ai_accent(cui_ctx *ui) {
-    return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    return cui__emphasis(ui);
 }
 
 /* A row that opens a body below it with a height spring (shared by the
@@ -949,7 +948,7 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     cui_node *sn = &ui->nodes[sb];
     sn->w = CUI_PX(32); sn->h = CUI_PX(32); sn->radius = CUI_CORNERS(ui->theme.radius_surface - 10);
     sn->dir = CUI_STACK; sn->align = CUI_ALIGN_CENTER; sn->justify = CUI_JUSTIFY_CENTER;
-    cui_color on_bg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    cui_color on_bg = cui__emphasis(ui);
     cui_color on_fg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, BACKGROUND) : CUI_C(ui, ACCENT_FOREGROUND);
     sn->bg = can ? cui_mix(on_bg, CUI_C(ui, BACKGROUND), sr.hovered ? 0.12f : 0.0f) : CUI_C(ui, CONTROL_TRACK);
     if (can) { sn->paint = cui__paint_sheen; sn->paint_data = NULL; sn->elevation = CUI_ELEVATION_RESTING; sn->elevation_alpha = 1; }

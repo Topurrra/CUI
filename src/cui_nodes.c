@@ -362,7 +362,7 @@ static void cui__paint_ne_card(cui_ctx *ui, cui_node *n, void *data) {
     if (dark) cui__draw_top_light(ui, r, rc, 0.045f);
     /* title */
     float head = CUI__NE_HEAD * z;
-    float ts = cui__fsz(ui, ui->theme.text_body) * z;
+    float ts = cui__fs(ui, ui->theme.text_body) * z;
     float x = r.x + 12 * z;
     if (cp->icon) {
         float is = 14 * z;
@@ -377,7 +377,7 @@ static void cui__paint_ne_card(cui_ctx *ui, cui_node *n, void *data) {
     float hair = 1.0f;
     cui_draw_rect(ui, (cui_rect){ r.x + 1, r.y + head, r.w - 2, hair }, CUI_CORNERS(0), CUI_C(ui, BORDER));
     /* rows */
-    float ls = cui__fsz(ui, ui->theme.text_sm) * z;
+    float ls = cui__fs(ui, ui->theme.text_sm) * z;
     float lfh = cui__font_line_height(ui, CUI_FONT_BODY, ls);
     float inset = CUI__NE_INSET * z;
     for (int k = 0; k < cp->row_n; k++) {

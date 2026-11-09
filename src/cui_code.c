@@ -1,7 +1,6 @@
 /* Code block with syntax highlighting, and a JSON viewer. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 /* ------------------------------------------------------------------------ */
 /* Tokenizer                                                                */
@@ -306,7 +305,7 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
     p->size = size; p->lh = lh; p->gutter = gutter; p->pad = pad;
     cui__syntax_colors(ui, p->colors);
     p->gutter_c = cui_alpha(CUI_C(ui, TEXT_MUTED), 0.7f);
-    p->hl_c = cui_alpha(ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT), ui->mode == CUI_THEME_DARK ? 0.12f : 0.08f);
+    p->hl_c = cui_alpha(cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.12f : 0.08f);
     cn->paint = cui__paint_code;
     cn->paint_data = p;
     cui__scroll_end_ex(ui);

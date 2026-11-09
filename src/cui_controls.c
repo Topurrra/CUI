@@ -3,7 +3,6 @@
  * breadcrumb, pagination and stepper. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 
 typedef struct {
     float hover, focus;

@@ -166,7 +166,7 @@ static void cui__fl_bar(cui_ctx *ui, const cui__fl_paint *p, const cui__fl_item 
         float vx0 = CUI_MAX(x0, body.x + 1), vx1 = CUI_MIN(x0 + w, body.x + body.w - 1);
         float avail = vx1 - vx0 - 12;
         if (avail >= CUI__FL_LABEL - 12) {
-            float fs = cui__fsz(ui, ui->theme.text_xs);
+            float fs = cui__fs(ui, ui->theme.text_xs);
             float fh = cui__font_line_height(ui, CUI_FONT_BODY, fs);
             cui__draw_text_ellipsis(ui, CUI_FONT_BODY, fs, vx0 + 6, y + (h - fh) * 0.5f, avail, it->fg, it->label, it->label_len, false);
         }
@@ -203,7 +203,7 @@ static void cui__paint_flame(cui_ctx *ui, cui_node *n, void *data) {
     cui_corners rc = { rad - 1, rad - 1, 0, 0 };
     cui_draw_rect(ui, (cui_rect){ r.x, r.y, r.w, CUI__FL_RULER }, rc, CUI_C(ui, SURFACE_MUTED));
     cui_draw_rect(ui, (cui_rect){ r.x, r.y + CUI__FL_RULER, r.w, 1 }, CUI_CORNERS(0), CUI_C(ui, BORDER));
-    float fs = cui__fsz(ui, ui->theme.text_xs);
+    float fs = cui__fs(ui, ui->theme.text_xs);
     if (k > 0) {
         double unit; const char *uname; int dec;
         float min_px = 72;
@@ -241,9 +241,9 @@ static void cui__paint_flame(cui_ctx *ui, cui_node *n, void *data) {
     if (p->has_sel) cui__fl_bar(ui, p, &p->sel, px0, k, body_y, body, true);
     if (p->empty) {
         const char *msg = "No spans";
-        float lw = cui__text_width(ui, CUI_FONT_BODY, cui__fsz(ui, ui->theme.text_sm), msg, -1, false);
-        float lh = cui__font_line_height(ui, CUI_FONT_BODY, cui__fsz(ui, ui->theme.text_sm));
-        cui__draw_text_line(ui, CUI_FONT_BODY, cui__fsz(ui, ui->theme.text_sm), body.x + (body.w - lw) * 0.5f, body.y + (body.h - lh) * 0.5f,
+        float lw = cui__text_width(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), msg, -1, false);
+        float lh = cui__font_line_height(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm));
+        cui__draw_text_line(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), body.x + (body.w - lw) * 0.5f, body.y + (body.h - lh) * 0.5f,
                             CUI_C(ui, TEXT_MUTED), msg, -1, false);
     }
     /* a quiet scroll indicator when rows are hidden above or below */

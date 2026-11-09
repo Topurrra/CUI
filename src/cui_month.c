@@ -6,7 +6,6 @@
  * the events in those weeks. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 #define CUI__MC_HEAD   26.0f   /* the day number's band at the top of a cell */
 #define CUI__MC_LINE   19.0f   /* one event line */
@@ -491,7 +490,7 @@ cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id_str, cui_date
     }
     p->line = CUI_C(ui, BORDER_SUBTLE);
     p->fg = CUI_C(ui, FOREGROUND); p->muted = CUI_C(ui, TEXT_MUTED);
-    p->accent = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
+    p->accent = cui__emphasis(ui);
     p->accent_fg = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, BACKGROUND) : CUI_C(ui, ACCENT_FOREGROUND);
     p->sel_bg = cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.045f);
     p->hover_bg = cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.025f);

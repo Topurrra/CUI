@@ -8,7 +8,6 @@
  * drawn by cui_code_block and cui_table. Memory comes from the frame arena. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 #define MD_MAX_DEPTH 12      /* containers nested deeper show as text */
 #define MD_WINDOW 64         /* how far back a closing * or _ looks for its opener */

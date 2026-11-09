@@ -1,7 +1,6 @@
 /* Data display: accordion, tree view, list items, virtual lists and tables. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 void cui__paint_focus_ring_node(cui_ctx *ui, cui_node *n, void *data);
 
 /* ------------------------------------------------------------------------ */

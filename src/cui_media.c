@@ -2,7 +2,6 @@
  * ticker. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 /* ------------------------------------------------------------------------ */
 /* Carousel                                                                 */

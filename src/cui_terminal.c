@@ -7,7 +7,6 @@
 #include "cui_internal.h"
 #include <stdarg.h>
 
-#define cui__fs cui__fsz
 
 enum { CUI__TM_TEXT = 0, CUI__TM_ESC, CUI__TM_CSI, CUI__TM_OSC, CUI__TM_OSC_ESC };
 
@@ -528,7 +527,7 @@ static cui_terminal_result cui__terminal_ex_body(cui_ctx *ui, const char *id_str
     p->t = ok ? t : NULL; p->top = st->top; p->cols = cols; p->cw = cw; p->lh = lh; p->size = size;
     p->has_sel = st->has_sel; p->s0 = s0; p->s1 = s1;
     p->fg = CUI_C(ui, FOREGROUND);
-    p->sel = cui_alpha(ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT), ui->mode == CUI_THEME_DARK ? 0.3f : 0.18f);
+    p->sel = cui_alpha(cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.3f : 0.18f);
     p->bar = CUI_C(ui, BORDER_STRONG); p->bar_t = vr.hovered || !st->follow ? 1 : 0; p->rows_total = rows_total;
     p->wheel = wid;
     ui->nodes[v].paint = cui__paint_terminal;

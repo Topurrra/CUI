@@ -3,7 +3,6 @@
  * and use the theme's series palette. */
 #include "cui_internal.h"
 
-static float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.font_scale; }
 
 typedef struct { cui_spring intro; cui_spring hx; float hover_t; int hover; bool init; float plot_x, plot_w; } cui__chart_state;
 

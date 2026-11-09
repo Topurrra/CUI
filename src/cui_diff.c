@@ -3,7 +3,6 @@
  * side or inline with word-level marks inside changed lines. */
 #include "cui_internal.h"
 
-#define cui__fs cui__fsz
 
 #define CUI__DIFF_SALT        0xD1FF0u
 #define CUI__DIFF_BUDGET      (1LL << 24)   /* search steps for the line diff, then coarse */
