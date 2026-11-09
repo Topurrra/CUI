@@ -89,7 +89,7 @@ def main():
     w(" * %d emoji in %d groups, %d of them take a skin tone. Each line of the text, once\n" % (len(items), len(groups), n_tone))
     w(" * inflated, is \"#group\" or [+ for a tone] emoji, a version letter, then the name. */\n")
     w("#define CUI__EMOJI_COUNT %d\n#define CUI__EMOJI_RAW_SIZE %d\n" % (len(items), len(raw)))
-    w("static const char *const cui__emoji_versions = \"%s\";   /* 'A' + i is version i, a space between */\n" % " ".join(versions))
+    w("/* version letters: 'A' + i is version i of: %s */\n" % " ".join(versions))
     w("static const uint32_t cui__emoji_tone_bases[][2] = {\n")
     for i in range(0, len(ranges), 6):
         w("    " + " ".join("{ 0x%05X, 0x%05X }," % (a, b) for a, b in ranges[i:i + 6]) + "\n")

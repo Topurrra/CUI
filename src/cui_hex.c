@@ -439,7 +439,7 @@ static void cui__hxf_keys(cui__hxf *f) {
     size_t bpr = f->bpr;
     int mods = ui->mods;
     bool shift = (mods & CUI_MOD_SHIFT) != 0, prim = (mods & CUI_MOD_PRIMARY) != 0;
-    bool far = (mods & (CUI_MOD_CTRL | CUI_MOD_PRIMARY)) != 0;
+    bool whole = (mods & (CUI_MOD_CTRL | CUI_MOD_PRIMARY)) != 0;
     size_t cur = sel->cursor, to = cur, last = f->size - 1;
     size_t page = (size_t)CUI_MAX(1.0, floor(f->view_rows) - 1) * bpr;
     bool moved = false;
@@ -449,8 +449,8 @@ static void cui__hxf_keys(cui__hxf *f) {
     if (cui_key_pressed(ui, CUI_KEY_DOWN)) { to = last - to >= bpr ? to + bpr : (to / bpr < last / bpr ? last : to); moved = true; }
     if (cui_key_pressed(ui, CUI_KEY_PAGE_UP)) { to = to >= page ? to - page : to % bpr; moved = true; }
     if (cui_key_pressed(ui, CUI_KEY_PAGE_DOWN)) { to = last - to >= page ? to + page : last; moved = true; }
-    if (cui_key_pressed(ui, CUI_KEY_HOME)) { to = far ? 0 : to - to % bpr; moved = true; }
-    if (cui_key_pressed(ui, CUI_KEY_END)) { to = far ? last : CUI_MIN(last, to - to % bpr + bpr - 1); moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) { to = whole ? 0 : to - to % bpr; moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_END)) { to = whole ? last : CUI_MIN(last, to - to % bpr + bpr - 1); moved = true; }
     if (moved) {
         cui__hex_select(sel, shift ? cui__hex_anchor(sel) : to, to);
         s->nibble = false;

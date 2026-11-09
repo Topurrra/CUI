@@ -736,8 +736,8 @@ static void cui__paint_wheel(cui_ctx *ui, cui_node *n, void *data) {
         if (fabsf(ang) > 1.45f) continue;
         float y = cy + sinf(ang) * radius;
         float a = cosf(ang);
-        float near = 1.0f - cui__clampf(fabsf(off), 0, 1);
-        cui_color c = cui_mix(p->dim, p->fg, near);
+        float closeness = 1.0f - cui__clampf(fabsf(off), 0, 1);
+        cui_color c = cui_mix(p->dim, p->fg, closeness);
         /* fade out before the rows reach the edges, so nothing looks cut */
         float edge = cui__clampf((p->rows * 0.5f - fabsf(off)) / 0.9f, 0, 1);
         c = cui_alpha(c, cui__clampf(a * a * 1.1f, 0, 1) * edge);
@@ -787,9 +787,9 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
             st->pos.x = p; st->pos.v = 0;
             ui->active = id;
             ui->animating = true;
-            int near = (int)floorf(p + 0.5f);
-            if (o->loop) { near %= count; if (near < 0) near += count; }
-            *index = CUI_CLAMP(near, 0, count - 1);
+            int nearest = (int)floorf(p + 0.5f);
+            if (o->loop) { nearest %= count; if (nearest < 0) nearest += count; }
+            *index = CUI_CLAMP(nearest, 0, count - 1);
             target = st->pos.x;
         } else {
             st->dragging = false;

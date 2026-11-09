@@ -30,7 +30,6 @@ typedef void (*PFN_glXSwapIntervalEXT)(Display *, GLXDrawable_, int);
 typedef int (*PFN_glXSwapIntervalMESA)(unsigned int);
 typedef Bool (*PFN_glXGetMscRateOML)(Display *, GLXDrawable_, int32_t *, int32_t *);
 typedef const char *(*PFN_glXQueryExtensionsString)(Display *, int);
-typedef const char *(*PFN_glXQueryExtensionsString)(Display *, int);
 
 #define GLX_X_RENDERABLE_ 0x8012
 #define GLX_DRAWABLE_TYPE_ 0x8010

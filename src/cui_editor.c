@@ -802,7 +802,7 @@ static void cui__edf_move_keys(cui__edf *f, int *vmove_out, int *vpage_out) {
     cui_ctx *ui = E->ui;
     const char *buf = E->buf;
     bool shift = f->shift, word_mod = f->word_mod, line_mod = f->line_mod;
-    bool far = (f->mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) != 0;
+    bool whole = (f->mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) != 0;
     int view_lines = CUI_MAX(1, (int)(f->view_h / f->lh) - 1);
     for (int rep = ui->kpressed[CUI_KEY_LEFT]; rep > 0; rep--) {
         int s0 = CUI_MIN(e->cursor, e->anchor);
@@ -832,9 +832,9 @@ static void cui__edf_move_keys(cui__edf *f, int *vmove_out, int *vpage_out) {
     }
     if (cui_key_pressed(ui, CUI_KEY_HOME)) {
         int line = cui__ed_line_of(E, e->cursor), ft = cui__ed_first_text(E, line);
-        cui__ed_move(E, far ? 0 : e->cursor == ft ? E->ls[line] : ft, shift);
+        cui__ed_move(E, whole ? 0 : e->cursor == ft ? E->ls[line] : ft, shift);
     }
-    if (cui_key_pressed(ui, CUI_KEY_END)) cui__ed_move(E, far ? E->len : cui__ed_end(E, cui__ed_line_of(E, e->cursor)), shift);
+    if (cui_key_pressed(ui, CUI_KEY_END)) cui__ed_move(E, whole ? E->len : cui__ed_end(E, cui__ed_line_of(E, e->cursor)), shift);
     if (f->prim && cui_key_pressed(ui, CUI_KEY_A)) { e->anchor = 0; e->cursor = E->len; }
     *vmove_out = vmove; *vpage_out = vpage;
 }

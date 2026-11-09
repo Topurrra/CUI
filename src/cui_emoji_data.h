@@ -3,7 +3,7 @@
  * inflated, is "#group" or [+ for a tone] emoji, a version letter, then the name. */
 #define CUI__EMOJI_COUNT 1914
 #define CUI__EMOJI_RAW_SIZE 41184
-static const char *const cui__emoji_versions = "0.6 0.7 1.0 2.0 3.0 4.0 5.0 11.0 12.0 12.1 13.0 13.1 14.0 15.0 15.1 16.0 17.0";   /* 'A' + i is version i, a space between */
+/* version letters: 'A' + i is version i of: 0.6 0.7 1.0 2.0 3.0 4.0 5.0 11.0 12.0 12.1 13.0 13.1 14.0 15.0 15.1 16.0 17.0 */
 static const uint32_t cui__emoji_tone_bases[][2] = {
     { 0x0261D, 0x0261D }, { 0x026F9, 0x026F9 }, { 0x0270A, 0x0270D }, { 0x1F385, 0x1F385 }, { 0x1F3C2, 0x1F3C4 }, { 0x1F3C7, 0x1F3C7 },
     { 0x1F3CA, 0x1F3CC }, { 0x1F442, 0x1F443 }, { 0x1F446, 0x1F450 }, { 0x1F466, 0x1F469 }, { 0x1F46B, 0x1F478 }, { 0x1F47C, 0x1F47C },

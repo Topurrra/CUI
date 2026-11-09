@@ -13,7 +13,7 @@
 #include <shellapi.h>
 
 /* UTF-8 to UTF-16; always terminated, empty on failure. */
-static bool cui__w(const char *s, WCHAR *out, int cap) {
+static bool cui__to_wide(const char *s, WCHAR *out, int cap) {
     if (cap <= 0) return false;
     int n = MultiByteToWideChar(CP_UTF8, 0, s ? s : "", -1, out, cap);
     if (n <= 0) { out[0] = 0; return false; }
@@ -34,7 +34,7 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
     (void)app;
     HWND owner = GetActiveWindow();
     WCHAR title[256];
-    cui__w(o->title ? o->title : (o->kind == CUI_FILE_SAVE ? "Save" : "Open"), title, 256);
+    cui__to_wide(o->title ? o->title : (o->kind == CUI_FILE_SAVE ? "Save" : "Open"), title, 256);
     WCHAR path[MAX_PATH * 4] = { 0 };
     if (o->kind == CUI_FILE_FOLDER) {
         /* the new style folder dialog needs COM on this thread */
@@ -71,7 +71,7 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
         if (!fit) n = 0;
         if (!cui__w_append(filter, 511, &n, "All files") || !cui__w_append(filter, 511, &n, "*.*")) n = 0;
         filter[n] = 0;   /* list ends with an empty string */
-        if (o->default_name) cui__w(o->default_name, path, MAX_PATH * 4);
+        if (o->default_name) cui__to_wide(o->default_name, path, MAX_PATH * 4);
         OPENFILENAMEW ofn;
         memset(&ofn, 0, sizeof ofn);
         ofn.lStructSize = sizeof ofn;
@@ -89,7 +89,7 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
 
 bool cui__plat_open_url(const char *url) {
     WCHAR w[4096];
-    if (!cui__w(url, w, 4096)) return false;
+    if (!cui__to_wide(url, w, 4096)) return false;
     return (INT_PTR)ShellExecuteW(NULL, L"open", w, NULL, NULL, SW_SHOWNORMAL) > 32;
 }
 
