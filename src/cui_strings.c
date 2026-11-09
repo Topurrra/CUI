@@ -1,6 +1,7 @@
 /* Text the components show: English by default, or an app's table (cui_set_strings).
  * Only the components that show dates link this file. */
 #include "cui_internal.h"
+#include <time.h>
 
 static const cui_strings cui__english = {
     { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" },
@@ -35,4 +36,19 @@ const char *cui__size_text(cui_ctx *ui, double v) {
     v /= 1000;   /* at least 1 KB here */
     while (v >= 1000 && k < 3) { v /= 1000; k++; }
     return cui__frame_printf(ui, v < 10 ? "%.1f %s" : "%.0f %s", v, u[k]);
+}
+
+/* minutes east of UTC of the local time zone at time t */
+int cui__utc_offset(int64_t t64) {
+    time_t t = (time_t)t64;
+    struct tm lt, gt;
+#if defined(_WIN32)
+    localtime_s(&lt, &t); gmtime_s(&gt, &t);
+#else
+    localtime_r(&t, &lt); gmtime_r(&t, &gt);
+#endif
+    int d = (lt.tm_year - gt.tm_year) * 366 + (lt.tm_yday - gt.tm_yday);
+    if (d > 1) d = -1;
+    if (d < -1) d = 1;
+    return d * 1440 + (lt.tm_hour - gt.tm_hour) * 60 + (lt.tm_min - gt.tm_min);
 }

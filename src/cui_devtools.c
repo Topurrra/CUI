@@ -1222,19 +1222,6 @@ static void cui__sc_write(const cui__sc_state *s, char *cron, size_t cap) {
 }
 
 /* the time zone offset of `now` in minutes east of UTC */
-static int cui__sc_offset(int64_t now) {
-    time_t t = (time_t)now;
-    struct tm lt, gt;
-#if defined(_WIN32)
-    localtime_s(&lt, &t); gmtime_s(&gt, &t);
-#else
-    localtime_r(&t, &lt); gmtime_r(&t, &gt);
-#endif
-    int d = (lt.tm_year - gt.tm_year) * 366 + (lt.tm_yday - gt.tm_yday);
-    if (d > 1) d = -1;
-    if (d < -1) d = 1;
-    return d * 1440 + (lt.tm_hour - gt.tm_hour) * 60 + (lt.tm_min - gt.tm_min);
-}
 
 /* "Mon, Nov 9 · 09:30" in the zone of `offset` */
 static const char *cui__sc_when(cui_ctx *ui, int64_t t, int offset) {
@@ -1354,7 +1341,7 @@ cui_schedule_result cui_schedule_picker_ex(cui_ctx *ui, const char *id_str, char
     const char *desc = cui_cron_describe(ui, cron);
     res.valid = desc != NULL;
     int64_t now = o->now ? o->now : (int64_t)time(NULL);
-    int offset = o->utc ? 0 : cui__sc_offset(now);
+    int offset = o->utc ? 0 : cui__utc_offset(now);
     int64_t next = 0;
     bool has_next = res.valid && cui_cron_next(cron, now, offset, &next);
     if (has_next) res.next = next;
