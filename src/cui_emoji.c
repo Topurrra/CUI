@@ -1136,158 +1136,382 @@ static void cui__em_build(cui__emoji *e, cui__em_state *st, int nrecent) {
     }
 }
 
-const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id_str, const cui_emoji_picker_opts *o) {
-    cui_emoji_picker_opts d;
-    memset(&d, 0, sizeof d);
-    if (!o) o = &d;
-    const char *picked = NULL;
-    cui_id id = cui_make_id(ui, id_str ? id_str : "emoji");
-    cui_push_id(ui, id_str ? id_str : "emoji");
-    cui_id gid = cui_make_id(ui, "#grid"), wid = gid ^ 0x3E1Du, sid = cui_make_id(ui, "#search");
-    cui__em_state *st = cui_state(ui, id, sizeof *st);
-    cui__state_set_dtor(ui, id, cui__em_state_free);
-    cui__emoji *e = cui__em(ui);
-    bool can = e && cui__em_can_draw(ui) && cui__em_list(ui, e);
-    if (can) cui__em_check(ui, e);
-    const char *const *names = o->group_names ? o->group_names : cui__em_group_names;
-    int *tone = o->tone ? o->tone : &st->own_tone;
-    *tone = CUI_CLAMP(*tone, 0, 5);
-    char *rbuf = o->recent && o->recent_cap ? o->recent : st->own_recent;
-    size_t rcap = o->recent && o->recent_cap ? o->recent_cap : sizeof st->own_recent;
-    /* recent emoji, as strings */
+/* ---- the picker ---- */
+
+/* one frame of the picker: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_emoji_picker_opts *o;
+    cui_id id, gid, wid, sid;          /* the picker, its grid, the grid's wheel target, the search */
+    cui__em_state *st;
+    cui__emoji *e;
+    bool can;                          /* a color emoji font is there to draw with */
+    const char *const *names;          /* group names */
+    int *tone;
+    char *rbuf; size_t rcap;           /* the recent list, space separated */
     char recent[CUI__EM_RECENT_MAX][32];
-    int nrecent = 0;
+    int nrecent;
+    cui__em_geo g;
+    cui_rect pr;                       /* the grid, last frame */
+    float view_h, maxtop;
+    int hover, pick_item;
+    bool in_search, in_grid;
+} cui__em_frame;
+
+static const char *const cui__em_hands[6] = {   /* the tone button and its choices */
+    "\xe2\x9c\x8b", "\xe2\x9c\x8b\xf0\x9f\x8f\xbb", "\xe2\x9c\x8b\xf0\x9f\x8f\xbc",
+    "\xe2\x9c\x8b\xf0\x9f\x8f\xbd", "\xe2\x9c\x8b\xf0\x9f\x8f\xbe", "\xe2\x9c\x8b\xf0\x9f\x8f\xbf",
+};
+
+/* the recent list as separate strings, and a hash of it to tell when it changed */
+static uint32_t cui__em_read_recent(cui__em_frame *f) {
     uint32_t rhash = 2166136261u;
-    for (const char *t = rbuf; *t && nrecent < CUI__EM_RECENT_MAX;) {
+    f->nrecent = 0;
+    for (const char *t = f->rbuf; *t && f->nrecent < CUI__EM_RECENT_MAX;) {
         while (*t == ' ') t++;
         const char *w = t;
         while (*t && *t != ' ') t++;
         size_t wl = (size_t)(t - w);
         if (!wl || wl >= 32) continue;
-        memcpy(recent[nrecent], w, wl); recent[nrecent][wl] = 0;
+        memcpy(f->recent[f->nrecent], w, wl); f->recent[f->nrecent][wl] = 0;
         for (size_t k = 0; k < wl; k++) rhash = (rhash ^ (unsigned char)w[k]) * 16777619u;
-        nrecent++;
+        f->nrecent++;
     }
-    /* the list, rebuilt only when what it shows changes */
-    if (can) {
-        int cap = e->nrec + CUI__EM_RECENT_MAX;
-        if (!st->items) { st->items = cui__alloc(ui, sizeof(int) * (size_t)cap); st->cap = st->items ? cap : 0; }
-        if (!st->built || strcmp(st->built_query, st->query) || st->built_recent_hash != rhash || st->built_recent_n != nrecent || st->built_avail != e->avail_font) {
-            cui__em_build(e, st, nrecent);
-            snprintf(st->built_query, sizeof st->built_query, "%s", st->query);
-            st->built_recent_hash = rhash; st->built_recent_n = nrecent; st->built_avail = e->avail_font; st->built = true;
-            st->cur = st->query[0] && st->nitems ? 0 : -1;
-            if (st->query[0]) st->top = st->target = 0;
-        }
-    } else st->nsec = 0;
+    return rhash;
+}
 
-    /* geometry, from the size the grid had last frame */
-    float size = o->size > 0 ? o->size : 26;
-    cui__em_geo g;
-    memset(&g, 0, sizeof g);
-    g.size = size; g.cell = size + 12; g.header = 30; g.pad = 6;
-    cui_rect pr = cui__prev_rect(ui, gid);
-    float gw = pr.w > 0 ? pr.w : 340;
-    g.cols = CUI_MAX(4, (int)((gw - g.pad * 2) / g.cell));
-    g.pad = floorf((gw - g.cols * g.cell) * 0.5f);
-    g.nsec = st->nsec;
-    memcpy(g.sec, st->sec, sizeof g.sec);
+/* the list, rebuilt only when what it shows changes */
+static void cui__em_refresh_list(cui__em_frame *f, uint32_t rhash) {
+    cui__em_state *st = f->st;
+    cui__emoji *e = f->e;
+    if (!f->can) { st->nsec = 0; return; }
+    int cap = e->nrec + CUI__EM_RECENT_MAX;
+    if (!st->items) { st->items = cui__alloc(f->ui, sizeof(int) * (size_t)cap); st->cap = st->items ? cap : 0; }
+    if (!st->built || strcmp(st->built_query, st->query) || st->built_recent_hash != rhash || st->built_recent_n != f->nrecent || st->built_avail != e->avail_font) {
+        cui__em_build(e, st, f->nrecent);
+        snprintf(st->built_query, sizeof st->built_query, "%s", st->query);
+        st->built_recent_hash = rhash; st->built_recent_n = f->nrecent; st->built_avail = e->avail_font; st->built = true;
+        st->cur = st->query[0] && st->nitems ? 0 : -1;
+        if (st->query[0]) st->top = st->target = 0;
+    }
+}
+
+/* geometry, from the size the grid had last frame */
+static void cui__em_layout(cui__em_frame *f) {
+    cui__em_state *st = f->st;
+    cui__em_geo *g = &f->g;
+    float size = f->o->size > 0 ? f->o->size : 26;
+    memset(g, 0, sizeof *g);
+    g->size = size; g->cell = size + 12; g->header = 30; g->pad = 6;
+    f->pr = cui__prev_rect(f->ui, f->gid);
+    float gw = f->pr.w > 0 ? f->pr.w : 340;
+    g->cols = CUI_MAX(4, (int)((gw - g->pad * 2) / g->cell));
+    g->pad = floorf((gw - g->cols * g->cell) * 0.5f);
+    g->nsec = st->nsec;
+    memcpy(g->sec, st->sec, sizeof g->sec);
     if (st->jump && !st->query[0]) {
-        for (int i = 0; i < g.nsec; i++) if (g.sec[i].kind == st->jump - 1) st->top = st->target = cui__em_sec_top(&g, i);
+        for (int i = 0; i < g->nsec; i++) if (g->sec[i].kind == st->jump - 1) st->top = st->target = cui__em_sec_top(g, i);
         st->jump = 0; st->animating = false;
     }
-    float view_h = o->height > 0 ? o->height : 280;
-    float maxtop = CUI_MAX(0.0f, cui__em_total_h(&g) - (pr.h > 0 ? pr.h : view_h));
+    f->view_h = f->o->height > 0 ? f->o->height : 280;
+    f->maxtop = CUI_MAX(0.0f, cui__em_total_h(g) - (f->pr.h > 0 ? f->pr.h : f->view_h));
+}
 
-    /* the pointer over the grid */
-    cui_interact gr = cui__interact(ui, gid, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
-    int hover = -1;
-    if (pr.w > 0 && gr.hovered && !st->dragging) hover = cui__em_item_at(&g, ui->mx - pr.x, ui->my - pr.y + st->top);
-    if (ui->scroll_target == wid && ui->scroll_dy != 0) {
-        st->target = CUI_CLAMP(st->target - ui->scroll_dy * 48, 0, maxtop);
+/* the pointer over the grid: hover, wheel, drag to scroll (as on a phone), click to pick */
+static void cui__em_pointer(cui__em_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__em_state *st = f->st;
+    cui_rect pr = f->pr;
+    cui_interact gr = cui__interact(ui, f->gid, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    f->hover = -1;
+    if (pr.w > 0 && gr.hovered && !st->dragging) f->hover = cui__em_item_at(&f->g, ui->mx - pr.x, ui->my - pr.y + st->top);
+    if (ui->scroll_target == f->wid && ui->scroll_dy != 0) {
+        st->target = CUI_CLAMP(st->target - ui->scroll_dy * 48, 0, f->maxtop);
         st->top = st->target; st->animating = false;
         ui->scroll_dy = 0;
     }
-    if (gr.pressed && ui->mpressed[0]) { st->pressing = true; st->dragging = false; st->press_y = ui->my; st->press_top = st->top; st->press_item = hover; st->cur_visible = false; }
+    if (gr.pressed && ui->mpressed[0]) { st->pressing = true; st->dragging = false; st->press_y = ui->my; st->press_top = st->top; st->press_item = f->hover; st->cur_visible = false; }
     if (st->pressing && ui->mdown[0]) {
-        if (!st->dragging && fabsf(ui->my - st->press_y) > 6) st->dragging = true;   /* a drag scrolls, as on a phone */
-        if (st->dragging) { st->top = st->target = CUI_CLAMP(st->press_top - (ui->my - st->press_y), 0, maxtop); st->animating = false; }
+        if (!st->dragging && fabsf(ui->my - st->press_y) > 6) st->dragging = true;
+        if (st->dragging) { st->top = st->target = CUI_CLAMP(st->press_top - (ui->my - st->press_y), 0, f->maxtop); st->animating = false; }
     }
-    int pick_item = -1;
+    f->pick_item = -1;
     if (st->pressing && !ui->mdown[0]) {
-        if (!st->dragging && st->press_item >= 0 && st->press_item == hover) pick_item = hover;
+        if (!st->dragging && st->press_item >= 0 && st->press_item == f->hover) f->pick_item = f->hover;
         st->pressing = st->dragging = false;
     }
-    if (gr.hovered && hover >= 0) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    if (gr.hovered && f->hover >= 0) cui__set_cursor(ui, CUI_CURSOR_HAND);
+}
 
-    /* keys: on the grid, or from the search field (Up, Down and Enter) */
-    bool in_search = ui->focus == sid, in_grid = ui->focus == gid;
-    if ((in_grid || in_search) && st->nitems > 0 && !st->tone_open) {
-        int move = 0;
-        bool horiz = in_grid;
+/* the cursor one row down (dir 1) or up (dir -1), across group headers; up from the first
+ * row goes back to the search */
+static void cui__em_cursor_vertical(cui__em_frame *f, int dir) {
+    cui__em_state *st = f->st;
+    const cui__em_geo *g = &f->g;
+    float x, y;
+    int si = cui__em_item_pos(g, st->cur, &x, &y);
+    if (si < 0) return;
+    const cui__em_section *s = &g->sec[si];
+    int k = st->cur - s->start, col = k % g->cols, row = k / g->cols, rows = cui__em_rows(g, s->count);
+    if (dir > 0) {
+        if (row + 1 < rows) st->cur = s->start + CUI_MIN(s->count - 1, (row + 1) * g->cols + col);
+        else if (si + 1 < g->nsec) st->cur = g->sec[si + 1].start + CUI_MIN(col, g->sec[si + 1].count - 1);
+    } else {
+        if (row > 0) st->cur = s->start + (row - 1) * g->cols + col;
+        else if (si > 0) { const cui__em_section *p = &g->sec[si - 1]; int pr_ = cui__em_rows(g, p->count) - 1; st->cur = p->start + CUI_MIN(p->count - 1, pr_ * g->cols + col); }
+        else if (f->in_grid) { f->ui->focus = f->sid; st->cur = -1; }
+    }
+}
+
+/* keys: on the grid, or from the search field (Up, Down and Enter) */
+static void cui__em_keys(cui__em_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__em_state *st = f->st;
+    f->in_search = ui->focus == f->sid; f->in_grid = ui->focus == f->gid;
+    if ((f->in_grid || f->in_search) && st->nitems > 0 && !st->tone_open) {
+        int move = 0;   /* -1 and 1 sideways, -2 and 2 a row */
+        bool horiz = f->in_grid;
         if (horiz && cui_key_pressed(ui, CUI_KEY_LEFT)) move = -1;
         if (horiz && cui_key_pressed(ui, CUI_KEY_RIGHT)) move = 1;
         if (cui_key_pressed(ui, CUI_KEY_DOWN)) move = 2;
         if (cui_key_pressed(ui, CUI_KEY_UP)) move = -2;
-        if (in_grid && cui_key_pressed(ui, CUI_KEY_HOME)) { st->cur = 0; st->cur_visible = true; move = 0; }
-        if (in_grid && cui_key_pressed(ui, CUI_KEY_END)) { st->cur = st->nitems - 1; st->cur_visible = true; move = 0; }
+        if (f->in_grid && cui_key_pressed(ui, CUI_KEY_HOME)) { st->cur = 0; st->cur_visible = true; move = 0; }
+        if (f->in_grid && cui_key_pressed(ui, CUI_KEY_END)) { st->cur = st->nitems - 1; st->cur_visible = true; move = 0; }
         if (move) {
             if (st->cur < 0) st->cur = 0;
             else if (move == 1 || move == -1) st->cur = CUI_CLAMP(st->cur + move, 0, st->nitems - 1);
-            else {
-                float x, y;
-                int si = cui__em_item_pos(&g, st->cur, &x, &y);
-                if (si >= 0) {
-                    const cui__em_section *s = &g.sec[si];
-                    int k = st->cur - s->start, col = k % g.cols, row = k / g.cols, rows = cui__em_rows(&g, s->count);
-                    if (move > 0) {
-                        if (row + 1 < rows) st->cur = s->start + CUI_MIN(s->count - 1, (row + 1) * g.cols + col);
-                        else if (si + 1 < g.nsec) st->cur = g.sec[si + 1].start + CUI_MIN(col, g.sec[si + 1].count - 1);
-                    } else {
-                        if (row > 0) st->cur = s->start + (row - 1) * g.cols + col;
-                        else if (si > 0) { const cui__em_section *p = &g.sec[si - 1]; int pr_ = cui__em_rows(&g, p->count) - 1; st->cur = p->start + CUI_MIN(p->count - 1, pr_ * g.cols + col); }
-                        else if (in_grid) { ui->focus = sid; st->cur = -1; }   /* up from the first row: back to the search */
-                    }
-                }
-            }
-            if (in_search && move == 2 && !st->query[0] && st->cur >= 0) ui->focus = gid;
+            else cui__em_cursor_vertical(f, move > 0 ? 1 : -1);
+            if (f->in_search && move == 2 && !st->query[0] && st->cur >= 0) ui->focus = f->gid;
             st->cur_visible = true;
             ui->kpressed[CUI_KEY_UP] = ui->kpressed[CUI_KEY_DOWN] = 0;
         }
-        if (cui_key_pressed(ui, CUI_KEY_ENTER) || (in_grid && cui_key_pressed(ui, CUI_KEY_SPACE))) {
-            pick_item = st->cur >= 0 ? st->cur : 0;
+        if (cui_key_pressed(ui, CUI_KEY_ENTER) || (f->in_grid && cui_key_pressed(ui, CUI_KEY_SPACE))) {
+            f->pick_item = st->cur >= 0 ? st->cur : 0;
             ui->kpressed[CUI_KEY_ENTER] = 0;
         }
     }
     if (st->tone_open && cui_key_pressed(ui, CUI_KEY_ESCAPE)) { st->tone_open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
-    /* keep the cursor in view */
-    if (st->cur_visible && st->cur >= 0 && st->cur < st->nitems) {
-        float x, y;
-        float vh = pr.h > 0 ? pr.h : view_h;
-        if (cui__em_item_pos(&g, st->cur, &x, &y) >= 0) {
-            if (y < st->target + g.header) st->target = CUI_MAX(0.0f, y - g.header);
-            else if (y + g.cell > st->target + vh) st->target = y + g.cell - vh;
-            st->animating = true;
-        }
-        st->cur_visible = false;
-    }
-    if (pick_item >= 0 && pick_item < st->nitems && can) {
-        cui__em_str t = cui__em_item_text(e, st, recent, st->items[pick_item], *tone);
-        picked = cui__frame_strdup(ui, t.s, t.len);
-        cui__em_push_recent(rbuf, rcap, t.s);   /* shows next time the list is built without a search */
-        st->cur = pick_item;
-    }
-    /* glide to a target */
-    st->target = CUI_CLAMP(st->target, 0, maxtop);
-    if (st->animating) {
-        cui__tween(ui, &st->top, st->target, 0.12f);
-        if (fabsf(st->top - st->target) < 0.5f) { st->top = st->target; st->animating = false; }
-        else ui->animating = true;
-    }
-    st->top = CUI_CLAMP(st->top, 0, maxtop);
+}
 
-    /* ---- build ---- */
-    int col = cui__node_new(ui, id);
+/* scroll so the keyboard cursor is in view */
+static void cui__em_follow_cursor(cui__em_frame *f) {
+    cui__em_state *st = f->st;
+    if (!(st->cur_visible && st->cur >= 0 && st->cur < st->nitems)) return;
+    float x, y;
+    float vh = f->pr.h > 0 ? f->pr.h : f->view_h;
+    if (cui__em_item_pos(&f->g, st->cur, &x, &y) >= 0) {
+        if (y < st->target + f->g.header) st->target = CUI_MAX(0.0f, y - f->g.header);
+        else if (y + f->g.cell > st->target + vh) st->target = y + f->g.cell - vh;
+        st->animating = true;
+    }
+    st->cur_visible = false;
+}
+
+/* glide the grid to its target */
+static void cui__em_glide(cui__em_frame *f) {
+    cui__em_state *st = f->st;
+    st->target = CUI_CLAMP(st->target, 0, f->maxtop);
+    if (st->animating) {
+        cui__tween(f->ui, &st->top, st->target, 0.12f);
+        if (fabsf(st->top - st->target) < 0.5f) { st->top = st->target; st->animating = false; }
+        else f->ui->animating = true;
+    }
+    st->top = CUI_CLAMP(st->top, 0, f->maxtop);
+}
+
+/* a button that shows an emoji or an icon: the tone choices, the tone button, the group tabs */
+static int cui__em_button(cui_ctx *ui, cui_id tid, cui_interact ti, cui_size w, float h, const char *s, bool icon) {
+    int b = cui__leaf(ui, tid, w, CUI_PX(h));
+    cui__mark_interactive(ui, b, CUI_IF_FOCUSABLE);
+    ui->nodes[b].radius = CUI_CORNERS(8);
+    if (ti.focus_visible) cui__focus_ring(ui, b, 1);
+    cui__em_tab_paint *tp = cui__frame_alloc(ui, sizeof *tp);
+    memset(tp, 0, sizeof *tp);
+    tp->s = s; tp->len = (int)strlen(s); tp->alpha = 1; tp->icon = icon;
+    ui->nodes[b].paint = cui__paint_emoji_tab; ui->nodes[b].paint_data = tp;
+    return b;
+}
+
+/* the top row: the search field and the tone button, or the six tones while choosing one */
+static void cui__em_build_top_row(cui__em_frame *f) {
+    cui_ctx *ui = f->ui;
+    const cui_emoji_picker_opts *o = f->o;
+    cui__em_state *st = f->st;
+    if (o->no_search && o->no_tone) return;
+    int row = cui__node_new(ui, 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->gap = 6;
+    rn->pad[0] = rn->pad[1] = rn->pad[3] = 10; rn->pad[2] = 6;
+    cui__open(ui, row);
+    if (st->tone_open) {
+        for (int k = 0; k < 6; k++) {
+            cui_push_id_int(ui, k);
+            cui_id tid = cui_make_id(ui, "#tone");
+            cui_interact ti = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
+            if (ti.clicked || ti.keyboard_activate) { *f->tone = k; st->tone_open = false; st->built = false; }
+            int b = cui__em_button(ui, tid, ti, CUI_PX(36), 36, cui__em_hands[k], false);
+            if (k == *f->tone) ui->nodes[b].bg = CUI_C(ui, HOVER);
+            else if (ti.hovered) ui->nodes[b].bg = cui_alpha(CUI_C(ui, HOVER), 0.6f);
+            cui_pop_id(ui);
+        }
+    } else {
+        if (!o->no_search) {
+            cui_input_opts io;
+            memset(&io, 0, sizeof io);
+            io.width = CUI_FILL; io.clearable = true;
+            io.placeholder = o->placeholder ? o->placeholder : "Search emoji";
+            cui__text_field(ui, f->sid, st->query, sizeof st->query, &io, false, 0 /* boxed */, CUI_ICON_SEARCH);
+        } else { int sp = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1)); (void)sp; }
+        if (!o->no_tone) {
+            cui_id tid = cui_make_id(ui, "#tones");
+            cui_interact ti = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
+            if (ti.clicked || ti.keyboard_activate) st->tone_open = true;
+            int b = cui__em_button(ui, tid, ti, CUI_PX(36), 36, cui__em_hands[*f->tone], false);
+            if (ti.hovered) ui->nodes[b].bg = CUI_C(ui, HOVER);
+        }
+    }
+    cui__close(ui);
+}
+
+/* the group tabs: one per group, the current one underlined; a tab jumps to its group */
+static void cui__em_build_tabs(cui__em_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__em_state *st = f->st;
+    const cui__em_geo *g = &f->g;
+    int cur_sec = 0;
+    float acc = 0;
+    for (int i = 0; i < g->nsec; i++) { float h = cui__em_sec_h(g, &g->sec[i]); if (st->top + 1 >= acc) cur_sec = i; acc += h; }
+    if (!f->can) return;
+    int row = cui__node_new(ui, 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->w = CUI_FILL; rn->justify = CUI_JUSTIFY_BETWEEN; rn->pad[1] = rn->pad[3] = 8;
+    cui__open(ui, row);
+    int active_kind = st->query[0] || cur_sec >= g->nsec ? -1 : g->sec[cur_sec].kind;
+    for (int kind = f->nrecent > 0 ? 0 : 1; kind <= CUI__EM_GROUPS; kind++) {
+        cui_push_id_int(ui, kind);
+        cui_id tid = cui_make_id(ui, "#tab");
+        cui_interact ti = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
+        if (ti.clicked || ti.keyboard_activate) {
+            if (st->query[0]) { st->query[0] = 0; st->jump = kind + 1; }   /* out of the search, then there */
+            else for (int i = 0; i < g->nsec; i++) if (g->sec[i].kind == kind) { st->target = cui__em_sec_top(g, i); st->animating = true; }
+        }
+        /* the tabs share the width, so a phone fits all ten */
+        int b = cui__em_button(ui, tid, ti, CUI_FILL, 34, kind == 0 ? CUI_ICON_CLOCK : cui__em_tab_icons[kind], kind == 0);
+        ui->nodes[b].max_w = 40;
+        if (ti.hovered) ui->nodes[b].bg = CUI_C(ui, HOVER);
+        cui__em_tab_paint *tp = ui->nodes[b].paint_data;
+        tp->alpha = kind == active_kind || ti.hovered ? 1 : 0.5f;
+        tp->active = kind == active_kind;
+        tp->bar = cui__emphasis(ui);
+        cui_tooltip(ui, f->names[kind]);
+        cui_pop_id(ui);
+    }
+    cui__close(ui);
+}
+
+/* the grid itself, painted by cui__paint_emoji_grid */
+static void cui__em_build_grid(cui__em_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__em_state *st = f->st;
+    int gn = cui__leaf(ui, f->gid, CUI_FILL, CUI_PX(f->view_h));
+    cui__mark_interactive(ui, gn, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    cui__em_paint *pp = cui__frame_alloc(ui, sizeof *pp);
+    memset(pp, 0, sizeof *pp);
+    pp->e = f->e; pp->st = st; pp->g = f->g; pp->items = st->items;
+    pp->recent = cui__frame_alloc(ui, sizeof f->recent);
+    memcpy(pp->recent, f->recent, sizeof f->recent);
+    pp->hover = f->hover; pp->cur = st->cur; pp->focus = f->in_grid && ui->focus_visible; pp->soft = f->in_search && st->query[0]; pp->top = st->top; pp->tone = *f->tone;
+    pp->names = f->names; pp->empty = f->o->empty_text ? f->o->empty_text : "No emoji found"; pp->none = !f->can; pp->wheel = f->wid;
+    pp->hover_bg = CUI_C(ui, HOVER); pp->header = CUI_C(ui, TEXT_MUTED); pp->ring = CUI_C(ui, FOCUS_RING);
+    ui->nodes[gn].paint = cui__paint_emoji_grid; ui->nodes[gn].paint_data = pp;
+}
+
+/* the name of what item v shows (t, as drawn): a recent one is looked up without its tone */
+static int cui__em_item_name(const cui__emoji *e, int v, cui__em_str t, const char **name) {
+    if (v >= 0) { *name = e->data + e->recs[v].name; return e->recs[v].name_len; }
+    for (int i = 0; i < e->nrec; i++) {
+        const cui__em_rec *rec = &e->recs[i];
+        char tb[64];
+        int tl = rec->len;
+        if (tl == t.len && !memcmp(e->data + rec->text, t.s, (size_t)tl)) { *name = e->data + rec->name; return rec->name_len; }
+        if (rec->tone) for (int k = 1; k <= 5; k++) {
+            tl = cui__em_toned(e->data + rec->text, rec->len, k, tb, sizeof tb);
+            if (tl == t.len && !memcmp(tb, t.s, (size_t)tl)) { *name = e->data + rec->name; return rec->name_len; }
+        }
+    }
+    *name = "";
+    return 0;
+}
+
+/* the preview: the emoji under the pointer, or the cursor's, with its name */
+static void cui__em_build_preview(cui__em_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__em_state *st = f->st;
+    int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
+    ui->nodes[line].bg = CUI_C(ui, BORDER_SUBTLE);
+    int row = cui__node_new(ui, 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(48); rn->gap = 10; rn->pad[1] = rn->pad[3] = 12;
+    cui__open(ui, row);
+    int show = f->hover >= 0 ? f->hover : st->cur;
+    if (f->can && show >= 0 && show < st->nitems) {
+        cui__em_str t = cui__em_item_text(f->e, st, f->recent, st->items[show], *f->tone);
+        cui_emoji(ui, t.s, 28);
+        const char *name;
+        int nl = cui__em_item_name(f->e, st->items[show], t, &name);
+        char cap[256];
+        int cl = CUI_MIN(nl, 255);
+        memcpy(cap, name, (size_t)cl); cap[cl] = 0;
+        if (cl && cap[0] >= 'a' && cap[0] <= 'z') cap[0] = (char)(cap[0] - 32);
+        int tn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(20));
+        cui__em_name_paint *np = cui__frame_alloc(ui, sizeof *np);
+        memcpy(np->s, cap, (size_t)cl + 1);
+        ui->nodes[tn].paint = cui__paint_emoji_name; ui->nodes[tn].paint_data = np;
+    } else if (f->can) {
+        int tn = cui__text_node(ui, f->o->hint ? f->o->hint : "Pick an emoji", -1, CUI_FONT_BODY, cui__fs(ui, 13), CUI_C(ui, TEXT_MUTED), false);
+        (void)tn;
+    }
+    cui__close(ui);
+}
+
+const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id_str, const cui_emoji_picker_opts *o) {
+    cui_emoji_picker_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    const char *picked = NULL;
+    cui__em_frame f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o;
+    f.id = cui_make_id(ui, id_str ? id_str : "emoji");
+    cui_push_id(ui, id_str ? id_str : "emoji");
+    f.gid = cui_make_id(ui, "#grid"); f.wid = f.gid ^ 0x3E1Du; f.sid = cui_make_id(ui, "#search");
+    cui__em_state *st = f.st = cui_state(ui, f.id, sizeof *st);
+    cui__state_set_dtor(ui, f.id, cui__em_state_free);
+    f.e = cui__em(ui);
+    f.can = f.e && cui__em_can_draw(ui) && cui__em_list(ui, f.e);
+    if (f.can) cui__em_check(ui, f.e);
+    f.names = o->group_names ? o->group_names : cui__em_group_names;
+    f.tone = o->tone ? o->tone : &st->own_tone;
+    *f.tone = CUI_CLAMP(*f.tone, 0, 5);
+    f.rbuf = o->recent && o->recent_cap ? o->recent : st->own_recent;
+    f.rcap = o->recent && o->recent_cap ? o->recent_cap : sizeof st->own_recent;
+
+    /* input, against last frame's layout */
+    cui__em_refresh_list(&f, cui__em_read_recent(&f));
+    cui__em_layout(&f);
+    cui__em_pointer(&f);
+    cui__em_keys(&f);
+    cui__em_follow_cursor(&f);
+    if (f.pick_item >= 0 && f.pick_item < st->nitems && f.can) {
+        cui__em_str t = cui__em_item_text(f.e, st, f.recent, st->items[f.pick_item], *f.tone);
+        picked = cui__frame_strdup(ui, t.s, t.len);
+        cui__em_push_recent(f.rbuf, f.rcap, t.s);   /* shows next time the list is built without a search */
+        st->cur = f.pick_item;
+    }
+    cui__em_glide(&f);
+
+    /* the nodes */
+    int col = cui__node_new(ui, f.id);
     cui_node *cn = &ui->nodes[col];
     cn->w = o->width.kind ? o->width : CUI_FILL;
     if (!o->width.kind) cn->max_w = 360;
@@ -1296,155 +1520,14 @@ const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id_str, const cui_emoji
     cn->radius = CUI_CORNERS(ui->theme.radius_panel);
     cn->flags |= CUI_NF_CLIP;
     cui__open(ui, col);
-    /* search and tone */
-    if (!o->no_search || !o->no_tone) {
-        int row = cui__node_new(ui, 0);
-        cui_node *rn = &ui->nodes[row];
-        rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->gap = 6;
-        rn->pad[0] = rn->pad[1] = rn->pad[3] = 10; rn->pad[2] = 6;
-        cui__open(ui, row);
-        if (st->tone_open) {
-            static const char *const hands[6] = { "\xe2\x9c\x8b", "\xe2\x9c\x8b\xf0\x9f\x8f\xbb", "\xe2\x9c\x8b\xf0\x9f\x8f\xbc", "\xe2\x9c\x8b\xf0\x9f\x8f\xbd", "\xe2\x9c\x8b\xf0\x9f\x8f\xbe", "\xe2\x9c\x8b\xf0\x9f\x8f\xbf" };
-            for (int k = 0; k < 6; k++) {
-                cui_push_id_int(ui, k);
-                cui_id tid = cui_make_id(ui, "#tone");
-                cui_interact ti = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
-                if (ti.clicked || ti.keyboard_activate) { *tone = k; st->tone_open = false; st->built = false; }
-                int b = cui__leaf(ui, tid, CUI_PX(36), CUI_PX(36));
-                cui__mark_interactive(ui, b, CUI_IF_FOCUSABLE);
-                ui->nodes[b].radius = CUI_CORNERS(8);
-                if (k == *tone) ui->nodes[b].bg = CUI_C(ui, HOVER);
-                else if (ti.hovered) ui->nodes[b].bg = cui_alpha(CUI_C(ui, HOVER), 0.6f);
-                if (ti.focus_visible) cui__focus_ring(ui, b, 1);
-                cui__em_tab_paint *tp = cui__frame_alloc(ui, sizeof *tp);
-                memset(tp, 0, sizeof *tp);
-                tp->s = hands[k]; tp->len = (int)strlen(hands[k]); tp->alpha = 1; tp->icon = false;
-                ui->nodes[b].paint = cui__paint_emoji_tab; ui->nodes[b].paint_data = tp;
-                cui_pop_id(ui);
-            }
-        } else {
-            if (!o->no_search) {
-                cui_input_opts io;
-                memset(&io, 0, sizeof io);
-                io.width = CUI_FILL; io.clearable = true;
-                io.placeholder = o->placeholder ? o->placeholder : "Search emoji";
-                cui__text_field(ui, sid, st->query, sizeof st->query, &io, false, 0 /* boxed */, CUI_ICON_SEARCH);
-            } else { int sp = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1)); (void)sp; }
-            if (!o->no_tone) {
-                cui_id tid = cui_make_id(ui, "#tones");
-                cui_interact ti = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
-                if (ti.clicked || ti.keyboard_activate) st->tone_open = true;
-                int b = cui__leaf(ui, tid, CUI_PX(36), CUI_PX(36));
-                cui__mark_interactive(ui, b, CUI_IF_FOCUSABLE);
-                ui->nodes[b].radius = CUI_CORNERS(8);
-                if (ti.hovered) ui->nodes[b].bg = CUI_C(ui, HOVER);
-                if (ti.focus_visible) cui__focus_ring(ui, b, 1);
-                cui__em_tab_paint *tp = cui__frame_alloc(ui, sizeof *tp);
-                memset(tp, 0, sizeof *tp);
-                static const char *const hands[6] = { "\xe2\x9c\x8b", "\xe2\x9c\x8b\xf0\x9f\x8f\xbb", "\xe2\x9c\x8b\xf0\x9f\x8f\xbc", "\xe2\x9c\x8b\xf0\x9f\x8f\xbd", "\xe2\x9c\x8b\xf0\x9f\x8f\xbe", "\xe2\x9c\x8b\xf0\x9f\x8f\xbf" };
-                tp->s = hands[*tone]; tp->len = (int)strlen(hands[*tone]); tp->alpha = 1; tp->icon = false;
-                ui->nodes[b].paint = cui__paint_emoji_tab; ui->nodes[b].paint_data = tp;
-            }
-        }
-        cui__close(ui);
-    }
-    /* group tabs */
-    int cur_sec = 0;
-    {
-        float acc = 0;
-        for (int i = 0; i < g.nsec; i++) { float h = cui__em_sec_h(&g, &g.sec[i]); if (st->top + 1 >= acc) cur_sec = i; acc += h; }
-    }
-    if (can) {
-        int row = cui__node_new(ui, 0);
-        cui_node *rn = &ui->nodes[row];
-        rn->dir = CUI_ROW; rn->w = CUI_FILL; rn->justify = CUI_JUSTIFY_BETWEEN; rn->pad[1] = rn->pad[3] = 8;
-        cui__open(ui, row);
-        int active_kind = st->query[0] || cur_sec >= g.nsec ? -1 : g.sec[cur_sec].kind;
-        for (int kind = nrecent > 0 ? 0 : 1; kind <= CUI__EM_GROUPS; kind++) {
-            cui_push_id_int(ui, kind);
-            cui_id tid = cui_make_id(ui, "#tab");
-            cui_interact ti = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
-            if (ti.clicked || ti.keyboard_activate) {
-                if (st->query[0]) { st->query[0] = 0; st->jump = kind + 1; }   /* out of the search, then there */
-                else for (int i = 0; i < g.nsec; i++) if (g.sec[i].kind == kind) { st->target = cui__em_sec_top(&g, i); st->animating = true; }
-            }
-            int b = cui__leaf(ui, tid, CUI_FILL, CUI_PX(34));   /* the tabs share the width, so a phone fits all ten */
-            ui->nodes[b].max_w = 40;
-            cui__mark_interactive(ui, b, CUI_IF_FOCUSABLE);
-            ui->nodes[b].radius = CUI_CORNERS(8);
-            if (ti.hovered) ui->nodes[b].bg = CUI_C(ui, HOVER);
-            if (ti.focus_visible) cui__focus_ring(ui, b, 1);
-            cui__em_tab_paint *tp = cui__frame_alloc(ui, sizeof *tp);
-            memset(tp, 0, sizeof *tp);
-            tp->icon = kind == 0;
-            tp->s = kind == 0 ? CUI_ICON_CLOCK : cui__em_tab_icons[kind];
-            tp->len = (int)strlen(tp->s);
-            tp->alpha = kind == active_kind || ti.hovered ? 1 : 0.5f;
-            tp->active = kind == active_kind;
-            tp->bar = cui__emphasis(ui);
-            ui->nodes[b].paint = cui__paint_emoji_tab; ui->nodes[b].paint_data = tp;
-            cui_tooltip(ui, names[kind]);
-            cui_pop_id(ui);
-        }
-        cui__close(ui);
-    }
-    {
-        int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-        ui->nodes[line].bg = CUI_C(ui, BORDER_SUBTLE);
-    }
-    /* the grid */
-    int gn = cui__leaf(ui, gid, CUI_FILL, CUI_PX(view_h));
-    cui__mark_interactive(ui, gn, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
-    cui__em_paint *pp = cui__frame_alloc(ui, sizeof *pp);
-    memset(pp, 0, sizeof *pp);
-    pp->e = e; pp->st = st; pp->g = g; pp->items = st->items;
-    pp->recent = cui__frame_alloc(ui, sizeof recent);
-    memcpy(pp->recent, recent, sizeof recent);
-    pp->hover = hover; pp->cur = st->cur; pp->focus = in_grid && ui->focus_visible; pp->soft = in_search && st->query[0]; pp->top = st->top; pp->tone = *tone;
-    pp->names = names; pp->empty = o->empty_text ? o->empty_text : "No emoji found"; pp->none = !can; pp->wheel = wid;
-    pp->hover_bg = CUI_C(ui, HOVER); pp->header = CUI_C(ui, TEXT_MUTED); pp->ring = CUI_C(ui, FOCUS_RING);
-    ui->nodes[gn].paint = cui__paint_emoji_grid; ui->nodes[gn].paint_data = pp;
-    /* the preview: the emoji under the pointer, or the cursor's */
-    if (!o->no_preview) {
-        int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-        ui->nodes[line].bg = CUI_C(ui, BORDER_SUBTLE);
-        int row = cui__node_new(ui, 0);
-        cui_node *rn = &ui->nodes[row];
-        rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(48); rn->gap = 10; rn->pad[1] = rn->pad[3] = 12;
-        cui__open(ui, row);
-        int show = hover >= 0 ? hover : st->cur;
-        if (can && show >= 0 && show < st->nitems) {
-            cui__em_str t = cui__em_item_text(e, st, recent, st->items[show], *tone);
-            cui_emoji(ui, t.s, 28);
-            const char *name = "";
-            int nl = 0;
-            int v = st->items[show];
-            if (v >= 0) { name = e->data + e->recs[v].name; nl = e->recs[v].name_len; }
-            else {   /* a recent one: find its name, without the tone */
-                for (int i = 0; i < e->nrec && !nl; i++) {
-                    const cui__em_rec *rec = &e->recs[i];
-                    char tb[64];
-                    int tl = rec->len;
-                    if (tl == t.len && !memcmp(e->data + rec->text, t.s, (size_t)tl)) { name = e->data + rec->name; nl = rec->name_len; }
-                    else if (rec->tone) for (int k = 1; k <= 5 && !nl; k++) { tl = cui__em_toned(e->data + rec->text, rec->len, k, tb, sizeof tb); if (tl == t.len && !memcmp(tb, t.s, (size_t)tl)) { name = e->data + rec->name; nl = rec->name_len; } }
-                }
-            }
-            char cap[256];
-            int cl = CUI_MIN(nl, 255);
-            memcpy(cap, name, (size_t)cl); cap[cl] = 0;
-            if (cl && cap[0] >= 'a' && cap[0] <= 'z') cap[0] = (char)(cap[0] - 32);
-            int tn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(20));
-            cui__em_name_paint *np = cui__frame_alloc(ui, sizeof *np);
-            memcpy(np->s, cap, (size_t)cl + 1);
-            ui->nodes[tn].paint = cui__paint_emoji_name; ui->nodes[tn].paint_data = np;
-        } else if (can) {
-            int tn = cui__text_node(ui, o->hint ? o->hint : "Pick an emoji", -1, CUI_FONT_BODY, cui__fs(ui, 13), CUI_C(ui, TEXT_MUTED), false);
-            (void)tn;
-        }
-        cui__close(ui);
-    }
+    cui__em_build_top_row(&f);
+    cui__em_build_tabs(&f);
+    int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
+    ui->nodes[line].bg = CUI_C(ui, BORDER_SUBTLE);
+    cui__em_build_grid(&f);
+    if (!o->no_preview) cui__em_build_preview(&f);
     cui__close(ui);
     cui_pop_id(ui);
-    ui->last_id = id;
+    ui->last_id = f.id;
     return picked;
 }
