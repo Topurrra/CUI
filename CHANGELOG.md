@@ -7,6 +7,11 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 ### Added
 
 - `cui_set_strings(ui, &table)`: month names, short month names, weekday names and "Today" in another language, switched at runtime with one call (issue #11, by pdenapo). A partial table falls back to English for what it leaves out. The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser use it. The names used to be copied in seven files; they now live in one small file that only these components link. See [Integration](docs/integration.md#text-in-other-languages).
+- `web/tools/build.sh app my_app.c`: your own app compiled to WebAssembly and opened in the browser at `#/app/my_app`, beside its source (issue #14). Any app whose `main` calls `cui_app_run` builds unchanged. See [Getting started](docs/getting-started.md#run-in-the-browser).
+
+### Documentation
+
+- Getting started lists what to install on Windows, macOS and three Linux families, builds and runs an example from a fresh checkout, explains running in the browser and where Android and iOS stand, and has a troubleshooting table for the common build and startup problems (issue #3).
 
 ## 2026-11-08 · 1.2: phones, tablets, right to left and performance
 

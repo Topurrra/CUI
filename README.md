@@ -332,6 +332,7 @@ The library is compiled for dead code stripping, so apps only carry what they us
 | macOS 10.13+ | Cocoa (Retina, native menus, text input) | OpenGL 3.3+, layer software fallback | Apple clang |
 | Linux, BSD | X11 (XIM text input, HiDPI) | OpenGL 3.3 (GLX), XPutImage fallback | GCC, Clang |
 | Wayland and others | SDL2 or GLFW | OpenGL 3.3 | GCC |
+| Browser | WebAssembly, plain clang ([how](docs/getting-started.md#run-in-the-browser)) | WebGL2, or software | Docs site, every push |
 | Anything | Your own | Your own (one shader) | |
 
 Set `CUI_RENDERER=software` to force the software renderer and `CUI_SCALE=2` to override the display scale. To use CUI inside an engine with your own window and renderer, see [Integration](docs/integration.md) and [Rendering](docs/rendering.md).
@@ -344,6 +345,7 @@ CUI 1.2 is complete enough to build real desktop apps. Every push runs unit, int
 - **Complex scripts.** Text is UTF-8 with kerning and font fallback. The optional `CUI_TEXT_SHAPING` CMake option adds Arabic-script shaping, Unicode bidi and shaped paragraph wrapping for static text (see [integration](docs/integration.md#optional-arabic-script-text-shaping)). Screens mirror for right-to-left languages with `.direction = CUI_DIRECTION_RTL` ([layout](docs/layout.md)). Explicit embeddings, overrides and isolates are unsupported. It is off by default. Editing and other complex scripts remain outside this experimental path. CJK works once you add a fallback font.
 - **Inline IME composition.** Committed text from input methods works; the text being composed shows in the system's IME window.
 - **Native Wayland.** Use the SDL2 or GLFW backend, or XWayland.
+- **Phones.** Layouts adapt to phone widths and touch, and apps run in mobile browsers, but there is no Android or iOS platform layer yet.
 
 ## Documentation
 

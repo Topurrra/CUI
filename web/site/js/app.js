@@ -1238,7 +1238,9 @@ function viewApps() {
 
 const WIDTHS = [['Fill', 0], ['1440', 1440], ['1280', 1280], ['1024', 1024], ['768', 768], ['390', 390]];
 function viewApp(id) {
-  const a = CAT.apps.find((x) => x.id === id);
+  /* an app of the examples, or your own from web/tools/build.sh app */
+  const a = CAT.apps.find((x) => x.id === id) || (/^[\w-]+$/.test(id) &&
+    { id, title: id, summary: 'Your app, built with web/tools/build.sh app.', source: `user/${id}.c` });
   if (!a) return viewMissing();
   setNav('apps');
   let width = 0;

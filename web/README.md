@@ -15,6 +15,7 @@ web/tools/serve.sh            # builds on first run, then serves http://localhos
 web/tools/build.sh            # rebuild after changing the library, a scene or an example
 web/tools/build.sh scenes     # faster: only the component scenes
 PORT=9000 web/tools/serve.sh  # another port
+web/tools/build.sh app my_app.c   # your own app, at http://localhost:8765/#/app/my_app
 ```
 
 Building needs clang with the `wasm32` target, `wasm-ld`, `llvm-ar` and
@@ -49,8 +50,10 @@ remembered for the whole site.
   browser's `Math`.
 - `host/web_host.c`: the browser platform layer: contexts, input, clipboard,
   the software renderer and draw data for WebGL2.
-- `host/web_app.c`: `cui_app_run` for the browser, so `examples/*.c` build
-  unchanged (with `-Dmain=web_app_main`).
+- `host/web_app.c`: `cui_app_run` for the browser, so `examples/*.c`, and any
+  app whose `main` calls `cui_app_run`, build unchanged (with
+  `-Dmain=web_app_main`). `build.sh app` builds yours the same way and copies its
+  source beside it; the page opens any `#/app/<name>` it finds a module for.
 - `host/scenes_web.c`: serves the scene table of `tests/component_shots.c`
   (the scenes that render the documentation images) plus
   `host/extra_scenes.inc` for components without a documentation image.

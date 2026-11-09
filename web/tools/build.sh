@@ -3,6 +3,8 @@
 # clang + wasm-ld (no Emscripten, no sysroot), plus the page catalog.
 #   web/tools/build.sh            build everything
 #   web/tools/build.sh scenes     only the component scenes module
+#   web/tools/build.sh app my_app.c [more.c...]
+#                                 your own app (its main calls cui_app_run), opened at #/app/my_app
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -50,6 +52,28 @@ link() {   # name objs...
     wasm-ld "${LDFLAGS[@]}" "$@" "${BASE[@]}" -o "$SITE/wasm/$name.wasm"
     printf '  %-10s %6d KB\n' "$name" $(( $(stat -c %s "$SITE/wasm/$name.wasm") / 1024 ))
 }
+
+# your own app: built like the examples, served from the same page
+if [[ "${1:-}" == "app" ]]; then
+    shift
+    [[ $# -ge 1 ]] || { echo "usage: web/tools/build.sh app main.c [more.c...]"; exit 2; }
+    name=$(basename "${1%.c}")
+    objs=()
+    for s in "$@"; do
+        o="$OUT/obj/user_${name}_$(basename "${s%.c}").o"
+        "$CC" "${CFLAGS[@]}" -I "$(dirname "$s")" -Dmain=web_app_main -c "$s" -o "$o"
+        objs+=("$o")
+    done
+    link "$name" "${objs[@]}" "$OUT/obj/web_app.o"
+    mkdir -p "$SITE/src/user" && cp "$1" "$SITE/src/user/$name.c"   # shown beside the app
+    if [[ ! -f "$SITE/catalog.js" ]]; then
+        python3 "$HERE/tools/gen_catalog.py" "$ROOT" "$SITE/catalog.js"
+        ln -sfn "../../assets/fonts" "$SITE/fonts"
+        ln -sfn "../../docs/images" "$SITE/images"
+    fi
+    echo "done: serve web/site (web/tools/serve.sh) and open http://localhost:${PORT:-8765}/#/app/$name"
+    exit 0
+fi
 
 # 2. the component scenes (tests/component_shots.c plus a few web-only scenes)
 python3 "$HERE/tools/gen_scenes.py" "$ROOT" "$OUT/scenes_table.inc"

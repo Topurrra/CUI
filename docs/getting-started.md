@@ -4,11 +4,27 @@ This guide takes you from an empty folder to a working window, then explains the
 
 ## 1. Get CUI
 
-CUI is a regular CMake project with no external dependencies.
+CUI is a regular CMake project with no external dependencies. You need a C99 compiler and CMake 3.14 or newer:
+
+| System | Install |
+|---|---|
+| Windows | Visual Studio 2019 or newer with "Desktop development with C++" (it includes CMake), or MinGW-w64 and CMake |
+| macOS | `xcode-select --install`, then CMake (`brew install cmake`) |
+| Debian, Ubuntu | `sudo apt install build-essential cmake libx11-dev` |
+| Fedora | `sudo dnf install gcc cmake libX11-devel` |
+| Arch | `sudo pacman -S base-devel cmake libx11` |
+
+To check that everything works, build CUI and run the smallest example:
 
 ```sh
 git clone https://github.com/yappologistic/CUI.git
+cd CUI
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/examples/hello                 # Windows with Visual Studio: build\examples\Release\hello.exe
 ```
+
+`build/examples/` also holds the gallery, which shows every component, and complete apps (mail, notes, music, a dashboard). If something fails, see [Troubleshooting](#troubleshooting).
 
 ### With CMake (recommended)
 
@@ -201,6 +217,34 @@ CUI_SCREENSHOT=out.png CUI_SCREENSHOT_FRAMES=60 ./my_app
 ```
 
 For unit tests, skip the window entirely: create a context with the software renderer, feed input with `cui_input_*` and render into memory. `tests/test_main.c` shows the pattern.
+
+## Run in the browser
+
+CUI compiles to WebAssembly with plain clang: no Emscripten and no downloads. The [live docs](https://yappologistic.github.io/CUI/) are built this way, and your app can be too, unchanged, as long as its `main` hands its frame function to `cui_app_run` (as in the example above) instead of running its own loop. You need clang with the `wasm32` target, `wasm-ld`, `llvm-ar` and python3 (on Debian or Ubuntu: `sudo apt install clang lld llvm python3`).
+
+```sh
+web/tools/build.sh app path/to/my_app.c    # more .c files may follow
+web/tools/serve.sh                          # then open http://localhost:8765/#/app/my_app
+```
+
+The app runs on the docs site's page, beside its source, with the theme, renderer and width controls. `web/site/` is plain static files, so any web server can host it. The page draws with WebGL2, or with CUI's software renderer. Two things of the app layer do nothing in the browser yet: `cui_app_file_dialog` (it returns false) and `cui_app_open_url`. [`web/README.md`](../web/README.md) explains the pieces.
+
+Android and iOS are not supported yet. Each needs its own platform layer (an `android_native_app_glue` or UIKit window with touch input and an OpenGL ES or Metal renderer). The core already handles touch-sized layouts, phone widths and the software renderer, so it is a contained piece of work; until then, [Integration](integration.md) shows how to drive CUI from a window and renderer you provide.
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| CMake says `Could NOT find X11` | Install the X11 headers: `libx11-dev` (Debian, Ubuntu), `libX11-devel` (Fedora), `libx11` (Arch) |
+| `undefined reference to XOpenDisplay` (building without CMake) | Put `-lX11 -ldl -lm -lpthread` after the source files on the command line |
+| No window on Wayland without XWayland | Configure with `-DCUI_PLATFORM=sdl2` or `-DCUI_PLATFORM=glfw` (install `libsdl2-dev` or `libglfw3-dev`) |
+| Black or empty window, OpenGL errors (virtual machines, remote desktop, old drivers) | CUI falls back to its software renderer when OpenGL 3.3 cannot start; to force it, run with `CUI_RENDERER=software` |
+| Everything looks too small or too large | Run with `CUI_SCALE=1.5` (or any scale) to override what the display reports |
+| A console window opens next to the app (Windows) | Use `add_executable(my_app WIN32 main.c)`, and with MSVC link with `/ENTRY:mainCRTStartup` |
+| `cui_app_cocoa.m` fails to compile (macOS, without CMake) | Compile it with `-fobjc-arc` and link the Cocoa, QuartzCore and OpenGL frameworks |
+| Text is missing | With `CUI_DEFAULT_FONTS=OFF` there are no built-in fonts: load your own (see [Theming](theming.md)) |
+
+Still stuck? [Open an issue](https://github.com/yappologistic/CUI/issues) with your system, compiler, the CMake command and its full output.
 
 ## Environment variables
 
