@@ -449,6 +449,240 @@ static void cui__ne_finish_wire(cui_ctx *ui, cui__ne_state *st, const cui__ne_se
     if (!dup) { cui__ne_push(ui, &st->ev_new, out); cui__ne_push(ui, &st->ev_new, in); }
 }
 
+/* the wheel zooms around the pointer; a sideways scroll pans */
+static void cui__ne_wheel(cui_ctx *ui, cui__ne_build *b) {
+    if (!(b->has_rect && ui->scroll_target == cui__ne_scroll_id(b->id) && (ui->scroll_dy != 0 || ui->scroll_dx != 0))) return;
+    if (ui->scroll_dy != 0) cui__ne_zoom_at(b, b->z * powf(1.12f, ui->scroll_dy), ui->mx, ui->my);
+    if (ui->scroll_dx != 0) { b->view->x += ui->scroll_dx * 40.0f; b->ox = b->r.x + b->view->x; }
+    ui->scroll_dx = ui->scroll_dy = 0;
+}
+
+/* keys while the editor or one of its cards has focus: Delete, F frames everything, Ctrl+A,
+ * Escape, arrows move the selection, + - and 0 zoom */
+static void cui__ne_keys(cui_ctx *ui, cui__ne_build *b, const cui__ne_set *prev) {
+    cui__ne_state *st = b->st;
+    bool prim = (ui->mods & CUI_MOD_PRIMARY) != 0;
+    if (cui_key_pressed(ui, CUI_KEY_DELETE) || cui_key_pressed(ui, CUI_KEY_BACKSPACE)) {
+        cui__ne_delete_selection(ui, st, prev);
+        ui->kpressed[CUI_KEY_DELETE] = ui->kpressed[CUI_KEY_BACKSPACE] = 0;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_F) && !prim) { st->frame_all = true; ui->kpressed[CUI_KEY_F] = 0; }
+    if (prim && cui_key_pressed(ui, CUI_KEY_A)) {
+        st->sel.n = 0;
+        for (int i = 0; i < prev->node_n; i++) cui__ne_push(ui, &st->sel, prev->nodes[i].id);
+        ui->kpressed[CUI_KEY_A] = 0;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        if (st->mode == NE_WIRE || st->mode == NE_MARQUEE) st->mode = NE_IDLE;
+        else { st->sel.n = 0; st->link_selected = false; }
+        ui->kpressed[CUI_KEY_ESCAPE] = 0;
+    }
+    if (st->sel.n > 0) {
+        float step = (ui->mods & CUI_MOD_SHIFT) ? 1.0f : 10.0f;
+        if (cui_key_pressed(ui, CUI_KEY_LEFT)) { st->move_dx -= step; ui->kpressed[CUI_KEY_LEFT] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_RIGHT)) { st->move_dx += step; ui->kpressed[CUI_KEY_RIGHT] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_UP)) { st->move_dy -= step; ui->kpressed[CUI_KEY_UP] = 0; }
+        if (cui_key_pressed(ui, CUI_KEY_DOWN)) { st->move_dy += step; ui->kpressed[CUI_KEY_DOWN] = 0; }
+    }
+    float cx = b->r.x + b->r.w * 0.5f, cy = b->r.y + b->r.h * 0.5f;
+    if (cui_key_pressed(ui, CUI_KEY_EQUAL)) { cui__ne_zoom_at(b, b->z * 1.25f, cx, cy); ui->kpressed[CUI_KEY_EQUAL] = 0; }
+    if (cui_key_pressed(ui, CUI_KEY_MINUS)) { cui__ne_zoom_at(b, b->z / 1.25f, cx, cy); ui->kpressed[CUI_KEY_MINUS] = 0; }
+    if (cui_key_pressed(ui, CUI_KEY_0)) { cui__ne_zoom_at(b, 1.0f, cx, cy); ui->kpressed[CUI_KEY_0] = 0; }
+}
+
+/* zoom and pan so every node shows, with a margin, at most at 100% */
+static void cui__ne_frame_all(cui__ne_build *b, const cui__ne_set *prev) {
+    cui_node_view *view = b->view;
+    if (prev->node_n <= 0) return;
+    float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+    for (int i = 0; i < prev->node_n; i++) {
+        const cui__ne_node *nd = &prev->nodes[i];
+        bx0 = CUI_MIN(bx0, nd->x); by0 = CUI_MIN(by0, nd->y);
+        bx1 = CUI_MAX(bx1, nd->x + nd->w); by1 = CUI_MAX(by1, nd->y + nd->h);
+    }
+    float m = 40;
+    float nz = CUI_MIN((b->r.w - 2 * m) / CUI_MAX(1.0f, bx1 - bx0), (b->r.h - 2 * m) / CUI_MAX(1.0f, by1 - by0));
+    nz = cui__clampf(CUI_MIN(nz, 1.0f), b->min_zoom, b->max_zoom);
+    view->zoom = b->z = nz;
+    view->x = b->r.w * 0.5f - (bx0 + bx1) * 0.5f * nz;
+    view->y = b->r.h * 0.5f - (by0 + by1) * 0.5f * nz;
+    b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
+}
+
+/* dragging the selected nodes, after the press has moved far enough to be a drag */
+static void cui__ne_drag_nodes(cui_ctx *ui, cui__ne_build *b) {
+    cui__ne_state *st = b->st;
+    float mx = ui->mx, my = ui->my;
+    if (st->mode == NE_PEND_DRAG && ui->mdown[0]) {
+        float dx = mx - st->press_x, dy = my - st->press_y;
+        if (dx * dx + dy * dy > CUI__NE_DRAG * CUI__NE_DRAG) st->mode = NE_DRAG;
+    }
+    if (st->mode == NE_DRAG) {
+        st->move_dx += (mx - st->last_x) / b->z;
+        st->move_dy += (my - st->last_y) / b->z;
+        cui__set_cursor(ui, CUI_CURSOR_MOVE);
+        ui->animating = true;
+    }
+    st->last_x = mx; st->last_y = my;
+    if (!ui->mdown[0]) {
+        /* a plain click on one of several selected nodes selects just that one */
+        if (st->mode == NE_PEND_DRAG && !st->press_mod && st->press_was_sel) cui__ne_select_only(ui, st, st->press_node);
+        st->mode = NE_IDLE;
+    }
+}
+
+/* a marquee: selects the nodes it touches, added to what was selected when it started */
+static void cui__ne_marquee(cui_ctx *ui, cui__ne_build *b, const cui__ne_set *prev) {
+    cui__ne_state *st = b->st;
+    float mx = ui->mx, my = ui->my;
+    if (st->mode == NE_PEND_MARQUEE && ui->mdown[0]) {
+        float dx = mx - st->press_x, dy = my - st->press_y;
+        if (dx * dx + dy * dy > CUI__NE_DRAG * CUI__NE_DRAG) st->mode = NE_MARQUEE;
+    }
+    st->mq_x1 = (mx - b->ox) / b->z; st->mq_y1 = (my - b->oy) / b->z;
+    if (st->mode == NE_MARQUEE) {
+        float x0 = CUI_MIN(st->mq_x0, st->mq_x1), y0 = CUI_MIN(st->mq_y0, st->mq_y1);
+        float x1 = CUI_MAX(st->mq_x0, st->mq_x1), y1 = CUI_MAX(st->mq_y0, st->mq_y1);
+        st->sel.n = 0;
+        for (int i = 0; i < st->mq_base.n; i++) cui__ne_push(ui, &st->sel, st->mq_base.v[i]);
+        for (int i = 0; i < prev->node_n; i++) {
+            const cui__ne_node *nd = &prev->nodes[i];
+            bool hit = nd->x < x1 && nd->x + nd->w > x0 && nd->y < y1 && nd->y + nd->h > y0;
+            if (hit && !cui__ne_has(&st->sel, nd->id)) cui__ne_push(ui, &st->sel, nd->id);
+        }
+        ui->animating = true;
+    }
+    if (!ui->mdown[0]) st->mode = NE_IDLE;
+}
+
+/* a wire being pulled from a pin: it snaps to the nearest compatible pin; the release
+ * connects (or disconnects) */
+static void cui__ne_wire(cui_ctx *ui, cui__ne_build *b, const cui__ne_set *prev) {
+    cui__ne_state *st = b->st;
+    float mx = ui->mx, my = ui->my;
+    st->last_x = mx; st->last_y = my;
+    st->has_target = false;
+    float best = CUI__NE_SNAP;
+    for (int i = 0; i < prev->pin_n; i++) {
+        const cui__ne_pin *p = &prev->pins[i];
+        if (!cui__ne_compatible(st, p)) continue;
+        cui_vec2 s = cui__ne_screen(b, p->x, p->y);
+        float dd = hypotf(s.x - mx, s.y - my);
+        if (dd < best) { best = dd; st->has_target = true; st->target_pin = p->pin; }
+    }
+    ui->animating = true;
+    if (!ui->mdown[0]) {
+        cui__ne_finish_wire(ui, st, prev);
+        st->mode = NE_IDLE;
+        st->has_target = false;
+    }
+}
+
+/* the gesture in progress: pan, drag nodes, marquee, wire, or the minimap */
+static void cui__ne_gesture(cui_ctx *ui, cui__ne_build *b, const cui__ne_set *prev, cui_id mmid) {
+    cui__ne_state *st = b->st;
+    cui_node_view *view = b->view;
+    float mx = ui->mx, my = ui->my;
+    switch (st->mode) {
+    case NE_PAN:
+        if (!ui->mdown[CUI_MOUSE_MIDDLE] && !ui->mdown[0]) { st->mode = NE_IDLE; break; }
+        view->x += mx - st->last_x; view->y += my - st->last_y;
+        b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
+        st->last_x = mx; st->last_y = my;
+        ui->active = b->id;
+        cui__set_cursor(ui, CUI_CURSOR_MOVE);
+        break;
+    case NE_PEND_DRAG:
+    case NE_DRAG:
+        cui__ne_drag_nodes(ui, b);
+        break;
+    case NE_PEND_MARQUEE:
+    case NE_MARQUEE:
+        cui__ne_marquee(ui, b, prev);
+        break;
+    case NE_WIRE:
+        cui__ne_wire(ui, b, prev);
+        break;
+    case NE_MINIMAP:
+        if (!ui->mdown[0]) { st->mode = NE_IDLE; break; }
+        if (st->mm_valid && st->mm_s > 0) {
+            float cx = st->mm_bx + (mx - st->mm_x) / st->mm_s, cy = st->mm_by + (my - st->mm_y) / st->mm_s;
+            view->x = b->r.w * 0.5f - cx * b->z;
+            view->y = b->r.h * 0.5f - cy * b->z;
+            b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
+        }
+        ui->active = mmid;
+        break;
+    default: break;
+    }
+}
+
+/* the link within a few points of (mx, my), as an index into prev->links, or -1 */
+static int cui__ne_link_at(const cui__ne_build *b, const cui__ne_set *prev, float mx, float my) {
+    int hit_link = -1;
+    float best = 5.0f;
+    for (int i = 0; i < prev->link_n; i++) {
+        const cui__ne_pin *pa = cui__ne_find_pin(prev->pins, prev->pin_n, prev->links[i].from);
+        const cui__ne_pin *pd = cui__ne_find_pin(prev->pins, prev->pin_n, prev->links[i].to);
+        if (!pa || !pd) continue;
+        cui_vec2 pts[96];
+        int n = cui__ne_curve(cui__ne_screen(b, pa->x, pa->y), cui__ne_screen(b, pd->x, pd->y), b->z, pts, 96);
+        for (int k = 0; k + 1 < n; k++) {
+            float dd = cui__ne_seg_dist((cui_vec2){ mx, my }, pts[k], pts[k + 1]);
+            if (dd < best) { best = dd; hit_link = i; }
+        }
+    }
+    return hit_link;
+}
+
+/* a press on the empty canvas: a wire under it is selected, otherwise a marquee starts
+ * (Shift or Ctrl adds to the selection) */
+static void cui__ne_press_canvas(cui_ctx *ui, cui__ne_build *b, const cui__ne_set *prev) {
+    cui__ne_state *st = b->st;
+    float mx = ui->mx, my = ui->my;
+    b->consumed = true;
+    bool add = (ui->mods & (CUI_MOD_SHIFT | CUI_MOD_PRIMARY)) != 0;
+    int hit_link = cui__ne_link_at(b, prev, mx, my);
+    if (hit_link >= 0) {
+        if (!add) st->sel.n = 0;
+        st->link_selected = true;
+        st->sel_link = prev->links[hit_link].id;
+    } else {
+        st->link_selected = false;
+        st->mq_base.n = 0;
+        if (add) for (int i = 0; i < st->sel.n; i++) cui__ne_push(ui, &st->mq_base, st->sel.v[i]);
+        else st->sel.n = 0;
+        st->mode = NE_PEND_MARQUEE;
+        st->press_x = mx; st->press_y = my;
+        st->mq_x0 = st->mq_x1 = (mx - b->ox) / b->z;
+        st->mq_y0 = st->mq_y1 = (my - b->oy) / b->z;
+    }
+}
+
+/* the canvas node: the grid, wires and minimap are painted from b */
+static void cui__ne_build_canvas(cui_ctx *ui, cui__ne_build *b, const cui_node_editor_opts *o, bool focus_visible, bool hot_mine) {
+    int en = cui__node_new(ui, b->id);
+    cui_node *n = &ui->nodes[en];
+    bool dark = ui->mode == CUI_THEME_DARK;
+    n->w = o->width.kind == CUI_SIZE_FIT && o->width.value == 0 ? CUI_FILL : o->width;
+    n->h = o->height.kind == CUI_SIZE_FIT && o->height.value == 0 ? CUI_PX(440) : o->height;
+    n->bg = dark ? cui_mix(CUI_C(ui, BACKGROUND), CUI_C(ui, SURFACE), 0.45f) : CUI_C(ui, SURFACE_MUTED);
+    n->border = 1;
+    n->border_color = CUI_C(ui, BORDER);
+    n->radius = CUI_CORNERS(ui->theme.radius_panel);
+    n->flags |= CUI_NF_CLIP;
+    n->pad[0] = n->pad[1] = n->pad[2] = n->pad[3] = 12;
+    n->gap = 8;
+    n->align = CUI_ALIGN_START;
+    n->paint = cui__paint_ne_canvas;
+    n->paint_data = b;
+    cui__mark_interactive(ui, en, CUI_IF_FOCUSABLE);
+    b->bg_focus = focus_visible;
+    b->editor_node = en;
+    if (hot_mine && b->st->mode == NE_IDLE && ui->kdown[CUI_KEY_SPACE]) cui__set_cursor(ui, CUI_CURSOR_MOVE);
+    cui__open(ui, en);
+}
+
 bool cui_node_editor_begin_ex(cui_ctx *ui, const char *id_str, cui_node_view *view, const cui_node_editor_opts *o) {
     cui_node_editor_opts d;
     memset(&d, 0, sizeof d);
@@ -482,6 +716,7 @@ bool cui_node_editor_begin_ex(cui_ctx *ui, const char *id_str, cui_node_view *vi
     b->z = view->zoom;
     b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
 
+    /* is the pointer, or the focus, on this editor or one of its cards and pins? */
     cui_interact bi = cui__interact(ui, b->id, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     cui_id mmid = cui__ne_minimap_id(b->id);
     cui_interact mi = cui__interact(ui, mmid, CUI_IF_DRAG | CUI_IF_KEEP_FOCUS);
@@ -495,62 +730,13 @@ bool cui_node_editor_begin_ex(cui_ctx *ui, const char *id_str, cui_node_view *vi
     for (int i = 0; i < prev->pin_n && !hot_mine; i++) if (ui->hot == cui__ne_pin_id(b->id, prev->pins[i].pin)) hot_mine = true;
     float mx = ui->mx, my = ui->my;
 
-    /* the wheel zooms around the pointer; a sideways scroll pans */
-    if (b->has_rect && ui->scroll_target == cui__ne_scroll_id(b->id) && (ui->scroll_dy != 0 || ui->scroll_dx != 0)) {
-        if (ui->scroll_dy != 0) cui__ne_zoom_at(b, b->z * powf(1.12f, ui->scroll_dy), mx, my);
-        if (ui->scroll_dx != 0) { view->x += ui->scroll_dx * 40.0f; b->ox = b->r.x + view->x; }
-        ui->scroll_dx = ui->scroll_dy = 0;
-    }
-
-    /* keyboard: Delete, F, Ctrl+A, Esc, arrows, + - 0 */
-    if (focus_mine && !ui->edit_prev) {
-        bool prim = (ui->mods & CUI_MOD_PRIMARY) != 0;
-        if (cui_key_pressed(ui, CUI_KEY_DELETE) || cui_key_pressed(ui, CUI_KEY_BACKSPACE)) {
-            cui__ne_delete_selection(ui, st, prev);
-            ui->kpressed[CUI_KEY_DELETE] = ui->kpressed[CUI_KEY_BACKSPACE] = 0;
-        }
-        if (cui_key_pressed(ui, CUI_KEY_F) && !prim) { st->frame_all = true; ui->kpressed[CUI_KEY_F] = 0; }
-        if (prim && cui_key_pressed(ui, CUI_KEY_A)) {
-            st->sel.n = 0;
-            for (int i = 0; i < prev->node_n; i++) cui__ne_push(ui, &st->sel, prev->nodes[i].id);
-            ui->kpressed[CUI_KEY_A] = 0;
-        }
-        if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
-            if (st->mode == NE_WIRE || st->mode == NE_MARQUEE) st->mode = NE_IDLE;
-            else { st->sel.n = 0; st->link_selected = false; }
-            ui->kpressed[CUI_KEY_ESCAPE] = 0;
-        }
-        if (st->sel.n > 0) {
-            float step = (ui->mods & CUI_MOD_SHIFT) ? 1.0f : 10.0f;
-            if (cui_key_pressed(ui, CUI_KEY_LEFT)) { st->move_dx -= step; ui->kpressed[CUI_KEY_LEFT] = 0; }
-            if (cui_key_pressed(ui, CUI_KEY_RIGHT)) { st->move_dx += step; ui->kpressed[CUI_KEY_RIGHT] = 0; }
-            if (cui_key_pressed(ui, CUI_KEY_UP)) { st->move_dy -= step; ui->kpressed[CUI_KEY_UP] = 0; }
-            if (cui_key_pressed(ui, CUI_KEY_DOWN)) { st->move_dy += step; ui->kpressed[CUI_KEY_DOWN] = 0; }
-        }
-        float cx = b->r.x + b->r.w * 0.5f, cy = b->r.y + b->r.h * 0.5f;
-        if (cui_key_pressed(ui, CUI_KEY_EQUAL)) { cui__ne_zoom_at(b, b->z * 1.25f, cx, cy); ui->kpressed[CUI_KEY_EQUAL] = 0; }
-        if (cui_key_pressed(ui, CUI_KEY_MINUS)) { cui__ne_zoom_at(b, b->z / 1.25f, cx, cy); ui->kpressed[CUI_KEY_MINUS] = 0; }
-        if (cui_key_pressed(ui, CUI_KEY_0)) { cui__ne_zoom_at(b, 1.0f, cx, cy); ui->kpressed[CUI_KEY_0] = 0; }
-    }
+    /* input */
+    cui__ne_wheel(ui, b);
+    if (focus_mine && !ui->edit_prev) cui__ne_keys(ui, b, prev);
     if (st->frame_all && b->has_rect) {
         st->frame_all = false;
-        if (prev->node_n > 0) {
-            float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
-            for (int i = 0; i < prev->node_n; i++) {
-                const cui__ne_node *nd = &prev->nodes[i];
-                bx0 = CUI_MIN(bx0, nd->x); by0 = CUI_MIN(by0, nd->y);
-                bx1 = CUI_MAX(bx1, nd->x + nd->w); by1 = CUI_MAX(by1, nd->y + nd->h);
-            }
-            float m = 40;
-            float nz = CUI_MIN((b->r.w - 2 * m) / CUI_MAX(1.0f, bx1 - bx0), (b->r.h - 2 * m) / CUI_MAX(1.0f, by1 - by0));
-            nz = cui__clampf(CUI_MIN(nz, 1.0f), b->min_zoom, b->max_zoom);
-            view->zoom = b->z = nz;
-            view->x = b->r.w * 0.5f - (bx0 + bx1) * 0.5f * nz;
-            view->y = b->r.h * 0.5f - (by0 + by1) * 0.5f * nz;
-            b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
-        }
+        cui__ne_frame_all(b, prev);
     }
-
     /* pan: the middle button, or Space and drag, anywhere over the canvas */
     bool over = b->has_rect && cui__rect_contains(b->r, mx, my) && ui->hot_layer == ui->current_layer && (hot_mine || ui->hot != 0);
     if (over && st->mode == NE_IDLE && !ui->edit_prev &&
@@ -558,147 +744,17 @@ bool cui_node_editor_begin_ex(cui_ctx *ui, const char *id_str, cui_node_view *vi
         st->mode = NE_PAN; st->last_x = mx; st->last_y = my;
         b->consumed = true;
     }
-    switch (st->mode) {
-    case NE_PAN:
-        if (!ui->mdown[CUI_MOUSE_MIDDLE] && !ui->mdown[0]) { st->mode = NE_IDLE; break; }
-        view->x += mx - st->last_x; view->y += my - st->last_y;
-        b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
-        st->last_x = mx; st->last_y = my;
-        ui->active = b->id;
-        cui__set_cursor(ui, CUI_CURSOR_MOVE);
-        break;
-    case NE_PEND_DRAG:
-    case NE_DRAG:
-        if (st->mode == NE_PEND_DRAG && ui->mdown[0]) {
-            float dx = mx - st->press_x, dy = my - st->press_y;
-            if (dx * dx + dy * dy > CUI__NE_DRAG * CUI__NE_DRAG) st->mode = NE_DRAG;
-        }
-        if (st->mode == NE_DRAG) {
-            st->move_dx += (mx - st->last_x) / b->z;
-            st->move_dy += (my - st->last_y) / b->z;
-            cui__set_cursor(ui, CUI_CURSOR_MOVE);
-            ui->animating = true;
-        }
-        st->last_x = mx; st->last_y = my;
-        if (!ui->mdown[0]) {
-            /* a plain click on one of several selected nodes selects just that one */
-            if (st->mode == NE_PEND_DRAG && !st->press_mod && st->press_was_sel) cui__ne_select_only(ui, st, st->press_node);
-            st->mode = NE_IDLE;
-        }
-        break;
-    case NE_PEND_MARQUEE:
-    case NE_MARQUEE: {
-        if (st->mode == NE_PEND_MARQUEE && ui->mdown[0]) {
-            float dx = mx - st->press_x, dy = my - st->press_y;
-            if (dx * dx + dy * dy > CUI__NE_DRAG * CUI__NE_DRAG) st->mode = NE_MARQUEE;
-        }
-        st->mq_x1 = (mx - b->ox) / b->z; st->mq_y1 = (my - b->oy) / b->z;
-        if (st->mode == NE_MARQUEE) {
-            float x0 = CUI_MIN(st->mq_x0, st->mq_x1), y0 = CUI_MIN(st->mq_y0, st->mq_y1);
-            float x1 = CUI_MAX(st->mq_x0, st->mq_x1), y1 = CUI_MAX(st->mq_y0, st->mq_y1);
-            st->sel.n = 0;
-            for (int i = 0; i < st->mq_base.n; i++) cui__ne_push(ui, &st->sel, st->mq_base.v[i]);
-            for (int i = 0; i < prev->node_n; i++) {
-                const cui__ne_node *nd = &prev->nodes[i];
-                bool hit = nd->x < x1 && nd->x + nd->w > x0 && nd->y < y1 && nd->y + nd->h > y0;
-                if (hit && !cui__ne_has(&st->sel, nd->id)) cui__ne_push(ui, &st->sel, nd->id);
-            }
-            ui->animating = true;
-        }
-        if (!ui->mdown[0]) st->mode = NE_IDLE;
-        break;
-    }
-    case NE_WIRE: {
-        st->last_x = mx; st->last_y = my;
-        st->has_target = false;
-        float best = CUI__NE_SNAP;
-        for (int i = 0; i < prev->pin_n; i++) {
-            const cui__ne_pin *p = &prev->pins[i];
-            if (!cui__ne_compatible(st, p)) continue;
-            cui_vec2 s = cui__ne_screen(b, p->x, p->y);
-            float dd = hypotf(s.x - mx, s.y - my);
-            if (dd < best) { best = dd; st->has_target = true; st->target_pin = p->pin; }
-        }
-        ui->animating = true;
-        if (!ui->mdown[0]) {
-            cui__ne_finish_wire(ui, st, prev);
-            st->mode = NE_IDLE;
-            st->has_target = false;
-        }
-        break;
-    }
-    case NE_MINIMAP:
-        if (!ui->mdown[0]) { st->mode = NE_IDLE; break; }
-        if (st->mm_valid && st->mm_s > 0) {
-            float cx = st->mm_bx + (mx - st->mm_x) / st->mm_s, cy = st->mm_by + (my - st->mm_y) / st->mm_s;
-            view->x = b->r.w * 0.5f - cx * b->z;
-            view->y = b->r.h * 0.5f - cy * b->z;
-            b->ox = b->r.x + view->x; b->oy = b->r.y + view->y;
-        }
-        ui->active = mmid;
-        break;
-    default: break;
-    }
+    cui__ne_gesture(ui, b, prev, mmid);
     if (mi.hovered && ui->mpressed[0] && !b->consumed && st->mode == NE_IDLE) {
         st->mode = NE_MINIMAP;
         b->consumed = true;
     }
-    /* a press on the empty canvas: a wire under it is selected, otherwise a marquee starts */
-    if (bi.hovered && ui->mpressed[0] && !b->consumed && st->mode == NE_IDLE) {
-        b->consumed = true;
-        bool add = (ui->mods & (CUI_MOD_SHIFT | CUI_MOD_PRIMARY)) != 0;
-        int hit_link = -1;
-        float best = 5.0f;
-        for (int i = 0; i < prev->link_n; i++) {
-            const cui__ne_pin *pa = cui__ne_find_pin(prev->pins, prev->pin_n, prev->links[i].from);
-            const cui__ne_pin *pd = cui__ne_find_pin(prev->pins, prev->pin_n, prev->links[i].to);
-            if (!pa || !pd) continue;
-            cui_vec2 pts[96];
-            int n = cui__ne_curve(cui__ne_screen(b, pa->x, pa->y), cui__ne_screen(b, pd->x, pd->y), b->z, pts, 96);
-            for (int k = 0; k + 1 < n; k++) {
-                float dd = cui__ne_seg_dist((cui_vec2){ mx, my }, pts[k], pts[k + 1]);
-                if (dd < best) { best = dd; hit_link = i; }
-            }
-        }
-        if (hit_link >= 0) {
-            if (!add) st->sel.n = 0;
-            st->link_selected = true;
-            st->sel_link = prev->links[hit_link].id;
-        } else {
-            st->link_selected = false;
-            st->mq_base.n = 0;
-            if (add) for (int i = 0; i < st->sel.n; i++) cui__ne_push(ui, &st->mq_base, st->sel.v[i]);
-            else st->sel.n = 0;
-            st->mode = NE_PEND_MARQUEE;
-            st->press_x = mx; st->press_y = my;
-            st->mq_x0 = st->mq_x1 = (mx - b->ox) / b->z;
-            st->mq_y0 = st->mq_y1 = (my - b->oy) / b->z;
-        }
-    }
+    if (bi.hovered && ui->mpressed[0] && !b->consumed && st->mode == NE_IDLE) cui__ne_press_canvas(ui, b, prev);
     if (st->mode != NE_IDLE && st->mode != NE_PAN && st->mode != NE_MINIMAP && ui->mdown[0] && ui->active == 0) ui->active = b->id;
     cui__spring(ui, &st->lift, st->mode == NE_DRAG ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
 
-    /* the canvas */
-    int en = cui__node_new(ui, b->id);
-    cui_node *n = &ui->nodes[en];
-    bool dark = ui->mode == CUI_THEME_DARK;
-    n->w = o->width.kind == CUI_SIZE_FIT && o->width.value == 0 ? CUI_FILL : o->width;
-    n->h = o->height.kind == CUI_SIZE_FIT && o->height.value == 0 ? CUI_PX(440) : o->height;
-    n->bg = dark ? cui_mix(CUI_C(ui, BACKGROUND), CUI_C(ui, SURFACE), 0.45f) : CUI_C(ui, SURFACE_MUTED);
-    n->border = 1;
-    n->border_color = CUI_C(ui, BORDER);
-    n->radius = CUI_CORNERS(ui->theme.radius_panel);
-    n->flags |= CUI_NF_CLIP;
-    n->pad[0] = n->pad[1] = n->pad[2] = n->pad[3] = 12;
-    n->gap = 8;
-    n->align = CUI_ALIGN_START;
-    n->paint = cui__paint_ne_canvas;
-    n->paint_data = b;
-    cui__mark_interactive(ui, en, CUI_IF_FOCUSABLE);
-    b->bg_focus = bi.focus_visible;
-    b->editor_node = en;
-    if (hot_mine && st->mode == NE_IDLE && ui->kdown[CUI_KEY_SPACE]) cui__set_cursor(ui, CUI_CURSOR_MOVE);
-    cui__open(ui, en);
+    /* build */
+    cui__ne_build_canvas(ui, b, o, bi.focus_visible, hot_mine);
     cui_push_id(ui, id_str ? id_str : "node-editor");
     b->prev = reg->cur;
     reg->cur = b;
