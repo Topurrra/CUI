@@ -130,6 +130,45 @@ static void cui__fl_unit(double step, double *unit, const char **name, int *dec)
     *dec = CUI_CLAMP(d, 0, 3);
 }
 
+/* The time ruler: ticks a nice step apart with their labels, inside `rr` (its bottom edge is the
+ * baseline), and grid lines `grid_h` tall below it. Time t sits at px0 + (t - t0) * pw / (t1 - t0);
+ * labels count from `origin`. Returns the step. */
+static double cui__fl_ruler(cui_ctx *ui, cui_rect rr, float px0, float pw, double t0, double t1, double origin, float grid_h) {
+    double range = t1 - t0;
+    float k = (float)(pw / range);
+    float fs = cui__fs(ui, ui->theme.text_xs);
+    double unit; const char *uname; int dec;
+    float min_px = 72;
+    double step = cui__fl_nice(range * min_px / pw);
+    cui__fl_unit(step, &unit, &uname, &dec);
+    /* wide labels ("12.42 ms") need more room: thin the ticks until they fit */
+    for (int guard = 0; guard < 4; guard++) {
+        const char *wl = cui__frame_printf(ui, "%.*f %s", dec, (t1 - origin) / unit, uname);
+        float lw = cui__text_width(ui, CUI_FONT_BODY, fs, wl, -1, true);
+        if ((float)(step * k) >= lw + 16) break;
+        step = cui__fl_nice(step * 1.01 * 2);
+        cui__fl_unit(step, &unit, &uname, &dec);
+    }
+    double first = ceil((t0 - origin) / step - 1e-9);
+    double last = floor((t1 - origin) / step + 1e-9);
+    float fh = cui__font_line_height(ui, CUI_FONT_BODY, fs);
+    cui_color grid = cui_alpha(CUI_C(ui, BORDER_SUBTLE), ui->mode == CUI_THEME_DARK ? 0.8f : 1.0f);
+    for (double q = first; q <= last && q - first < 400; q += 1) {
+        double t = origin + q * step;
+        float x = px0 + (float)((t - t0) * k);
+        x = floorf(x);
+        if (grid_h > 0) cui_draw_rect(ui, (cui_rect){ x, rr.y + rr.h + 1, 1, grid_h }, CUI_CORNERS(0), grid);
+        cui_draw_rect(ui, (cui_rect){ x, rr.y + rr.h - 5, 1, 5 }, CUI_CORNERS(0), CUI_C(ui, BORDER_STRONG));
+        double v = q * step / unit;
+        if (fabs(v) < 1e-9) v = 0;
+        const char *lbl = cui__frame_printf(ui, "%.*f %s", dec, v, uname);
+        float lw = cui__text_width(ui, CUI_FONT_BODY, fs, lbl, -1, true);
+        if (x + 4 + lw <= rr.x + rr.w - 6)
+            cui__draw_text_line(ui, CUI_FONT_BODY, fs, x + 4, rr.y + (rr.h - 4 - fh) * 0.5f, CUI_C(ui, TEXT_MUTED), lbl, -1, true);
+    }
+    return step;
+}
+
 /* ---- painting ---- */
 
 static void cui__fl_push(cui_ctx *ui, cui__fl_paint *p, const cui__fl_item *it) {
@@ -203,38 +242,7 @@ static void cui__paint_flame(cui_ctx *ui, cui_node *n, void *data) {
     cui_corners rc = { rad - 1, rad - 1, 0, 0 };
     cui_draw_rect(ui, (cui_rect){ r.x, r.y, r.w, CUI__FL_RULER }, rc, CUI_C(ui, SURFACE_MUTED));
     cui_draw_rect(ui, (cui_rect){ r.x, r.y + CUI__FL_RULER, r.w, 1 }, CUI_CORNERS(0), CUI_C(ui, BORDER));
-    float fs = cui__fs(ui, ui->theme.text_xs);
-    if (k > 0) {
-        double unit; const char *uname; int dec;
-        float min_px = 72;
-        double step = cui__fl_nice(range * min_px / pw);
-        cui__fl_unit(step, &unit, &uname, &dec);
-        /* wide labels ("12.42 ms") need more room: thin the ticks until they fit */
-        for (int guard = 0; guard < 4; guard++) {
-            const char *wl = cui__frame_printf(ui, "%.*f %s", dec, (p->t1 - p->origin) / unit, uname);
-            float lw = cui__text_width(ui, CUI_FONT_BODY, fs, wl, -1, true);
-            if ((float)(step * k) >= lw + 16) break;
-            step = cui__fl_nice(step * 1.01 * 2);
-            cui__fl_unit(step, &unit, &uname, &dec);
-        }
-        double first = ceil((p->t0 - p->origin) / step - 1e-9);
-        double last = floor((p->t1 - p->origin) / step + 1e-9);
-        float fh = cui__font_line_height(ui, CUI_FONT_BODY, fs);
-        cui_color grid = cui_alpha(CUI_C(ui, BORDER_SUBTLE), ui->mode == CUI_THEME_DARK ? 0.8f : 1.0f);
-        for (double q = first; q <= last && q - first < 400; q += 1) {
-            double t = p->origin + q * step;
-            float x = px0 + (float)((t - p->t0) * k);
-            x = floorf(x);
-            cui_draw_rect(ui, (cui_rect){ x, r.y + CUI__FL_RULER + 1, 1, r.h - CUI__FL_RULER - 2 }, CUI_CORNERS(0), grid);
-            cui_draw_rect(ui, (cui_rect){ x, r.y + CUI__FL_RULER - 5, 1, 5 }, CUI_CORNERS(0), CUI_C(ui, BORDER_STRONG));
-            double v = q * step / unit;
-            if (fabs(v) < 1e-9) v = 0;
-            const char *lbl = cui__frame_printf(ui, "%.*f %s", dec, v, uname);
-            float lw = cui__text_width(ui, CUI_FONT_BODY, fs, lbl, -1, true);
-            if (x + 4 + lw <= r.x + r.w - 6)
-                cui__draw_text_line(ui, CUI_FONT_BODY, fs, x + 4, r.y + (CUI__FL_RULER - 4 - fh) * 0.5f, CUI_C(ui, TEXT_MUTED), lbl, -1, true);
-        }
-    }
+    if (k > 0) cui__fl_ruler(ui, (cui_rect){ r.x, r.y, r.w, CUI__FL_RULER }, px0, pw, p->t0, p->t1, p->origin, r.h - CUI__FL_RULER - 2);
     /* rows */
     cui_push_clip(ui, body);
     for (int i = 0; i < p->n; i++) cui__fl_bar(ui, p, &p->items[i], px0, k, body_y, body, false);
