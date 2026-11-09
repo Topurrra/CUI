@@ -340,31 +340,41 @@ static void cui__fb_default_places(char (*out)[CUI__FB_PATH], const char **label
 #endif
 }
 
-cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, char *path, size_t path_cap, const cui_file_browser_opts *o) {
-    cui_file_browser_opts d;
-    memset(&d, 0, sizeof d);
-    if (!o) o = &d;
-    cui_file_browser_result res = { NULL, NULL, false, false };
-    if (!path || path_cap < 2) return res;
-    cui_id id = cui_make_id(ui, id_str ? id_str : "files");
-    cui__fb_state *s = cui_state(ui, id, sizeof *s);
-    cui__state_set_dtor(ui, id, cui__fb_dtor);
-    if (!*path) snprintf(path, path_cap, ".");
-    if (!s->init) { s->sel = -1; s->init = true; }
-    char before[CUI__FB_PATH];
-    snprintf(before, sizeof before, "%s", path);
-    if (s->reload || strcmp(s->loaded, path) != 0) { cui__fb_load(ui, s, path, o); s->reload = false; }
-    cui__fb_order(ui, s, o);
-    cui_push_id(ui, id_str ? id_str : "files");
-    cui_rect pr = cui__prev_rect(ui, id);
-    bool narrow = pr.w > 0 && pr.w < 560, tiny = pr.w > 0 && pr.w < 380;
-    int col = cui__node_new(ui, id);
-    cui_node *cn = &ui->nodes[col];
-    cn->w = o->width.kind ? o->width : CUI_FILL;
-    cn->h = o->height.kind ? o->height : CUI_PX(380);
-    cn->self_align = CUI_ALIGN_STRETCH; cn->gap = 8;
-    cui__open(ui, col);
-    /* toolbar: back, forward, up, the path and the filter */
+/* one frame of the browser: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_file_browser_opts *o;
+    cui__fb_state *s;
+    cui_id id, lid;                    /* the browser, its list */
+    char *path; size_t path_cap;
+    cui_rect pr;                       /* the browser, last frame */
+    bool narrow, tiny;                 /* narrow drops the places and the date, tiny the size and the filter */
+    float fs, fx;                      /* text sizes: names, and the small print */
+    cui_interact lr;                   /* the list */
+    /* what the user asked for this frame, carried out at the end */
+    bool go_back, go_fwd, go_up, reload;
+    const char *go_to;
+    int picked;                        /* an entry opened by Enter or a double click */
+    cui_path_bar_result pb;
+    int nseg, root_len; size_t plen;   /* the path bar's segments */
+} cui__fb_frame;
+
+/* the path up to and including segment `seg` of the path bar */
+static void cui__fb_path_prefix(const char *path, int root_len, size_t plen, int seg, char *out, size_t cap) {
+    size_t k = (size_t)root_len;
+    int seen = root_len ? 1 : 0;
+    while (seen <= seg && k < plen) {
+        while (k < plen && cui__is_sep(path[k])) k++;
+        while (k < plen && !cui__is_sep(path[k])) k++;
+        seen++;
+    }
+    snprintf(out, cap, "%.*s", (int)(k ? k : 1), path);
+}
+
+/* toolbar: back, forward, up, the path as segments, the filter and reload */
+static void cui__fb_build_toolbar(cui__fb_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__fb_state *s = f->s;
     int bar = cui__node_new(ui, 0);
     ui->nodes[bar].dir = CUI_ROW; ui->nodes[bar].gap = 4; ui->nodes[bar].align = CUI_ALIGN_CENTER; ui->nodes[bar].w = CUI_FILL;
     cui__open(ui, bar);
@@ -372,15 +382,15 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
     memset(&bo, 0, sizeof bo);
     bo.size = CUI_SIZE_SM; bo.variant = CUI_BUTTON_GHOST;
     bo.tooltip = "Back"; bo.disabled = s->hpos <= 0;
-    bool go_back = cui_icon_button_ex(ui, CUI_ICON_ARROW_LEFT, &bo);
+    f->go_back = cui_icon_button_ex(ui, CUI_ICON_ARROW_LEFT, &bo);
     bo.tooltip = "Forward"; bo.disabled = s->hpos >= s->hn - 1;
-    bool go_fwd = cui_icon_button_ex(ui, CUI_ICON_ARROW_RIGHT, &bo);
+    f->go_fwd = cui_icon_button_ex(ui, CUI_ICON_ARROW_RIGHT, &bo);
     bo.tooltip = "Up"; bo.disabled = false;
-    bool go_up = cui_icon_button_ex(ui, CUI_ICON_ARROW_UP, &bo);
+    f->go_up = cui_icon_button_ex(ui, CUI_ICON_ARROW_UP, &bo);
     /* the path as segments; the root is its own segment */
     const char *segs[64];
     int nseg = 0;
-    char *pcopy = cui__frame_strdup(ui, path, -1);
+    char *pcopy = cui__frame_strdup(ui, f->path, -1);
     size_t plen = strlen(pcopy);
     int root_len = plen && cui__is_sep(pcopy[0]) ? 1 : (plen >= 2 && pcopy[1] == ':') ? (plen >= 3 && cui__is_sep(pcopy[2]) ? 3 : 2) : 0;
     if (root_len) segs[nseg++] = cui__frame_strdup(ui, pcopy, root_len);
@@ -392,77 +402,68 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
         segs[nseg++] = cui__frame_strdup(ui, p, (int)(e - p));
         p = e;
     }
-    if (nseg == 0) segs[nseg++] = path;
+    if (nseg == 0) segs[nseg++] = f->path;
     cui_path_bar_opts po;
     memset(&po, 0, sizeof po);
-    po.text = path; po.size = CUI_SIZE_SM;
-    cui_path_bar_result pb = cui_path_bar_ex(ui, "path", segs, nseg, &po);
-    if (!tiny) {
+    po.text = f->path; po.size = CUI_SIZE_SM;
+    f->pb = cui_path_bar_ex(ui, "path", segs, nseg, &po);
+    f->nseg = nseg; f->root_len = root_len; f->plen = plen;
+    if (!f->tiny) {
         cui_input_opts io;
         memset(&io, 0, sizeof io);
-        io.placeholder = "Filter"; io.icon = CUI_ICON_SEARCH; io.width = CUI_PX(narrow ? 120 : 180); io.clearable = true;
+        io.placeholder = "Filter"; io.icon = CUI_ICON_SEARCH; io.width = CUI_PX(f->narrow ? 120 : 180); io.clearable = true;
         cui_input_ex(ui, "filter", s->query, sizeof s->query, &io);
     }
     bo.tooltip = "Reload (F5)";
-    bool reload = cui_icon_button_ex(ui, CUI_ICON_REFRESH_CW, &bo);
+    f->reload = cui_icon_button_ex(ui, CUI_ICON_REFRESH_CW, &bo);
     cui__close(ui);
-    /* body: places and the list */
-    int body = cui__node_new(ui, 0);
-    ui->nodes[body].dir = CUI_ROW; ui->nodes[body].gap = 8; ui->nodes[body].w = CUI_FILL; ui->nodes[body].h = CUI_FILL;
-    ui->nodes[body].align = CUI_ALIGN_STRETCH;
-    cui__open(ui, body);
-    const char *go_to = NULL;
-    if (!o->no_places && !narrow) {
-        char (*dplaces)[CUI__FB_PATH] = cui__frame_alloc(ui, sizeof(char[CUI__FB_PATH]) * 6);
-        const char *dlabels[6];
-        int np = 0;
-        const char *const *places = o->places;
-        if (!places) {
-            cui__fb_default_places(dplaces, dlabels, &np);
-        } else np = CUI_MIN(o->place_count, 6);
-        int side = cui__node_new(ui, 0);
-        ui->nodes[side].w = CUI_PX(150); ui->nodes[side].gap = 1;
-        cui__open(ui, side);
-        for (int k = 0; k < np; k++) {
-            const char *pp = places ? places[k] : dplaces[k];
-            const char *label = places ? pp : dlabels[k];
-            if (places) { const char *sl = pp + strlen(pp); while (sl > pp && !cui__is_sep(sl[-1])) sl--; if (*sl) label = sl; }
-            cui_id pid = cui__hash_str(pp, id ^ 0x91ACu);
-            cui_interact pr2 = cui__interact(ui, pid, CUI_IF_FOCUSABLE);
-            bool here = !strcmp(pp, path);
-            if (pr2.clicked || pr2.keyboard_activate) go_to = pp;
-            int row = cui__node_new(ui, pid);
-            cui_node *rn = &ui->nodes[row];
-            rn->dir = CUI_ROW; rn->gap = 8; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(28);
-            rn->pad[1] = rn->pad[3] = 8;
-            rn->radius = CUI_CORNERS(ui->theme.radius_control);
-            rn->bg = here ? CUI_C(ui, ACTIVE) : pr2.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
-            cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
-            cui__focus_ring(ui, row, pr2.focus_visible ? 1.0f : 0.0f);
-            if (pr2.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
-            cui__open(ui, row);
-            const char *icon = !places && k == 0 ? CUI_ICON_HOUSE : !places && k == np - 1 ? CUI_ICON_MONITOR : !places && k == 3 ? CUI_ICON_DOWNLOAD : CUI_ICON_FOLDER;
-            cui__icon_node(ui, icon, 15, here ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
-            int t = cui__text_node(ui, label, -1, here ? CUI_FONT_MEDIUM : CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, FOREGROUND), false);
-            ui->nodes[t].w = CUI_FILL; ui->nodes[t].line_height = 1.3f;
-            cui__close(ui);
-        }
+}
+
+/* the places beside the list: the app's, or home, desktop, documents, downloads and the root */
+static void cui__fb_build_places(cui__fb_frame *f) {
+    cui_ctx *ui = f->ui;
+    const cui_file_browser_opts *o = f->o;
+    char (*dplaces)[CUI__FB_PATH] = cui__frame_alloc(ui, sizeof(char[CUI__FB_PATH]) * 6);
+    const char *dlabels[6];
+    int np = 0;
+    const char *const *places = o->places;
+    if (!places) {
+        cui__fb_default_places(dplaces, dlabels, &np);
+    } else np = CUI_MIN(o->place_count, 6);
+    int side = cui__node_new(ui, 0);
+    ui->nodes[side].w = CUI_PX(150); ui->nodes[side].gap = 1;
+    cui__open(ui, side);
+    for (int k = 0; k < np; k++) {
+        const char *pp = places ? places[k] : dplaces[k];
+        const char *label = places ? pp : dlabels[k];
+        if (places) { const char *sl = pp + strlen(pp); while (sl > pp && !cui__is_sep(sl[-1])) sl--; if (*sl) label = sl; }
+        cui_id pid = cui__hash_str(pp, f->id ^ 0x91ACu);
+        cui_interact pr2 = cui__interact(ui, pid, CUI_IF_FOCUSABLE);
+        bool here = !strcmp(pp, f->path);
+        if (pr2.clicked || pr2.keyboard_activate) f->go_to = pp;
+        int row = cui__node_new(ui, pid);
+        cui_node *rn = &ui->nodes[row];
+        rn->dir = CUI_ROW; rn->gap = 8; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(28);
+        rn->pad[1] = rn->pad[3] = 8;
+        rn->radius = CUI_CORNERS(ui->theme.radius_control);
+        rn->bg = here ? CUI_C(ui, ACTIVE) : pr2.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
+        cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
+        cui__focus_ring(ui, row, pr2.focus_visible ? 1.0f : 0.0f);
+        if (pr2.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+        cui__open(ui, row);
+        const char *icon = !places && k == 0 ? CUI_ICON_HOUSE : !places && k == np - 1 ? CUI_ICON_MONITOR : !places && k == 3 ? CUI_ICON_DOWNLOAD : CUI_ICON_FOLDER;
+        cui__icon_node(ui, icon, 15, here ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
+        int t = cui__text_node(ui, label, -1, here ? CUI_FONT_MEDIUM : CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, FOREGROUND), false);
+        ui->nodes[t].w = CUI_FILL; ui->nodes[t].line_height = 1.3f;
         cui__close(ui);
     }
-    /* the list: a header that sorts, then the rows in view */
-    cui_id lid = id ^ 0x115Du;
-    cui_interact lr = cui__interact(ui, lid, CUI_IF_FOCUSABLE);
-    int list = cui__node_new(ui, lid);
-    cui_node *ln = &ui->nodes[list];
-    ln->w = CUI_FILL; ln->h = CUI_FILL; ln->gap = 0;
-    ln->border = 1; ln->border_color = CUI_C(ui, BORDER);
-    ln->radius = CUI_CORNERS(ui->theme.radius_control);
-    ln->bg = CUI_C(ui, SURFACE);
-    ln->flags |= CUI_NF_CLIP;
-    cui__mark_interactive(ui, list, CUI_IF_FOCUSABLE);
-    cui__focus_ring(ui, list, lr.focus_visible ? 1.0f : 0.0f);
-    cui__open(ui, list);
-    float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
+    cui__close(ui);
+}
+
+/* the column titles: a click sorts by that column, again reverses it */
+static void cui__fb_build_header(cui__fb_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__fb_state *s = f->s;
     int head = cui__node_new(ui, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].align = CUI_ALIGN_CENTER; ui->nodes[head].w = CUI_FILL; ui->nodes[head].h = CUI_PX(30);
     ui->nodes[head].pad[1] = 12; ui->nodes[head].pad[3] = 12; ui->nodes[head].gap = 12;
@@ -470,8 +471,8 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
     cui__open(ui, head);
     static const char *titles[3] = { "Name", "Date modified", "Size" };
     for (int k = 0; k < 3; k++) {
-        if ((k == 1 && narrow) || (k == 2 && tiny)) continue;
-        cui_id hid = id ^ (0x4EAD0u + (unsigned)k);
+        if ((k == 1 && f->narrow) || (k == 2 && f->tiny)) continue;
+        cui_id hid = f->id ^ (0x4EAD0u + (unsigned)k);
         cui_interact hr = cui__interact(ui, hid, 0);
         if (hr.clicked) { if (s->sort == k) s->desc = !s->desc; else { s->sort = k; s->desc = false; } }
         int c = cui__node_new(ui, hid);
@@ -482,7 +483,7 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
         cui__mark_interactive(ui, c, 0);
         if (hr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
         cui__open(ui, c);
-        int t = cui__text_node(ui, titles[k], -1, CUI_FONT_MEDIUM, fx, s->sort == k || hr.hovered ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY), false);
+        int t = cui__text_node(ui, titles[k], -1, CUI_FONT_MEDIUM, f->fx, s->sort == k || hr.hovered ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY), false);
         ui->nodes[t].line_height = 1.3f;
         if (s->sort == k) cui__icon_node(ui, s->desc ? CUI_ICON_ARROW_DOWN : CUI_ICON_ARROW_UP, 12, CUI_C(ui, FOREGROUND));
         cui__close(ui);
@@ -490,46 +491,52 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
     cui__close(ui);
     int line = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
     ui->nodes[line].bg = CUI_C(ui, BORDER);
-    /* keys on the list */
-    int pos = -1;   /* the selection's place in the order */
+}
+
+/* the next entry, from the selection on, whose name starts with what was typed (ASCII, any case) */
+static int cui__fb_type_ahead(cui__fb_state *s, int pos) {
+    int start = s->typed_n == 1 ? pos + 1 : CUI_MAX(pos, 0);
+    for (int j = 0; j < s->norder; j++) {
+        int k = (start + j) % s->norder;
+        const char *nm = s->ent[s->order[k]].name;
+        bool ok = true;
+        for (int c = 0; c < s->typed_n && ok; c++) ok = cui__ascii_lower((unsigned char)nm[c]) == cui__ascii_lower((unsigned char)s->typed[c]);
+        if (ok) return k;
+    }
+    return -1;
+}
+
+/* keys: on the list (arrows, pages, Home, End, Enter, type-ahead, Backspace), and anywhere
+ * when nothing else has focus (Alt+arrows for history, F5) */
+static void cui__fb_keys(cui__fb_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__fb_state *s = f->s;
+    int pos = -1;
     for (int k = 0; k < s->norder; k++) if (s->order[k] == s->sel) { pos = k; break; }
-    int picked = -1;
-    if (lr.focused && s->norder > 0) {
-        int np = pos, page = (int)CUI_MAX(1.0f, (pr.h - 80) / CUI__FB_ROW);
+    if (f->lr.focused && s->norder > 0) {
+        int np = pos, page = (int)CUI_MAX(1.0f, (f->pr.h - 80) / CUI__FB_ROW);
         if (cui_key_pressed(ui, CUI_KEY_DOWN)) np = pos < 0 ? 0 : pos + 1;
         if (cui_key_pressed(ui, CUI_KEY_UP)) np = pos < 0 ? 0 : pos - 1;
         if (cui_key_pressed(ui, CUI_KEY_PAGE_DOWN)) np = (pos < 0 ? 0 : pos) + page;
         if (cui_key_pressed(ui, CUI_KEY_PAGE_UP)) np = (pos < 0 ? 0 : pos) - page;
         if (cui_key_pressed(ui, CUI_KEY_HOME)) np = 0;
         if (cui_key_pressed(ui, CUI_KEY_END)) np = s->norder - 1;
-        if (cui_key_pressed(ui, CUI_KEY_ENTER) && pos >= 0) picked = s->sel;
-        /* typing jumps to the next name starting with what was typed */
+        if (cui_key_pressed(ui, CUI_KEY_ENTER) && pos >= 0) f->picked = s->sel;
         if (ui->text_in_len > 0 && !(ui->mods & (CUI_MOD_CTRL | CUI_MOD_ALT))) {
             if (ui->time - s->typed_at > 1.0) s->typed_n = 0;
             for (int k = 0; k < ui->text_in_len && s->typed_n < 31; k++) s->typed[s->typed_n++] = ui->text_in[k];
             s->typed[s->typed_n] = 0;
             s->typed_at = ui->time;
-            int start = s->typed_n == 1 ? pos + 1 : CUI_MAX(pos, 0);
-            for (int j = 0; j < s->norder; j++) {
-                int k = (start + j) % s->norder;
-                const char *nm = s->ent[s->order[k]].name;
-                bool ok = true;
-                for (int c = 0; c < s->typed_n && ok; c++) {
-                    char a = nm[c], b = s->typed[c];
-                    a = (char)cui__ascii_lower(a);
-                    b = (char)cui__ascii_lower(b);
-                    ok = a == b;
-                }
-                if (ok) { np = k; break; }
-            }
+            int k = cui__fb_type_ahead(s, pos);
+            if (k >= 0) np = k;
         }
         if (np != pos) { np = CUI_CLAMP(np, 0, s->norder - 1); s->sel = s->order[np]; pos = np; s->scroll_to_sel = true; }
     }
-    if (lr.focused || ui->focus == 0) {
-        if (cui_key_pressed(ui, CUI_KEY_BACKSPACE) && lr.focused) go_up = true;
-        if (cui_key_pressed(ui, CUI_KEY_LEFT) && (ui->mods & CUI_MOD_ALT)) go_back = true;
-        if (cui_key_pressed(ui, CUI_KEY_RIGHT) && (ui->mods & CUI_MOD_ALT)) go_fwd = true;
-        if (cui_key_pressed(ui, CUI_KEY_F5)) reload = true;
+    if (f->lr.focused || ui->focus == 0) {
+        if (cui_key_pressed(ui, CUI_KEY_BACKSPACE) && f->lr.focused) f->go_up = true;
+        if (cui_key_pressed(ui, CUI_KEY_LEFT) && (ui->mods & CUI_MOD_ALT)) f->go_back = true;
+        if (cui_key_pressed(ui, CUI_KEY_RIGHT) && (ui->mods & CUI_MOD_ALT)) f->go_fwd = true;
+        if (cui_key_pressed(ui, CUI_KEY_F5)) f->reload = true;
     }
     /* keep the selection in view */
     if (s->scroll_to_sel && pos >= 0) {
@@ -539,90 +546,151 @@ cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, cha
         else if (y + CUI__FB_ROW > ss->ty + vh) ss->ty = y + CUI__FB_ROW - vh;
         s->scroll_to_sel = false;
     }
+}
+
+/* the rows in view, or why there are none */
+static void cui__fb_build_rows(cui__fb_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__fb_state *s = f->s;
     if (s->error || s->norder == 0) {
         int e = cui__node_new(ui, 0);
         ui->nodes[e].w = CUI_FILL; ui->nodes[e].h = CUI_FILL; ui->nodes[e].align = CUI_ALIGN_CENTER; ui->nodes[e].justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, e);
         const char *msg = s->error ? "This folder could not be read" : s->query[0] ? "Nothing matches the filter" : "This folder is empty";
-        cui__text_node(ui, msg, -1, CUI_FONT_BODY, fs, CUI_C(ui, TEXT_MUTED), false);
+        cui__text_node(ui, msg, -1, CUI_FONT_BODY, f->fs, CUI_C(ui, TEXT_MUTED), false);
         cui__close(ui);
-    } else {
-        int first, last;
-        cui_virtual_list_begin(ui, "rows", s->norder, CUI__FB_ROW, CUI_FILL, &first, &last);
-        time_t now = time(NULL);
-        for (int k = first; k < last; k++) {
-            int i = s->order[k];
-            const cui_file_entry *e = &s->ent[i];
-            cui_id rid = cui__hash(&i, sizeof i, id ^ 0x20E5u);
-            cui_interact rr = cui__interact(ui, rid, CUI_IF_KEEP_FOCUS);
-            if (rr.clicked || (rr.pressed && ui->mpressed[0])) { s->sel = i; ui->focus = lid; }
-            if (rr.clicked && ui->click_count >= 2) picked = i;
-            bool sel = i == s->sel;
-            int row = cui__node_new(ui, rid);
-            cui_node *rn = &ui->nodes[row];
-            rn->dir = CUI_ROW; rn->gap = 12; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(CUI__FB_ROW);
-            rn->pad[1] = rn->pad[3] = 12;
-            rn->bg = sel ? (lr.focused ? cui_mix(CUI_C(ui, SURFACE), cui__emphasis(ui), ui->accent == CUI_ACCENT_NEUTRAL ? 0.08f : 0.16f) : CUI_C(ui, ACTIVE)) : rr.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
-            cui__mark_interactive(ui, row, 0);
-            cui__open(ui, row);
-            int nm = cui__node_new(ui, 0);
-            ui->nodes[nm].dir = CUI_ROW; ui->nodes[nm].gap = 8; ui->nodes[nm].align = CUI_ALIGN_CENTER; ui->nodes[nm].w = CUI_FILL;
-            cui__open(ui, nm);
-            cui__icon_node(ui, cui__file_icon(e), 15, e->dir ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
-            int t = cui__text_node(ui, e->name, -1, CUI_FONT_BODY, fs, CUI_C(ui, FOREGROUND), false);
-            ui->nodes[t].w = CUI_FILL; ui->nodes[t].line_height = 1.3f;
-            cui__close(ui);
-            if (!narrow) {
-                int dt = cui__text_node(ui, cui__file_date(ui, e->modified, now), -1, CUI_FONT_BODY, fx, CUI_C(ui, TEXT_SECONDARY), false);
-                ui->nodes[dt].w = CUI_PX(150); ui->nodes[dt].flags |= CUI_NF_TABULAR;
-            }
-            if (!tiny) {
-                int sz = cui__text_node(ui, cui__file_size(ui, e), -1, CUI_FONT_BODY, fx, CUI_C(ui, TEXT_SECONDARY), false);
-                ui->nodes[sz].w = CUI_PX(76); ui->nodes[sz].text_align = CUI_TEXT_RIGHT; ui->nodes[sz].flags |= CUI_NF_TABULAR;
-            }
-            cui__close(ui);
-        }
-        cui_virtual_list_end(ui);
+        return;
     }
+    int first, last;
+    cui_virtual_list_begin(ui, "rows", s->norder, CUI__FB_ROW, CUI_FILL, &first, &last);
+    time_t now = time(NULL);
+    for (int k = first; k < last; k++) {
+        int i = s->order[k];
+        const cui_file_entry *e = &s->ent[i];
+        cui_id rid = cui__hash(&i, sizeof i, f->id ^ 0x20E5u);
+        cui_interact rr = cui__interact(ui, rid, CUI_IF_KEEP_FOCUS);
+        if (rr.clicked || (rr.pressed && ui->mpressed[0])) { s->sel = i; ui->focus = f->lid; }
+        if (rr.clicked && ui->click_count >= 2) f->picked = i;
+        bool sel = i == s->sel;
+        int row = cui__node_new(ui, rid);
+        cui_node *rn = &ui->nodes[row];
+        rn->dir = CUI_ROW; rn->gap = 12; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(CUI__FB_ROW);
+        rn->pad[1] = rn->pad[3] = 12;
+        rn->bg = sel ? (f->lr.focused ? cui_mix(CUI_C(ui, SURFACE), cui__emphasis(ui), ui->accent == CUI_ACCENT_NEUTRAL ? 0.08f : 0.16f) : CUI_C(ui, ACTIVE)) : rr.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
+        cui__mark_interactive(ui, row, 0);
+        cui__open(ui, row);
+        int nm = cui__node_new(ui, 0);
+        ui->nodes[nm].dir = CUI_ROW; ui->nodes[nm].gap = 8; ui->nodes[nm].align = CUI_ALIGN_CENTER; ui->nodes[nm].w = CUI_FILL;
+        cui__open(ui, nm);
+        cui__icon_node(ui, cui__file_icon(e), 15, e->dir ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
+        int t = cui__text_node(ui, e->name, -1, CUI_FONT_BODY, f->fs, CUI_C(ui, FOREGROUND), false);
+        ui->nodes[t].w = CUI_FILL; ui->nodes[t].line_height = 1.3f;
+        cui__close(ui);
+        if (!f->narrow) {
+            int dt = cui__text_node(ui, cui__file_date(ui, e->modified, now), -1, CUI_FONT_BODY, f->fx, CUI_C(ui, TEXT_SECONDARY), false);
+            ui->nodes[dt].w = CUI_PX(150); ui->nodes[dt].flags |= CUI_NF_TABULAR;
+        }
+        if (!f->tiny) {
+            int sz = cui__text_node(ui, cui__file_size(ui, e), -1, CUI_FONT_BODY, f->fx, CUI_C(ui, TEXT_SECONDARY), false);
+            ui->nodes[sz].w = CUI_PX(76); ui->nodes[sz].text_align = CUI_TEXT_RIGHT; ui->nodes[sz].flags |= CUI_NF_TABULAR;
+        }
+        cui__close(ui);
+    }
+    cui_virtual_list_end(ui);
+}
+
+/* carry out what was asked this frame: open, a path bar segment, a typed path, a place,
+ * up, back, forward, reload */
+static void cui__fb_navigate(cui__fb_frame *f, cui_file_browser_result *res) {
+    cui__fb_state *s = f->s;
+    char *path = f->path;
+    size_t path_cap = f->path_cap;
+    char target[CUI__FB_PATH];
+    target[0] = 0;
+    if (f->picked >= 0) {
+        const cui_file_entry *e = &s->ent[f->picked];
+        cui__path_join(target, sizeof target, path, e->name);
+        if (e->dir) cui__fb_go(s, path, path_cap, target, true);
+        else res->picked = cui__frame_strdup(f->ui, target, -1);
+    }
+    if (f->pb.clicked >= 0 && f->pb.clicked < f->nseg - 1) {
+        cui__fb_path_prefix(path, f->root_len, f->plen, f->pb.clicked, target, sizeof target);
+        cui__fb_go(s, path, path_cap, target, true);
+    }
+    if (f->pb.submitted) cui__fb_go(s, path, path_cap, f->pb.submitted, true);
+    if (f->go_to) cui__fb_go(s, path, path_cap, f->go_to, true);
+    if (f->go_up) { snprintf(target, sizeof target, "%s", path); if (cui__path_up(target)) cui__fb_go(s, path, path_cap, target, true); }
+    if (f->go_back && s->hpos > 0) { s->hpos--; snprintf(path, path_cap, "%s", s->hist[s->hpos]); }
+    if (f->go_fwd && s->hpos < s->hn - 1) { s->hpos++; snprintf(path, path_cap, "%s", s->hist[s->hpos]); }
+    if (f->reload) s->reload = true;
+}
+
+cui_file_browser_result cui_file_browser_ex(cui_ctx *ui, const char *id_str, char *path, size_t path_cap, const cui_file_browser_opts *o) {
+    cui_file_browser_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_file_browser_result res = { NULL, NULL, false, false };
+    if (!path || path_cap < 2) return res;
+    cui__fb_frame f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o; f.path = path; f.path_cap = path_cap; f.picked = -1;
+    f.id = cui_make_id(ui, id_str ? id_str : "files");
+    cui__fb_state *s = f.s = cui_state(ui, f.id, sizeof *s);
+    cui__state_set_dtor(ui, f.id, cui__fb_dtor);
+    if (!*path) snprintf(path, path_cap, ".");
+    if (!s->init) { s->sel = -1; s->init = true; }
+    char before[CUI__FB_PATH];
+    snprintf(before, sizeof before, "%s", path);
+    if (s->reload || strcmp(s->loaded, path) != 0) { cui__fb_load(ui, s, path, o); s->reload = false; }
+    cui__fb_order(ui, s, o);
+    cui_push_id(ui, id_str ? id_str : "files");
+    f.pr = cui__prev_rect(ui, f.id);
+    f.narrow = f.pr.w > 0 && f.pr.w < 560; f.tiny = f.pr.w > 0 && f.pr.w < 380;
+    int col = cui__node_new(ui, f.id);
+    cui_node *cn = &ui->nodes[col];
+    cn->w = o->width.kind ? o->width : CUI_FILL;
+    cn->h = o->height.kind ? o->height : CUI_PX(380);
+    cn->self_align = CUI_ALIGN_STRETCH; cn->gap = 8;
+    cui__open(ui, col);
+    cui__fb_build_toolbar(&f);
+    /* body: places and the list */
+    int body = cui__node_new(ui, 0);
+    ui->nodes[body].dir = CUI_ROW; ui->nodes[body].gap = 8; ui->nodes[body].w = CUI_FILL; ui->nodes[body].h = CUI_FILL;
+    ui->nodes[body].align = CUI_ALIGN_STRETCH;
+    cui__open(ui, body);
+    if (!o->no_places && !f.narrow) cui__fb_build_places(&f);
+    /* the list: a header that sorts, then the rows in view */
+    f.lid = f.id ^ 0x115Du;
+    f.lr = cui__interact(ui, f.lid, CUI_IF_FOCUSABLE);
+    int list = cui__node_new(ui, f.lid);
+    cui_node *ln = &ui->nodes[list];
+    ln->w = CUI_FILL; ln->h = CUI_FILL; ln->gap = 0;
+    ln->border = 1; ln->border_color = CUI_C(ui, BORDER);
+    ln->radius = CUI_CORNERS(ui->theme.radius_control);
+    ln->bg = CUI_C(ui, SURFACE);
+    ln->flags |= CUI_NF_CLIP;
+    cui__mark_interactive(ui, list, CUI_IF_FOCUSABLE);
+    cui__focus_ring(ui, list, f.lr.focus_visible ? 1.0f : 0.0f);
+    cui__open(ui, list);
+    f.fs = cui__fs(ui, ui->theme.text_sm); f.fx = cui__fs(ui, ui->theme.text_xs);
+    cui__fb_build_header(&f);
+    cui__fb_keys(&f);
+    cui__fb_build_rows(&f);
     cui__close(ui);   /* list */
     cui__close(ui);   /* body */
     cui__close(ui);   /* column */
     cui_pop_id(ui);
-    /* where to go */
-    char target[CUI__FB_PATH];
-    target[0] = 0;
-    if (picked >= 0) {
-        const cui_file_entry *e = &s->ent[picked];
-        cui__path_join(target, sizeof target, path, e->name);
-        if (e->dir) cui__fb_go(s, path, path_cap, target, true);
-        else res.picked = cui__frame_strdup(ui, target, -1);
-    }
-    if (pb.clicked >= 0 && pb.clicked < nseg - 1) {
-        /* the path up to that segment */
-        size_t k = (size_t)root_len;
-        int seen = root_len ? 1 : 0;
-        while (seen <= pb.clicked && k < plen) {
-            while (k < plen && cui__is_sep(path[k])) k++;
-            while (k < plen && !cui__is_sep(path[k])) k++;
-            seen++;
-        }
-        snprintf(target, sizeof target, "%.*s", (int)(k ? k : 1), path);
-        cui__fb_go(s, path, path_cap, target, true);
-    }
-    if (pb.submitted) cui__fb_go(s, path, path_cap, pb.submitted, true);
-    if (go_to) cui__fb_go(s, path, path_cap, go_to, true);
-    if (go_up) { snprintf(target, sizeof target, "%s", path); if (cui__path_up(target)) cui__fb_go(s, path, path_cap, target, true); }
-    if (go_back && s->hpos > 0) { s->hpos--; snprintf(path, path_cap, "%s", s->hist[s->hpos]); }
-    if (go_fwd && s->hpos < s->hn - 1) { s->hpos++; snprintf(path, path_cap, "%s", s->hist[s->hpos]); }
-    if (reload) s->reload = true;
+
+    cui__fb_navigate(&f, &res);
     res.navigated = strcmp(before, path) != 0;
     if (res.navigated) s->query[0] = 0;
     if (s->sel >= 0 && s->sel < s->n && !res.navigated) {
+        char target[CUI__FB_PATH];
         cui__path_join(target, sizeof target, path, s->ent[s->sel].name);
         res.selected = cui__frame_strdup(ui, target, -1);
     }
     res.error = s->error;
-    ui->last_id = lid;
+    ui->last_id = f.lid;
     return res;
 }
 
