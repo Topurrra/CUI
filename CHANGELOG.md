@@ -17,7 +17,19 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
   - **Query builder**: conditions in nested all/any groups, with operators that fit each field's type. `cui_query_text` writes the query as a sentence and `cui_query_match` tests a record.
   - **Schedule picker**: a cron expression edited as every N minutes, hourly, daily, weekly, monthly or custom, with the next runs listed. `cui_cron_next` and `cui_cron_describe` are public.
   - **Keymap**: shortcuts drawn on a keyboard by modifier set, with categories, conflicts, the bindings on hover, and the clicked key returned for rebinding.
-- `tests/test_devtools.c`: the ten components under clicks, keys and random input, at three widths, in both directions and both themes, with timing checks on large inputs.
+- `tests/test_devtools.c`: the developer tools under clicks, keys and random input, at three widths, in both directions and both themes, with timing checks on large inputs.
+- **Ten more developer tools**, to the same standard. They are on the gallery's new *More developer tools* page.
+  - **Test explorer**: test results as a tree. Suites sum up their tests, and failures show their messages. It has run buttons, Run all, status filters with counts, a name filter and keys.
+  - **Stack trace**: an exception with its frames. Library frames fold, and frames open to show their source, highlighted, with the failing line marked. A button copies the trace.
+  - **Blame**: source with who last changed each line. Runs of a commit share a gutter entry with author, age and hash, newer changes are shaded stronger, and a hover marks a commit's lines. 100,000 lines take a tenth of a millisecond a frame.
+  - **Coverage**: a folder tree built from file paths. Each folder sums up its files, with lines, branches and functions against thresholds, sortable columns and folding.
+  - **Regex tester**: matches and groups highlighted in a test text, with the flags i, m and s, errors under the pattern, and a list of the matches and groups. Its engine is public as `cui_regex_search`: groups, named groups, lazy quantifiers, classes and anchors, with a step budget, so a pattern that backtracks for too long stops instead of freezing.
+  - **HTTP request bar**: the method, the URL and Send or Cancel, plus `cui_response_status` for a response's status, time and size. `cui_url_params` and `cui_url_set_params` keep a parameters table in step with the URL.
+  - **API explorer**: endpoints grouped by tag, with method colors, path parameters marked, deprecated endpoints struck through, parameters, Try it, a filter and keys.
+  - **Feature flags**: flags against environments. Each environment has a switch and a share of users set from a popover, and a phone shows one environment at a time.
+  - **Uptime bars**: a status page. Each service has its state, its uptime and a bar per day colored by availability, with hover details. Narrow panels keep the latest days.
+  - **Time histogram**: event counts over time, stacked by series. Drag to select whole buckets, and hover for the counts. The time labels adapt from seconds to weeks.
+- The code editor takes `marks`, ranges of bytes to highlight in the accent or a series color. The highlighter takes `"text"` for no highlighting.
 
 ## 2026-11-09 · 1.2: phones, tablets, right to left and performance
 

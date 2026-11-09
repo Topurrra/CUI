@@ -776,6 +776,496 @@ static void test_random(void) {
     CHECK(frames == 12 * 700);
 }
 
+/* ======================================================================== */
+/* the second batch                                                         */
+/* ======================================================================== */
+
+static int rx(const char *p, int fl, const char *s, int from, int *a, int *b) {
+    cui_regex_match m;
+    int r = cui_regex_search(p, fl, s, -1, from, &m, NULL);
+    if (r == 1) { *a = m.start; *b = m.end; }
+    return r;
+}
+static void test_regex(void) {
+    printf("regex: literals, classes, groups, alternation, quantifiers, lazy, anchors, flags, names, UTF-8, errors, budget\n");
+    int a = 0, b = 0;
+    CHECK(rx("a+b", 0, "xxaaab", 0, &a, &b) == 1 && a == 2 && b == 6);
+    CHECK(rx("a+?b", 0, "aaab", 0, &a, &b) == 1 && a == 0 && b == 4);
+    CHECK(rx("<.+?>", 0, "<a><b>", 0, &a, &b) == 1 && b == 3);
+    CHECK(rx("<.+>", 0, "<a><b>", 0, &a, &b) == 1 && b == 6);
+    CHECK(rx("^\\w+$", 0, "hello world", 0, &a, &b) == 0);
+    CHECK(rx("^world$", CUI_REGEX_MULTILINE, "hello\nworld\n", 0, &a, &b) == 1 && a == 6);
+    CHECK(rx("x{2,3}", 0, "xxxx", 0, &a, &b) == 1 && b == 3);
+    CHECK(rx("x{2,}", 0, "xxxxx", 0, &a, &b) == 1 && b == 5);
+    CHECK(rx("a{,2}", 0, "a{,2}", 0, &a, &b) == 1 && b == 5);   /* not a repeat: literal braces */
+    CHECK(rx("[^aeiou\\s]+", 0, "aei bcd", 0, &a, &b) == 1 && a == 4 && b == 7);
+    CHECK(rx("[a-c-]+", 0, "x-ab-c", 0, &a, &b) == 1 && a == 1 && b == 6);
+    CHECK(rx("HELLO", CUI_REGEX_ICASE, "say hello", 0, &a, &b) == 1 && a == 4);
+    CHECK(rx("[A-Z]+", CUI_REGEX_ICASE, "abc", 0, &a, &b) == 1 && b == 3);
+    CHECK(rx("\\bcat\\b", 0, "concat cat", 0, &a, &b) == 1 && a == 7);
+    CHECK(rx("\\Bcat", 0, "cat concat", 0, &a, &b) == 1 && a == 7);
+    CHECK(rx("a.c", 0, "a\nc abc", 0, &a, &b) == 1 && a == 4);
+    CHECK(rx("a.c", CUI_REGEX_DOTALL, "a\nc", 0, &a, &b) == 1 && a == 0);
+    CHECK(rx("(foo|foobar)baz", 0, "foobarbaz", 0, &a, &b) == 1 && b == 9);   /* backtracks into the alternation */
+    CHECK(rx("\\d+\\.\\d+", 0, "v 10.25", 0, &a, &b) == 1 && a == 2 && b == 7);
+    CHECK(rx("\\x41+", 0, "zAAA", 0, &a, &b) == 1 && a == 1);
+    CHECK(rx(".", 0, "\xc3\xa9t", 0, &a, &b) == 1 && b == 2);                  /* a whole character */
+    CHECK(rx("t", 0, "\xc3\xa9t\xc3\xa9", 1, &a, &b) == 1 && a == 2);           /* `from` inside a character moves on */
+    CHECK(rx("", 0, "abc", 0, &a, &b) == 1 && a == 0 && b == 0);
+    CHECK(rx("x*", 0, "abc", 2, &a, &b) == 1 && a == 2 && b == 2);
+    CHECK(rx("abc", 0, "ab", 0, &a, &b) == 0);
+    cui_regex_match m;
+    CHECK(cui_regex_search("(?<y>\\d{4})-(\\d\\d)(-(\\d\\d))?", 0, "on 2026-11", -1, 0, &m, NULL) == 1);
+    CHECK(m.groups == 4 && !strcmp(m.group_name[1], "y") && m.group_start[1] == 3 && m.group_end[1] == 7 && m.group_start[2] == 8);
+    CHECK(m.group_start[3] == -1 && m.group_end[3] == -1);   /* an optional group that did not take part */
+    CHECK(cui_regex_search("(a)|(b)", 0, "b", -1, 0, &m, NULL) == 1 && m.group_start[1] == -1 && m.group_start[2] == 0);
+    CHECK(cui_regex_search("(\\w)+", 0, "abc", -1, 0, &m, NULL) == 1 && m.group_start[1] == 2);   /* the last turn */
+    static const char *bad[] = { "(", "a)", "[a-", "*a", "a{3,1}", "(?=a)", "\\", "x\\q", "[z-a]", "a**" };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        const char *err = NULL;
+        int r = cui_regex_search(bad[i], 0, "a", -1, 0, &m, &err);
+        if (r != -1 || !err) printf("  accepted \"%s\"\n", bad[i]);
+        CHECK(r == -1 && err && err[0]);
+    }
+    /* patterns that backtrack for ever stop, quickly */
+    clock_t c0 = clock();
+    const char *err = NULL;
+    CHECK(cui_regex_search("(a*)*b", 0, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac", -1, 0, &m, &err) == -2 && err);
+    CHECK(cui_regex_search("(x+x+)+y", 0, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", -1, 0, &m, &err) == -2);
+    static char big[200001];
+    memset(big, 'a', 200000);
+    CHECK(cui_regex_search(".*", 0, big, -1, 0, &m, NULL) == 1 && m.end == 200000);
+    CHECK(cui_regex_search("a*$", 0, big, -1, 0, &m, NULL) == 1 && m.end == 200000);
+    int r = cui_regex_search("a*b", 0, big, -1, 0, &m, NULL);
+    CHECK(r == 0 || r == -2);
+    CHECK((double)(clock() - c0) / CLOCKS_PER_SEC < 3.0);
+    CHECK(cui_regex_search(NULL, 0, "a", -1, 0, &m, NULL) == 0);
+}
+
+typedef struct { char pat[128]; char text[512]; int flags; cui_regex_tester_result r; } rt_ctx;
+static void build_rt(cui_ctx *ui, void *u) {
+    rt_ctx *c = u;
+    c->r = cui_regex_tester(ui, "rx", c->pat, sizeof c->pat, c->text, sizeof c->text, .flags = &c->flags);
+}
+static void test_regex_tester(void) {
+    printf("regex tester: counts, groups, flags, invalid, empty matches, typing the pattern\n");
+    rt_ctx c;
+    memset(&c, 0, sizeof c);
+    snprintf(c.pat, sizeof c.pat, "(\\w+)@(\\w+)\\.com");
+    snprintf(c.text, sizeof c.text, "bob@example.com, ann@test.com\nBOB@EXAMPLE.COM");
+    cui_ctx *ui = new_ctx(800, 600);
+    run(ui, build_rt, &c, 3);
+    CHECK(c.r.valid && c.r.matches == 2);
+    c.flags = CUI_REGEX_ICASE;
+    run(ui, build_rt, &c, 2);
+    CHECK(c.r.matches == 3);
+    snprintf(c.pat, sizeof c.pat, "(unclosed");
+    run(ui, build_rt, &c, 2);
+    CHECK(!c.r.valid && c.r.error && c.r.matches == 0);
+    snprintf(c.pat, sizeof c.pat, "x*");
+    run(ui, build_rt, &c, 2);
+    CHECK(c.r.valid && c.r.matches == (int)strlen(c.text) + 1);   /* an empty match at every position */
+    c.pat[0] = 0;
+    run(ui, build_rt, &c, 2);
+    CHECK(c.r.valid && c.r.matches == 0);
+    /* type a pattern into the field */
+    cui_push_id(ui, "rx");
+    cui_id pid = cui_make_id(ui, "pattern");
+    cui_pop_id(ui);
+    cui_rect pr = cui_get_rect(ui, pid);
+    click(ui, build_rt, &c, pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f);
+    type(ui, build_rt, &c, "\\.com");
+    run(ui, build_rt, &c, 1);
+    CHECK(!strcmp(c.pat, "\\.com") && c.r.matches == 3);
+    cui_set_viewport(ui, 340, 700, 1);
+    run(ui, build_rt, &c, 3);
+    CHECK(c.r.matches == 3);
+    cui_destroy(ui);
+}
+
+static void test_url(void) {
+    printf("URL parameters: decode, encode, fragments, disabled pairs, capacity; HTTP reasons\n");
+    cui_kv_pair p[8];
+    int n = cui_url_params("https://x.dev/a?q=hello+world&tag=c%2B%2B&empty&k=v#top", p, 8);
+    CHECK(n == 4);
+    CHECK(!strcmp(p[0].key, "q") && !strcmp(p[0].value, "hello world"));
+    CHECK(!strcmp(p[1].value, "c++") && !strcmp(p[2].key, "empty") && !p[2].value[0] && p[3].enabled);
+    CHECK(cui_url_params("https://x.dev/a", p, 8) == 0);
+    CHECK(cui_url_params("https://x.dev/?a=1&b=2&c=3", p, 2) == 2);
+    char url[96] = "https://x.dev/search?old=1#frag";
+    cui_kv_pair q[3];
+    memset(q, 0, sizeof q);
+    snprintf(q[0].key, 64, "q"); snprintf(q[0].value, 256, "a b&c"); q[0].enabled = true;
+    snprintf(q[1].key, 64, "off"); snprintf(q[1].value, 256, "x"); q[1].enabled = false;
+    snprintf(q[2].key, 64, "lang"); snprintf(q[2].value, 256, "fa"); q[2].enabled = true;
+    CHECK(cui_url_set_params(url, sizeof url, q, 3));
+    CHECK(!strcmp(url, "https://x.dev/search?q=a%20b%26c&lang=fa#frag"));
+    n = cui_url_params(url, p, 8);   /* round trip */
+    CHECK(n == 2 && !strcmp(p[0].value, "a b&c") && !strcmp(p[1].key, "lang"));
+    char tiny[24] = "https://x.dev/";
+    CHECK(!cui_url_set_params(tiny, sizeof tiny, q, 3));
+    CHECK(!strcmp(tiny, "https://x.dev/"));   /* unchanged when it does not fit */
+    CHECK(!strcmp(cui_http_reason(404), "Not Found") && !strcmp(cui_http_reason(299), ""));
+    CHECK(!strcmp(cui_http_method_name(CUI_HTTP_DELETE), "DELETE") && !strcmp(cui_http_method_name(9), ""));
+}
+
+static const cui_test_item tx2_items[] = {
+    { "layout", 0 }, { "rows", 1, CUI_JOB_PASSED, 0.004f }, { "wraps", 1, CUI_JOB_PASSED, 0.006f }, { "mirrors", 1, CUI_JOB_FAILED, 0.01f, "expected 412, got 388" },
+    { "text", 0 }, { "shapes", 1, CUI_JOB_PASSED, 0.2f }, { "bidi", 1, CUI_JOB_SKIPPED, -1 },
+    { "render", 0 }, { "gl", 1 }, { "atlas", 2, CUI_JOB_RUNNING, -1 },
+};
+typedef struct { cui_test_explorer_result r; int run, activated; bool run_all; } tx_ctx;
+static void build_tx(cui_ctx *ui, void *u) {
+    tx_ctx *c = u;
+    c->r = cui_test_explorer(ui, "tests", tx2_items, 10, .height = 400);
+    if (c->r.run >= 0) c->run = c->r.run;
+    if (c->r.activated >= 0) c->activated = c->r.activated;
+    if (c->r.run_all) c->run_all = true;
+}
+static void test_test_explorer(void) {
+    printf("test explorer: counts, select, keys, fold, run one, run all, activate\n");
+    tx_ctx c;
+    memset(&c, 0, sizeof c);
+    c.run = c.activated = -1;
+    cui_ctx *ui = new_ctx(800, 600);
+    run(ui, build_tx, &c, 3);
+    CHECK(c.r.passed == 3 && c.r.failed == 1 && c.r.skipped == 1 && c.r.total == 6);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "tests"));
+    /* the toolbar's first button runs everything */
+    click(ui, build_tx, &c, r.x + 30, r.y + 16);
+    CHECK(c.run_all);
+    /* click down the list until a test is selected */
+    for (float y = r.y + 50; y < r.y + 200 && c.r.selected < 0; y += 7) click(ui, build_tx, &c, r.x + r.w * 0.4f, y);
+    CHECK(c.r.selected == 0);   /* the first row: the layout suite */
+    key(ui, build_tx, &c, CUI_KEY_DOWN, 0); CHECK(c.r.selected == 1);
+    key(ui, build_tx, &c, CUI_KEY_DOWN, 0); key(ui, build_tx, &c, CUI_KEY_DOWN, 0); CHECK(c.r.selected == 3);
+    key(ui, build_tx, &c, CUI_KEY_DOWN, 0); CHECK(c.r.selected == 4);   /* past the failure's message */
+    key(ui, build_tx, &c, CUI_KEY_ENTER, 0); CHECK(c.activated == 4);
+    key(ui, build_tx, &c, CUI_KEY_LEFT, 0);                             /* fold "text" */
+    key(ui, build_tx, &c, CUI_KEY_DOWN, 0); CHECK(c.r.selected == 7);   /* straight to "render" */
+    key(ui, build_tx, &c, CUI_KEY_UP, 0); key(ui, build_tx, &c, CUI_KEY_RIGHT, 0); key(ui, build_tx, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.selected == 5);
+    /* the selected row shows its run button at the end */
+    cui_rect r2 = cui_get_rect(ui, cui_make_id(ui, "tests"));
+    for (float y = r2.y + 50; y < r2.y + r2.h && c.run < 0; y += 7) click(ui, build_tx, &c, r2.x + r2.w - 20, y);
+    CHECK(c.run >= 0);
+    cui_destroy(ui);
+}
+
+typedef struct { cui_stack_trace_result r; int clicked; } st_ctx;
+static const char *const st2_src[] = { "function total(cart) {", "  return cart.items.length;", "}" };
+static const cui_stack_frame st2_frames[] = {
+    { "total", "src/cart.js", 2, 15, false, st2_src, 3, 1 }, { "handle", "node_modules/x/a.js", 9, 1, true }, { "next", "node_modules/x/b.js", 3, 1, true },
+    { "main", "src/main.js", 4, 1, false },
+};
+static void build_st(cui_ctx *ui, void *u) {
+    st_ctx *c = u;
+    c->r = cui_stack_trace(ui, "trace", st2_frames, 4, .title = "TypeError", .message = "x is undefined", .lang = "js");
+    if (c->r.clicked >= 0) c->clicked = c->r.clicked;
+}
+static void test_stack(void) {
+    printf("stack trace: first own frame open, fold and unfold, library frames, copy\n");
+    st_ctx c;
+    memset(&c, 0, sizeof c);
+    c.clicked = -1;
+    cui_ctx *ui = new_ctx(800, 600);
+    run(ui, build_st, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "trace"));
+    float h_open = r.h;
+    CHECK(h_open > 150);   /* the source of the first frame shows */
+    /* click the rows from the top until frame 0 reports: it folds */
+    for (float y = r.y + 50; y < r.y + r.h && c.clicked < 0; y += 6) click(ui, build_st, &c, r.x + 60, y);
+    CHECK(c.clicked == 0);
+    run(ui, build_st, &c, 1);
+    float h_closed = cui_get_rect(ui, cui_make_id(ui, "trace")).h;
+    CHECK(h_closed < h_open - 40);
+    /* the library frames unfold */
+    r = cui_get_rect(ui, cui_make_id(ui, "trace"));
+    for (float y = r.y + r.h - 8; y > r.y + 40; y -= 6) {
+        click(ui, build_st, &c, r.x + 60, y);
+        run(ui, build_st, &c, 1);
+        if (cui_get_rect(ui, cui_make_id(ui, "trace")).h > h_closed + 30) break;
+    }
+    CHECK(cui_get_rect(ui, cui_make_id(ui, "trace")).h > h_closed + 30);
+    cui_destroy(ui);
+}
+
+typedef struct { int method; char url[128]; bool loading; int sends, cancels; } rq_ctx;
+static void build_rq(cui_ctx *ui, void *u) {
+    rq_ctx *c = u;
+    cui_request_bar_result r = cui_request_bar(ui, "req", &c->method, c->url, sizeof c->url, .loading = c->loading);
+    if (r.send) c->sends++;
+    if (r.cancel) c->cancels++;
+    cui_response_status(ui, 503, 1.25, 512);
+}
+static void test_request(void) {
+    printf("request bar: Enter sends, the button sends or cancels, empty URL\n");
+    rq_ctx c;
+    memset(&c, 0, sizeof c);
+    cui_ctx *ui = new_ctx(800, 400);
+    run(ui, build_rq, &c, 3);
+    cui_push_id(ui, "req");
+    cui_id uid = cui_make_id(ui, "url");
+    cui_pop_id(ui);
+    cui_rect ur = cui_get_rect(ui, uid), r = cui_get_rect(ui, cui_make_id(ui, "req"));
+    click(ui, build_rq, &c, ur.x + 20, ur.y + ur.h / 2);
+    key(ui, build_rq, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.sends == 0);   /* nothing to send */
+    type(ui, build_rq, &c, "https://api.dev/x");
+    key(ui, build_rq, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.sends == 1);
+    click(ui, build_rq, &c, r.x + r.w - 30, r.y + r.h / 2);
+    CHECK(c.sends == 2);
+    c.loading = true;
+    run(ui, build_rq, &c, 2);
+    click(ui, build_rq, &c, r.x + r.w - 30, r.y + r.h / 2);
+    CHECK(c.cancels == 1 && c.sends == 2);
+    cui_destroy(ui);
+}
+
+static float up_days[90];
+typedef struct { cui_uptime_result r; } up_ctx;
+static void build_up(cui_ctx *ui, void *u) {
+    up_ctx *c = u;
+    const cui_uptime_service sv[] = { { "API", up_days, 90 }, { "Empty", NULL, 0 } };
+    c->r = cui_uptime(ui, "status", sv, 2, .last_day = (cui_date){ 2026, 11, 9 });
+}
+static void test_uptime(void) {
+    printf("uptime bars: hover reports the day, narrow shows the latest days\n");
+    for (int i = 0; i < 90; i++) up_days[i] = i == 80 ? 0.9f : i < 5 ? -1 : 1;
+    up_ctx c;
+    memset(&c, 0, sizeof c);
+    cui_ctx *ui = new_ctx(900, 400);
+    run(ui, build_up, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "status"));
+    int want = 89;
+    float x, y;
+    CHECK(find(ui, build_up, &c, r, &c.r.day, want, &x, &y) && c.r.service == 0);   /* the latest day is reachable */
+    cui_set_viewport(ui, 300, 400, 1);
+    run(ui, build_up, &c, 3);
+    r = cui_get_rect(ui, cui_make_id(ui, "status"));
+    bool seen_last = false, seen_first = false;   /* bars are thin here: sweep a point at a time */
+    for (float yy = r.y + 20; yy < r.y + 70; yy += 6)
+        for (float xx = r.x; xx < r.x + r.w; xx += 1) { move(ui, build_up, &c, xx, yy); if (c.r.day == 89) seen_last = true; if (c.r.day == 0) seen_first = true; }
+    CHECK(seen_last);
+    CHECK(!seen_first);   /* the oldest days do not fit */
+    cui_destroy(ui);
+}
+
+static float th_a[48], th_b[48];
+typedef struct { double s0, s1; cui_time_histogram_result r; } th_ctx;
+static void build_th(cui_ctx *ui, void *u) {
+    th_ctx *c = u;
+    const cui_histogram_series se[] = { { "info", th_a, CUI_TONE_INFO }, { "error", th_b, CUI_TONE_DANGER } };
+    c->r = cui_time_histogram(ui, "hist", 1794240000, 600, 48, se, 2, &c->s0, &c->s1, .utc = true);
+}
+static void test_histogram(void) {
+    printf("time histogram: hover, drag selects whole buckets, click clears\n");
+    for (int i = 0; i < 48; i++) { th_a[i] = (float)(10 + i); th_b[i] = (float)(i % 5); }
+    th_ctx c;
+    memset(&c, 0, sizeof c);
+    cui_ctx *ui = new_ctx(800, 400);
+    run(ui, build_th, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "hist"));
+    float x, y;
+    CHECK(find(ui, build_th, &c, r, &c.r.hovered, 47, &x, &y));
+    CHECK(find(ui, build_th, &c, r, &c.r.hovered, 0, &x, &y));
+    float px0 = r.x + 40, pw = r.w - 44;
+    cui_input_mouse_move(ui, px0 + pw * 0.25f, r.y + 40); run(ui, build_th, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_th, &c, 1);
+    for (int k = 1; k <= 5; k++) { cui_input_mouse_move(ui, px0 + pw * (0.25f + 0.05f * k), r.y + 40); run(ui, build_th, &c, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_th, &c, 1);
+    CHECK(c.s1 > c.s0);
+    CHECK(fmod(c.s0 - 1794240000, 600) == 0 && fmod(c.s1 - 1794240000, 600) == 0);
+    CHECK(c.s0 >= 1794240000 + 600 * 11 && c.s1 <= 1794240000 + 600 * 25);
+    click(ui, build_th, &c, px0 + pw * 0.8f, r.y + 40);
+    CHECK(c.s0 == 0 && c.s1 == 0);
+    cui_destroy(ui);
+}
+
+static const cui_coverage_file cv2_files[] = {
+    { "src/core/a.c", 100, 90, 10, 9, 5, 5 }, { "src/core/b.c", 100, 50, 10, 2, 5, 1 }, { "src/text/c.c", 200, 20, 0, 0, 10, 1 }, { "main.c", 100, 100, 0, 0, 1, 1 },
+};
+typedef struct { cui_coverage_result r; int activated; } cv_ctx;
+static void build_cv(cui_ctx *ui, void *u) {
+    cv_ctx *c = u;
+    c->r = cui_coverage(ui, "cov", cv2_files, 4);
+    if (c->r.activated >= 0) c->activated = c->r.activated;
+}
+static void test_coverage(void) {
+    printf("coverage: totals, folders, sort, fold, activate a file\n");
+    cv_ctx c;
+    memset(&c, 0, sizeof c);
+    c.activated = -1;
+    cui_ctx *ui = new_ctx(800, 600);
+    run(ui, build_cv, &c, 3);
+    CHECK(fabs(c.r.lines - 52.0f) < 0.01f);   /* 260 of 500 lines */
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "cov"));
+    float h_all = r.h;
+    CHECK(h_all > 30 * 8);   /* all files, src, core, a, b, text, c, main */
+    /* double-click each row until a file reports */
+    for (float y = r.y + 40; y < r.y + r.h && c.activated < 0; y += 30) double_click(ui, build_cv, &c, r.x + r.w * 0.3f, y);
+    CHECK(c.activated >= 0);
+    /* a click on a folder folds it */
+    click(ui, build_cv, &c, r.x + 80, r.y + 30 + 30 + 15);   /* "src" */
+    run(ui, build_cv, &c, 1);
+    CHECK(cui_get_rect(ui, cui_make_id(ui, "cov")).h < h_all - 60);
+    cui_destroy(ui);
+}
+
+static const char *const bl2_lines[] = { "int a;", "/* note", "   more */", "int b;", "int c;" };
+static const int bl2_commit[] = { 0, 1, 1, 0, 9 };   /* 9 is out of range */
+static const cui_blame_commit bl2_commits[] = { { "aaaa1111", "Maya Okafor", "First", 1700000000 }, { "bbbb2222", "Jonas Berg", "Note", 1790000000 } };
+typedef struct { cui_blame_result r; int clicked; const char *const *lines; const int *lc; int n; } bl_ctx;
+static void build_bl(cui_ctx *ui, void *u) {
+    bl_ctx *c = u;
+    c->r = cui_blame(ui, "blame", c->lines, c->lc, c->n, bl2_commits, 2, .lang = "c", .now = 1794211200, .height = 300);
+    if (c->r.clicked >= 0) c->clicked = c->r.clicked;
+}
+static void test_blame(void) {
+    printf("blame: hover a commit, click it, bad commit index, 100k lines\n");
+    bl_ctx c;
+    memset(&c, 0, sizeof c);
+    c.clicked = -1; c.lines = bl2_lines; c.lc = bl2_commit; c.n = 5;
+    cui_ctx *ui = new_ctx(900, 500);
+    run(ui, build_bl, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "blame"));
+    float x, y;
+    CHECK(find(ui, build_bl, &c, (cui_rect){ r.x, r.y, 120, r.h }, &c.r.hovered, 1, &x, &y));
+    click(ui, build_bl, &c, x, y);
+    CHECK(c.clicked == 1);
+    static const char *many[100000];
+    static int many_c[100000];
+    for (int i = 0; i < 100000; i++) { many[i] = i % 7 == 0 ? "/* comment" : i % 7 == 1 ? "   ends */ int x = 1;" : "    return value + other;"; many_c[i] = (i / 40) % 2; }
+    c.lines = many; c.lc = many_c; c.n = 100000;
+    clock_t c0 = clock();
+    run(ui, build_bl, &c, 1);
+    double first = (double)(clock() - c0) / CLOCKS_PER_SEC * 1000;
+    c0 = clock();
+    run(ui, build_bl, &c, 30);
+    double ms = (double)(clock() - c0) / CLOCKS_PER_SEC * 1000 / 30;
+    printf("  100k lines: first frame %.1f ms, then %.2f ms a frame\n", first, ms);
+    CHECK(ms < 20);
+    cui_destroy(ui);
+}
+
+typedef struct { cui_feature_flag f[3]; cui_feature_flags_result r; int changes; } ff_ctx;
+static void build_ff(cui_ctx *ui, void *u) {
+    ff_ctx *c = u;
+    static const char *envs[] = { "Dev", "Staging", "Prod" };
+    c->r = cui_feature_flags(ui, "flags", c->f, 3, envs, 3);
+    if (c->r.flag >= 0) c->changes++;
+}
+static void test_flags(void) {
+    printf("feature flags: switches change flags, narrow shows one environment\n");
+    ff_ctx c;
+    memset(&c, 0, sizeof c);
+    c.f[0].key = "new-checkout"; c.f[0].on[0] = true;
+    c.f[1].key = "search-v2"; c.f[2].key = "export";
+    cui_ctx *ui = new_ctx(900, 500);
+    run(ui, build_ff, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "flags"));
+    /* click across the first row until a switch flips */
+    bool before[3] = { c.f[0].on[0], c.f[0].on[1], c.f[0].on[2] };
+    for (float x = r.x + r.w * 0.45f; x < r.x + r.w && !c.changes; x += 8)
+        for (float y = r.y + 60; y < r.y + 110 && !c.changes; y += 8) click(ui, build_ff, &c, x, y);
+    CHECK(c.changes == 1);
+    CHECK(c.f[0].on[0] != before[0] || c.f[0].on[1] != before[1] || c.f[0].on[2] != before[2]);
+    cui_set_viewport(ui, 360, 600, 1);
+    run(ui, build_ff, &c, 3);
+    CHECK(c.changes == 1);
+    cui_destroy(ui);
+}
+
+static const cui_api_param ax2_par[] = { { "id", "path", "string", true, "The id" } };
+static const cui_api_endpoint ax2_eps[] = {
+    { "GET", "/users", "List users", "Users" }, { "GET", "/users/{id}", "Get a user", "Users", false, ax2_par, 1 },
+    { "POST", "/orders", "Create an order", "Orders" }, { "DELETE", "/v1/x", "Old", NULL, true },
+};
+typedef struct { cui_api_explorer_result r; int sel, try_it; } ax_ctx;
+static void build_ax(cui_ctx *ui, void *u) {
+    ax_ctx *c = u;
+    c->r = cui_api_explorer(ui, "api", ax2_eps, 4, .selected = &c->sel);
+    if (c->r.try_it >= 0) c->try_it = c->r.try_it;
+}
+static void test_api(void) {
+    printf("API explorer: select, open, try it, keys, fold a tag\n");
+    ax_ctx c;
+    memset(&c, 0, sizeof c);
+    c.sel = -1; c.try_it = -1;
+    cui_ctx *ui = new_ctx(800, 600);
+    run(ui, build_ax, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "api"));
+    float h0 = r.h;
+    /* below the filter and the first tag's header: the rows; the second is /users/{id} */
+    for (float y = r.y + 70; y < r.y + r.h && c.sel != 1; y += 6) click(ui, build_ax, &c, r.x + r.w * 0.6f, y);
+    CHECK(c.sel == 1);
+    run(ui, build_ax, &c, 1);
+    r = cui_get_rect(ui, cui_make_id(ui, "api"));
+    CHECK(r.h > h0 + 30);   /* its parameters opened */
+    key(ui, build_ax, &c, CUI_KEY_DOWN, 0); CHECK(c.sel == 2);
+    key(ui, build_ax, &c, CUI_KEY_UP, 0); key(ui, build_ax, &c, CUI_KEY_UP, 0); CHECK(c.sel == 0);
+    for (float y = r.y + 110; y < r.y + r.h && c.try_it < 0; y += 6) click(ui, build_ax, &c, r.x + 115, y);
+    CHECK(c.try_it == 1);   /* the open endpoint's button */
+    cui_destroy(ui);
+}
+
+/* the second ten, at three widths, both directions and themes, under random input */
+typedef struct { rt_ctx rt; tx_ctx tx; st_ctx st; rq_ctx rq; up_ctx up; th_ctx th; cv_ctx cv; bl_ctx bl; ff_ctx ff; ax_ctx ax; } all2_ctx;
+static void build_all2(cui_ctx *ui, void *u) {
+    all2_ctx *a = u;
+    cui_scroll(ui, "page", .width = CUI_FILL, .height = CUI_FILL) {
+        cui_column(ui, .gap = 16, .width = CUI_FILL) {
+            build_rt(ui, &a->rt); build_tx(ui, &a->tx); build_st(ui, &a->st); build_rq(ui, &a->rq); build_up(ui, &a->up);
+            build_th(ui, &a->th); build_cv(ui, &a->cv); build_bl(ui, &a->bl); build_ff(ui, &a->ff); build_ax(ui, &a->ax);
+        }
+    }
+}
+static void test_random2(void) {
+    printf("the second ten under random input: 3 widths x 2 directions x 2 themes\n");
+    static const cui_key keys[] = { CUI_KEY_UP, CUI_KEY_DOWN, CUI_KEY_LEFT, CUI_KEY_RIGHT, CUI_KEY_ENTER, CUI_KEY_ESCAPE, CUI_KEY_TAB,
+                                    CUI_KEY_BACKSPACE, CUI_KEY_SPACE, CUI_KEY_HOME, CUI_KEY_END, CUI_KEY_DELETE };
+    static const char *texts[] = { "a", "(", "[a-", "\\d+", "*", "?", "\xd8\xb3\xd9\x84\xd8\xa7\xd9\x85", "{2}", "|", ")" };
+    long frames = 0;
+    for (int cfg = 0; cfg < 12; cfg++) {
+        static const float widths[3] = { 340, 760, 1280 };
+        bool rtl = cfg & 1, dark = (cfg >> 1) & 1;
+        float w = widths[cfg / 4];
+        all2_ctx *a = calloc(1, sizeof *a);
+        snprintf(a->rt.pat, sizeof a->rt.pat, "(\\w+)@");
+        snprintf(a->rt.text, sizeof a->rt.text, "a@b c@d");
+        a->tx.run = a->tx.activated = -1; a->st.clicked = -1; a->cv.activated = -1;
+        a->bl.lines = bl2_lines; a->bl.lc = bl2_commit; a->bl.n = 5; a->bl.clicked = -1;
+        a->ff.f[0].key = "x"; a->ff.f[1].key = "y"; a->ff.f[2].key = "z";
+        a->ax.sel = -1; a->ax.try_it = -1;
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT,
+                                                 .direction = rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_INHERIT });
+        cui_set_viewport(ui, w, 900, 1);
+        g_seed = (unsigned)cfg * 104729u + 11;
+        for (int f = 0; f < 700; f++) {
+            unsigned r = rnd();
+            switch (r % 10) {
+            case 0: case 1: case 2: cui_input_mouse_move(ui, (float)(rnd() % (unsigned)w), (float)(rnd() % 900)); break;
+            case 3: cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); break;
+            case 4: cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); break;
+            case 5: cui_input_scroll(ui, 0, (float)((int)(rnd() % 7) - 3)); break;
+            case 6: { cui_key k = keys[rnd() % (sizeof keys / sizeof keys[0])]; cui_input_key(ui, k, true, 0); cui_input_key(ui, k, false, 0); break; }
+            case 7: cui_input_text(ui, texts[rnd() % (sizeof texts / sizeof texts[0])]); break;
+            default: break;
+            }
+            run(ui, build_all2, a, 1);
+            frames++;
+            if (strlen(a->rt.pat) >= sizeof a->rt.pat || strlen(a->rt.text) >= sizeof a->rt.text || strlen(a->rq.url) >= sizeof a->rq.url ||
+                a->ax.sel >= 4 || a->tx.r.selected >= 10) { printf("  out of range at config %d frame %d\n", cfg, f); CHECK(false); break; }
+            for (int k = 0; k < 3; k++) for (int e = 0; e < 3; e++) if (a->ff.f[k].rollout[e] < 0 || a->ff.f[k].rollout[e] > 100) { CHECK(false); f = 9999; }
+        }
+        cui_destroy(ui);
+        free(a);
+    }
+    printf("  %ld frames\n", frames);
+    CHECK(frames == 12 * 700);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_cron();
@@ -790,6 +1280,19 @@ int main(void) {
     test_waterfall();
     test_trace();
     test_random();
+    test_regex();
+    test_regex_tester();
+    test_url();
+    test_test_explorer();
+    test_stack();
+    test_request();
+    test_uptime();
+    test_histogram();
+    test_coverage();
+    test_blame();
+    test_flags();
+    test_api();
+    test_random2();
     cui_sw_destroy(g_sw);
     printf("\n%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

@@ -1409,6 +1409,180 @@ static void page_devtools(cui_ctx *ui) {
     devtools_keymap(ui);
 }
 
+/* ---- more developer tools ------------------------------------------------ */
+
+static char rx_pat[128] = "(?<user>[\\w.]+)@(?<host>[\\w-]+)\\.(com|org)";
+static char rx_text[1024] = "Contact maya.okafor@example.com or jonas@cui-lib.org for access.\nOld address: priya@legacy.net (no longer read).\nSupport: help@example.com";
+static void devtools2_regex(cui_ctx *ui) {
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 760) {
+        cui_regex_tester(ui, "rx", rx_pat, sizeof rx_pat, rx_text, sizeof rx_text, .height = 110);
+    }
+}
+
+static const cui_test_item tx_items[] = {
+    { "layout", 0 }, { "row distributes extra space", 1, CUI_JOB_PASSED, 0.004f }, { "wraps to the next line", 1, CUI_JOB_PASSED, 0.006f },
+    { "mirrors under right to left", 1, CUI_JOB_FAILED, 0.012f, "expected x = 412, got 388 (padding not mirrored)" },
+    { "text", 0 }, { "shapes Persian", 1, CUI_JOB_PASSED, 0.210f }, { "ellipsis keeps whole characters", 1, CUI_JOB_PASSED, 0.003f },
+    { "bidi brackets", 1, CUI_JOB_SKIPPED, -1 },
+    { "renderer", 0 }, { "software", 1 }, { "rounded corners", 2, CUI_JOB_PASSED, 0.031f }, { "soft shadows", 2, CUI_JOB_RUNNING, -1 },
+    { "OpenGL", 1 }, { "atlas growth", 2, CUI_JOB_PENDING, -1 }, { "slow gradient path", 2, CUI_JOB_PASSED, 1.42f },
+};
+static void devtools2_tests(cui_ctx *ui) {
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 760) {
+        cui_test_explorer(ui, "tests", tx_items, (int)(sizeof tx_items / sizeof tx_items[0]), .height = 500);
+    }
+}
+
+static const char *const st_src1[] = { "function total(cart) {", "  let sum = 0;", "  for (const item of cart.items) {", "    sum += item.price * item.qty;", "  }", "  return sum;" };
+static const char *const st_src2[] = { "export function checkout(user) {", "  const cart = carts.get(user.id);", "  const amount = total(cart);", "  return charge(user, amount);" };
+static const cui_stack_frame st_frames[] = {
+    { "total", "src/cart.js", 3, 29, false, st_src1, 6, 1 },
+    { "checkout", "src/checkout.js", 3, 18, false, st_src2, 4, 1 },
+    { "handle", "node_modules/express/lib/router/layer.js", 95, 5, true },
+    { "next", "node_modules/express/lib/router/route.js", 149, 13, true },
+    { "dispatch", "node_modules/express/lib/router/index.js", 284, 15, true },
+    { "onRequest", "src/server.js", 41, 9, false },
+};
+static void devtools2_stack(cui_ctx *ui) {
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 760) {
+        cui_stack_trace(ui, "trace", st_frames, 6, .title = "TypeError", .message = "Cannot read properties of undefined (reading 'items')", .lang = "js");
+    }
+}
+
+static int rq_method = 1;
+static char rq_url[256] = "https://api.example.com/v1/orders?status=open&limit=20";
+static cui_kv_pair rq_params[8];
+static int rq_n = -1;
+static void devtools2_request(cui_ctx *ui) {
+    if (rq_n < 0) rq_n = cui_url_params(rq_url, rq_params, 8);
+    cui_column(ui, .gap = 12, .width = CUI_FILL, .max_width = 760) {
+        cui_request_bar_result r = cui_request_bar(ui, "req", &rq_method, rq_url, sizeof rq_url);
+        if (r.changed) rq_n = cui_url_params(rq_url, rq_params, 8);
+        if (cui_kv_editor(ui, "params", rq_params, &rq_n, 8)) cui_url_set_params(rq_url, sizeof rq_url, rq_params, rq_n);
+        cui_response_status(ui, 201, 0.142, 18400);
+    }
+}
+
+static float up_api[90], up_web[90], up_db[90], up_cdn[90];
+static void devtools2_uptime(cui_ctx *ui) {
+    static bool init;
+    if (!init) {
+        init = true;
+        for (int i = 0; i < 90; i++) {
+            up_api[i] = 1; up_web[i] = 1; up_db[i] = 1; up_cdn[i] = i < 20 ? -1 : 1;
+            if (i % 17 == 5) up_api[i] = 0.9985f;
+            if (i == 61) up_api[i] = 0.962f;
+            if (i == 44) up_web[i] = 0.93f;
+            if (i % 23 == 9) up_db[i] = 0.995f;
+            if (i == 88) up_db[i] = 0.97f;
+        }
+    }
+    static const char *names_en[] = { "API", "Website", "Database", "CDN" };
+    const cui_uptime_service sv[] = { { names_en[0], up_api, 90 }, { names_en[1], up_web, 90 }, { names_en[2], up_db, 90 }, { names_en[3], up_cdn, 90 } };
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 860) {
+        cui_uptime(ui, "status", sv, 4, .last_day = (cui_date){ 2026, 11, 9 });
+    }
+}
+
+static float th_info[96], th_warn[96], th_err[96];
+static double th_s0 = 1794240000 + 3600 * 5, th_s1 = 1794240000 + 3600 * 7.5;
+static void devtools2_histogram(cui_ctx *ui) {
+    static bool init;
+    if (!init) {
+        init = true;
+        for (int i = 0; i < 96; i++) {
+            double x = i / 96.0;
+            th_info[i] = (float)(120 + 80 * sin(x * 6.28 * 2) + (i * 37 % 23));
+            th_warn[i] = (float)(12 + (i * 13 % 9) + (i > 60 && i < 70 ? 40 : 0));
+            th_err[i] = (float)((i * 7 % 5) + (i > 62 && i < 67 ? 30 : 0));
+        }
+    }
+    const cui_histogram_series se[] = { { "Info", th_info, CUI_TONE_INFO }, { "Warning", th_warn, CUI_TONE_WARNING }, { "Error", th_err, CUI_TONE_DANGER } };
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 900) {
+        cui_time_histogram(ui, "logs", 1794240000, 900, 96, se, 3, &th_s0, &th_s1, .utc = true, .height = 150);
+    }
+}
+
+static const cui_coverage_file cv_files[] = {
+    { "src/core/layout.c", 1840, 1702, 620, 541, 88, 86 }, { "src/core/state.c", 420, 401, 96, 90, 31, 31 },
+    { "src/core/draw.c", 960, 610, 300, 160, 54, 40 }, { "src/text/shape.c", 2210, 1490, 802, 411, 120, 88 },
+    { "src/text/atlas.c", 640, 598, 140, 131, 30, 30 }, { "src/render/gl.c", 1300, 410, 260, 60, 70, 22 },
+    { "src/render/software.c", 2400, 2210, 900, 799, 140, 136 }, { "src/main.c", 120, 120, 10, 10, 4, 4 },
+};
+static void devtools2_coverage(cui_ctx *ui) {
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 820) {
+        cui_coverage(ui, "cov", cv_files, 8, .height = 372);
+    }
+}
+
+static const char *const bl_lines[] = {
+    "#include \"cui_internal.h\"", "", "/* the width a component asks for */", "static float measure(cui_node *n) {", "    float w = n->pad[1] + n->pad[3];",
+    "    for (int c = n->first; c >= 0; c = next(c))", "        w += width_of(c) + n->gap;", "    return w - n->gap;", "}", "",
+    "void cui__layout(cui_ctx *ui) {", "    for (int i = 0; i < ui->node_count; i++)", "        measure(&ui->nodes[i]);", "    place(ui, 0);  /* the root */", "}",
+};
+static const int bl_commit[] = { 0, 0, 1, 1, 2, 2, 2, 1, 1, 0, 3, 3, 4, 3, 3 };
+static const cui_blame_commit bl_commits[] = {
+    { "a1b2c3d4e5", "Maya Okafor", "First layout pass", 1730000000 }, { "b2c3d4e5f6", "Jonas Berg", "Measure: count padding once", 1760000000 },
+    { "c3d4e5f6a7", "Priya Nair", "Gaps between children", 1790000000 }, { "d4e5f6a7b8", "Omid Saadat", "Layout entry point", 1793000000 },
+    { "e5f6a7b8c9", "Aiko Tanaka", "Measure every node", 1794100000 },
+};
+static void devtools2_blame(cui_ctx *ui) {
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 900) {
+        cui_blame(ui, "blame", bl_lines, bl_commit, 15, bl_commits, 5, .lang = "c", .now = 1794211200, .height = 320, .first_line = 120);
+    }
+}
+
+static cui_feature_flag ff_flags[] = {
+    { "new-checkout", "Single-page checkout with saved cards", { true, true, false }, { 0, 25, 0 } },
+    { "dark-mode-default", "Start new accounts in dark mode", { true, false, false } },
+    { "search-v2", "Ranked search with typo tolerance", { true, true, true }, { 0, 100, 5 } },
+    { "export-pdf", "Export reports as PDF", { false, false, false } },
+};
+static void devtools2_flags(cui_ctx *ui) {
+    static const char *envs[] = { "Development", "Staging", "Production" };
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 860) {
+        cui_feature_flags(ui, "flags", ff_flags, 4, envs, 3);
+    }
+}
+
+static const cui_api_param ax_p1[] = { { "id", "path", "string", true, "The user's id" }, { "fields", "query", "string", false, "Comma separated fields to return" } };
+static const cui_api_param ax_p2[] = { { "limit", "query", "integer", false, "At most this many, default 20" }, { "cursor", "query", "string", false, "From a previous page" } };
+static const cui_api_endpoint ax_eps[] = {
+    { "GET", "/users", "List users", "Users", false, ax_p2, 2 }, { "POST", "/users", "Create a user", "Users" },
+    { "GET", "/users/{id}", "Get a user", "Users", false, ax_p1, 2 }, { "PATCH", "/users/{id}", "Update a user", "Users", false, ax_p1, 1 },
+    { "DELETE", "/users/{id}", "Delete a user", "Users", false, ax_p1, 1 }, { "GET", "/orders", "List orders", "Orders", false, ax_p2, 2 },
+    { "PUT", "/orders/{id}/status", "Set an order's status", "Orders" }, { "GET", "/v1/orders", "List orders (old)", "Orders", true },
+};
+static int ax_sel = 2;
+static void devtools2_api(cui_ctx *ui) {
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 820) {
+        cui_api_explorer(ui, "api", ax_eps, 8, .selected = &ax_sel);
+    }
+}
+
+static void page_devtools2(cui_ctx *ui) {
+    section(ui, "Test explorer", "Suites fold; hover a row to run it; filter by status or name.");
+    devtools2_tests(ui);
+    section(ui, "Stack trace", "Library frames fold; a frame with source opens; copy the trace.");
+    devtools2_stack(ui);
+    section(ui, "Blame", "Hover the gutter to mark a commit's lines; click it to open the commit.");
+    devtools2_blame(ui);
+    section(ui, "Coverage", "Folders sum up their files; click a column to sort.");
+    devtools2_coverage(ui);
+    section(ui, "Regex tester", "Matches and groups are marked as you type.");
+    devtools2_regex(ui);
+    section(ui, "HTTP request bar", "The parameters table and the URL stay in step.");
+    devtools2_request(ui);
+    section(ui, "API explorer", "Click an endpoint for its parameters.");
+    devtools2_api(ui);
+    section(ui, "Feature flags", "A switch per environment; click a share to change it.");
+    devtools2_flags(ui);
+    section(ui, "Uptime", "One bar per day; hover for the day.");
+    devtools2_uptime(ui);
+    section(ui, "Time histogram", "Drag to select a range; click to clear it.");
+    devtools2_histogram(ui);
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -1430,6 +1604,7 @@ static const more_page pages[] = {
     { "Audio", CUI_ICON_AUDIO_LINES, page_audio },
     { "Files", CUI_ICON_FOLDER, page_files },
     { "Developer tools", CUI_ICON_SQUARE_TERMINAL, page_devtools },
+    { "More developer tools", CUI_ICON_BUG, page_devtools2 },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

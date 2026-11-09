@@ -642,6 +642,329 @@ cui_pipeline_result cui_pipeline_ex(cui_ctx *ui, const char *id_str, const char 
 }
 
 /* ======================================================================== */
+/* Test explorer                                                            */
+/* ======================================================================== */
+
+#define CUI__TX_ROW    28.0f
+#define CUI__TX_NARROW 480.0f
+#define CUI__TX_FOLDS  64
+
+typedef struct {
+    bool init;
+    bool show[3];               /* passed, failed, skipped shown */
+    char query[96];
+    int sel;
+    uint32_t folded[CUI__TX_FOLDS]; int nfolded;
+    bool scroll_to_sel;
+    bool rtl;                   /* the list read right to left last frame: Left and Right swap */
+} cui__tx_state;
+
+/* a suite's results, from the tests under it */
+typedef struct { int pass, fail, skip, run, pend, shown; float time; bool suite; } cui__tx_sum;
+
+typedef struct {
+    cui_ctx *ui;
+    const cui_test_item *it; int n;
+    cui__tx_state *s;
+    cui_id id, lid;
+    cui__tx_sum *sum;
+    int *rows; int nrows;       /* an item, or -(item + 1) for a failure's message under it */
+    bool narrow;
+    cui_test_explorer_result *res;
+} cui__txf;
+
+static uint32_t cui__tx_key(const cui_test_item *it, int i) { return cui__hash_str(it[i].name ? it[i].name : "", (uint32_t)i * 2654435761u + 0x7E57u); }
+static bool cui__tx_folded(const cui__tx_state *s, uint32_t h) {
+    for (int i = 0; i < s->nfolded; i++) if (s->folded[i] == h) return true;
+    return false;
+}
+static void cui__tx_fold(cui__tx_state *s, uint32_t h, bool fold) {
+    for (int i = 0; i < s->nfolded; i++)
+        if (s->folded[i] == h) { if (!fold) s->folded[i] = s->folded[--s->nfolded]; return; }
+    if (fold && s->nfolded < CUI__TX_FOLDS) s->folded[s->nfolded++] = h;
+}
+static cui_job_status cui__tx_status(const cui__txf *f, int i) {
+    const cui__tx_sum *m = &f->sum[i];
+    if (!m->suite) return f->it[i].status;
+    if (m->fail) return CUI_JOB_FAILED;
+    if (m->run) return CUI_JOB_RUNNING;
+    if (m->pend) return CUI_JOB_PENDING;
+    if (m->pass) return CUI_JOB_PASSED;
+    return m->skip ? CUI_JOB_SKIPPED : CUI_JOB_PENDING;
+}
+/* does a test pass the status toggles and the text filter */
+static bool cui__tx_passes(const cui__txf *f, int i) {
+    cui_job_status st = f->it[i].status;
+    int b = st == CUI_JOB_PASSED ? 0 : st == CUI_JOB_FAILED ? 1 : st == CUI_JOB_SKIPPED || st == CUI_JOB_CANCELED ? 2 : -1;
+    if (b >= 0 && !f->s->show[b]) return false;
+    return cui__contains_ci(f->it[i].name ? f->it[i].name : "", f->s->query);
+}
+
+/* sums up each suite and lists the rows: a suite shows when a test under it passes the filters */
+static void cui__tx_rows(cui__txf *f) {
+    cui_ctx *ui = f->ui;
+    int n = f->n;
+    size_t nn = (size_t)CUI_MAX(1, n);
+    f->res->passed = f->res->failed = f->res->skipped = f->res->total = 0;
+    f->sum = cui__frame_alloc(ui, sizeof(cui__tx_sum) * nn);
+    memset(f->sum, 0, sizeof(cui__tx_sum) * nn);
+    int stack[64], sp = 0;
+    for (int i = 0; i < n; i++) {
+        int d = CUI_CLAMP(f->it[i].depth, 0, 63);
+        while (sp > 0 && CUI_CLAMP(f->it[stack[sp - 1]].depth, 0, 63) >= d) sp--;
+        bool suite = i + 1 < n && f->it[i + 1].depth > f->it[i].depth;
+        f->sum[i].suite = suite;
+        if (!suite) {
+            cui_job_status st = f->it[i].status;
+            bool shown = cui__tx_passes(f, i);
+            float t = f->it[i].duration > 0 ? f->it[i].duration : 0;
+            switch (st) {
+            case CUI_JOB_PASSED: f->res->passed++; break;
+            case CUI_JOB_FAILED: f->res->failed++; break;
+            case CUI_JOB_SKIPPED: case CUI_JOB_CANCELED: f->res->skipped++; break;
+            default: break;
+            }
+            f->res->total++;
+            for (int k = 0; k < sp; k++) {
+                cui__tx_sum *m = &f->sum[stack[k]];
+                switch (st) {
+                case CUI_JOB_PASSED: m->pass++; break;
+                case CUI_JOB_FAILED: m->fail++; break;
+                case CUI_JOB_SKIPPED: case CUI_JOB_CANCELED: m->skip++; break;
+                case CUI_JOB_RUNNING: m->run++; break;
+                default: m->pend++; break;
+                }
+                m->time += t;
+                if (shown) m->shown++;
+            }
+            if (shown) f->sum[i].shown = 1;
+        }
+        if (suite && sp < 64) stack[sp++] = i;
+    }
+    f->rows = cui__frame_alloc(ui, sizeof(int) * nn * 2);
+    f->nrows = 0;
+    int hide_below = -1;   /* depth under a folded suite */
+    for (int i = 0; i < n; i++) {
+        int d = f->it[i].depth;
+        if (hide_below >= 0) { if (d > hide_below) continue; hide_below = -1; }
+        if (!f->sum[i].shown) continue;
+        f->rows[f->nrows++] = i;
+        if (f->sum[i].suite && cui__tx_folded(f->s, cui__tx_key(f->it, i))) hide_below = d;
+        else if (!f->sum[i].suite && f->it[i].status == CUI_JOB_FAILED && f->it[i].message && f->it[i].message[0]) f->rows[f->nrows++] = -(i + 1);
+    }
+}
+
+static int cui__tx_row_of(const cui__txf *f, int item) {
+    for (int r = 0; r < f->nrows; r++) if (f->rows[r] == item) return r;
+    return -1;
+}
+
+static void cui__tx_keys(cui__txf *f) {
+    cui_ctx *ui = f->ui;
+    cui__tx_state *s = f->s;
+    int r = cui__tx_row_of(f, s->sel), nr = r;
+    bool left = cui_key_pressed(ui, s->rtl ? CUI_KEY_RIGHT : CUI_KEY_LEFT), right = cui_key_pressed(ui, s->rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT);
+    if (cui_key_pressed(ui, CUI_KEY_DOWN)) { nr = r + 1; while (nr < f->nrows && f->rows[nr] < 0) nr++; if (nr >= f->nrows) nr = r; }
+    if (cui_key_pressed(ui, CUI_KEY_UP)) { nr = r < 0 ? 0 : r - 1; while (nr > 0 && f->rows[nr] < 0) nr--; if (nr < 0) nr = 0; }
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) nr = 0;
+    if (cui_key_pressed(ui, CUI_KEY_END)) { nr = f->nrows - 1; while (nr > 0 && f->rows[nr] < 0) nr--; }
+    if (r < 0 && nr < 0 && f->nrows > 0 && (cui_key_pressed(ui, CUI_KEY_DOWN) || cui_key_pressed(ui, CUI_KEY_UP))) nr = 0;
+    if (nr != r && nr >= 0 && nr < f->nrows && f->rows[nr] >= 0) { s->sel = f->rows[nr]; s->scroll_to_sel = true; }
+    int i = s->sel;
+    if (i >= 0 && i < f->n) {
+        bool suite = f->sum[i].suite;
+        uint32_t h = cui__tx_key(f->it, i);
+        if (left) {
+            if (suite && !cui__tx_folded(s, h)) cui__tx_fold(s, h, true);
+            else for (int k = i - 1; k >= 0; k--) if (f->it[k].depth < f->it[i].depth) { s->sel = k; s->scroll_to_sel = true; break; }
+        }
+        if (right && suite) cui__tx_fold(s, h, false);
+        if (cui_key_pressed(ui, CUI_KEY_ENTER)) f->res->activated = i;
+    }
+}
+
+static void cui__tx_toolbar(cui__txf *f) {
+    cui_ctx *ui = f->ui;
+    cui__tx_state *s = f->s;
+    int bar = cui__node_new(ui, 0);
+    cui_node *bn = &ui->nodes[bar];
+    bn->dir = CUI_ROW; bn->gap = 8; bn->w = CUI_FILL; bn->align = CUI_ALIGN_CENTER; bn->flags |= CUI_NF_ROW_WRAP;
+    cui__open(ui, bar);
+    cui_button_opts bo;
+    memset(&bo, 0, sizeof bo);
+    bo.size = CUI_SIZE_SM; bo.icon = CUI_ICON_PLAY;
+    if (cui_button_ex(ui, f->narrow ? "Run" : "Run all", &bo)) f->res->run_all = true;
+    static const char *const icons[3] = { CUI_ICON_CIRCLE_CHECK, CUI_ICON_CIRCLE_X, CUI_ICON_CHEVRONS_RIGHT };
+    const char *labels[3] = { cui__frame_printf(ui, "%d", f->res->passed), cui__frame_printf(ui, "%d", f->res->failed), cui__frame_printf(ui, "%d", f->res->skipped) };
+    cui_toggle_group_opts go;
+    memset(&go, 0, sizeof go);
+    go.size = CUI_SIZE_SM; go.icons = icons;
+    cui_toggle_group_ex(ui, "status", labels, 3, s->show, &go);
+    cui_input_opts io;
+    memset(&io, 0, sizeof io);
+    io.size = CUI_SIZE_SM; io.width = CUI_FILL; io.placeholder = "Filter tests"; io.clearable = true;
+    cui_search_ex(ui, "filter", s->query, sizeof s->query, &io);
+    ui->nodes[ui->last_node].min_w = 120;
+    cui__close(ui);
+}
+
+static void cui__tx_row(cui__txf *f, int i) {
+    cui_ctx *ui = f->ui;
+    cui__tx_state *s = f->s;
+    const cui_test_item *t = &f->it[i];
+    bool suite = f->sum[i].suite;
+    cui_id rid = f->id ^ (cui__tx_key(f->it, i) * 0x9E3779B1u);
+    cui_interact ri = cui__interact(ui, rid, CUI_IF_KEEP_FOCUS);
+    uint32_t h = cui__tx_key(f->it, i);
+    bool folded = suite && cui__tx_folded(s, h);
+    if (ri.clicked) {
+        s->sel = i; ui->focus = f->lid;
+        if (ui->click_count >= 2) { if (suite) cui__tx_fold(s, h, !folded); else f->res->activated = i; }
+    }
+    bool sel = s->sel == i, focused = ui->focus == f->lid;
+    int row = cui__node_new(ui, rid);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->gap = 6; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(CUI__TX_ROW);
+    rn->pad[1] = 6; rn->pad[3] = 8 + (float)CUI_CLAMP(t->depth, 0, 12) * (f->narrow ? 12 : 16);
+    rn->bg = sel ? (focused ? cui_mix(CUI_C(ui, SURFACE), cui__emphasis(ui), ui->accent == CUI_ACCENT_NEUTRAL ? 0.08f : 0.16f) : CUI_C(ui, ACTIVE))
+                 : ri.hovered ? CUI_C(ui, HOVER) : cui__rgba(0, 0, 0, 0);
+    cui__mark_interactive(ui, row, 0);
+    cui__open(ui, row);
+    if (suite) {
+        cui_id cid = rid ^ 0xC4u;
+        cui_interact ci = cui__interact(ui, cid, 0);
+        if (ci.clicked) cui__tx_fold(s, h, !folded);
+        cui__icon_node(ui, folded ? CUI_ICON_CHEVRON_RIGHT : CUI_ICON_CHEVRON_DOWN, 14, ci.hovered ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED));
+        int c = ui->last_node;
+        ui->nodes[c].id = cid;
+        cui__mark_interactive(ui, c, 0);
+    } else {
+        int sp = cui__node_new(ui, 0);
+        ui->nodes[sp].w = ui->nodes[sp].h = CUI_PX(14);
+    }
+    cui__pl_status_icon(ui, cui__tx_status(f, i), false, 14);
+    float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
+    int tn = cui__text_node(ui, t->name ? t->name : "", -1, suite ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, CUI_C(ui, FOREGROUND), false);
+    ui->nodes[tn].w = CUI_FILL; ui->nodes[tn].flags |= CUI_NF_CLIP; ui->nodes[tn].line_height = 1.3f;
+    if (suite && !f->narrow) {
+        const cui__tx_sum *m = &f->sum[i];
+        int all = m->pass + m->fail + m->skip + m->run + m->pend;
+        int ct = cui__text_node(ui, cui__frame_printf(ui, "%d/%d", m->pass, all), -1, CUI_FONT_BODY, fx, CUI_C(ui, TEXT_MUTED), false);
+        ui->nodes[ct].flags |= CUI_NF_TABULAR;
+    }
+    float dur = suite ? f->sum[i].time : t->duration;
+    if (dur > 0 || (!suite && t->duration >= 0 && t->status != CUI_JOB_PENDING && t->status != CUI_JOB_SKIPPED)) {
+        const char *ds = dur < 1 ? cui__frame_printf(ui, "%.0f ms", dur * 1000) : cui__frame_printf(ui, "%.2f s", dur);
+        int dt = cui__text_node(ui, ds, -1, CUI_FONT_BODY, fx, dur >= 1 ? CUI_C(ui, WARNING) : CUI_C(ui, TEXT_MUTED), false);
+        ui->nodes[dt].flags |= CUI_NF_TABULAR; ui->nodes[dt].direction = CUI_DIRECTION_LTR;
+    }
+    /* the run button, on hover and on the selection; a space of its size otherwise */
+    bool show_run = ri.hovered || sel;
+    if (show_run) {
+        cui_button_opts bo;
+        memset(&bo, 0, sizeof bo);
+        bo.size = CUI_SIZE_SM; bo.variant = CUI_BUTTON_GHOST; bo.tooltip = suite ? "Run these tests" : "Run this test";
+        cui_push_id_int(ui, i);
+        if (cui_icon_button_ex(ui, CUI_ICON_PLAY, &bo)) f->res->run = i;
+        cui_pop_id(ui);
+    } else {
+        int sp = cui__node_new(ui, 0);
+        ui->nodes[sp].w = ui->nodes[sp].h = CUI_PX(28);
+    }
+    cui__close(ui);
+    if (ri.hovered && ui->active == 0 && t->message && t->message[0] && !suite) cui__tooltip_passive(ui, rid, t->message);
+}
+
+static void cui__tx_message_row(cui__txf *f, int i) {
+    cui_ctx *ui = f->ui;
+    const cui_test_item *t = &f->it[i];
+    int row = cui__node_new(ui, 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->w = CUI_FILL; rn->h = CUI_PX(CUI__TX_ROW);
+    rn->pad[1] = 8; rn->pad[3] = 8 + (float)CUI_CLAMP(t->depth, 0, 12) * (f->narrow ? 12 : 16) + 40;
+    cui__open(ui, row);
+    const char *msg = t->message, *nl = strchr(msg, '\n');
+    int tn = cui__text_node(ui, msg, nl ? (int)(nl - msg) : -1, CUI_FONT_MONO, cui__fs(ui, ui->theme.text_xs), CUI_C(ui, DANGER), false);
+    ui->nodes[tn].w = CUI_FILL; ui->nodes[tn].flags |= CUI_NF_CLIP;
+    cui__close(ui);
+}
+
+cui_test_explorer_result cui_test_explorer_ex(cui_ctx *ui, const char *id_str, const cui_test_item *items, int count, const cui_test_explorer_opts *o) {
+    cui_test_explorer_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_test_explorer_result res;
+    memset(&res, 0, sizeof res);
+    res.selected = res.activated = res.run = -1;
+    if (!items || count < 0) count = 0;
+    cui__txf f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.it = items; f.n = count; f.res = &res;
+    f.id = cui_make_id(ui, id_str);
+    f.lid = f.id ^ 0x7E50u;
+    cui__tx_state *s = f.s = cui_state(ui, f.id ^ 0x7E51u, sizeof *s);
+    if (!s->init) { s->init = true; s->show[0] = s->show[1] = s->show[2] = true; s->sel = -1; }
+    if (s->sel >= count) s->sel = -1;
+    cui_rect pr = cui__prev_rect(ui, f.id);
+    f.narrow = pr.w > 0 && pr.w < CUI__TX_NARROW;
+    cui__tx_rows(&f);
+
+    int outer = cui__node_new(ui, f.id);
+    cui_node *on = &ui->nodes[outer];
+    on->gap = 8;
+    on->w = o->width.kind ? o->width : CUI_FILL;
+    on->h = o->height < 0 ? CUI_FILL : CUI_PX(o->height > 0 ? o->height : 320);
+    cui__open(ui, outer);
+    cui_push_id(ui, id_str);
+    cui__tx_toolbar(&f);
+    cui__tx_rows(&f);   /* the toggles and the filter may have changed */
+    cui_interact lr = cui__interact(ui, f.lid, CUI_IF_FOCUSABLE);
+    if (lr.focused && !ui->edit_prev) cui__tx_keys(&f);
+    int frame = cui__node_new(ui, f.lid);
+    cui_node *fn = &ui->nodes[frame];
+    fn->w = CUI_FILL; fn->h = CUI_FILL; fn->min_h = 80;
+    fn->radius = CUI_CORNERS(ui->theme.radius_control);
+    fn->border = 1; fn->border_color = CUI_C(ui, BORDER);
+    fn->bg = CUI_C(ui, SURFACE);
+    fn->flags |= CUI_NF_CLIP;
+    fn->paint = cui__paint_pb_dir; fn->paint_data = &s->rtl;
+    cui__mark_interactive(ui, frame, CUI_IF_FOCUSABLE);
+    cui__focus_ring(ui, frame, lr.focus_visible ? 1.0f : 0.0f);
+    cui__open(ui, frame);
+    if (s->scroll_to_sel) {
+        int r = cui__tx_row_of(&f, s->sel);
+        cui_scroll_state *ss = cui_state(ui, cui_make_id(ui, "rows"), sizeof *ss);
+        float y = r * CUI__TX_ROW, vh = ss->view_h > 0 ? ss->view_h : 240;
+        if (r >= 0) {
+            if (y < ss->ty) ss->ty = y;
+            else if (y + CUI__TX_ROW * 2 > ss->ty + vh) ss->ty = y + CUI__TX_ROW * 2 - vh;   /* with its message */
+        }
+        s->scroll_to_sel = false;
+    }
+    if (f.nrows == 0) {
+        int e = cui__node_new(ui, 0);
+        ui->nodes[e].w = CUI_FILL; ui->nodes[e].h = CUI_FILL; ui->nodes[e].align = CUI_ALIGN_CENTER; ui->nodes[e].justify = CUI_JUSTIFY_CENTER;
+        cui__open(ui, e);
+        cui__text_node(ui, count == 0 ? "No tests" : "No tests match the filters", -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
+        cui__close(ui);
+    } else {
+        int first, last;
+        cui_virtual_list_begin(ui, "rows", f.nrows, CUI__TX_ROW, CUI_FILL, &first, &last);
+        for (int r = first; r < last; r++) {
+            int v = f.rows[r];
+            if (v >= 0) cui__tx_row(&f, v); else cui__tx_message_row(&f, -v - 1);
+        }
+        cui_virtual_list_end(ui);
+    }
+    cui__close(ui);   /* frame */
+    cui_pop_id(ui);
+    cui__close(ui);   /* outer */
+    res.selected = s->sel;
+    ui->last_id = f.id;
+    return res;
+}
+
+/* ======================================================================== */
 /* Query builder                                                            */
 /* ======================================================================== */
 

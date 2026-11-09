@@ -53,6 +53,8 @@ cui__lang cui__lang_for(const char *lang) {
         l.kw = kw_go; l.types = ty_go; l.line_comment = "//"; l.block_comments = true; l.backtick = true;
     } else if (!strcmp(lang, "shell") || !strcmp(lang, "sh") || !strcmp(lang, "bash")) {
         l.kw = kw_sh; l.line_comment = "#"; l.no_caps_types = true;
+    } else if (!strcmp(lang, "text") || !strcmp(lang, "plain")) {
+        l.plain = true;
     }
     return l;
 }
@@ -68,6 +70,7 @@ static bool cui__ident_char(char c) { return cui__ident_start(c) || (c >= '0' &&
 int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
     int count = 0, i = 0;
 #define EMIT(st, ln, k) do { if (count < cap) { out[count].start = (st); out[count].len = (ln); out[count].kind = (uint8_t)(k); count++; } } while (0)
+    if (L->plain) { if (n > 0) EMIT(0, n, TK_TEXT); return count; }
     while (i < n) {
         if (*in_block) {
             int st = i;
@@ -151,6 +154,22 @@ int cui__tokenize_lang(const char *lang, const char *s, int n, bool *in_block, c
     bool json = lang && !strcmp(lang, "json");
     cui__lang L = cui__lang_for(json ? NULL : lang);
     return cui__tokenize(&L, json, s, n, in_block, out, cap < 256 ? cap : 256);
+}
+
+float cui__draw_code_line(cui_ctx *ui, const char *lang, const char *s, int n, bool *in_block, float x, float y, float size, const cui_color *colors, float max_x) {
+    if (!lang) {
+        cui__draw_text_line(ui, CUI_FONT_MONO, size, x, y, colors[TK_TEXT], s, n, true);
+        return x + cui__text_width(ui, CUI_FONT_MONO, size, s, n, true);
+    }
+    cui__tok tk[256];
+    int nt = cui__tokenize_lang(lang, s, n, in_block, tk, 256), pos = 0;
+    for (int t = 0; t < nt && x <= max_x; t++) {
+        if (tk[t].start > pos) x += cui__text_width(ui, CUI_FONT_MONO, size, s + pos, tk[t].start - pos, true);
+        cui__draw_text_line(ui, CUI_FONT_MONO, size, x, y, colors[tk[t].kind], s + tk[t].start, tk[t].len, true);
+        x += cui__text_width(ui, CUI_FONT_MONO, size, s + tk[t].start, tk[t].len, true);
+        pos = tk[t].start + tk[t].len;
+    }
+    return x;
 }
 
 /* ------------------------------------------------------------------------ */

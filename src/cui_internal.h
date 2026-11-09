@@ -721,7 +721,7 @@ int cui__edit_word_left(const char *s, int pos);
 int cui__edit_word_right(const char *s, int len, int pos);
 
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */
-typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types; } cui__lang;
+typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types, plain; } cui__lang;
 typedef struct { int start, len; uint8_t kind; } cui__tok;
 #define CUI__TK_COUNT 10   /* token kinds; colors from cui__syntax_colors */
 cui__lang cui__lang_for(const char *lang);
@@ -730,5 +730,8 @@ int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_
 /* The same, by language name as the code block takes it ("c", "py", "json"...). */
 int cui__tokenize_lang(const char *lang, const char *s, int n, bool *in_block, cui__tok *out, int cap);
 void cui__syntax_colors(cui_ctx *ui, cui_color *c);   /* CUI__TK_COUNT colors, by token kind */
+/* One line of code in the mono font at (x, y), highlighted when lang is set, stopping past
+ * max_x; *in_block carries a block comment to the next line. Returns the x after it. */
+float cui__draw_code_line(cui_ctx *ui, const char *lang, const char *s, int n, bool *in_block, float x, float y, float size, const cui_color *colors, float max_x);
 
 #endif /* CUI_INTERNAL_H */

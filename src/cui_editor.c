@@ -381,6 +381,8 @@ typedef struct {
     int tab, cursor, anchor, caret_line, caret_col;
     int br_line[2], br_col[2];
     const char *query; int qn;
+    const cui_text_mark *marks; int nmarks;   /* the app's marks that reach the lines in view */
+    cui_color mark_colors[7];
     const char *placeholder;
     float size, lh, cw, gutter, view_h;
     double sy, max_sy;
@@ -473,6 +475,16 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             float xa = (float)cui__ed_col(s, ls, a, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, b, p->tab) * p->cw;
             if (s1 > ale) xb += p->cw * 0.6f;   /* the newline is selected too */
             cui_draw_rect(ui, (cui_rect){ x0 + xa, y, xb - xa, p->lh }, CUI_CORNERS(2), p->sel);
+        }
+        /* the app's marks, behind the find matches */
+        for (int m = 0; m < p->nmarks; m++) {
+            const cui_text_mark *mk = &p->marks[m];
+            if (mk->start > ale) break;
+            if (mk->end <= als && !(mk->end == mk->start && mk->start == als)) continue;
+            int a = CUI_MAX(mk->start, als) - p->base, b = CUI_MIN(mk->end, ale) - p->base;
+            float xa = (float)cui__ed_col(s, ls, a, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, b, p->tab) * p->cw;
+            if (xb - xa < 2) { xa -= 1; xb = xa + 2; }   /* an empty match shows as a bar */
+            cui_draw_rect(ui, (cui_rect){ x0 + xa, y + 1, xb - xa, p->lh - 2 }, CUI_CORNERS(2), p->mark_colors[CUI_CLAMP(mk->color, 0, 6)]);
         }
         /* find matches */
         if (p->qn > 0) {
@@ -1136,6 +1148,21 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
         }
     }
     if (st->mode == 1 && st->query[0]) { p->query = cui__frame_strdup(ui, st->query, -1); p->qn = (int)strlen(p->query); }
+    if (f->o->marks && f->o->mark_count > 0) {   /* the marks that reach the lines in view, copied: the caller owns them */
+        const cui_text_mark *mk = f->o->marks;
+        int n = f->o->mark_count, lo = 0, hi = n;
+        while (lo < hi) { int m = lo + (hi - lo) / 2; if (mk[m].start < a - 4096) lo = m + 1; else hi = m; }   /* starts are sorted; marks are short */
+        int k0 = lo, k1 = lo;
+        while (k1 < n && mk[k1].start <= b) k1++;
+        int c = 0;
+        cui_text_mark *keep = cui__frame_alloc(ui, sizeof *keep * (size_t)CUI_MAX(1, k1 - k0));
+        for (int k = k0; k < k1; k++) if (mk[k].end >= a) keep[c++] = mk[k];
+        p->marks = keep; p->nmarks = c;
+        for (int k = 0; k < 7; k++) {
+            cui_color base = k == 0 ? (ui->accent == CUI_ACCENT_NEUTRAL ? cui_oklch(0.6f, 0.13f, 250, 1) : CUI_C(ui, ACCENT)) : ui->theme.colors[CUI_TOKEN_SERIES_1 + (k - 1)];
+            p->mark_colors[k] = cui_alpha(base, dark ? 0.34f : 0.26f);
+        }
+    }
     cui__syntax_colors(ui, p->colors);
     cui_color fg = CUI_C(ui, FOREGROUND);
     cui_color acc = ui->accent == CUI_ACCENT_NEUTRAL ? cui_oklch(0.6f, 0.13f, 250, 1) : CUI_C(ui, ACCENT);

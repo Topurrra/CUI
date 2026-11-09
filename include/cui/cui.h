@@ -1314,7 +1314,7 @@ CUI_API bool cui_file_picker_ex(cui_ctx *ui, const char *id, bool *open, char *o
 /* ------------------------------------------------------------------------ */
 
 /* Code block with syntax highlighting (lang: "c", "cpp", "js", "ts",
- * "python", "rust", "go", "json", "shell"), line numbers, a title bar and a
+ * "python", "rust", "go", "json", "shell", or "text" for none), line numbers, a title bar and a
  * copy button. Long lines scroll sideways. */
 typedef struct cui_code_opts {
     int _;
@@ -1419,9 +1419,11 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
  * line; Esc closes the bar, else clears the selection, else lets the next
  * Tab move focus. Double-click selects a word, triple-click or the gutter a
  * line. Read only keeps selection, copy and find. */
+/* a highlighted range of bytes: color 0 is the accent, 1 to 6 the series colors */
+typedef struct cui_text_mark { int start, end; int color; } cui_text_mark;
 typedef struct cui_code_editor_opts {
     int _;
-    const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell"; NULL plain */
+    const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell"; "text" for none */
     cui_size width;            /* default fill */
     float height;              /* default 320; negative fills the space */
     float size;                /* font size, default 13 */
@@ -1431,6 +1433,8 @@ typedef struct cui_code_editor_opts {
     bool no_line_numbers;
     bool autofocus;
     const char *placeholder;   /* shown while the text is empty */
+    const cui_text_mark *marks;   /* ranges to highlight (search results, regex matches), sorted by start */
+    int mark_count;
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
@@ -3201,6 +3205,207 @@ CUI_API cui_trace_result cui_trace_view_ex(cui_ctx *ui, const char *id, cui_trac
                                            const cui_trace_span *spans, int span_count, cui_trace_view *view, int *selected, const cui_trace_opts *opts);
 CUI_API void cui_trace_sort(cui_trace_span *spans, int count);
 
+/* ---- Regular expressions and the regex tester ---- */
+
+/* A backtracking engine for the common syntax: literals and escapes, . [] [^]
+ * with ranges, \d \w \s \D \W \S, \b \B, ^ $, groups ( ), (?: ) and
+ * (?<name> ), | and the quantifiers * + ? {n} {n,} {n,m}, each with a lazy ?.
+ * Lookaround and backreferences are not supported. cui_regex_search finds the
+ * first match at or after `from` and returns 1, 0 for none, -1 for an invalid
+ * pattern and -2 when matching would take too long (*error says why). */
+#define CUI_REGEX_GROUPS 10
+enum { CUI_REGEX_ICASE = 1, CUI_REGEX_MULTILINE = 2, CUI_REGEX_DOTALL = 4 };
+typedef struct cui_regex_match {
+    int start, end;                  /* bytes */
+    int groups;                      /* capture groups in the pattern */
+    int group_start[CUI_REGEX_GROUPS], group_end[CUI_REGEX_GROUPS];   /* 1 based; -1 when a group took no part */
+    char group_name[CUI_REGEX_GROUPS][24];
+} cui_regex_match;
+CUI_API int cui_regex_search(const char *pattern, int flags, const char *text, int len, int from, cui_regex_match *m, const char **error);
+
+/* A pattern field with flags over a test text: every match is highlighted in
+ * the text and its groups in their own colors, and the list below shows each
+ * match with its groups. Errors show under the pattern. Both buffers are
+ * yours and edited in place. */
+typedef struct cui_regex_tester_opts {
+    int _;
+    cui_size width;
+    float height;                    /* of the test text, default 180 */
+    int *flags;                      /* CUI_REGEX_*; NULL: kept for you */
+} cui_regex_tester_opts;
+typedef struct cui_regex_tester_result { bool valid; int matches; const char *error; } cui_regex_tester_result;
+CUI_API cui_regex_tester_result cui_regex_tester_ex(cui_ctx *ui, const char *id, char *pattern, size_t pattern_cap, char *text, size_t text_cap,
+                                                    const cui_regex_tester_opts *opts);
+
+/* ---- Test explorer ---- */
+
+/* Test results as a tree: suites fold, each test shows its status and time,
+ * and a failure shows its message under it. A suite's status sums up its
+ * tests. The toolbar runs everything, counts results and filters by status
+ * and by name. Hover a row for its run button. Only the rows in view are
+ * built. Up and Down move, Left and Right fold, Enter activates. Items are in
+ * tree order with their depth; the statuses are the pipeline's. */
+typedef struct cui_test_item {
+    const char *name;
+    int depth;                       /* 0 for the top suites */
+    cui_job_status status;           /* a suite's own status is ignored when it has tests */
+    float duration;                  /* seconds, negative when it has not run */
+    const char *message;             /* why it failed, may be NULL */
+} cui_test_item;
+typedef struct cui_test_explorer_opts { int _; cui_size width; float height; /* default 320 */ } cui_test_explorer_opts;
+typedef struct cui_test_explorer_result {
+    int selected, activated;         /* items, or -1 */
+    int run;                         /* item whose run button was pressed this frame, or -1 */
+    bool run_all;
+    int passed, failed, skipped, total;   /* tests, not suites */
+} cui_test_explorer_result;
+CUI_API cui_test_explorer_result cui_test_explorer_ex(cui_ctx *ui, const char *id, const cui_test_item *items, int count, const cui_test_explorer_opts *opts);
+
+/* ---- Stack trace ---- */
+
+/* An exception and its call stack: the error's type and message, then each
+ * frame's function and position. Runs of library frames fold into one row.
+ * A frame with source opens to show the lines around it, the failing line
+ * marked; the first frame of your own code starts open. A button copies the
+ * whole trace as text. */
+typedef struct cui_stack_frame {
+    const char *function;
+    const char *file;
+    int line, column;                /* 1 based; 0 leaves it out */
+    bool external;                   /* library or runtime code */
+    const char *const *source;       /* lines around the frame, may be NULL */
+    int source_count;
+    int source_first;                /* line number of source[0] */
+} cui_stack_frame;
+typedef struct cui_stack_trace_opts {
+    int _;
+    cui_size width;
+    const char *title;               /* "TypeError" */
+    const char *message;             /* "Cannot read properties of undefined" */
+    const char *lang;                /* highlights the source, as the code block */
+} cui_stack_trace_opts;
+typedef struct cui_stack_trace_result { int clicked; /* frame, or -1 */ } cui_stack_trace_result;
+CUI_API cui_stack_trace_result cui_stack_trace_ex(cui_ctx *ui, const char *id, const cui_stack_frame *frames, int count, const cui_stack_trace_opts *opts);
+
+/* ---- HTTP request bar ---- */
+
+/* The method, the URL and Send, as in an API client. Enter in the URL sends;
+ * while `loading` the button cancels. cui_response_status shows a response's
+ * status, time and size in one line. cui_url_params and cui_url_set_params
+ * move a URL's query to and from key-value pairs, decoding and encoding it,
+ * so a parameters table can stay in step with the URL. */
+typedef enum cui_http_method { CUI_HTTP_GET = 0, CUI_HTTP_POST, CUI_HTTP_PUT, CUI_HTTP_PATCH, CUI_HTTP_DELETE, CUI_HTTP_HEAD, CUI_HTTP_OPTIONS } cui_http_method;
+typedef struct cui_request_bar_opts { int _; cui_size width; bool loading; const char *placeholder; } cui_request_bar_opts;
+typedef struct cui_request_bar_result { bool send; bool cancel; bool changed; } cui_request_bar_result;
+CUI_API cui_request_bar_result cui_request_bar_ex(cui_ctx *ui, const char *id, int *method, char *url, size_t cap, const cui_request_bar_opts *opts);
+CUI_API void cui_response_status(cui_ctx *ui, int status, double seconds, double bytes);
+CUI_API const char *cui_http_reason(int status);   /* "Not Found"; "" when unknown */
+CUI_API const char *cui_http_method_name(int method);
+CUI_API int cui_url_params(const char *url, cui_kv_pair *pairs, int cap);   /* returns the pairs written */
+CUI_API bool cui_url_set_params(char *url, size_t cap, const cui_kv_pair *pairs, int count);   /* enabled pairs; false when it did not fit */
+
+/* ---- Uptime bars ---- */
+
+/* A status page: each service with its current state, its uptime over the
+ * period, and one bar per day colored by availability (gray without data).
+ * Hover a bar for its day and uptime. On a narrow panel only the most recent
+ * days that fit are shown. */
+typedef struct cui_uptime_service {
+    const char *name;
+    const float *days;               /* oldest first: the fraction of the day it was up, 0..1; negative: no data */
+    int day_count;
+} cui_uptime_service;
+typedef struct cui_uptime_opts { int _; cui_size width; cui_date last_day; /* the date of the last value, for the tooltips */ } cui_uptime_opts;
+typedef struct cui_uptime_result { int service, day; /* under the pointer, or -1 */ } cui_uptime_result;
+CUI_API cui_uptime_result cui_uptime_ex(cui_ctx *ui, const char *id, const cui_uptime_service *services, int count, const cui_uptime_opts *opts);
+
+/* ---- Time histogram ---- */
+
+/* Event counts over time, stacked by series (log levels, status classes), as
+ * above a log search. Drag across it to select a time range, click to clear.
+ * Hover a bar for its time and counts. Times are Unix seconds. */
+typedef struct cui_histogram_series { const char *name; const float *counts; cui_tone tone; } cui_histogram_series;
+typedef struct cui_time_histogram_opts { int _; cui_size width; float height; /* default 140 */ bool utc; } cui_time_histogram_opts;
+typedef struct cui_time_histogram_result { bool selection_changed; int hovered; /* bucket, or -1 */ } cui_time_histogram_result;
+CUI_API cui_time_histogram_result cui_time_histogram_ex(cui_ctx *ui, const char *id, double start, double bucket_seconds, int buckets,
+                                                        const cui_histogram_series *series, int series_count, double *sel_start, double *sel_end,
+                                                        const cui_time_histogram_opts *opts);
+
+/* ---- Coverage ---- */
+
+/* Test coverage by folder and file: the files' paths make the tree, each
+ * folder sums up what it holds, and folders fold. Line coverage shows as a
+ * bar colored by thresholds, with branches and functions beside it. Click a
+ * column's title to sort. Enter or a double-click activates a file. Narrow
+ * panels show lines only. */
+typedef struct cui_coverage_file {
+    const char *path;                /* "src/core/layout.c" */
+    int lines, lines_hit;
+    int branches, branches_hit;      /* 0 branches: not measured */
+    int functions, functions_hit;
+} cui_coverage_file;
+typedef struct cui_coverage_opts { int _; cui_size width; float height; float low, high; /* percent; default 50 and 80 */ } cui_coverage_opts;
+typedef struct cui_coverage_result { int activated; /* file, or -1 */ float lines; /* percent of all lines covered */ } cui_coverage_result;
+CUI_API cui_coverage_result cui_coverage_ex(cui_ctx *ui, const char *id, const cui_coverage_file *files, int count, const cui_coverage_opts *opts);
+
+/* ---- Blame ---- */
+
+/* Source with who last changed each line: lines from one commit share one
+ * gutter entry with its author, age and hash, and a bar at the edge shades
+ * newer changes stronger. Hover a gutter entry for the commit's summary and
+ * to mark its lines; click it to get the commit. Only the lines in view are
+ * built. On a phone the gutter keeps only the shade and initials. */
+typedef struct cui_blame_commit { const char *hash; const char *author; const char *summary; int64_t time; /* Unix seconds */ } cui_blame_commit;
+typedef struct cui_blame_opts {
+    int _;
+    cui_size width;
+    float height;                    /* default 360 */
+    const char *lang;                /* highlights the code, as the code block */
+    int64_t now;                     /* ages are counted to here; 0: the clock */
+    int first_line;                  /* number of the first line, default 1 */
+} cui_blame_opts;
+typedef struct cui_blame_result { int clicked; int hovered; /* commits, or -1 */ } cui_blame_result;
+CUI_API cui_blame_result cui_blame_ex(cui_ctx *ui, const char *id, const char *const *lines, const int *line_commit, int line_count,
+                                      const cui_blame_commit *commits, int commit_count, const cui_blame_opts *opts);
+
+/* ---- Feature flags ---- */
+
+/* Flags against environments: a switch per environment, and the share of
+ * users a flag reaches there, set from a popover. A field filters by key or
+ * description. On a phone one environment shows at a time, picked above the
+ * list. You own the flags; they change in place. */
+#define CUI_FLAG_ENVS 8
+typedef struct cui_feature_flag {
+    const char *key;
+    const char *description;
+    bool on[CUI_FLAG_ENVS];
+    int rollout[CUI_FLAG_ENVS];      /* percent of users while on; 0 and 100 mean everyone */
+} cui_feature_flag;
+typedef struct cui_feature_flags_opts { int _; cui_size width; float height; /* default fits the flags */ } cui_feature_flags_opts;
+typedef struct cui_feature_flags_result { int flag, env; /* changed this frame, or -1 */ } cui_feature_flags_result;
+CUI_API cui_feature_flags_result cui_feature_flags_ex(cui_ctx *ui, const char *id, cui_feature_flag *flags, int count,
+                                                      const char *const *envs, int env_count, const cui_feature_flags_opts *opts);
+
+/* ---- API explorer ---- */
+
+/* Endpoints grouped by tag, each with its method, its path (parameters
+ * marked) and its summary; deprecated ones are struck through. A click opens
+ * an endpoint's parameters and a Try it button. A field filters by path or
+ * summary. Up and Down move, Enter opens. */
+typedef struct cui_api_param { const char *name; const char *in; /* "path", "query", "header", "body" */ const char *type; bool required; const char *description; } cui_api_param;
+typedef struct cui_api_endpoint {
+    const char *method;              /* "GET" */
+    const char *path;                /* "/users/{id}" */
+    const char *summary;
+    const char *tag;                 /* groups the list; NULL groups as "Other" */
+    bool deprecated;
+    const cui_api_param *params;
+    int param_count;
+} cui_api_endpoint;
+typedef struct cui_api_explorer_opts { int _; cui_size width; float height; int *selected; } cui_api_explorer_opts;
+typedef struct cui_api_explorer_result { int selected; int try_it; /* endpoint, or -1 */ } cui_api_explorer_result;
+CUI_API cui_api_explorer_result cui_api_explorer_ex(cui_ctx *ui, const char *id, const cui_api_endpoint *endpoints, int count, const cui_api_explorer_opts *opts);
+
 /* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
@@ -3473,6 +3678,18 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_waterfall(ui, id, requests, count, ...) cui_waterfall_ex((ui), (id), (requests), (count), CUI__OPTS(cui_waterfall_opts, __VA_ARGS__))
 #define cui_trace_view(ui, id, tracks, track_count, spans, span_count, view, selected, ...) \
     cui_trace_view_ex((ui), (id), (tracks), (track_count), (spans), (span_count), (view), (selected), CUI__OPTS(cui_trace_opts, __VA_ARGS__))
+#define cui_regex_tester(ui, id, pat, pcap, text, tcap, ...) cui_regex_tester_ex((ui), (id), (pat), (pcap), (text), (tcap), CUI__OPTS(cui_regex_tester_opts, __VA_ARGS__))
+#define cui_test_explorer(ui, id, items, n, ...) cui_test_explorer_ex((ui), (id), (items), (n), CUI__OPTS(cui_test_explorer_opts, __VA_ARGS__))
+#define cui_stack_trace(ui, id, frames, n, ...) cui_stack_trace_ex((ui), (id), (frames), (n), CUI__OPTS(cui_stack_trace_opts, __VA_ARGS__))
+#define cui_request_bar(ui, id, method, url, cap, ...) cui_request_bar_ex((ui), (id), (method), (url), (cap), CUI__OPTS(cui_request_bar_opts, __VA_ARGS__))
+#define cui_uptime(ui, id, services, n, ...) cui_uptime_ex((ui), (id), (services), (n), CUI__OPTS(cui_uptime_opts, __VA_ARGS__))
+#define cui_time_histogram(ui, id, start, bucket, buckets, series, nseries, sel_start, sel_end, ...) \
+    cui_time_histogram_ex((ui), (id), (start), (bucket), (buckets), (series), (nseries), (sel_start), (sel_end), CUI__OPTS(cui_time_histogram_opts, __VA_ARGS__))
+#define cui_coverage(ui, id, files, n, ...) cui_coverage_ex((ui), (id), (files), (n), CUI__OPTS(cui_coverage_opts, __VA_ARGS__))
+#define cui_blame(ui, id, lines, line_commit, n, commits, ncommits, ...) \
+    cui_blame_ex((ui), (id), (lines), (line_commit), (n), (commits), (ncommits), CUI__OPTS(cui_blame_opts, __VA_ARGS__))
+#define cui_feature_flags(ui, id, flags, n, envs, nenvs, ...) cui_feature_flags_ex((ui), (id), (flags), (n), (envs), (nenvs), CUI__OPTS(cui_feature_flags_opts, __VA_ARGS__))
+#define cui_api_explorer(ui, id, endpoints, n, ...) cui_api_explorer_ex((ui), (id), (endpoints), (n), CUI__OPTS(cui_api_explorer_opts, __VA_ARGS__))
 #define cui_flame_graph(ui, id, spans, count, view, selected, ...) \
     cui_flame_graph_ex((ui), (id), (spans), (count), (view), (selected), CUI__OPTS(cui_flame_opts, __VA_ARGS__))
 /* curve and gradient editors */

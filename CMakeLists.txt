@@ -69,6 +69,9 @@ set(CUI_CORE_SOURCES
     src/cui_strings.c
     src/cui_devtools.c
     src/cui_graph.c
+    src/cui_devpanels.c
+    src/cui_regex.c
+    src/cui_devviews.c
     src/cui_tour.c
     src/cui_photo.c
     src/cui_files.c

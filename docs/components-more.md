@@ -840,7 +840,7 @@ With the editor focused, Left and Right step the playhead by a frame (Shift: ten
 
 ## Developer tools
 
-Panels for the tools developers build: an HTTP client, an IDE, a CI dashboard, a profiler, a network inspector. The table-like ones (problems, commit graph, waterfall) build only the rows in view; the timelines and graphs (trace viewer, dependency graph) draw only what is in view. A panel whose content is drawn on a time or graph axis (the keymap, the dependency graph, the trace viewer, the waterfall's bars) keeps its left-to-right geometry in a right-to-left interface, while the labels, columns and controls around it mirror.
+Panels for the tools developers build: an HTTP client, an IDE, a CI dashboard, a profiler, a network inspector, a status page. The table-like ones (problems, commit graph, waterfall, test explorer, coverage, blame) build only the rows in view; the timelines and graphs (trace viewer, dependency graph) draw only what is in view. A panel whose content is drawn on a time or graph axis (the keymap, the dependency graph, the trace viewer, the waterfall's bars) keeps its left-to-right geometry in a right-to-left interface, while the labels, columns and controls around it mirror.
 
 ### Key-value editor
 
@@ -976,6 +976,158 @@ cui_trace_view(ui, "trace", tracks, 3, spans, span_count, &view, &selected,
 ```
 
 A tracing timeline in the manner of a performance panel. Each thread, process or service has a lane of nested spans, drawn like the flame graph and sharing its colors and ruler. Markers (vsync, a GC pause, a deploy) run across every lane, with their names in a strip under the ruler. The wheel zooms around the pointer, Shift+wheel pans, and over the lane names the wheel scrolls the lanes. Dragging pans, a click selects, and a double click zooms to a span. Shift+drag measures a range, which `view.mark_start` and `mark_end` hold and the ruler labels with its length. A click on a lane's name folds it to its top row, and `collapsed` keeps that in your track array. With the viewer focused, Left and Right step along the row, Up goes to the parent and Down to the first child. + and - zoom, Enter zooms to the selection, F fits, and Esc clears the measurement and then the selection. Only the rows and spans in view are visited, and spans thinner than a point merge into runs, so 200,000 spans take under a millisecond a frame. Below 560 points the lane names get a narrower column.
+
+### Regex tester
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/regex-tester-dark.png"><img src="images/components/regex-tester.png" alt="Regex tester"></picture>
+
+```c
+static char pattern[128] = "(?<user>[\\w.]+)@(?<host>[\\w-]+)\\.com";
+static char text[4096] = "Write to maya@example.com or help@example.com";
+cui_regex_tester_result r = cui_regex_tester(ui, "rx", pattern, sizeof pattern, text, sizeof text);
+```
+
+A pattern field with the flags i (ignore case), m (multi-line ^ and $) and s (dot matches newline) above a test text. Every match is highlighted in the text, and each group in its own color. Under the text, the count is shown, then each match with its range and its groups, named or numbered. An invalid pattern shows the reason under the field. A pattern that would backtrack for too long stops and says so instead of freezing the frame. The matches are worked out again only when the pattern, the flags or the text change. `.flags` keeps the flags in your variable.
+
+The engine is public. `cui_regex_search(pattern, flags, text, len, from, &match, &error)` finds the first match at or after a byte offset, with up to nine groups and their names. It supports the common syntax: classes and ranges, `\d \w \s` and their negations, `\b`, anchors, groups `( )`, `(?: )` and `(?<name> )`, alternation, and greedy or lazy `* + ? {n,m}`. It does not support lookaround or backreferences. It returns 1 for a match, 0 for none, -1 for an invalid pattern and -2 when the step budget runs out.
+
+The text field is the code editor, which gains `marks`: ranges of bytes to highlight, in the accent or a series color. The highlighter gains `"text"`, a language that highlights nothing.
+
+### Test explorer
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/test-explorer-dark.png"><img src="images/components/test-explorer.png" alt="Test explorer"></picture>
+
+```c
+static const cui_test_item tests[] = {
+    { "layout", 0 },   /* a suite: the items after it with a greater depth are its tests */
+    { "wraps to the next line", 1, CUI_JOB_PASSED, 0.006f },
+    { "mirrors under right to left", 1, CUI_JOB_FAILED, 0.012f, "expected x = 412, got 388" },
+};
+cui_test_explorer_result r = cui_test_explorer(ui, "tests", tests, 3);
+if (r.run >= 0) run_tests_under(r.run);
+if (r.run_all) run_everything();
+```
+
+Test results as a tree in tree order, each item with its depth. A suite shows a status summed from its tests (failed, then running, then pending), how many passed, and their total time. A test shows its own status and time, and a time over a second is shown in amber. A failure's first message line shows under it, and the whole message on hover. The toolbar has a Run all button, toggles that filter passed, failed and skipped tests and show their counts, and a field that filters by name. The run button shows on the hovered and the selected row. Up and Down move the selection. Left folds a suite or goes to the parent, Right unfolds, and Enter or a double click reports `activated`. The statuses are the pipeline's `cui_job_status`. Only the rows in view are built.
+
+### Stack trace
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/stack-trace-dark.png"><img src="images/components/stack-trace.png" alt="Stack trace"></picture>
+
+```c
+static const char *const src[] = { "function total(cart) {", "  let sum = 0;", "  for (const item of cart.items) {" };
+static const cui_stack_frame frames[] = {
+    { "total", "src/cart.js", 3, 29, false, src, 3, 1 },          /* source lines 1 to 3 */
+    { "handle", "node_modules/express/lib/router/layer.js", 95, 5, true },
+};
+cui_stack_trace(ui, "error", frames, 2, .title = "TypeError", .message = "Cannot read properties of undefined", .lang = "js");
+```
+
+An exception with its call stack. The header shows the error's type and message, with a button that copies the whole trace as text. Each frame shows its function and its file, line and column. A run of library frames (`external`) folds into one row that unfolds on a click. A frame with `source` opens to show those lines, highlighted, with the frame's line marked. The first frame of your own code starts open. Frames are focusable, and Enter or Space opens one. On a phone only the file's name is shown.
+
+### HTTP request bar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/request-bar-dark.png"><img src="images/components/request-bar.png" alt="HTTP request bar"></picture>
+
+```c
+static int method = CUI_HTTP_GET;
+static char url[512] = "https://api.example.com/v1/orders?status=open";
+static cui_kv_pair params[16];
+static int nparams = -1;
+if (nparams < 0) nparams = cui_url_params(url, params, 16);
+
+cui_request_bar_result r = cui_request_bar(ui, "request", &method, url, sizeof url, .loading = in_flight);
+if (r.changed) nparams = cui_url_params(url, params, 16);                  /* the URL changed: reread its query */
+if (cui_kv_editor(ui, "params", params, &nparams, 16)) cui_url_set_params(url, sizeof url, params, nparams);
+if (r.send) start_request(method, url);
+if (r.cancel) cancel_request();
+cui_response_status(ui, status, seconds, bytes);
+```
+
+The method, the URL and Send, as in an API client. Enter in the URL sends, and while `loading` the button cancels. On a phone the button keeps only its icon. `cui_response_status` shows a status badge (green 2xx, blue 3xx, amber 4xx, red 5xx, with the reason phrase), the time and the size. `cui_url_params` decodes a URL's query into key-value pairs. `cui_url_set_params` writes the enabled pairs back, percent-encoded, keeping the fragment, and leaves the URL alone when the result would not fit. Together they keep a parameters table in step with the URL. `cui_http_reason` and `cui_http_method_name` give the names.
+
+### Uptime bars
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/uptime-dark.png"><img src="images/components/uptime.png" alt="Uptime bars"></picture>
+
+```c
+static float api_days[90];   /* the fraction of each day the API was up, oldest first; negative: no data */
+const cui_uptime_service services[] = { { "API", api_days, 90 }, { "Website", web_days, 90 } };
+cui_uptime(ui, "status", services, 2, .last_day = today);
+```
+
+A status page. Each service shows its state from its last day (operational, degraded or outage) and its uptime over the days with data. Below it is one bar per day, colored by availability: green from 99.9%, olive from 99%, amber from 95%, red below that, and gray without data. A hover lifts the bar and shows its date and uptime, and the result names the service and day under the pointer. On a narrow panel only the most recent days that fit are shown, newest on the right.
+
+### Time histogram
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/time-histogram-dark.png"><img src="images/components/time-histogram.png" alt="Time histogram"></picture>
+
+```c
+const cui_histogram_series levels[] = { { "Info", info, CUI_TONE_INFO }, { "Warning", warn, CUI_TONE_WARNING }, { "Error", err, CUI_TONE_DANGER } };
+static double from, to;   /* the selected range, Unix seconds; equal: none */
+if (cui_time_histogram(ui, "volume", start, 900, 96, levels, 3, &from, &to).selection_changed)
+    filter_logs(from, to);
+```
+
+Event counts over time, stacked by series, as above a log search, with a legend that shows each series' total. Dragging across it selects a range of whole buckets, and a click clears it. A hover shows the bucket's times and its count in each series. The time labels pick their step from seconds to weeks to suit the width, and show dates once the span passes a day. Times are local, or UTC with `utc`.
+
+### Coverage
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/coverage-dark.png"><img src="images/components/coverage.png" alt="Coverage"></picture>
+
+```c
+static const cui_coverage_file files[] = {
+    { "src/core/layout.c", 1840, 1702, 620, 541, 88, 86 },   /* lines, hit; branches, hit; functions, hit */
+    { "src/render/gl.c", 1300, 410, 260, 60, 70, 22 },
+};
+cui_coverage_result r = cui_coverage(ui, "coverage", files, 2);
+if (r.activated >= 0) open_file(files[r.activated].path);
+```
+
+Test coverage as a tree built from the files' paths. Each folder sums up what it holds, and a row for all files sits on top. Lines show as a bar and a percentage, with branches and functions beside them. They are colored red below `low` (50%), amber below `high` (80%) and green above. A click on a column's title sorts by it, and a second click reverses the order; folders stay above files. A click on a folder folds it. Up and Down move the selection, Left and Right fold and unfold a folder, and Enter folds a folder or, on a file, reports `activated`, as a double click does. A hover shows the counts behind the percentages. On a phone only the lines column is shown.
+
+### Blame
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/blame-dark.png"><img src="images/components/blame.png" alt="Blame"></picture>
+
+```c
+/* line_commit[i]: which commit last changed line i */
+cui_blame_result r = cui_blame(ui, "blame", lines, line_commit, line_count, commits, commit_count, .lang = "c");
+if (r.clicked >= 0) show_commit(&commits[r.clicked]);
+```
+
+Source with who last changed each line. Consecutive lines from one commit share a gutter entry with the author, the age ("6 weeks ago") and the short hash. A bar at the edge shades newer changes stronger. A hover on the gutter marks every line of that commit and shows its summary, and a click reports the commit. The code is highlighted with `lang`, and block comments that started further up are tracked. Only the lines in view are built: 100,000 lines take a tenth of a millisecond a frame after the first. On a phone the gutter keeps the shade and the author's initials.
+
+### Feature flags
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/feature-flags-dark.png"><img src="images/components/feature-flags.png" alt="Feature flags"></picture>
+
+```c
+static cui_feature_flag flags[] = {
+    { "new-checkout", "Single-page checkout", { true, true, false }, { 0, 25, 0 } },   /* on in two; a quarter of staging */
+};
+static const char *envs[] = { "Development", "Staging", "Production" };
+cui_feature_flags_result r = cui_feature_flags(ui, "flags", flags, 1, envs, 3);
+if (r.flag >= 0) save_flag(&flags[r.flag], r.env);
+```
+
+Flags against environments, edited in place. Each environment has a switch, and while a flag is on it also shows the share of users it reaches. A click on the share opens a slider with presets, and a share under 100% shows in amber. A field filters by key or description. On a phone, or when the columns do not fit, one environment shows at a time, picked above the list. The result names the flag and the environment that changed this frame. With `height` the list scrolls.
+
+### API explorer
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/api-explorer-dark.png"><img src="images/components/api-explorer.png" alt="API explorer"></picture>
+
+```c
+static const cui_api_param user_params[] = { { "id", "path", "string", true, "The user's id" } };
+static const cui_api_endpoint endpoints[] = {
+    { "GET", "/users", "List users", "Users" },
+    { "GET", "/users/{id}", "Get a user", "Users", false, user_params, 1 },
+};
+cui_api_explorer_result r = cui_api_explorer(ui, "api", endpoints, 2);
+if (r.try_it >= 0) open_request(&endpoints[r.try_it]);
+```
+
+Endpoints grouped by tag, in the order the tags first appear; a tag's header folds its group. Each endpoint shows its method in its color (GET blue, POST green, PUT amber, PATCH teal, DELETE red), its path with the `{parameters}` marked, and its summary. A deprecated endpoint is struck through and badged. A click opens an endpoint's parameters (name, required mark, type, where it goes, description) and a Try it button. A field filters by path or summary. Up and Down move, and Enter or Space opens. With `height` the list scrolls and keeps the selection in view.
 
 ## Conversation
 
