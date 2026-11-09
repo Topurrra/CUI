@@ -2,25 +2,7 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
-## Unreleased
-
-### Added
-
-- `cui_set_strings(ui, &table)`: month names, short month names, weekday names and "Today" in another language, switched at runtime with one call (issue #11, by pdenapo). A partial table falls back to English for what it leaves out. The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser use it. The names used to be copied in seven files; they now live in one small file that only these components link. See [Integration](docs/integration.md#text-in-other-languages).
-- `web/tools/build.sh app my_app.c`: your own app compiled to WebAssembly and opened in the browser at `#/app/my_app`, beside its source (issue #14). Any app whose `main` calls `cui_app_run` builds unchanged. See [Getting started](docs/getting-started.md#run-in-the-browser).
-
-- **Single-file distribution** (issue #10, by r-lyeh): `tools/amalgamate.py` writes `cui.h` + `cui.c` (add one file to any build) and `cui_single.h` (stb style, with `CUI_IMPLEMENTATION`), with the window layer picked by the preprocessor and macros for what CMake options used to choose. Releases attach the files, and CI builds an app from both forms with gcc and clang, warnings as errors. See [Getting started](docs/getting-started.md#one-file).
-
-### Fixed
-
-- The X11 backend declared one typedef twice, which C99 does not allow (clang warned about it).
-
-### Documentation
-
-- Integration explains what a window costs in memory with each renderer, measured, and how much of it is the graphics driver rather than CUI: a bare OpenGL window takes 76 MB on its own on the test machine, CUI's own memory is 2 MB or so (issue #9).
-- Getting started lists what to install on Windows, macOS and three Linux families, builds and runs an example from a fresh checkout, explains running in the browser and where Android and iOS stand, and has a troubleshooting table for the common build and startup problems (issue #3).
-
-## 2026-11-08 · 1.2: phones, tablets, right to left and performance
+## 2026-11-09 · 1.2: phones, tablets, right to left and performance
 
 ### Added
 
@@ -37,6 +19,9 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **Radial gauge**: a value on a dial with colored bands, labelled ticks, a target marker and a needle that springs to new values, or a filled arc without the needle.
 - **Candlestick chart**: open, high, low and close with volume, overlay lines and a last price tag. It zooms around the pointer, pans by dragging, follows new candles, and shows a crosshair with each candle's values. Zoomed out, candles merge per pixel column, so 100,000 of them build in about a millisecond.
 - **Knob, fader and level meter**: the controls of audio, synth and mixer panels. Knobs turn by dragging up and down with a fine mode on Shift, can be bipolar or logarithmic, and reset on double-click. Faders have a labelled scale and an optional meter beside the track. Level meters have peak hold, a falling bar, a clip light and LED segments. The wheel only turns a control that has focus.
+- `cui_set_strings(ui, &table)`: month names, short month names, weekday names and "Today" in another language, switched at runtime with one call (issue #11, by pdenapo). A partial table falls back to English for what it leaves out. The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser use it. The names used to be copied in seven files; they now live in one small file that only these components link. See [Integration](docs/integration.md#text-in-other-languages).
+- `web/tools/build.sh app my_app.c`: your own app compiled to WebAssembly and opened in the browser at `#/app/my_app`, beside its source (issue #14). Any app whose `main` calls `cui_app_run` builds unchanged. See [Getting started](docs/getting-started.md#run-in-the-browser).
+- **Single-file distribution** (issue #10, by r-lyeh): `tools/amalgamate.py` writes `cui.h` + `cui.c` (add one file to any build) and `cui_single.h` (stb style, with `CUI_IMPLEMENTATION`), with the window layer picked by the preprocessor and macros for what CMake options used to choose. Releases attach the files, and CI builds an app from both forms with gcc and clang, warnings as errors. See [Getting started](docs/getting-started.md#one-file).
 
 ### Changed
 
@@ -69,6 +54,13 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - The gallery's image compare page made new textures each time it was visited and never freed the old ones, about 2 MB per visit. Found by the soak test.
 - Joined wheel pickers in the demo sit flush, so the selection band runs across all three.
 - A demo sankey read past the end of its link array.
+- The X11 backend declared one typedef twice, which C99 does not allow (clang warned about it).
+
+### Documentation
+
+- [How CUI is built](docs/architecture.md): the frame lifecycle, where things live, the outline every component follows and how to change code without changing behavior. Contributing gains rules for keeping the code readable, and the largest components were split into named phases with no change in what they draw.
+- Integration explains what a window costs in memory with each renderer, measured, and how much of it is the graphics driver rather than CUI: a bare OpenGL window takes 76 MB on its own on the test machine, CUI's own memory is 2 MB or so (issue #9).
+- Getting started lists what to install on Windows, macOS and three Linux families, builds and runs an example from a fresh checkout, explains running in the browser and where Android and iOS stand, and has a troubleshooting table for the common build and startup problems (issue #3).
 
 ## 2026-11-07 · 1.1: text, code and workspace
 
