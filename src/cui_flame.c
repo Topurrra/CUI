@@ -350,199 +350,216 @@ static void cui__fl_reveal(const cui__fl_ctx *c, cui_flame_view *v, int i, doubl
     cui__fl_clamp_scroll(c, v);
 }
 
-cui_flame_result cui_flame_graph_ex(cui_ctx *ui, const char *id_str, const cui_flame_span *spans, int count,
-                                    cui_flame_view *view, int *selected, const cui_flame_opts *o) {
-    cui_flame_opts d;
-    memset(&d, 0, sizeof d);
-    if (!o) o = &d;
-    cui_flame_result res;
-    res.selection_changed = res.view_changed = false;
-    res.hovered = res.zoomed = -1;
-    cui_id id = cui_make_id(ui, id_str ? id_str : "flame");
-    cui_id sid = id ^ 0xF1A5C011u;
-    cui__fl_state *st = cui_state(ui, id ^ 0xF1A3u, sizeof *st);
-    if (!st->init) { st->own_sel = -1; st->init = true; }
-    cui_flame_view *v = view ? view : &st->own_view;
-    int *sel = selected ? selected : &st->own_sel;
-    if (!spans || count < 0) count = 0;
-    int sel_before = *sel;
-    if (*sel < -1 || *sel >= count) *sel = -1;
-    double min_range = o->min_range > 0 ? o->min_range : 1e-8;
+/* one frame of the flame graph: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_flame_opts *o;
+    cui_flame_result *res;
+    cui_id id, sid;
+    cui__fl_state *st;
+    cui_flame_view *v;
+    int *sel;
+    const cui_flame_span *spans; int count;
+    double min_range;
+    cui__fl_ctx c;                      /* the data's extent and the plot's geometry */
+    bool has_data, has_rect;
+    cui_rect R;                         /* the graph, last frame */
+    double range;                       /* the view's range before this frame's input */
+    cui_interact bi;
+    float mx, my;
+    bool user_moved;                    /* input that should stop an animation */
+    int hov;                            /* the span under the pointer, or -1 */
+} cui__flf;
 
-    /* extent of the data, a row at a time */
-    cui__fl_ctx c;
-    memset(&c, 0, sizeof c);
-    c.s = spans; c.n = count;
-    c.row_h = o->row_height > 0 ? o->row_height : CUI__FL_ROW;
-    c.dmin = 0; c.dmax = 0;
+/* the extent of the data, a row at a time, and the plot's geometry from the last frame */
+static void cui__flf_extent(cui__flf *f) {
+    cui__fl_ctx *c = &f->c;
+    const cui_flame_span *spans = f->spans;
+    int count = f->count;
+    memset(c, 0, sizeof *c);
+    c->s = spans; c->n = count;
+    c->row_h = f->o->row_height > 0 ? f->o->row_height : CUI__FL_ROW;
+    c->dmin = 0; c->dmax = 0;
     bool any = false;
     for (int lo = cui__fl_depth_lb(spans, count, 0); lo < count;) {
         int dd = spans[lo].depth;
         int hi = cui__fl_depth_lb(spans, count, dd + 1);
         if (hi <= lo) break;   /* unsorted input: stop rather than loop */
         double a = spans[lo].start, b = spans[hi - 1].end;
-        if (!any || a < c.dmin) c.dmin = a;
-        if (!any || b > c.dmax) c.dmax = b;
+        if (!any || a < c->dmin) c->dmin = a;
+        if (!any || b > c->dmax) c->dmax = b;
         any = true;
-        c.rows = dd + 1;
+        c->rows = dd + 1;
         lo = hi;
     }
-    if (c.rows > 100000) c.rows = 100000;
-    bool has_data = any && c.dmax >= c.dmin && isfinite(c.dmin) && isfinite(c.dmax);
-    if (has_data && c.dmax - c.dmin < min_range) { double m = (c.dmin + c.dmax) * 0.5; c.dmin = m - min_range * 0.5; c.dmax = m + min_range * 0.5; }
+    if (c->rows > 100000) c->rows = 100000;
+    f->has_data = any && c->dmax >= c->dmin && isfinite(c->dmin) && isfinite(c->dmax);
+    if (f->has_data && c->dmax - c->dmin < f->min_range) { double m = (c->dmin + c->dmax) * 0.5; c->dmin = m - f->min_range * 0.5; c->dmax = m + f->min_range * 0.5; }
 
-    bool has_rect = cui__has_prev_rect(ui, id);
-    cui_rect R = cui__prev_rect(ui, id);
-    c.plot_x = R.x + CUI__FL_PADX;
-    c.plot_w = has_rect ? CUI_MAX(1.0f, R.w - 2 * CUI__FL_PADX) : 600;
-    c.body_y = R.y + CUI__FL_RULER + 1 + CUI__FL_PADY;
-    c.body_h = has_rect ? CUI_MAX(1.0f, R.h - CUI__FL_RULER - 1 - 2 * CUI__FL_PADY) : 200;
+    f->has_rect = cui__has_prev_rect(f->ui, f->id);
+    f->R = cui__prev_rect(f->ui, f->id);
+    cui_rect R = f->R;
+    c->plot_x = R.x + CUI__FL_PADX;
+    c->plot_w = f->has_rect ? CUI_MAX(1.0f, R.w - 2 * CUI__FL_PADX) : 600;
+    c->body_y = R.y + CUI__FL_RULER + 1 + CUI__FL_PADY;
+    c->body_h = f->has_rect ? CUI_MAX(1.0f, R.h - CUI__FL_RULER - 1 - 2 * CUI__FL_PADY) : 200;
+}
 
-    double b0 = v->start, b1 = v->end;
-    float bs = v->scroll;
-    if (has_data && (!(v->end > v->start) || !isfinite(v->start) || !isfinite(v->end))) {
-        v->start = c.dmin; v->end = c.dmax;
-        st->anim_on = false;
+/* wheel: zoom around the pointer; Shift or a sideways scroll pans */
+static void cui__flf_wheel(cui__flf *f) {
+    cui_ctx *ui = f->ui;
+    cui_flame_view *v = f->v;
+    if (!(ui->scroll_target == f->sid && ui->hot_layer == ui->current_layer && (ui->scroll_dx != 0 || ui->scroll_dy != 0))) return;
+    double range = f->range;
+    bool pan = ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT);
+    if (pan) {
+        float dl = ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy;
+        double dt = (double)dl * 40.0 / f->c.plot_w * range;
+        v->start -= dt; v->end -= dt;
+    } else {
+        double z = pow(1.12, (double)ui->scroll_dy);
+        double nr = CUI_MAX(range / z, f->min_range);
+        nr = CUI_MIN(nr, f->c.dmax - f->c.dmin);
+        double u = (double)(f->mx - f->c.plot_x) / f->c.plot_w;
+        double tm = v->start + u * range;
+        v->start = tm - u * nr; v->end = v->start + nr;
     }
+    ui->scroll_dx = ui->scroll_dy = 0;
+    f->user_moved = true;
+}
 
-    cui_interact bi = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
-    float mx = ui->mx, my = ui->my;
-    bool user_moved = false;   /* input that should stop an animation */
-
-    if (has_data && has_rect) {
-        double range = v->end - v->start;
-        /* wheel: zoom around the pointer; Shift or a sideways scroll pans */
-        if (ui->scroll_target == sid && ui->hot_layer == ui->current_layer && (ui->scroll_dx != 0 || ui->scroll_dy != 0)) {
-            bool pan = ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT);
-            if (pan) {
-                float dl = ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy;
-                double dt = (double)dl * 40.0 / c.plot_w * range;
-                v->start -= dt; v->end -= dt;
-            } else {
-                double f = pow(1.12, (double)ui->scroll_dy);
-                double nr = CUI_MAX(range / f, min_range);
-                nr = CUI_MIN(nr, c.dmax - c.dmin);
-                double u = (double)(mx - c.plot_x) / c.plot_w;
-                double tm = v->start + u * range;
-                v->start = tm - u * nr; v->end = v->start + nr;
-            }
-            ui->scroll_dx = ui->scroll_dy = 0;
-            user_moved = true;
-        }
-        /* pointer */
-        if (bi.hovered && ui->mpressed[0] && st->mode == FL_IDLE) {
-            st->mode = FL_PRESS;
-            st->press_x = st->last_x = mx; st->press_y = st->last_y = my;
-            st->press_hit = cui__fl_hit(&c, v, mx, my);
-            st->press_double = bi.double_clicked;
-        }
-        if (st->mode == FL_PRESS && ui->mdown[0]) {
-            float dx = mx - st->press_x, dy = my - st->press_y;
-            if (dx * dx + dy * dy > CUI__FL_DRAG * CUI__FL_DRAG) st->mode = FL_PAN;
-        }
-        if (st->mode == FL_PAN) {
-            double dt = (double)(mx - st->last_x) / c.plot_w * (v->end - v->start);
-            v->start -= dt; v->end -= dt;
-            v->scroll -= my - st->last_y;
-            st->last_x = mx; st->last_y = my;
-            cui__set_cursor(ui, CUI_CURSOR_MOVE);
-            user_moved = true;
-            if (!ui->mdown[0]) st->mode = FL_IDLE;
-        } else if (st->mode == FL_PRESS && !ui->mdown[0]) {
-            st->mode = FL_IDLE;
-            int h = st->press_hit;
-            bool in_rows = st->press_y >= c.body_y - CUI__FL_PADY;   /* a click on the ruler keeps the selection */
-            if (in_rows && h != *sel) *sel = h;
-            if (st->press_double) {
-                if (h >= 0) { cui__fl_zoom_span(&c, st, v, h, min_range); res.zoomed = h; }
-                else cui__fl_animate_to(st, v, c.dmin, c.dmax);
-            }
-        }
-        if (st->mode != FL_IDLE && !ui->mdown[0]) st->mode = FL_IDLE;
-        /* keyboard */
-        if (bi.focused && !ui->edit_prev) {
-            bool shift = (ui->mods & CUI_MOD_SHIFT) != 0;
-            int s = *sel, ns = s;
-            if (shift && (cui_key_pressed(ui, CUI_KEY_LEFT) || cui_key_pressed(ui, CUI_KEY_RIGHT))) {
-                double dt = (cui_key_pressed(ui, CUI_KEY_LEFT) ? -0.1 : 0.1) * range;
-                v->start += dt; v->end += dt;
-                user_moved = true;
-            } else if (cui_key_pressed(ui, CUI_KEY_LEFT) || cui_key_pressed(ui, CUI_KEY_RIGHT) ||
-                       cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN)) {
-                if (s < 0) {
-                    /* nothing selected: start from the first span in view on the top row */
-                    int lo, hi;
-                    cui__fl_row(spans, count, spans[cui__fl_depth_lb(spans, count, 0)].depth, &lo, &hi);
-                    int k = cui__fl_end_gt(spans, lo, hi, v->start);
-                    ns = k < hi ? k : (lo < hi ? lo : -1);
-                } else if (cui_key_pressed(ui, CUI_KEY_LEFT)) {
-                    if (s > 0 && spans[s - 1].depth == spans[s].depth) ns = s - 1;
-                } else if (cui_key_pressed(ui, CUI_KEY_RIGHT)) {
-                    if (s + 1 < count && spans[s + 1].depth == spans[s].depth) ns = s + 1;
-                } else if (cui_key_pressed(ui, CUI_KEY_UP)) {
-                    int pk = cui__fl_parent(spans, count, s);
-                    if (pk >= 0) ns = pk;
-                } else {
-                    int ck = cui__fl_first_child(spans, count, s);
-                    if (ck >= 0) ns = ck;
-                }
-                if (ns >= 0 && ns != s) { *sel = ns; cui__fl_reveal(&c, v, ns, min_range); user_moved = true; }
-            }
-            ui->kpressed[CUI_KEY_LEFT] = ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_UP] = ui->kpressed[CUI_KEY_DOWN] = 0;
-            double cx = (v->start + v->end) * 0.5;
-            if (cui_key_pressed(ui, CUI_KEY_EQUAL) || cui_key_pressed(ui, CUI_KEY_MINUS)) {
-                double f = cui_key_pressed(ui, CUI_KEY_EQUAL) ? 1 / 1.25 : 1.25;
-                double nr = CUI_MIN(CUI_MAX((v->end - v->start) * f, min_range), c.dmax - c.dmin);
-                v->start = cx - nr * 0.5; v->end = cx + nr * 0.5;
-                user_moved = true;
-                ui->kpressed[CUI_KEY_EQUAL] = ui->kpressed[CUI_KEY_MINUS] = 0;
-            }
-            if ((cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE)) && *sel >= 0) {
-                cui__fl_zoom_span(&c, st, v, *sel, min_range);
-                res.zoomed = *sel;
-                ui->kpressed[CUI_KEY_ENTER] = ui->kpressed[CUI_KEY_SPACE] = 0;
-            }
-            bool fitted = fabs(v->start - c.dmin) <= 1e-9 * (c.dmax - c.dmin) + 1e-15 &&
-                          fabs(v->end - c.dmax) <= 1e-9 * (c.dmax - c.dmin) + 1e-15;
-            if (cui_key_pressed(ui, CUI_KEY_HOME) || (cui_key_pressed(ui, CUI_KEY_F) && !(ui->mods & CUI_MOD_PRIMARY))) {
-                cui__fl_animate_to(st, v, c.dmin, c.dmax);
-                ui->kpressed[CUI_KEY_HOME] = ui->kpressed[CUI_KEY_F] = 0;
-            }
-            if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
-                if (fitted && !st->anim_on) *sel = -1;
-                else cui__fl_animate_to(st, v, c.dmin, c.dmax);
-                ui->kpressed[CUI_KEY_ESCAPE] = 0;
-            }
-        }
-        if (user_moved) st->anim_on = false;
-        if (st->anim_on) {
-            float pr = cui__spring(ui, &st->anim, 1.0f, CUI__SPRING_EXPAND);
-            double s0, s1;
-            cui__fl_lerp(st, pr >= 1.0f ? 1.0 : (double)pr, &s0, &s1);
-            v->start = s0; v->end = s1;
-            if (pr >= 1.0f && st->anim.v == 0) { v->start = st->b0; v->end = st->b1; st->anim_on = false; }
-        } else {
-            cui__fl_clamp(&c, v, min_range);
-        }
-        cui__fl_clamp_scroll(&c, v);
-    } else if (!has_data) {
+/* the pointer: a press that moves pans both ways; a click selects (not on the ruler); a
+ * double click zooms to the span, or out to everything */
+static void cui__flf_pointer(cui__flf *f) {
+    cui_ctx *ui = f->ui;
+    cui__fl_state *st = f->st;
+    cui_flame_view *v = f->v;
+    float mx = f->mx, my = f->my;
+    if (f->bi.hovered && ui->mpressed[0] && st->mode == FL_IDLE) {
+        st->mode = FL_PRESS;
+        st->press_x = st->last_x = mx; st->press_y = st->last_y = my;
+        st->press_hit = cui__fl_hit(&f->c, v, mx, my);
+        st->press_double = f->bi.double_clicked;
+    }
+    if (st->mode == FL_PRESS && ui->mdown[0]) {
+        float dx = mx - st->press_x, dy = my - st->press_y;
+        if (dx * dx + dy * dy > CUI__FL_DRAG * CUI__FL_DRAG) st->mode = FL_PAN;
+    }
+    if (st->mode == FL_PAN) {
+        double dt = (double)(mx - st->last_x) / f->c.plot_w * (v->end - v->start);
+        v->start -= dt; v->end -= dt;
+        v->scroll -= my - st->last_y;
+        st->last_x = mx; st->last_y = my;
+        cui__set_cursor(ui, CUI_CURSOR_MOVE);
+        f->user_moved = true;
+        if (!ui->mdown[0]) st->mode = FL_IDLE;
+    } else if (st->mode == FL_PRESS && !ui->mdown[0]) {
         st->mode = FL_IDLE;
-        st->anim_on = false;
-        if (*sel != -1) *sel = -1;
+        int h = st->press_hit;
+        bool in_rows = st->press_y >= f->c.body_y - CUI__FL_PADY;   /* a click on the ruler keeps the selection */
+        if (in_rows && h != *f->sel) *f->sel = h;
+        if (st->press_double) {
+            if (h >= 0) { cui__fl_zoom_span(&f->c, st, v, h, f->min_range); f->res->zoomed = h; }
+            else cui__fl_animate_to(st, v, f->c.dmin, f->c.dmax);
+        }
     }
+    if (st->mode != FL_IDLE && !ui->mdown[0]) st->mode = FL_IDLE;
+}
 
-    /* hover */
-    int hov = -1;
-    if (has_data && has_rect && bi.hovered && st->mode != FL_PAN && cui__rect_contains(R, mx, my)) hov = cui__fl_hit(&c, v, mx, my);
-    res.hovered = hov;
-    res.selection_changed = *sel != sel_before;
-    res.view_changed = v->start != b0 || v->end != b1 || v->scroll != bs;
+/* arrows walk the tree: left and right along the row, up to the parent, down to the first
+ * child; with nothing selected they start from the first span in view on the top row */
+static void cui__flf_arrows(cui__flf *f) {
+    cui_ctx *ui = f->ui;
+    const cui_flame_span *spans = f->spans;
+    int count = f->count;
+    int s = *f->sel, ns = s;
+    if (s < 0) {
+        int lo, hi;
+        cui__fl_row(spans, count, spans[cui__fl_depth_lb(spans, count, 0)].depth, &lo, &hi);
+        int k = cui__fl_end_gt(spans, lo, hi, f->v->start);
+        ns = k < hi ? k : (lo < hi ? lo : -1);
+    } else if (cui_key_pressed(ui, CUI_KEY_LEFT)) {
+        if (s > 0 && spans[s - 1].depth == spans[s].depth) ns = s - 1;
+    } else if (cui_key_pressed(ui, CUI_KEY_RIGHT)) {
+        if (s + 1 < count && spans[s + 1].depth == spans[s].depth) ns = s + 1;
+    } else if (cui_key_pressed(ui, CUI_KEY_UP)) {
+        int pk = cui__fl_parent(spans, count, s);
+        if (pk >= 0) ns = pk;
+    } else {
+        int ck = cui__fl_first_child(spans, count, s);
+        if (ck >= 0) ns = ck;
+    }
+    if (ns >= 0 && ns != s) { *f->sel = ns; cui__fl_reveal(&f->c, f->v, ns, f->min_range); f->user_moved = true; }
+}
 
-    /* the panel */
-    int en = cui__node_new(ui, id);
+/* keys while focused: arrows (Shift pans), = and - zoom, Enter or Space zooms to the
+ * selection, Home or F fits, Escape fits and then clears the selection */
+static void cui__flf_keys(cui__flf *f) {
+    cui_ctx *ui = f->ui;
+    cui__fl_state *st = f->st;
+    cui_flame_view *v = f->v;
+    const cui__fl_ctx *c = &f->c;
+    bool shift = (ui->mods & CUI_MOD_SHIFT) != 0;
+    if (shift && (cui_key_pressed(ui, CUI_KEY_LEFT) || cui_key_pressed(ui, CUI_KEY_RIGHT))) {
+        double dt = (cui_key_pressed(ui, CUI_KEY_LEFT) ? -0.1 : 0.1) * f->range;
+        v->start += dt; v->end += dt;
+        f->user_moved = true;
+    } else if (cui_key_pressed(ui, CUI_KEY_LEFT) || cui_key_pressed(ui, CUI_KEY_RIGHT) ||
+               cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN)) {
+        cui__flf_arrows(f);
+    }
+    ui->kpressed[CUI_KEY_LEFT] = ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_UP] = ui->kpressed[CUI_KEY_DOWN] = 0;
+    double cx = (v->start + v->end) * 0.5;
+    if (cui_key_pressed(ui, CUI_KEY_EQUAL) || cui_key_pressed(ui, CUI_KEY_MINUS)) {
+        double z = cui_key_pressed(ui, CUI_KEY_EQUAL) ? 1 / 1.25 : 1.25;
+        double nr = CUI_MIN(CUI_MAX((v->end - v->start) * z, f->min_range), c->dmax - c->dmin);
+        v->start = cx - nr * 0.5; v->end = cx + nr * 0.5;
+        f->user_moved = true;
+        ui->kpressed[CUI_KEY_EQUAL] = ui->kpressed[CUI_KEY_MINUS] = 0;
+    }
+    if ((cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE)) && *f->sel >= 0) {
+        cui__fl_zoom_span(c, st, v, *f->sel, f->min_range);
+        f->res->zoomed = *f->sel;
+        ui->kpressed[CUI_KEY_ENTER] = ui->kpressed[CUI_KEY_SPACE] = 0;
+    }
+    bool fitted = fabs(v->start - c->dmin) <= 1e-9 * (c->dmax - c->dmin) + 1e-15 &&
+                  fabs(v->end - c->dmax) <= 1e-9 * (c->dmax - c->dmin) + 1e-15;
+    if (cui_key_pressed(ui, CUI_KEY_HOME) || (cui_key_pressed(ui, CUI_KEY_F) && !(ui->mods & CUI_MOD_PRIMARY))) {
+        cui__fl_animate_to(st, v, c->dmin, c->dmax);
+        ui->kpressed[CUI_KEY_HOME] = ui->kpressed[CUI_KEY_F] = 0;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        if (fitted && !st->anim_on) *f->sel = -1;
+        else cui__fl_animate_to(st, v, c->dmin, c->dmax);
+        ui->kpressed[CUI_KEY_ESCAPE] = 0;
+    }
+}
+
+/* the view: glides to a zoom's target, or stays inside the data */
+static void cui__flf_move_view(cui__flf *f) {
+    cui__fl_state *st = f->st;
+    cui_flame_view *v = f->v;
+    if (f->user_moved) st->anim_on = false;
+    if (st->anim_on) {
+        float pr = cui__spring(f->ui, &st->anim, 1.0f, CUI__SPRING_EXPAND);
+        double s0, s1;
+        cui__fl_lerp(st, pr >= 1.0f ? 1.0 : (double)pr, &s0, &s1);
+        v->start = s0; v->end = s1;
+        if (pr >= 1.0f && st->anim.v == 0) { v->start = st->b0; v->end = st->b1; st->anim_on = false; }
+    } else {
+        cui__fl_clamp(&f->c, v, f->min_range);
+    }
+    cui__fl_clamp_scroll(&f->c, v);
+}
+
+/* the graph's node and its paint data, without the spans */
+static cui__fl_paint *cui__flf_build_panel(cui__flf *f, int *node) {
+    cui_ctx *ui = f->ui;
+    const cui_flame_opts *o = f->o;
+    int en = cui__node_new(ui, f->id);
     cui_node *n = &ui->nodes[en];
     n->w = o->width.kind == CUI_SIZE_FIT && o->width.value == 0 ? CUI_FILL : o->width;
-    float def_h = CUI__FL_RULER + 1 + 2 * CUI__FL_PADY + CUI_MAX(3, c.rows) * c.row_h;
+    float def_h = CUI__FL_RULER + 1 + 2 * CUI__FL_PADY + CUI_MAX(3, f->c.rows) * f->c.row_h;
     n->h = CUI_PX(o->height > 0 ? o->height : CUI_MIN(360.0f, def_h));
     n->bg = CUI_C(ui, SURFACE);
     n->border = 1;
@@ -552,103 +569,177 @@ cui_flame_result cui_flame_graph_ex(cui_ctx *ui, const char *id_str, const cui_f
     cui__mark_interactive(ui, en, CUI_IF_FOCUSABLE);
     cui__fl_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
-    p->st = st; p->sid = sid;
-    p->t0 = v->start; p->t1 = v->end; p->origin = c.dmin;
-    p->row_h = c.row_h; p->scroll = v->scroll; p->content_h = c.rows * c.row_h;
-    p->empty = !has_data;
-    cui__tween(ui, &st->focus, bi.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
-    p->focus = st->focus;
+    p->st = f->st; p->sid = f->sid;
+    p->t0 = f->v->start; p->t1 = f->v->end; p->origin = f->c.dmin;
+    p->row_h = f->c.row_h; p->scroll = f->v->scroll; p->content_h = f->c.rows * f->c.row_h;
+    p->empty = !f->has_data;
+    cui__tween(ui, &f->st->focus, f->bi.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+    p->focus = f->st->focus;
     n->paint = cui__paint_flame;
     n->paint_data = p;
+    *node = en;
+    return p;
+}
 
-    if (has_data && v->end > v->start) {
-        /* the spans in view, each row from its first visible span */
-        double t0 = v->start, t1 = v->end;
-        double k = c.plot_w / (t1 - t0);
-        int d0 = (int)floorf(v->scroll / c.row_h), d1 = (int)floorf((v->scroll + c.body_h) / c.row_h);
-        d0 = CUI_MAX(0, d0); d1 = CUI_MIN(c.rows - 1, d1);
-        cui_color run_fill = cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, TEXT_MUTED), ui->mode == CUI_THEME_DARK ? 0.32f : 0.26f);
-        for (int row = d0; row <= d1; row++) {
-            int lo, hi;
-            cui__fl_row(spans, count, row, &lo, &hi);
-            int i = cui__fl_end_gt(spans, lo, hi, t0);
-            while (i < hi && spans[i].start < t1) {
-                const cui_flame_span *sp = &spans[i];
-                double xs = (sp->start - t0) * k, xe = (sp->end - t0) * k;
-                cui__fl_item it;
-                memset(&it, 0, sizeof it);
-                it.row = row;
-                if (xe - xs >= 1.0) {
-                    uint32_t key = cui__fl_key(sp);
-                    it.s = sp->start; it.e = sp->end;
-                    it.kind = i == hov ? FL_HOVER : FL_SPAN;
-                    it.fill = cui__fl_fill(ui, key, i == hov);
-                    if (xe - xs >= CUI__FL_LABEL && sp->name && sp->name[0]) {
-                        it.fg = cui__fl_fg(ui, key, it.fill);
-                        it.label_len = (int)strlen(sp->name);
-                        it.label = cui__frame_strdup(ui, sp->name, it.label_len);
-                    }
-                    cui__fl_push(ui, p, &it);
-                    i++;
-                    continue;
-                }
-                /* thinner than a point: merge with the neighbours within a point */
-                double rx0 = xs, rx1 = xe;
-                i++;
-                for (;;) {
-                    int j = cui__fl_end_gt(spans, i, hi, t0 + (rx1 + 1.0) / k);
-                    if (j > i) { double e2 = (spans[j - 1].end - t0) * k; if (e2 > rx1) rx1 = e2; i = j; }
-                    if (i < hi) {
-                        double ns = (spans[i].start - t0) * k, ne = (spans[i].end - t0) * k;
-                        if (ne - ns < 1.0 && ns <= rx1 + 1.0) { rx1 = ne; i++; continue; }
-                    }
-                    break;
-                }
-                if (rx1 - rx0 >= 1.0) {
-                    it.s = t0 + rx0 / k; it.e = t0 + rx1 / k;
-                    it.kind = FL_RUN;
-                    it.fill = run_fill;
-                    cui__fl_push(ui, p, &it);
-                }
-            }
+/* a span as drawn: its color, and its name when it is `w` points wide or more */
+static cui__fl_item cui__flf_span_item(cui_ctx *ui, const cui_flame_span *sp, int row, bool hovered, double w) {
+    uint32_t key = cui__fl_key(sp);
+    cui__fl_item it;
+    memset(&it, 0, sizeof it);
+    it.row = row;
+    it.s = sp->start; it.e = sp->end;
+    it.kind = hovered ? FL_HOVER : FL_SPAN;
+    it.fill = cui__fl_fill(ui, key, hovered);
+    if (w >= CUI__FL_LABEL && sp->name && sp->name[0]) {
+        it.fg = cui__fl_fg(ui, key, it.fill);
+        it.label_len = (int)strlen(sp->name);
+        it.label = cui__frame_strdup(ui, sp->name, it.label_len);
+    }
+    return it;
+}
+
+/* one row's spans in view, from its first visible span; spans thinner than a point merge
+ * with their neighbours within a point into one run */
+static void cui__flf_row_items(cui__flf *f, cui__fl_paint *p, int row, double t0, double t1, double k, cui_color run_fill) {
+    cui_ctx *ui = f->ui;
+    const cui_flame_span *spans = f->spans;
+    int lo, hi;
+    cui__fl_row(spans, f->count, row, &lo, &hi);
+    int i = cui__fl_end_gt(spans, lo, hi, t0);
+    while (i < hi && spans[i].start < t1) {
+        const cui_flame_span *sp = &spans[i];
+        double xs = (sp->start - t0) * k, xe = (sp->end - t0) * k;
+        if (xe - xs >= 1.0) {
+            cui__fl_item it = cui__flf_span_item(ui, sp, row, i == f->hov, xe - xs);
+            cui__fl_push(ui, p, &it);
+            i++;
+            continue;
         }
-        /* the selection, on top and at least a few points wide */
-        int s = *sel;
-        if (s >= 0 && spans[s].depth >= d0 && spans[s].depth <= d1 && spans[s].end >= t0 && spans[s].start <= t1) {
-            const cui_flame_span *sp = &spans[s];
-            uint32_t key = cui__fl_key(sp);
+        double rx0 = xs, rx1 = xe;
+        i++;
+        for (;;) {
+            int j = cui__fl_end_gt(spans, i, hi, t0 + (rx1 + 1.0) / k);
+            if (j > i) { double e2 = (spans[j - 1].end - t0) * k; if (e2 > rx1) rx1 = e2; i = j; }
+            if (i < hi) {
+                double ns = (spans[i].start - t0) * k, ne = (spans[i].end - t0) * k;
+                if (ne - ns < 1.0 && ns <= rx1 + 1.0) { rx1 = ne; i++; continue; }
+            }
+            break;
+        }
+        if (rx1 - rx0 >= 1.0) {
             cui__fl_item it;
             memset(&it, 0, sizeof it);
-            it.s = sp->start; it.e = sp->end; it.row = sp->depth;
-            it.kind = s == hov ? FL_HOVER : FL_SPAN;
-            it.fill = cui__fl_fill(ui, key, s == hov);
-            if ((sp->end - sp->start) * k >= CUI__FL_LABEL && sp->name && sp->name[0]) {
-                it.fg = cui__fl_fg(ui, key, it.fill);
-                it.label_len = (int)strlen(sp->name);
-                it.label = cui__frame_strdup(ui, sp->name, it.label_len);
-            }
-            p->sel = it; p->has_sel = true;
+            it.row = row;
+            it.s = t0 + rx0 / k; it.e = t0 + rx1 / k;
+            it.kind = FL_RUN;
+            it.fill = run_fill;
+            cui__fl_push(ui, p, &it);
         }
     }
+}
 
-    /* the tooltip anchors on a small box at the pointer, on the hovered row */
-    cui__open(ui, en);
-    if (hov >= 0 && ui->active == 0 && !ui->mdown[0]) {
-        const cui_flame_span *sp = &spans[hov];
-        cui_id tid = cui__hash(&hov, sizeof hov, id ^ 0x7111u);
-        float ry = c.body_y + sp->depth * c.row_h - v->scroll;
-        cui__absolute(ui, tid, mx - R.x - 1, ry - R.y, 2, c.row_h - 1);
-        double dur = sp->end - sp->start;
-        int pk = cui__fl_parent(spans, count, hov);
-        double base = pk >= 0 ? spans[pk].end - spans[pk].start : v->end - v->start;
-        double pct = base > 0 ? dur / base * 100.0 : 0;
-        const char *of = pk >= 0 ? (spans[pk].name && spans[pk].name[0] ? spans[pk].name : "parent") : "view";
-        const char *tip = cui__frame_printf(ui, "%s\n%s \xc2\xb7 %.*f%% of %s", sp->name && sp->name[0] ? sp->name : "Unnamed span",
-                                            cui__fl_dur(ui, dur), pct >= 10 ? 0 : 1, pct, of);
-        cui__tooltip_passive(ui, tid, tip);
+/* the spans in view, then the selection on top */
+static void cui__flf_build_spans(cui__flf *f, cui__fl_paint *p) {
+    cui_ctx *ui = f->ui;
+    const cui_flame_view *v = f->v;
+    const cui__fl_ctx *c = &f->c;
+    double t0 = v->start, t1 = v->end;
+    double k = c->plot_w / (t1 - t0);
+    int d0 = (int)floorf(v->scroll / c->row_h), d1 = (int)floorf((v->scroll + c->body_h) / c->row_h);
+    d0 = CUI_MAX(0, d0); d1 = CUI_MIN(c->rows - 1, d1);
+    cui_color run_fill = cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, TEXT_MUTED), ui->mode == CUI_THEME_DARK ? 0.32f : 0.26f);
+    for (int row = d0; row <= d1; row++) cui__flf_row_items(f, p, row, t0, t1, k, run_fill);
+    int s = *f->sel;
+    const cui_flame_span *spans = f->spans;
+    if (s >= 0 && spans[s].depth >= d0 && spans[s].depth <= d1 && spans[s].end >= t0 && spans[s].start <= t1) {
+        const cui_flame_span *sp = &spans[s];
+        p->sel = cui__flf_span_item(ui, sp, sp->depth, s == f->hov, (sp->end - sp->start) * k);
+        p->has_sel = true;
     }
+}
+
+/* the tooltip anchors on a small box at the pointer, on the hovered row */
+static void cui__flf_tooltip(cui__flf *f) {
+    cui_ctx *ui = f->ui;
+    int hov = f->hov;
+    if (!(hov >= 0 && ui->active == 0 && !ui->mdown[0])) return;
+    const cui_flame_span *spans = f->spans;
+    const cui_flame_span *sp = &spans[hov];
+    cui_id tid = cui__hash(&hov, sizeof hov, f->id ^ 0x7111u);
+    float ry = f->c.body_y + sp->depth * f->c.row_h - f->v->scroll;
+    cui__absolute(ui, tid, f->mx - f->R.x - 1, ry - f->R.y, 2, f->c.row_h - 1);
+    double dur = sp->end - sp->start;
+    int pk = cui__fl_parent(spans, f->count, hov);
+    double base = pk >= 0 ? spans[pk].end - spans[pk].start : f->v->end - f->v->start;
+    double pct = base > 0 ? dur / base * 100.0 : 0;
+    const char *of = pk >= 0 ? (spans[pk].name && spans[pk].name[0] ? spans[pk].name : "parent") : "view";
+    const char *tip = cui__frame_printf(ui, "%s\n%s \xc2\xb7 %.*f%% of %s", sp->name && sp->name[0] ? sp->name : "Unnamed span",
+                                        cui__fl_dur(ui, dur), pct >= 10 ? 0 : 1, pct, of);
+    cui__tooltip_passive(ui, tid, tip);
+}
+
+cui_flame_result cui_flame_graph_ex(cui_ctx *ui, const char *id_str, const cui_flame_span *spans, int count,
+                                    cui_flame_view *view, int *selected, const cui_flame_opts *o) {
+    cui_flame_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_flame_result res;
+    res.selection_changed = res.view_changed = false;
+    res.hovered = res.zoomed = -1;
+    cui__flf f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o; f.res = &res;
+    f.id = cui_make_id(ui, id_str ? id_str : "flame");
+    f.sid = f.id ^ 0xF1A5C011u;
+    cui__fl_state *st = f.st = cui_state(ui, f.id ^ 0xF1A3u, sizeof *st);
+    if (!st->init) { st->own_sel = -1; st->init = true; }
+    cui_flame_view *v = f.v = view ? view : &st->own_view;
+    int *sel = f.sel = selected ? selected : &st->own_sel;
+    if (!spans || count < 0) count = 0;
+    f.spans = spans; f.count = count;
+    int sel_before = *sel;
+    if (*sel < -1 || *sel >= count) *sel = -1;
+    f.min_range = o->min_range > 0 ? o->min_range : 1e-8;
+    cui__flf_extent(&f);
+
+    double b0 = v->start, b1 = v->end;
+    float bs = v->scroll;
+    if (f.has_data && (!(v->end > v->start) || !isfinite(v->start) || !isfinite(v->end))) {
+        v->start = f.c.dmin; v->end = f.c.dmax;
+        st->anim_on = false;
+    }
+
+    f.bi = cui__interact(ui, f.id, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    f.mx = ui->mx; f.my = ui->my;
+
+    /* input */
+    if (f.has_data && f.has_rect) {
+        f.range = v->end - v->start;
+        cui__flf_wheel(&f);
+        cui__flf_pointer(&f);
+        if (f.bi.focused && !ui->edit_prev) cui__flf_keys(&f);
+        cui__flf_move_view(&f);
+    } else if (!f.has_data) {
+        st->mode = FL_IDLE;
+        st->anim_on = false;
+        if (*sel != -1) *sel = -1;
+    }
+
+    /* hover */
+    f.hov = -1;
+    if (f.has_data && f.has_rect && f.bi.hovered && st->mode != FL_PAN && cui__rect_contains(f.R, f.mx, f.my)) f.hov = cui__fl_hit(&f.c, v, f.mx, f.my);
+    res.hovered = f.hov;
+    res.selection_changed = *sel != sel_before;
+    res.view_changed = v->start != b0 || v->end != b1 || v->scroll != bs;
+
+    /* build */
+    int en;
+    cui__fl_paint *p = cui__flf_build_panel(&f, &en);
+    if (f.has_data && v->end > v->start) cui__flf_build_spans(&f, p);
+    cui__open(ui, en);
+    cui__flf_tooltip(&f);
     cui__close(ui);
-    ui->last_id = id;
+    ui->last_id = f.id;
     return res;
 }
 
