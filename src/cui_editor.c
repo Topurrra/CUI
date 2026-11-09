@@ -587,499 +587,551 @@ cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id_str, char 
     return r;
 }
 
-static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *id_str, char *buf, size_t cap, const cui_code_editor_opts *o) {
-    cui_code_editor_opts d;
-    memset(&d, 0, sizeof d);
-    if (!o) o = &d;
-    cui_code_editor_result res;
-    memset(&res, 0, sizeof res);
-    res.bracket = res.bracket_match = -1;
-    static char empty[1];
-    if (!buf || cap == 0) { buf = empty; cap = 1; empty[0] = 0; }
-    if (!memchr(buf, 0, cap)) buf[cap - 1] = 0;   /* never read past the capacity */
+/* One frame of the editor's view, around the editing context: ids, metrics, the box from
+ * the last frame and the scroll limits. */
+typedef struct {
+    cui__ed *E;
+    const cui_code_editor_opts *o;
+    cui_code_editor_result *res;
+    const char *id_str;
+    cui_id id, lid, sid, fid, gid;      /* the editor, its lines, its scroll, the find and go to fields */
+    int lang_kind;
+    float size, lh, cw, gutter, height; /* text size, line height, column width */
+    cui_rect br; bool known;            /* the lines' box, last frame (known: it has one) */
+    float code_w, gx;                   /* the code's width, and where it starts (right of the gutter) */
+    double view_h, content_h, max_sy;
+    float max_sx;
+    bool over_vbar, over_hbar;          /* the pointer is over a scrollbar's zone */
+    int mods; bool shift, prim;
+    bool word_mod, line_mod;            /* the platform's word and line modifiers */
+    cui_interact lr;
+    bool focused;
+    int caret_line, caret_col;
+} cui__edf;
 
-    cui_id id = cui_make_id(ui, id_str);
-    cui_id lid = id ^ 0xED1B0D1u, sid = id ^ 0xED15C011u;
-    cui__ed_state *st = cui_state(ui, id ^ CUI__ED_SALT, sizeof *st);
-    cui__edit_attach(ui, id ^ CUI__ED_SALT, &st->ed);
-    if (!st->init) {
-        st->init = true;
-        st->pref_col = -1;
-        if (o->autofocus) ui->focus = lid;
-    }
-    cui_id fid, gid;
-    cui_push_id(ui, id_str);
-    fid = cui_make_id(ui, "find");
-    gid = cui_make_id(ui, "goto");
-    cui_pop_id(ui);
-
-    cui__ed E;
-    memset(&E, 0, sizeof E);
-    E.ui = ui; E.st = st; E.buf = buf; E.cap = cap;
-    E.len = (int)strlen(buf);
-    E.tab = o->tab_size > 0 ? CUI_MIN(o->tab_size, 16) : 4;
-    E.use_tabs = o->use_tabs;
-    E.ro = o->read_only;
-    cui__ed_index(&E);
+/* requests made from code since the last frame: select, go to, find */
+static void cui__edf_requests(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
     cui_edit_state *e = &st->ed;
-    e->cursor = CUI_CLAMP(e->cursor, 0, E.len);
-    e->anchor = CUI_CLAMP(e->anchor, 0, E.len);
-    st->drag_a = CUI_CLAMP(st->drag_a, 0, E.len);   /* the text may change during a drag */
-    st->drag_b = CUI_CLAMP(st->drag_b, 0, E.len);
-    int lang_kind = cui__ed_lang_kind(o->lang);
-    bool json = o->lang && !strcmp(o->lang, "json");
-    cui__lang L = cui__lang_for(json ? NULL : o->lang);
-
-    float size = cui__fs(ui, o->size > 0 ? o->size : 13);
-    float lh = roundf(size * 1.6f);
-    float cw = cui__text_width(ui, CUI_FONT_MONO, size, "0000000000000000", 16, true) / 16.0f;
-    int digits = 2;
-    for (int v = E.nl / 100; v > 0; v /= 10) digits++;
-    float gutter = o->no_line_numbers ? CUI__ED_GAP : 12 + (float)digits * cw + 14;
-    float height = o->height > 0 ? o->height : 320;
-
-    /* ---- requests from code ---- */
+    cui_ctx *ui = E->ui;
     if (st->pend_sel) {
-        e->anchor = CUI_CLAMP(st->pend_a, 0, E.len);
-        e->cursor = CUI_CLAMP(st->pend_c, 0, E.len);
-        ui->focus = lid;
-        E.reveal = E.center = true;
+        e->anchor = CUI_CLAMP(st->pend_a, 0, E->len);
+        e->cursor = CUI_CLAMP(st->pend_c, 0, E->len);
+        ui->focus = f->lid;
+        E->reveal = E->center = true;
         st->pref_col = -1;
     }
     if (st->pend_goto) {
-        int line = CUI_CLAMP(st->pend_line - 1, 0, E.nl - 1);
-        e->cursor = e->anchor = cui__ed_pos(&E, line, (float)CUI_MAX(0, st->pend_col - 1));
-        ui->focus = lid;
-        E.reveal = E.center = true;
+        int line = CUI_CLAMP(st->pend_line - 1, 0, E->nl - 1);
+        e->cursor = e->anchor = cui__ed_pos(E, line, (float)CUI_MAX(0, st->pend_col - 1));
+        ui->focus = f->lid;
+        E->reveal = E->center = true;
         st->pref_col = -1;
     }
-    if (st->pend_find) cui__ed_find_go(&E, CUI_MIN(e->cursor, e->anchor), 1);
+    if (st->pend_find) cui__ed_find_go(E, CUI_MIN(e->cursor, e->anchor), 1);
     st->pend_sel = st->pend_goto = st->pend_find = false;
+}
 
-    cui_rect br = cui__prev_rect(ui, lid);
-    bool known = cui__has_prev_rect(ui, lid) && br.w > 0;
-    if (!known) { ui->animating = true; br.w = 480; br.h = height - 2 - (st->mode ? 41 : 0); }
-    float code_w = CUI_MAX(1.0f, br.w - gutter - CUI__ED_GAP);
-    double view_h = CUI_MAX((double)lh, (double)br.h - 2 * CUI__ED_INSET);
-    double content_h = (double)E.nl * lh;
-    double max_sy = CUI_MAX(0.0, content_h - view_h);
-
-    /* ---- the find and go to line bar: open, close ---- */
-    bool mine = ui->focus == lid || ui->focus == fid || ui->focus == gid;
-    int mods = ui->mods;
-    bool shift = (mods & CUI_MOD_SHIFT) != 0, prim = (mods & CUI_MOD_PRIMARY) != 0;
-    if (mine && prim && cui_key_pressed(ui, CUI_KEY_F)) {
+/* the find and go to line bar: Ctrl+F and Ctrl+G open it, Escape in it closes it */
+static void cui__edf_bar_keys(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    bool mine = ui->focus == f->lid || ui->focus == f->fid || ui->focus == f->gid;
+    if (mine && f->prim && cui_key_pressed(ui, CUI_KEY_F)) {
         int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
-        if (s1 > s0 && s1 - s0 < (int)sizeof st->query && !memchr(buf + s0, '\n', (size_t)(s1 - s0)))
-            snprintf(st->query, sizeof st->query, "%.*s", s1 - s0, buf + s0);
+        if (s1 > s0 && s1 - s0 < (int)sizeof st->query && !memchr(E->buf + s0, '\n', (size_t)(s1 - s0)))
+            snprintf(st->query, sizeof st->query, "%.*s", s1 - s0, E->buf + s0);
         st->mode = 1;
         st->bar_focus = true;
         ui->kpressed[CUI_KEY_F] = 0;
     }
-    if (mine && prim && cui_key_pressed(ui, CUI_KEY_G)) {
+    if (mine && f->prim && cui_key_pressed(ui, CUI_KEY_G)) {
         st->mode = 2;
         st->go[0] = 0;
         st->bar_focus = true;
         ui->kpressed[CUI_KEY_G] = 0;
     }
-    if ((ui->focus == fid || ui->focus == gid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+    if ((ui->focus == f->fid || ui->focus == f->gid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         st->mode = 0;
-        ui->focus = lid;
+        ui->focus = f->lid;
         ui->kpressed[CUI_KEY_ESCAPE] = 0;
     }
+}
 
-    /* ---- pointer ---- */
-    cui_interact lr = cui__interact(ui, lid, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
-    float gx = br.x + gutter, x0 = gx + CUI__ED_GAP - st->sx, y0 = br.y + CUI__ED_INSET - (float)st->sy;
-    bool over_vbar = known && max_sy > 0 && ui->mx >= br.x + br.w - CUI__ED_BAR;
-    float max_sx = CUI_MAX(0.0f, (float)CUI_MAX(E.maxlen, 1) * cw + CUI__ED_GAP + 24 - code_w);
-    bool over_hbar = known && max_sx > 0 && ui->my >= br.y + br.h - CUI__ED_BAR && ui->mx >= gx && !over_vbar;
-    if (lr.hovered) cui__set_cursor(ui, (over_vbar || over_hbar || ui->mx < gx) ? CUI_CURSOR_ARROW : CUI_CURSOR_TEXT);
-    if (known) {
-        int line = (int)floor(((double)ui->my - y0) / lh);
-        float col = (ui->mx - x0) / cw;
-        if (lr.hovered && ui->mpressed[0]) {
-            st->tab_free = false;
-            if (over_vbar || over_hbar) {
-                float at, len;
-                if (over_vbar) {
-                    cui__ed_thumb(br.h - 6, br.h, max_sy, st->sy, &at, &len);
-                    float ty = br.y + 3 + at;
-                    st->bar_grab = ui->my >= ty && ui->my <= ty + len ? ui->my - ty : len * 0.5f;
-                    st->bar_drag = 1;
-                } else {
-                    float track = br.w - gutter - 6 - (max_sy > 0 ? CUI__ED_BAR : 0);
-                    cui__ed_thumb(track, br.w - gutter, max_sx, st->sx, &at, &len);
-                    float tx = gx + 3 + at;
-                    st->bar_grab = ui->mx >= tx && ui->mx <= tx + len ? ui->mx - tx : len * 0.5f;
-                    st->bar_drag = 2;
-                }
-            } else {
-                int pos = cui__ed_pos(&E, line, ui->mx < gx ? 0 : col);
-                int clicks = ui->click_count;
-                st->drag = ui->mx < gx ? 3 : clicks >= 3 ? 3 : clicks == 2 ? 2 : 1;
-                if (st->drag == 1) {
-                    e->cursor = pos;
-                    if (!shift) e->anchor = pos;
-                    st->drag_a = st->drag_b = e->anchor;
-                } else {
-                    int a, b;
-                    if (st->drag == 2) cui__ed_word_at(&E, pos, &a, &b); else cui__ed_line_at(&E, pos, &a, &b);
-                    st->drag_a = a; st->drag_b = b;
-                    e->anchor = a; e->cursor = b;
-                }
-                st->pref_col = -1;
-                ui->caret_time = ui->time;
-            }
+/* a press: on a scrollbar it grabs the thumb; in the gutter it selects lines; in the code it
+ * places the caret, and a double or triple click selects a word or a line */
+static void cui__edf_press(cui__edf *f, int line, float col) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    cui_rect br = f->br;
+    st->tab_free = false;
+    if (f->over_vbar || f->over_hbar) {
+        float at, len;
+        if (f->over_vbar) {
+            cui__ed_thumb(br.h - 6, br.h, f->max_sy, st->sy, &at, &len);
+            float ty = br.y + 3 + at;
+            st->bar_grab = ui->my >= ty && ui->my <= ty + len ? ui->my - ty : len * 0.5f;
+            st->bar_drag = 1;
+        } else {
+            float track = br.w - f->gutter - 6 - (f->max_sy > 0 ? CUI__ED_BAR : 0);
+            cui__ed_thumb(track, br.w - f->gutter, f->max_sx, st->sx, &at, &len);
+            float tx = f->gx + 3 + at;
+            st->bar_grab = ui->mx >= tx && ui->mx <= tx + len ? ui->mx - tx : len * 0.5f;
+            st->bar_drag = 2;
         }
-        if (st->bar_drag && lr.active && ui->mdown[0]) {
-            float at, len;
-            if (st->bar_drag == 1) {
-                cui__ed_thumb(br.h - 6, br.h, max_sy, st->sy, &at, &len);
-                float t = (ui->my - br.y - 3 - st->bar_grab) / CUI_MAX(1.0f, br.h - 6 - len);
-                st->sy = (double)cui__clampf(t, 0, 1) * max_sy;
-            } else {
-                float track = br.w - gutter - 6 - (max_sy > 0 ? CUI__ED_BAR : 0);
-                cui__ed_thumb(track, br.w - gutter, max_sx, st->sx, &at, &len);
-                float t = (ui->mx - gx - 3 - st->bar_grab) / CUI_MAX(1.0f, track - len);
-                st->sx = cui__clampf(t, 0, 1) * max_sx;
-            }
-            st->last_activity = ui->time;
-        }
-        if (st->drag && lr.active && ui->mdown[0] && !ui->mpressed[0]) {
-            /* past an edge the view scrolls, faster further out */
-            float top = br.y, bottom = br.y + br.h;
-            if (ui->my < top || ui->my > bottom) {
-                float dist = ui->my < top ? top - ui->my : ui->my - bottom;
-                double step = (double)ui->dt * (double)lh * (8.0 + 10.0 * dist / lh);
-                st->sy = CUI_MAX(0.0, CUI_MIN(max_sy, st->sy + (ui->my < top ? -step : step)));
-                ui->animating = true;
-            }
-            if (st->drag != 3 && (ui->mx < gx || ui->mx > br.x + br.w)) {
-                float dist = ui->mx < gx ? gx - ui->mx : ui->mx - (br.x + br.w);
-                float step = ui->dt * cw * (12.0f + 1.0f * dist);
-                st->sx = cui__clampf(st->sx + (ui->mx < gx ? -step : step), 0, max_sx);
-                ui->animating = true;
-            }
-            y0 = br.y + CUI__ED_INSET - (float)st->sy;
-            x0 = gx + CUI__ED_GAP - st->sx;
-            line = (int)floor(((double)ui->my - y0) / lh);
-            col = (ui->mx - x0) / cw;
-            int pos = cui__ed_pos(&E, line, st->drag == 3 ? 0 : col);
-            if (line < 0) pos = 0;
-            if (line >= E.nl) pos = E.len;
-            int prev = e->cursor;
-            if (st->drag == 1) e->cursor = pos;
-            else {
-                int a, b;
-                if (st->drag == 2) cui__ed_word_at(&E, pos, &a, &b); else cui__ed_line_at(&E, pos, &a, &b);
-                if (a < st->drag_a) { e->anchor = st->drag_b; e->cursor = a; }
-                else { e->anchor = st->drag_a; e->cursor = CUI_MAX(b, st->drag_b); }
-            }
-            if (e->cursor != prev) { ui->caret_time = ui->time; E.reveal = true; }
-        }
+        return;
+    }
+    int pos = cui__ed_pos(E, line, ui->mx < f->gx ? 0 : col);
+    int clicks = ui->click_count;
+    st->drag = ui->mx < f->gx ? 3 : clicks >= 3 ? 3 : clicks == 2 ? 2 : 1;
+    if (st->drag == 1) {
+        e->cursor = pos;
+        if (!f->shift) e->anchor = pos;
+        st->drag_a = st->drag_b = e->anchor;
+    } else {
+        int a, b;
+        if (st->drag == 2) cui__ed_word_at(E, pos, &a, &b); else cui__ed_line_at(E, pos, &a, &b);
+        st->drag_a = a; st->drag_b = b;
+        e->anchor = a; e->cursor = b;
+    }
+    st->pref_col = -1;
+    ui->caret_time = ui->time;
+}
+
+/* dragging a scrollbar's thumb */
+static void cui__edf_bar_drag(cui__edf *f) {
+    cui__ed_state *st = f->E->st;
+    cui_ctx *ui = f->E->ui;
+    cui_rect br = f->br;
+    float at, len;
+    if (st->bar_drag == 1) {
+        cui__ed_thumb(br.h - 6, br.h, f->max_sy, st->sy, &at, &len);
+        float t = (ui->my - br.y - 3 - st->bar_grab) / CUI_MAX(1.0f, br.h - 6 - len);
+        st->sy = (double)cui__clampf(t, 0, 1) * f->max_sy;
+    } else {
+        float track = br.w - f->gutter - 6 - (f->max_sy > 0 ? CUI__ED_BAR : 0);
+        cui__ed_thumb(track, br.w - f->gutter, f->max_sx, st->sx, &at, &len);
+        float t = (ui->mx - f->gx - 3 - st->bar_grab) / CUI_MAX(1.0f, track - len);
+        st->sx = cui__clampf(t, 0, 1) * f->max_sx;
+    }
+    st->last_activity = ui->time;
+}
+
+/* dragging a selection, by characters, words or lines; past an edge the view scrolls,
+ * faster further out */
+static void cui__edf_drag_select(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    cui_rect br = f->br;
+    float gx = f->gx, lh = f->lh, cw = f->cw;
+    float top = br.y, bottom = br.y + br.h;
+    if (ui->my < top || ui->my > bottom) {
+        float dist = ui->my < top ? top - ui->my : ui->my - bottom;
+        double step = (double)ui->dt * (double)lh * (8.0 + 10.0 * dist / lh);
+        st->sy = CUI_MAX(0.0, CUI_MIN(f->max_sy, st->sy + (ui->my < top ? -step : step)));
+        ui->animating = true;
+    }
+    if (st->drag != 3 && (ui->mx < gx || ui->mx > br.x + br.w)) {
+        float dist = ui->mx < gx ? gx - ui->mx : ui->mx - (br.x + br.w);
+        float step = ui->dt * cw * (12.0f + 1.0f * dist);
+        st->sx = cui__clampf(st->sx + (ui->mx < gx ? -step : step), 0, f->max_sx);
+        ui->animating = true;
+    }
+    float y0 = br.y + CUI__ED_INSET - (float)st->sy;
+    float x0 = gx + CUI__ED_GAP - st->sx;
+    int line = (int)floor(((double)ui->my - y0) / lh);
+    float col = (ui->mx - x0) / cw;
+    int pos = cui__ed_pos(E, line, st->drag == 3 ? 0 : col);
+    if (line < 0) pos = 0;
+    if (line >= E->nl) pos = E->len;
+    int prev = e->cursor;
+    if (st->drag == 1) e->cursor = pos;
+    else {
+        int a, b;
+        if (st->drag == 2) cui__ed_word_at(E, pos, &a, &b); else cui__ed_line_at(E, pos, &a, &b);
+        if (a < st->drag_a) { e->anchor = st->drag_b; e->cursor = a; }
+        else { e->anchor = st->drag_a; e->cursor = CUI_MAX(b, st->drag_b); }
+    }
+    if (e->cursor != prev) { ui->caret_time = ui->time; E->reveal = true; }
+}
+
+/* the pointer: press, drags, the wheel */
+static void cui__edf_pointer(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_ctx *ui = E->ui;
+    cui_rect br = f->br;
+    f->lr = cui__interact(ui, f->lid, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
+    f->gx = br.x + f->gutter;
+    float x0 = f->gx + CUI__ED_GAP - st->sx, y0 = br.y + CUI__ED_INSET - (float)st->sy;
+    f->over_vbar = f->known && f->max_sy > 0 && ui->mx >= br.x + br.w - CUI__ED_BAR;
+    f->max_sx = CUI_MAX(0.0f, (float)CUI_MAX(E->maxlen, 1) * f->cw + CUI__ED_GAP + 24 - f->code_w);
+    f->over_hbar = f->known && f->max_sx > 0 && ui->my >= br.y + br.h - CUI__ED_BAR && ui->mx >= f->gx && !f->over_vbar;
+    if (f->lr.hovered) cui__set_cursor(ui, (f->over_vbar || f->over_hbar || ui->mx < f->gx) ? CUI_CURSOR_ARROW : CUI_CURSOR_TEXT);
+    if (f->known) {
+        int line = (int)floor(((double)ui->my - y0) / f->lh);
+        float col = (ui->mx - x0) / f->cw;
+        if (f->lr.hovered && ui->mpressed[0]) cui__edf_press(f, line, col);
+        if (st->bar_drag && f->lr.active && ui->mdown[0]) cui__edf_bar_drag(f);
+        if (st->drag && f->lr.active && ui->mdown[0] && !ui->mpressed[0]) cui__edf_drag_select(f);
     }
     if (!ui->mdown[0]) st->drag = st->bar_drag = 0;
-    if (ui->scroll_target == sid && (ui->scroll_dy != 0 || ui->scroll_dx != 0)) {
+    if (ui->scroll_target == f->sid && (ui->scroll_dy != 0 || ui->scroll_dx != 0)) {
         float dy = ui->scroll_dy, dx = ui->scroll_dx;
-        if (shift && dx == 0) { dx = dy; dy = 0; }
-        st->sy -= (double)dy * lh * 3;
+        if (f->shift && dx == 0) { dx = dy; dy = 0; }
+        st->sy -= (double)dy * f->lh * 3;
         st->sx -= dx * 44;
         st->last_activity = ui->time;
         ui->scroll_dy = ui->scroll_dx = 0;   /* consumed */
     }
+}
 
-    /* ---- keys ---- */
-    bool focused = ui->focus == lid;
-    if (!focused) st->tab_free = false;
-    if (focused) {
-        ui->edit = e;   /* cui_wants_keyboard, caret blink wakeups */
-#if defined(__APPLE__)
-        bool word_mod = (mods & CUI_MOD_ALT) != 0, line_mod = (mods & CUI_MOD_SUPER) != 0;
-#else
-        bool word_mod = (mods & CUI_MOD_CTRL) != 0, line_mod = false;
-#endif
-        bool far = (mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) != 0;
-        int before_c = e->cursor, before_a = e->anchor;
-        int view_lines = CUI_MAX(1, (int)(view_h / lh) - 1);
-        for (int k = CUI_KEY_NONE + 1; k < CUI_KEY_COUNT; k++)
-            if (ui->kpressed[k] && k != CUI_KEY_TAB && k != CUI_KEY_ESCAPE) st->tab_free = false;
-        if (ui->text_in_len > 0) st->tab_free = false;
+/* caret motion: arrows (by character, word or line end), up and down keeping the column,
+ * pages, Home, End, select all. Reports the vertical motion. */
+static void cui__edf_move_keys(cui__edf *f, int *vmove_out, int *vpage_out) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    const char *buf = E->buf;
+    bool shift = f->shift, word_mod = f->word_mod, line_mod = f->line_mod;
+    bool far = (f->mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) != 0;
+    int view_lines = CUI_MAX(1, (int)(f->view_h / f->lh) - 1);
+    for (int rep = ui->kpressed[CUI_KEY_LEFT]; rep > 0; rep--) {
+        int s0 = CUI_MIN(e->cursor, e->anchor);
+        if (!shift && e->cursor != e->anchor && !word_mod && !line_mod) { cui__ed_move(E, s0, false); continue; }
+        int line = cui__ed_line_of(E, e->cursor);
+        cui__ed_move(E, line_mod ? cui__ed_first_text(E, line) : word_mod ? cui__edit_word_left(buf, e->cursor) : cui__utf8_prev(buf, e->cursor), shift);
+    }
+    for (int rep = ui->kpressed[CUI_KEY_RIGHT]; rep > 0; rep--) {
+        int s1 = CUI_MAX(e->cursor, e->anchor);
+        if (!shift && e->cursor != e->anchor && !word_mod && !line_mod) { cui__ed_move(E, s1, false); continue; }
+        int line = cui__ed_line_of(E, e->cursor);
+        cui__ed_move(E, line_mod ? cui__ed_end(E, line) : word_mod ? cui__edit_word_right(buf, E->len, e->cursor) : cui__utf8_next(buf, E->len, e->cursor), shift);
+    }
+    int vmove = (int)ui->kpressed[CUI_KEY_DOWN] - (int)ui->kpressed[CUI_KEY_UP];
+    int vpage = (int)ui->kpressed[CUI_KEY_PAGE_DOWN] - (int)ui->kpressed[CUI_KEY_PAGE_UP];
+    if (line_mod && vmove) cui__ed_move(E, vmove < 0 ? 0 : E->len, shift);
+    else if (vmove || vpage) {
+        int line = cui__ed_line_of(E, e->cursor);
+        if (st->pref_col < 0) st->pref_col = cui__ed_caret_col(E, e->cursor);
+        int target = line + vmove + vpage * view_lines;
+        int keep = st->pref_col;
+        if (vpage) st->sy += (double)(CUI_CLAMP(target, 0, E->nl - 1) - line) * f->lh;
+        if (target < 0) cui__ed_move(E, 0, shift);
+        else if (target >= E->nl) cui__ed_move(E, E->len, shift);
+        else cui__ed_move(E, cui__ed_pos(E, target, (float)keep), shift);
+        st->pref_col = keep;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) {
+        int line = cui__ed_line_of(E, e->cursor), ft = cui__ed_first_text(E, line);
+        cui__ed_move(E, far ? 0 : e->cursor == ft ? E->ls[line] : ft, shift);
+    }
+    if (cui_key_pressed(ui, CUI_KEY_END)) cui__ed_move(E, far ? E->len : cui__ed_end(E, cui__ed_line_of(E, e->cursor)), shift);
+    if (f->prim && cui_key_pressed(ui, CUI_KEY_A)) { e->anchor = 0; e->cursor = E->len; }
+    *vmove_out = vmove; *vpage_out = vpage;
+}
+
+/* Backspace: the selection, or back a character, a word, to the line start, or in the
+ * indentation to the previous tab stop */
+static void cui__edf_backspace(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui_edit_state *e = &E->st->ed;
+    const char *buf = E->buf;
+    for (int rep = E->ui->kpressed[CUI_KEY_BACKSPACE]; rep > 0; rep--) {
         int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
-        for (int rep = ui->kpressed[CUI_KEY_LEFT]; rep > 0; rep--) {
-            s0 = CUI_MIN(e->cursor, e->anchor);
-            if (!shift && e->cursor != e->anchor && !word_mod && !line_mod) { cui__ed_move(&E, s0, false); continue; }
-            int line = cui__ed_line_of(&E, e->cursor);
-            cui__ed_move(&E, line_mod ? cui__ed_first_text(&E, line) : word_mod ? cui__edit_word_left(buf, e->cursor) : cui__utf8_prev(buf, e->cursor), shift);
+        if (s1 > s0) { cui__ed_replace(E, s0, s1, "", 0, 3); continue; }
+        if (s0 == 0) continue;
+        int line = cui__ed_line_of(E, s0), ls = E->ls[line], to = cui__utf8_prev(buf, s0);
+        if (f->word_mod) to = cui__edit_word_left(buf, s0);
+        else if (f->line_mod) to = ls;
+        else if (s0 > ls && cui__ed_first_text(E, line) >= s0 && buf[s0 - 1] == ' ') {
+            int col = cui__ed_col(buf, ls, s0, E->tab), stop = (col - 1) / E->tab * E->tab;
+            to = s0;
+            while (to > ls && buf[to - 1] == ' ' && cui__ed_col(buf, ls, to - 1, E->tab) >= stop) to--;
         }
-        for (int rep = ui->kpressed[CUI_KEY_RIGHT]; rep > 0; rep--) {
-            s1 = CUI_MAX(e->cursor, e->anchor);
-            if (!shift && e->cursor != e->anchor && !word_mod && !line_mod) { cui__ed_move(&E, s1, false); continue; }
-            int line = cui__ed_line_of(&E, e->cursor);
-            cui__ed_move(&E, line_mod ? cui__ed_end(&E, line) : word_mod ? cui__edit_word_right(buf, E.len, e->cursor) : cui__utf8_next(buf, E.len, e->cursor), shift);
+        cui__ed_replace(E, to, s0, "", 0, 2);
+    }
+}
+
+/* editing keys (not read only): paste, undo and redo, Backspace, Delete, Enter, Tab, typing */
+static void cui__edf_edit_keys(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    char *buf = E->buf;
+    bool shift = f->shift, prim = f->prim;
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    if (prim && cui_key_pressed(ui, CUI_KEY_V) && ui->platform.get_clipboard) {
+        const char *clip = ui->platform.get_clipboard(ui->platform.user);
+        if (clip && *clip) {
+            cui__ed_replace(E, s0, s1, clip, (int)strlen(clip), 3);
+            e->last_edit = 0;   /* typing after a paste is its own step */
         }
-        int vmove = (int)ui->kpressed[CUI_KEY_DOWN] - (int)ui->kpressed[CUI_KEY_UP];
-        int vpage = (int)ui->kpressed[CUI_KEY_PAGE_DOWN] - (int)ui->kpressed[CUI_KEY_PAGE_UP];
-        if (line_mod && vmove) cui__ed_move(&E, vmove < 0 ? 0 : E.len, shift);
-        else if (vmove || vpage) {
-            int line = cui__ed_line_of(&E, e->cursor);
-            if (st->pref_col < 0) st->pref_col = cui__ed_caret_col(&E, e->cursor);
-            int target = line + vmove + vpage * view_lines;
-            int keep = st->pref_col;
-            if (vpage) st->sy += (double)(CUI_CLAMP(target, 0, E.nl - 1) - line) * lh;
-            if (target < 0) cui__ed_move(&E, 0, shift);
-            else if (target >= E.nl) cui__ed_move(&E, E.len, shift);
-            else cui__ed_move(&E, cui__ed_pos(&E, target, (float)keep), shift);
-            st->pref_col = keep;
-        }
-        if (cui_key_pressed(ui, CUI_KEY_HOME)) {
-            int line = cui__ed_line_of(&E, e->cursor), ft = cui__ed_first_text(&E, line);
-            cui__ed_move(&E, far ? 0 : e->cursor == ft ? E.ls[line] : ft, shift);
-        }
-        if (cui_key_pressed(ui, CUI_KEY_END)) cui__ed_move(&E, far ? E.len : cui__ed_end(&E, cui__ed_line_of(&E, e->cursor)), shift);
-        if (prim && cui_key_pressed(ui, CUI_KEY_A)) { e->anchor = 0; e->cursor = E.len; }
-        /* clipboard: without a selection, copy and cut take the whole line */
+    }
+    bool undo = prim && !shift && cui_key_pressed(ui, CUI_KEY_Z);
+    bool redo = prim && ((shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y));
+    if ((undo || redo) && cui__edit_undo_step(ui, e, buf, E->cap, !undo)) {
+        E->len = (int)strlen(buf);
+        cui__ed_index(E);
+        E->changed = E->reveal = true;
+        st->pref_col = -1;
+    }
+    cui__edf_backspace(f);
+    for (int rep = ui->kpressed[CUI_KEY_DELETE]; rep > 0; rep--) {
         s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-        if (prim && (cui_key_pressed(ui, CUI_KEY_C) || cui_key_pressed(ui, CUI_KEY_X))) {
-            int a = s0, b = s1;
-            if (a == b) cui__ed_line_at(&E, a, &a, &b);
-            if (b > a && ui->platform.set_clipboard) ui->platform.set_clipboard(ui->platform.user, cui__frame_strdup(ui, buf + a, b - a));
-            if (cui_key_pressed(ui, CUI_KEY_X) && b > a) cui__ed_replace(&E, a, b, "", 0, 3);
-        }
-        if (!E.ro) {
-            s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-            if (prim && cui_key_pressed(ui, CUI_KEY_V) && ui->platform.get_clipboard) {
-                const char *clip = ui->platform.get_clipboard(ui->platform.user);
-                if (clip && *clip) {
-                    cui__ed_replace(&E, s0, s1, clip, (int)strlen(clip), 3);
-                    e->last_edit = 0;   /* typing after a paste is its own step */
-                }
-            }
-            bool undo = prim && !shift && cui_key_pressed(ui, CUI_KEY_Z);
-            bool redo = prim && ((shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y));
-            if ((undo || redo) && cui__edit_undo_step(ui, e, buf, cap, !undo)) {
-                E.len = (int)strlen(buf);
-                cui__ed_index(&E);
-                E.changed = E.reveal = true;
-                st->pref_col = -1;
-            }
-            for (int rep = ui->kpressed[CUI_KEY_BACKSPACE]; rep > 0; rep--) {
-                s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-                if (s1 > s0) { cui__ed_replace(&E, s0, s1, "", 0, 3); continue; }
-                if (s0 == 0) continue;
-                int line = cui__ed_line_of(&E, s0), ls = E.ls[line], to = cui__utf8_prev(buf, s0);
-                if (word_mod) to = cui__edit_word_left(buf, s0);
-                else if (line_mod) to = ls;
-                else if (s0 > ls && cui__ed_first_text(&E, line) >= s0 && buf[s0 - 1] == ' ') {
-                    /* in the indentation: back to the previous tab stop */
-                    int col = cui__ed_col(buf, ls, s0, E.tab), stop = (col - 1) / E.tab * E.tab;
-                    to = s0;
-                    while (to > ls && buf[to - 1] == ' ' && cui__ed_col(buf, ls, to - 1, E.tab) >= stop) to--;
-                }
-                cui__ed_replace(&E, to, s0, "", 0, 2);
-            }
-            for (int rep = ui->kpressed[CUI_KEY_DELETE]; rep > 0; rep--) {
-                s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-                if (s1 > s0) { cui__ed_replace(&E, s0, s1, "", 0, 3); continue; }
-                if (s0 >= E.len) continue;
-                int to = word_mod ? cui__edit_word_right(buf, E.len, s0) : cui__utf8_next(buf, E.len, s0);
-                cui__ed_replace(&E, s0, to, "", 0, 2);
-                e->cursor = e->anchor = e->last_cursor = s0;
-            }
-            for (int rep = ui->kpressed[CUI_KEY_ENTER]; rep > 0 && !prim; rep--) cui__ed_newline(&E, lang_kind);
-            if (cui_key_pressed(ui, CUI_KEY_TAB) && !(mods & CUI_MOD_CTRL)) {
-                s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-                if (shift || s1 > s0) cui__ed_indent(&E, shift);
-                else {
-                    int col = cui__ed_caret_col(&E, s0), n = E.use_tabs ? 1 : E.tab - col % E.tab;
-                    char sp[17];
-                    memset(sp, E.use_tabs ? '\t' : ' ', sizeof sp);
-                    cui__ed_replace(&E, s0, s0, sp, n, 3);
-                }
-            }
-            if (ui->text_in_len > 0 && !(prim && !(mods & CUI_MOD_ALT))) cui__ed_type(&E, ui->text_in, ui->text_in_len, lang_kind);
-        }
-        if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
-            if (st->mode) st->mode = 0;
-            else if (e->cursor != e->anchor) e->anchor = e->cursor;
-            else st->tab_free = true;   /* the next Tab leaves the editor */
-        }
-        if (e->cursor != before_c || e->anchor != before_a || E.changed) {
-            ui->caret_time = ui->time;
-            if (vmove == 0 && vpage == 0) st->pref_col = -1;
-        }
-        if (!E.ro && !st->tab_free) ui->tab_owner = lid;
+        if (s1 > s0) { cui__ed_replace(E, s0, s1, "", 0, 3); continue; }
+        if (s0 >= E->len) continue;
+        int to = f->word_mod ? cui__edit_word_right(buf, E->len, s0) : cui__utf8_next(buf, E->len, s0);
+        cui__ed_replace(E, s0, to, "", 0, 2);
+        e->cursor = e->anchor = e->last_cursor = s0;
     }
-
-    /* ---- build ---- */
-    bool dark = ui->mode == CUI_THEME_DARK;
-    int outer = cui__node_new(ui, id);
-    cui_node *on = &ui->nodes[outer];
-    on->w = o->width.kind ? o->width : CUI_FILL;
-    on->h = o->height < 0 ? CUI_FILL : CUI_PX(height);
-    on->min_h = 80;
-    on->radius = CUI_CORNERS(ui->theme.radius_control);
-    cui_color bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    on->bg = bg;   /* the code block's surface */
-    on->border = 1;
-    cui__tween(ui, &st->focus_t, (ui->focus == lid || ui->focus == fid || ui->focus == gid) ? 1.0f : 0.0f, CUI__T_FOCUS);
-    on->border_color = cui_mix(CUI_C(ui, BORDER), cui__edge_on(ui), st->focus_t * 0.7f);
-    on->flags |= CUI_NF_CLIP;
-    cui__open(ui, outer);
-
-    if (st->mode) {
-        bool narrow = known && br.w < 360;   /* a phone: a shorter count, no search icon */
-        int bar = cui__node_new(ui, 0);
-        cui_node *bn = &ui->nodes[bar];
-        bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 4;
-        bn->w = CUI_FILL;
-        bn->pad[0] = bn->pad[2] = 6; bn->pad[1] = 6; bn->pad[3] = 6;
-        bn->bg = CUI_C(ui, SURFACE);
-        cui__open(ui, bar);
-        cui_push_id(ui, id_str);
-        cui_input_opts io;
-        memset(&io, 0, sizeof io);
-        io.size = CUI_SIZE_SM;
-        io.width = CUI_FILL;
-        cui_button_opts bo;
-        memset(&bo, 0, sizeof bo);
-        bo.size = CUI_SIZE_SM;
-        bo.variant = CUI_BUTTON_GHOST;
-        if (st->mode == 1) {
-            if (st->bar_focus) { ui->focus = fid; ui->tf_select_all = fid; st->bar_focus = false; }
-            io.placeholder = "Find";
-            io.icon = narrow ? NULL : CUI_ICON_SEARCH;
-            int f = cui_input_ex(ui, "find", st->query, sizeof st->query, &io);
-            int qn = (int)strlen(st->query);
-            int s0 = CUI_MIN(e->cursor, e->anchor);
-            if (f & CUI_CHANGED) cui__ed_find_go(&E, s0, 1);   /* as you type, from where the selection starts */
-            if (f & CUI_SUBMITTED) cui__ed_find_go(&E, shift ? s0 : s0 + (e->cursor != e->anchor ? 1 : 0), shift ? -1 : 1);
-            /* the count, and which match the selection is */
-            int total = 0, index = 0;
-            s0 = CUI_MIN(e->cursor, e->anchor);
-            int s1 = CUI_MAX(e->cursor, e->anchor);
-            bool on_match = qn > 0 && s1 - s0 == qn && cui__ed_hit(buf, E.len, s0, st->query, qn);
-            for (int i = 0; qn > 0 && i + qn <= E.len; i++)
-                if (cui__ed_hit(buf, E.len, i, st->query, qn)) { total++; if (i < s0 || (on_match && i == s0)) index++; }
-            res.find_matches = total;
-            res.find_index = on_match ? index : 0;
-            const char *label = qn == 0 ? "" : narrow ? (on_match ? cui__frame_printf(ui, "%d/%d", index, total) : cui__frame_printf(ui, "%d", total))
-                              : total == 0 ? "No results" : on_match ? cui__frame_printf(ui, "%d of %d", index, total)
-                              : cui__frame_printf(ui, "%d match%s", total, total == 1 ? "" : "es");
-            if (*label) {
-                int t = cui__text_node(ui, label, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), total ? CUI_C(ui, TEXT_SECONDARY) : CUI_C(ui, TEXT_MUTED), false);
-                ui->nodes[t].flags |= CUI_NF_TABULAR;
-                ui->nodes[t].line_height = 1.3f;
-                ui->nodes[t].pad[1] = ui->nodes[t].pad[3] = 4;
-            }
-            bo.disabled = total == 0;
-            bo.tooltip = "Previous match"; bo.shortcut = "Shift Enter";
-            if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_UP, &bo)) cui__ed_find_go(&E, s0, -1);
-            ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
-            bo.tooltip = "Next match"; bo.shortcut = "Enter";
-            if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_DOWN, &bo)) cui__ed_find_go(&E, s0 + (s1 > s0 ? 1 : 0), 1);
-            ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
-            bo.disabled = false;
-        } else {
-            if (st->bar_focus) { ui->focus = gid; ui->tf_select_all = gid; st->bar_focus = false; }
-            io.placeholder = narrow ? "Go to line" : cui__frame_printf(ui, "Go to line, 1 to %d", E.nl);
-            io.icon = narrow ? NULL : CUI_ICON_ARROW_DOWN;
-            int f = cui_input_ex(ui, "goto", st->go, sizeof st->go, &io);
-            if (f & CUI_SUBMITTED) {
-                char *end = NULL;
-                long line = strtol(st->go, &end, 10), col = 1;
-                if (end && *end == ':') col = strtol(end + 1, NULL, 10);
-                if (end != st->go) {
-                    line = CUI_CLAMP(line, 1, E.nl);
-                    e->cursor = e->anchor = cui__ed_pos(&E, (int)line - 1, (float)CUI_MAX(0, col - 1));
-                    E.reveal = E.center = true;
-                    st->pref_col = -1;
-                    st->mode = 0;
-                    ui->focus = lid;
-                }
-            }
+    for (int rep = ui->kpressed[CUI_KEY_ENTER]; rep > 0 && !prim; rep--) cui__ed_newline(E, f->lang_kind);
+    if (cui_key_pressed(ui, CUI_KEY_TAB) && !(f->mods & CUI_MOD_CTRL)) {
+        s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
+        if (shift || s1 > s0) cui__ed_indent(E, shift);
+        else {
+            int col = cui__ed_caret_col(E, s0), n = E->use_tabs ? 1 : E->tab - col % E->tab;
+            char sp[17];
+            memset(sp, E->use_tabs ? '\t' : ' ', sizeof sp);
+            cui__ed_replace(E, s0, s0, sp, n, 3);
         }
-        bo.tooltip = "Close"; bo.shortcut = "Esc";
-        if (cui_icon_button_ex(ui, CUI_ICON_X, &bo)) { st->mode = 0; ui->focus = lid; }
-        ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
-        cui_pop_id(ui);
-        cui__close(ui);
-        int hl = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-        ui->nodes[hl].bg = CUI_C(ui, BORDER);
     }
+    if (ui->text_in_len > 0 && !(prim && !(f->mods & CUI_MOD_ALT))) cui__ed_type(E, ui->text_in, ui->text_in_len, f->lang_kind);
+}
 
-    /* ---- follow the caret, then keep the scroll in range ---- */
-    if (E.changed) {
-        content_h = (double)E.nl * lh;
-        max_sy = CUI_MAX(0.0, content_h - view_h);
-        max_sx = CUI_MAX(0.0f, (float)CUI_MAX(E.maxlen, 1) * cw + CUI__ED_GAP + 24 - code_w);
+/* the keyboard while the lines have focus */
+static void cui__edf_keys(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    ui->edit = e;   /* cui_wants_keyboard, caret blink wakeups */
+#if defined(__APPLE__)
+    f->word_mod = (f->mods & CUI_MOD_ALT) != 0; f->line_mod = (f->mods & CUI_MOD_SUPER) != 0;
+#else
+    f->word_mod = (f->mods & CUI_MOD_CTRL) != 0; f->line_mod = false;
+#endif
+    int before_c = e->cursor, before_a = e->anchor;
+    for (int k = CUI_KEY_NONE + 1; k < CUI_KEY_COUNT; k++)
+        if (ui->kpressed[k] && k != CUI_KEY_TAB && k != CUI_KEY_ESCAPE) st->tab_free = false;
+    if (ui->text_in_len > 0) st->tab_free = false;
+    int vmove, vpage;
+    cui__edf_move_keys(f, &vmove, &vpage);
+    /* clipboard: without a selection, copy and cut take the whole line */
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    if (f->prim && (cui_key_pressed(ui, CUI_KEY_C) || cui_key_pressed(ui, CUI_KEY_X))) {
+        int a = s0, b = s1;
+        if (a == b) cui__ed_line_at(E, a, &a, &b);
+        if (b > a && ui->platform.set_clipboard) ui->platform.set_clipboard(ui->platform.user, cui__frame_strdup(ui, E->buf + a, b - a));
+        if (cui_key_pressed(ui, CUI_KEY_X) && b > a) cui__ed_replace(E, a, b, "", 0, 3);
     }
-    int caret_line = cui__ed_line_of(&E, e->cursor);
-    int caret_col = cui__ed_col(buf, E.ls[caret_line], e->cursor, E.tab);
+    if (!E->ro) cui__edf_edit_keys(f);
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        if (st->mode) st->mode = 0;
+        else if (e->cursor != e->anchor) e->anchor = e->cursor;
+        else st->tab_free = true;   /* the next Tab leaves the editor */
+    }
+    if (e->cursor != before_c || e->anchor != before_a || E->changed) {
+        ui->caret_time = ui->time;
+        if (vmove == 0 && vpage == 0) st->pref_col = -1;
+    }
+    if (!E->ro && !st->tab_free) ui->tab_owner = f->lid;
+}
+
+/* the find bar's field, the match count and the previous and next buttons */
+static void cui__edf_build_find(cui__edf *f, cui_input_opts *io, cui_button_opts *bo, bool narrow) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    bool shift = f->shift;
+    if (st->bar_focus) { ui->focus = f->fid; ui->tf_select_all = f->fid; st->bar_focus = false; }
+    io->placeholder = "Find";
+    io->icon = narrow ? NULL : CUI_ICON_SEARCH;
+    int fl = cui_input_ex(ui, "find", st->query, sizeof st->query, io);
+    int qn = (int)strlen(st->query);
+    int s0 = CUI_MIN(e->cursor, e->anchor);
+    if (fl & CUI_CHANGED) cui__ed_find_go(E, s0, 1);   /* as you type, from where the selection starts */
+    if (fl & CUI_SUBMITTED) cui__ed_find_go(E, shift ? s0 : s0 + (e->cursor != e->anchor ? 1 : 0), shift ? -1 : 1);
+    /* the count, and which match the selection is */
+    int total = 0, index = 0;
+    s0 = CUI_MIN(e->cursor, e->anchor);
+    int s1 = CUI_MAX(e->cursor, e->anchor);
+    bool on_match = qn > 0 && s1 - s0 == qn && cui__ed_hit(E->buf, E->len, s0, st->query, qn);
+    for (int i = 0; qn > 0 && i + qn <= E->len; i++)
+        if (cui__ed_hit(E->buf, E->len, i, st->query, qn)) { total++; if (i < s0 || (on_match && i == s0)) index++; }
+    f->res->find_matches = total;
+    f->res->find_index = on_match ? index : 0;
+    const char *label = qn == 0 ? "" : narrow ? (on_match ? cui__frame_printf(ui, "%d/%d", index, total) : cui__frame_printf(ui, "%d", total))
+                      : total == 0 ? "No results" : on_match ? cui__frame_printf(ui, "%d of %d", index, total)
+                      : cui__frame_printf(ui, "%d match%s", total, total == 1 ? "" : "es");
+    if (*label) {
+        int t = cui__text_node(ui, label, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), total ? CUI_C(ui, TEXT_SECONDARY) : CUI_C(ui, TEXT_MUTED), false);
+        ui->nodes[t].flags |= CUI_NF_TABULAR;
+        ui->nodes[t].line_height = 1.3f;
+        ui->nodes[t].pad[1] = ui->nodes[t].pad[3] = 4;
+    }
+    bo->disabled = total == 0;
+    bo->tooltip = "Previous match"; bo->shortcut = "Shift Enter";
+    if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_UP, bo)) cui__ed_find_go(E, s0, -1);
+    ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
+    bo->tooltip = "Next match"; bo->shortcut = "Enter";
+    if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_DOWN, bo)) cui__ed_find_go(E, s0 + (s1 > s0 ? 1 : 0), 1);
+    ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
+    bo->disabled = false;
+}
+
+/* the go to line field: "line" or "line:column" */
+static void cui__edf_build_goto(cui__edf *f, cui_input_opts *io, bool narrow) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    if (st->bar_focus) { ui->focus = f->gid; ui->tf_select_all = f->gid; st->bar_focus = false; }
+    io->placeholder = narrow ? "Go to line" : cui__frame_printf(ui, "Go to line, 1 to %d", E->nl);
+    io->icon = narrow ? NULL : CUI_ICON_ARROW_DOWN;
+    int fl = cui_input_ex(ui, "goto", st->go, sizeof st->go, io);
+    if (!(fl & CUI_SUBMITTED)) return;
+    char *end = NULL;
+    long line = strtol(st->go, &end, 10), col = 1;
+    if (end && *end == ':') col = strtol(end + 1, NULL, 10);
+    if (end != st->go) {
+        line = CUI_CLAMP(line, 1, E->nl);
+        e->cursor = e->anchor = cui__ed_pos(E, (int)line - 1, (float)CUI_MAX(0, col - 1));
+        E->reveal = E->center = true;
+        st->pref_col = -1;
+        st->mode = 0;
+        ui->focus = f->lid;
+    }
+}
+
+/* the bar above the lines: find or go to line, and a close button */
+static void cui__edf_build_bar(cui__edf *f) {
+    cui__ed_state *st = f->E->st;
+    cui_ctx *ui = f->E->ui;
+    bool narrow = f->known && f->br.w < 360;   /* a phone: a shorter count, no search icon */
+    int bar = cui__node_new(ui, 0);
+    cui_node *bn = &ui->nodes[bar];
+    bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 4;
+    bn->w = CUI_FILL;
+    bn->pad[0] = bn->pad[2] = 6; bn->pad[1] = 6; bn->pad[3] = 6;
+    bn->bg = CUI_C(ui, SURFACE);
+    cui__open(ui, bar);
+    cui_push_id(ui, f->id_str);
+    cui_input_opts io;
+    memset(&io, 0, sizeof io);
+    io.size = CUI_SIZE_SM;
+    io.width = CUI_FILL;
+    cui_button_opts bo;
+    memset(&bo, 0, sizeof bo);
+    bo.size = CUI_SIZE_SM;
+    bo.variant = CUI_BUTTON_GHOST;
+    if (st->mode == 1) cui__edf_build_find(f, &io, &bo, narrow);
+    else cui__edf_build_goto(f, &io, narrow);
+    bo.tooltip = "Close"; bo.shortcut = "Esc";
+    if (cui_icon_button_ex(ui, CUI_ICON_X, &bo)) { st->mode = 0; ui->focus = f->lid; }
+    ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
+    cui_pop_id(ui);
+    cui__close(ui);
+    int hl = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
+    ui->nodes[hl].bg = CUI_C(ui, BORDER);
+}
+
+/* follow the caret, then keep the scroll in range */
+static void cui__edf_follow_caret(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    float cw = f->cw, lh = f->lh, code_w = f->code_w;
+    double view_h = f->view_h;
+    if (E->changed) {
+        f->content_h = (double)E->nl * lh;
+        f->max_sy = CUI_MAX(0.0, f->content_h - view_h);
+        f->max_sx = CUI_MAX(0.0f, (float)CUI_MAX(E->maxlen, 1) * cw + CUI__ED_GAP + 24 - code_w);
+    }
+    f->caret_line = cui__ed_line_of(E, e->cursor);
+    f->caret_col = cui__ed_col(E->buf, E->ls[f->caret_line], e->cursor, E->tab);
     /* a line wider than the longest in bytes (tabs) still scrolls into reach */
-    max_sx = CUI_MAX(max_sx, (float)caret_col * cw + CUI__ED_GAP + 24 - code_w);
-    if (E.reveal) {
-        double cy = (double)caret_line * lh;
+    f->max_sx = CUI_MAX(f->max_sx, (float)f->caret_col * cw + CUI__ED_GAP + 24 - code_w);
+    if (E->reveal) {
+        double cy = (double)f->caret_line * lh;
         bool out = cy < st->sy || cy + lh > st->sy + view_h;
-        if (E.center && out) {   /* whole lines: none cut at the top */
+        if (E->center && out) {   /* whole lines: none cut at the top */
             double k = floor((cy - view_h * 0.5) / lh + 0.5);
             st->sy = k > 0 ? k * lh + CUI__ED_INSET : 0;
         }
         else if (cy < st->sy) st->sy = cy;
         else if (cy + lh > st->sy + view_h) st->sy = cy + lh - view_h;
-        float cx = (float)caret_col * cw, margin = CUI_MIN(cw * 4, code_w * 0.25f);
+        float cx = (float)f->caret_col * cw, margin = CUI_MIN(cw * 4, code_w * 0.25f);
         if (cx < st->sx + margin) st->sx = cx - margin;
         if (cx > st->sx + code_w - margin) st->sx = cx - code_w + margin;
-        if (E.center && (cx < st->sx || cx > st->sx + code_w)) st->sx = cx - code_w * 0.5f;
+        if (E->center && (cx < st->sx || cx > st->sx + code_w)) st->sx = cx - code_w * 0.5f;
     }
-    st->sy = CUI_MAX(0.0, CUI_MIN(max_sy, st->sy));
-    st->sx = cui__clampf(st->sx, 0, max_sx);
+    st->sy = CUI_MAX(0.0, CUI_MIN(f->max_sy, st->sy));
+    st->sx = cui__clampf(st->sx, 0, f->max_sx);
+}
 
-    /* ---- the editor's lines ---- */
-    int body = cui__node_new(ui, lid);
+/* the editor's lines: one node whose paint draws the lines in view, copied into frame memory */
+static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, bool dark) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    float lh = f->lh, cw = f->cw;
+    bool focused = f->focused;
+    int body = cui__node_new(ui, f->lid);
     cui_node *bdn = &ui->nodes[body];
     bdn->w = CUI_FILL; bdn->h = CUI_FILL;
     cui__mark_interactive(ui, body, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     cui__ed_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
-    p->sid = sid;
+    p->sid = f->sid;
     int first = (int)CUI_MAX(0.0, floor((st->sy - CUI__ED_INSET) / lh));
-    int last = (int)CUI_MIN((double)E.nl, ceil((st->sy + view_h + 2 * CUI__ED_INSET) / lh) + 1);
+    int last = (int)CUI_MIN((double)E->nl, ceil((st->sy + f->view_h + 2 * CUI__ED_INSET) / lh) + 1);
     if (first > last) first = last;
-    p->first = first; p->count = last - first; p->nl = E.nl;
-    int a = E.ls[first], b = last > first ? cui__ed_end(&E, last - 1) : a;
+    p->first = first; p->count = last - first; p->nl = E->nl;
+    int a = E->ls[first], b = last > first ? cui__ed_end(E, last - 1) : a;
     p->base = a;
-    p->text = cui__frame_strdup(ui, buf + a, b - a);   /* the caller may change the buffer before painting */
+    p->text = cui__frame_strdup(ui, E->buf + a, b - a);   /* the caller may change the buffer before painting */
     int *ls = cui__frame_alloc(ui, sizeof(int) * (size_t)(p->count + 1));
-    memcpy(ls, E.ls + first, sizeof(int) * (size_t)(p->count + 1));
+    memcpy(ls, E->ls + first, sizeof(int) * (size_t)(p->count + 1));
     p->ls = ls;
-    p->lang = L; p->json = json;
-    p->in_block = cui__ed_block_state(&E, &L, first);
-    p->tab = E.tab;
+    p->lang = *L; p->json = json;
+    p->in_block = cui__ed_block_state(E, L, first);
+    p->tab = E->tab;
     p->cursor = e->cursor; p->anchor = e->anchor;
-    p->caret_line = caret_line; p->caret_col = caret_col;
+    p->caret_line = f->caret_line; p->caret_col = f->caret_col;
     p->focused = focused;
-    p->show_line = focused || ui->focus == fid || ui->focus == gid;
-    p->ro = E.ro;
-    p->empty = E.len == 0;
-    p->placeholder = o->placeholder;
-    p->size = size; p->lh = lh; p->cw = cw; p->gutter = gutter;
-    p->view_h = known ? br.h : 0;
-    p->sy = st->sy; p->max_sy = max_sy;
-    p->sx = st->sx; p->max_sx = max_sx;
+    p->show_line = focused || ui->focus == f->fid || ui->focus == f->gid;
+    p->ro = E->ro;
+    p->empty = E->len == 0;
+    p->placeholder = f->o->placeholder;
+    p->size = f->size; p->lh = lh; p->cw = cw; p->gutter = f->gutter;
+    p->view_h = f->known ? f->br.h : 0;
+    p->sy = st->sy; p->max_sy = f->max_sy;
+    p->sx = st->sx; p->max_sx = f->max_sx;
     p->vc0 = (int)floorf(st->sx / cw) - 1;
-    p->vc1 = (int)ceilf((st->sx + code_w + CUI__ED_GAP) / cw) + 1;
+    p->vc1 = (int)ceilf((st->sx + f->code_w + CUI__ED_GAP) / cw) + 1;
     p->caret_phase = ui->time - ui->caret_time;
     p->br_line[0] = p->br_line[1] = -1;
     if (e->cursor == e->anchor && p->show_line) {
         int ba, bb;
-        cui__ed_brackets(&E, e->cursor, &ba, &bb);
+        cui__ed_brackets(E, e->cursor, &ba, &bb);
         if (ba >= 0) {
-            res.bracket = ba; res.bracket_match = bb;
+            f->res->bracket = ba; f->res->bracket_match = bb;
             int pos[2] = { ba, bb };
             for (int m = 0; m < 2; m++) {
-                p->br_line[m] = cui__ed_line_of(&E, pos[m]);
-                p->br_col[m] = cui__ed_col(buf, E.ls[p->br_line[m]], pos[m], E.tab);
+                p->br_line[m] = cui__ed_line_of(E, pos[m]);
+                p->br_col[m] = cui__ed_col(E->buf, E->ls[p->br_line[m]], pos[m], E->tab);
             }
         }
     }
@@ -1100,30 +1152,123 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     p->muted = CUI_C(ui, TEXT_MUTED);
     p->line = CUI_C(ui, BORDER);
     p->bar = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
+    /* the scrollbars show while scrolling, while hovered or held */
     bool recent = st->last_activity > 0 && ui->time - st->last_activity < 0.9;
-    bool vb = over_vbar && (lr.hovered || st->bar_drag == 1), hb = over_hbar && (lr.hovered || st->bar_drag == 2);
-    bool show_bar = recent || vb || hb || st->bar_drag || (lr.hovered && (max_sy > 0 || max_sx > 0));
+    bool vb = f->over_vbar && (f->lr.hovered || st->bar_drag == 1), hb = f->over_hbar && (f->lr.hovered || st->bar_drag == 2);
+    bool show_bar = recent || vb || hb || st->bar_drag || (f->lr.hovered && (f->max_sy > 0 || f->max_sx > 0));
     if (recent) cui__wakeup_after(ui, (float)(0.9 - (ui->time - st->last_activity)) + 0.01f);
     cui__tween(ui, &st->bar_t, show_bar ? 1.0f : 0.0f, show_bar ? 0.12f : 0.3f);
     p->bar_t = st->bar_t;
     p->bar_big = (vb || st->bar_drag == 1) ? 1 : (hb || st->bar_drag == 2) ? 2 : 0;
     bdn->paint = cui__paint_editor;
     bdn->paint_data = p;
-    if (focused) cui__wakeup_after(ui, 0.53f);
+}
 
-    if (focused && ui->platform.set_text_input_rect) {
-        cui_rect cr = { gx + CUI__ED_GAP - st->sx + (float)caret_col * cw, br.y + CUI__ED_INSET + (float)((double)caret_line * lh - st->sy), 1, lh };
+static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *id_str, char *buf, size_t cap, const cui_code_editor_opts *o) {
+    cui_code_editor_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_code_editor_result res;
+    memset(&res, 0, sizeof res);
+    res.bracket = res.bracket_match = -1;
+    static char empty[1];
+    if (!buf || cap == 0) { buf = empty; cap = 1; empty[0] = 0; }
+    if (!memchr(buf, 0, cap)) buf[cap - 1] = 0;   /* never read past the capacity */
+
+    cui__edf f;
+    memset(&f, 0, sizeof f);
+    f.o = o; f.res = &res; f.id_str = id_str;
+    f.id = cui_make_id(ui, id_str);
+    f.lid = f.id ^ 0xED1B0D1u; f.sid = f.id ^ 0xED15C011u;
+    cui__ed_state *st = cui_state(ui, f.id ^ CUI__ED_SALT, sizeof *st);
+    cui__edit_attach(ui, f.id ^ CUI__ED_SALT, &st->ed);
+    if (!st->init) {
+        st->init = true;
+        st->pref_col = -1;
+        if (o->autofocus) ui->focus = f.lid;
+    }
+    cui_push_id(ui, id_str);
+    f.fid = cui_make_id(ui, "find");
+    f.gid = cui_make_id(ui, "goto");
+    cui_pop_id(ui);
+
+    cui__ed E;
+    memset(&E, 0, sizeof E);
+    E.ui = ui; E.st = st; E.buf = buf; E.cap = cap;
+    E.len = (int)strlen(buf);
+    E.tab = o->tab_size > 0 ? CUI_MIN(o->tab_size, 16) : 4;
+    E.use_tabs = o->use_tabs;
+    E.ro = o->read_only;
+    cui__ed_index(&E);
+    f.E = &E;
+    cui_edit_state *e = &st->ed;
+    e->cursor = CUI_CLAMP(e->cursor, 0, E.len);
+    e->anchor = CUI_CLAMP(e->anchor, 0, E.len);
+    st->drag_a = CUI_CLAMP(st->drag_a, 0, E.len);   /* the text may change during a drag */
+    st->drag_b = CUI_CLAMP(st->drag_b, 0, E.len);
+    f.lang_kind = cui__ed_lang_kind(o->lang);
+    bool json = o->lang && !strcmp(o->lang, "json");
+    cui__lang L = cui__lang_for(json ? NULL : o->lang);
+
+    f.size = cui__fs(ui, o->size > 0 ? o->size : 13);
+    f.lh = roundf(f.size * 1.6f);
+    f.cw = cui__text_width(ui, CUI_FONT_MONO, f.size, "0000000000000000", 16, true) / 16.0f;
+    int digits = 2;
+    for (int v = E.nl / 100; v > 0; v /= 10) digits++;
+    f.gutter = o->no_line_numbers ? CUI__ED_GAP : 12 + (float)digits * f.cw + 14;
+    f.height = o->height > 0 ? o->height : 320;
+
+    cui__edf_requests(&f);
+
+    f.br = cui__prev_rect(ui, f.lid);
+    f.known = cui__has_prev_rect(ui, f.lid) && f.br.w > 0;
+    if (!f.known) { ui->animating = true; f.br.w = 480; f.br.h = f.height - 2 - (st->mode ? 41 : 0); }
+    f.code_w = CUI_MAX(1.0f, f.br.w - f.gutter - CUI__ED_GAP);
+    f.view_h = CUI_MAX((double)f.lh, (double)f.br.h - 2 * CUI__ED_INSET);
+    f.content_h = (double)E.nl * f.lh;
+    f.max_sy = CUI_MAX(0.0, f.content_h - f.view_h);
+
+    /* input */
+    f.mods = ui->mods;
+    f.shift = (f.mods & CUI_MOD_SHIFT) != 0; f.prim = (f.mods & CUI_MOD_PRIMARY) != 0;
+    cui__edf_bar_keys(&f);
+    cui__edf_pointer(&f);
+    f.focused = ui->focus == f.lid;
+    if (!f.focused) st->tab_free = false;
+    if (f.focused) cui__edf_keys(&f);
+
+    /* build */
+    bool dark = ui->mode == CUI_THEME_DARK;
+    int outer = cui__node_new(ui, f.id);
+    cui_node *on = &ui->nodes[outer];
+    on->w = o->width.kind ? o->width : CUI_FILL;
+    on->h = o->height < 0 ? CUI_FILL : CUI_PX(f.height);
+    on->min_h = 80;
+    on->radius = CUI_CORNERS(ui->theme.radius_control);
+    cui_color bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
+    on->bg = bg;   /* the code block's surface */
+    on->border = 1;
+    cui__tween(ui, &st->focus_t, (ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.gid) ? 1.0f : 0.0f, CUI__T_FOCUS);
+    on->border_color = cui_mix(CUI_C(ui, BORDER), cui__edge_on(ui), st->focus_t * 0.7f);
+    on->flags |= CUI_NF_CLIP;
+    cui__open(ui, outer);
+    if (st->mode) cui__edf_build_bar(&f);
+    cui__edf_follow_caret(&f);
+    cui__edf_build_lines(&f, &L, json, dark);
+    if (f.focused) cui__wakeup_after(ui, 0.53f);
+    if (f.focused && ui->platform.set_text_input_rect) {
+        cui_rect cr = { f.gx + CUI__ED_GAP - st->sx + (float)f.caret_col * f.cw, f.br.y + CUI__ED_INSET + (float)((double)f.caret_line * f.lh - st->sy), 1, f.lh };
         ui->platform.set_text_input_rect(ui->platform.user, cr);
     }
-    if (focused) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
+    if (f.focused) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
     cui__close(ui);   /* outer */
-    ui->last_id = id;
+    ui->last_id = f.id;
 
     res.changed = E.changed;
     res.refused = E.refused;
-    res.focused = ui->focus == lid || ui->focus == fid || ui->focus == gid;
+    res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.gid;
     res.cursor = e->cursor; res.anchor = e->anchor;
-    res.line = caret_line + 1; res.column = caret_col + 1;
+    res.line = f.caret_line + 1; res.column = f.caret_col + 1;
     res.line_count = E.nl;
     res.length = E.len;
     return res;
