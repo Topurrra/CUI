@@ -63,6 +63,19 @@ cc -std=c99 -O2 -Iinclude main.c src/*.c src/render/*.c src/platform/cui_app.c s
    -lX11 -ldl -lm -lpthread -o my_app
 ```
 
+### One file
+
+For a build system other than CMake, or to vendor CUI into a large codebase, use the single-file distribution, attached to every [release](https://github.com/yappologistic/CUI/releases) or made from a checkout with `python3 tools/amalgamate.py` (it writes `build/amalgamation/`). It comes in two forms:
+
+- `cui.h` and `cui.c`: add `cui.c` to your build and include `cui.h`, as with SQLite.
+- `cui_single.h`: one header in the style of the stb libraries. Include it anywhere; in exactly one `.c` file, `#define CUI_IMPLEMENTATION` first, and include it before any system header there.
+
+```sh
+cc -std=c99 -O2 main.c cui.c -lX11 -ldl -lm -lpthread -o my_app      # Linux; other systems link as in the table above
+```
+
+The window layer for your system is picked by the preprocessor. Before the implementation, `CUI_NO_APP` leaves the window layer out (bring your own window and renderer), `CUI_PLATFORM_SDL2` or `CUI_PLATFORM_GLFW` uses SDL2 or GLFW instead, `CUI_NO_DEFAULT_FONTS` and `CUI_NO_STB_IMAGE` leave out the fonts and image loading, and `CUI_TEXT_SHAPING` adds Arabic-script shaping. On macOS the window layer is Objective-C: compile `cui.c` with `-x objective-c -fobjc-arc`, or define `CUI_NO_APP`.
+
 ### Options
 
 | CMake option | Default | Meaning |

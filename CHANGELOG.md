@@ -9,6 +9,12 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - `cui_set_strings(ui, &table)`: month names, short month names, weekday names and "Today" in another language, switched at runtime with one call (issue #11, by pdenapo). A partial table falls back to English for what it leaves out. The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser use it. The names used to be copied in seven files; they now live in one small file that only these components link. See [Integration](docs/integration.md#text-in-other-languages).
 - `web/tools/build.sh app my_app.c`: your own app compiled to WebAssembly and opened in the browser at `#/app/my_app`, beside its source (issue #14). Any app whose `main` calls `cui_app_run` builds unchanged. See [Getting started](docs/getting-started.md#run-in-the-browser).
 
+- **Single-file distribution** (issue #10, by r-lyeh): `tools/amalgamate.py` writes `cui.h` + `cui.c` (add one file to any build) and `cui_single.h` (stb style, with `CUI_IMPLEMENTATION`), with the window layer picked by the preprocessor and macros for what CMake options used to choose. Releases attach the files, and CI builds an app from both forms with gcc and clang, warnings as errors. See [Getting started](docs/getting-started.md#one-file).
+
+### Fixed
+
+- The X11 backend declared one typedef twice, which C99 does not allow (clang warned about it).
+
 ### Documentation
 
 - Integration explains what a window costs in memory with each renderer, measured, and how much of it is the graphics driver rather than CUI: a bare OpenGL window takes 76 MB on its own on the test machine, CUI's own memory is 2 MB or so (issue #9).

@@ -35,7 +35,11 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_ENV"
           echo "title=CUI ${short}" >> "$GITHUB_ENV"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Single-file distribution
+        run: |
+          # older commits predate it: release without the files then
+          if [ -f tools/amalgamate.py ]; then python3 tools/amalgamate.py dist; else mkdir -p dist; fi
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${tag}" --target "${sha}" --title "${title}" --notes-file notes.md
+        run: gh release create "${tag}" --target "${sha}" --title "${title}" --notes-file notes.md $(ls dist/cui.h dist/cui.c dist/cui_single.h 2>/dev/null)

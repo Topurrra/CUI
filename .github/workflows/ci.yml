@@ -69,6 +69,27 @@ jobs:
       - name: Tests
         run: ctest --test-dir build --output-on-failure
 
+  amalgamation:
+    name: Single-file distribution (${{ matrix.cc }})
+    strategy:
+      matrix:
+        cc: [gcc, clang]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libx11-dev
+      - name: Generate cui.h, cui.c and cui_single.h
+        run: python3 tools/amalgamate.py dist
+      - name: Build an app from each form, and the optional parts on and off
+        run: |
+          W="-std=c99 -O1 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers"
+          sed 's#<cui/cui.h>#"cui.h"#; s#<cui/cui_app.h>#"cui.h"#' examples/hello.c > dist/hello.c
+          ${{ matrix.cc }} $W -Idist dist/hello.c dist/cui.c -lX11 -ldl -lm -lpthread -o dist/hello
+          printf '#define CUI_IMPLEMENTATION\n#include "cui_single.h"\n' > dist/impl.c
+          ${{ matrix.cc }} $W -Idist -c dist/impl.c -o dist/impl.o
+          ${{ matrix.cc }} $W -Idist -DCUI_NO_APP -DCUI_NO_DEFAULT_FONTS -DCUI_NO_STB_IMAGE -c dist/cui.c -o dist/core.o
+          ${{ matrix.cc }} $W -Idist -DCUI_TEXT_SHAPING -c dist/cui.c -o dist/shaping.o
+
   windows:
     name: Windows (${{ matrix.name }}, shaping ${{ matrix.shaping }})
     runs-on: windows-2022

@@ -176,6 +176,7 @@ CUI has about 170 components in plain C. That stays workable only if every file 
 - Something one file uses is `static` in that file. Something a second file needs moves to `src/cui_internal.h`, in the section its heading names, and its implementation goes in the file that section lists.
 - Before writing a small helper, search `cui_internal.h`. Copies of the same logic in several files are the main way a codebase like this decays: the next change fixes one copy and not the others. The theme rules in particular have one home each: `CUI_C` for colors, `cui__emphasis` for the selected or active color, `cui__fs` for font sizes, the `CUI__T_*` and `CUI__SPRING_*` tokens for motion.
 - The public header promises things to users. New API goes there only with a comment saying what it is for, next to its siblings, with an options struct whose zero value is the default.
+- Names are unique across the whole library, even `static` ones, and no variable is called `near` or `far` (macros in the Windows headers): the single-file distribution (`tools/amalgamate.py`) compiles every file as one, and CI builds it.
 - The core (`cui_core.c`, `cui_layout.c`, `cui_draw.c`, `cui_text.c`) never calls into a component's file. When the core has to reach an optional part, the part installs a hook (`ui->emoji_hook` is the example). Windows linkers keep a whole file once anything in it is used.
 
 **How code reads**
