@@ -11,6 +11,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Documentation
 
+- Integration explains what a window costs in memory with each renderer, measured, and how much of it is the graphics driver rather than CUI: a bare OpenGL window takes 76 MB on its own on the test machine, CUI's own memory is 2 MB or so (issue #9).
 - Getting started lists what to install on Windows, macOS and three Linux families, builds and runs an example from a fresh checkout, explains running in the browser and where Android and iOS stand, and has a troubleshooting table for the common build and startup problems (issue #3).
 
 ## 2026-11-08 · 1.2: phones, tablets, right to left and performance

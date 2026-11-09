@@ -104,6 +104,28 @@ A `cui_ctx` is not thread safe; use it from one thread. You may create several c
 
 All allocations go through `cui_ctx_desc.allocator` if you provide one. Per frame data lives in an arena that is reused, so a steady UI does not allocate. Component state is freed automatically a few seconds after the component disappears.
 
+### What a window costs
+
+Most of what a process uses with the OpenGL renderer belongs to the graphics driver, not to CUI. Measured with `examples/hello` and `examples/tracker` (Release build, 6 seconds after start, three runs each, the same within 2%):
+
+| | `hello`, resident (private) | `tracker`, resident (private) |
+|---|---|---|
+| Linux, software renderer | 7.1 MB (4.5 MB) | 12.6 MB (9.9 MB) |
+| Linux, OpenGL (Mesa llvmpipe) | 100 MB (59 MB) | 108 MB (63 MB) |
+| Linux, a bare OpenGL 3.3 window that only clears, no CUI | 76 MB (33 MB) | |
+| Windows 10, OpenGL (NVIDIA), reported in issue #9 | 66 MB (111 MB) | 74 MB (126 MB) |
+| Windows 10, software renderer, same report | | 19 MB (11 MB) |
+
+The Linux machine has no GPU, so its OpenGL is Mesa's CPU rasterizer; on it CUI picks the software renderer by itself unless told otherwise (see [Performance](performance.md)). The bare window shows the driver's own cost before anything is drawn. The rest of the OpenGL figure is mostly the driver compiling and keeping CUI's shader. CUI's part is small:
+
+- the context, its state and buffers, with the five embedded fonts unpacked (about 180 KB): 1.6 to 2.3 MB for the example apps after an hour of use ([Performance](performance.md));
+- the glyph atlas, 1 MB at first. It doubles as needed, up to 16 MB with very large or many text sizes, and compacts back when the text is gone;
+- with OpenGL, one shader program, one copy of the atlas as an 8-bit texture (1 MB at first) and a vertex buffer the size of a frame's triangles (usually under 1 MB).
+
+CUI keeps the CPU copy of the atlas because it grows and compacts the atlas there and the software renderer draws from it. That is 1 MB at first, small next to the driver.
+
+Pick the software renderer (`.renderer = CUI_RENDERER_SOFTWARE` in `cui_app_desc`, or `CUI_RENDERER=software`) when memory matters more than GPU offload: tools that stay open all day, many windows, small machines. It redraws only the tiles that changed, so a steady app costs almost no CPU; [Performance](performance.md) has the numbers. Keep OpenGL for large, busy windows on machines with a real GPU.
+
 ## Binary size
 
 CUI is built to stay small. Measured with GCC, `-DCMAKE_BUILD_TYPE=MinSizeRel`, stripped, x86-64:
