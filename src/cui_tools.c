@@ -750,126 +750,113 @@ void cui_log_view_ex(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const
     cui__keep_ltr(ui, first);
 }
 
-static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const cui_log_view_opts *o) {
-    cui_log_view_opts d;
-    memset(&d, 0, sizeof d);
-    if (!o) o = &d;
-    static const cui_log_buffer empty_buf = {0};   /* stands in for a NULL buffer: never written */
-    const cui_log_buffer *b = buf ? buf : &empty_buf;
-    cui_id id = cui_make_id(ui, id_str);
-    cui_id lid = id ^ 0x11575u, sid = id ^ 0x5C2011u;
-    cui__logv_state *s = cui_state(ui, id ^ 0x106Bu, sizeof *s);
-    cui__state_set_dtor(ui, id ^ 0x106Bu, cui__logv_dtor);
-    if (!s->init) {
-        for (int k = 0; k < CUI_LOG_LEVEL_COUNT; k++) s->levels[k] = true;
-        s->follow = true;
-        s->init = true;
-    }
-    float size = cui__fs(ui, o->size > 0 ? o->size : 12);
-    float row_h = roundf(size * 1.8f);
-    float pad_y = 6;
-    cui_scroll_state *ss = cui_state(ui, sid, sizeof *ss);
-    float view_h = ss->view_h > 0 ? ss->view_h : 300;
+/* one frame of the log view: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_log_view_opts *o;
+    cui_log_buffer *buf;                /* the caller's, may be NULL */
+    const cui_log_buffer *b;            /* never NULL */
+    cui_id id, lid, sid;                /* the view, its list, its scroll area */
+    cui__logv_state *s;
+    float size, row_h, pad_y;
+    cui_scroll_state *ss;
+    float view_h;
+    bool copy_now;                      /* the copy button or Ctrl+C */
+    cui_interact lr;
+    int hover_row;
+    float wheel;
+    bool key_up, key_end;               /* keys that move the cursor off, or to, the last row */
+} cui__lvf;
 
-    int outer = cui__node_new(ui, id);
-    cui_node *on = &ui->nodes[outer];
-    on->gap = 8;
-    on->w = o->width.kind ? o->width : CUI_FILL;
-    on->h = o->height < 0 ? CUI_FILL : CUI_PX(o->height > 0 ? o->height : 320);
-    cui__open(ui, outer);
-    cui_push_id(ui, id_str);
-
-    /* ---- toolbar ---- */
-    bool copy_now = false;
-    if (!o->no_toolbar) {
-        cui_box tb;
-        memset(&tb, 0, sizeof tb);
-        tb.dir = CUI_ROW; tb.align = CUI_ALIGN_CENTER; tb.gap = 8; tb.wrap = true;
-        tb.width = CUI_FILL;
-        cui_box_begin(ui, &tb);
-        /* narrow (a phone): initials, so the counts stay readable instead of
-         * every label being cut to "Tra..." */
-        cui_rect opr = cui__prev_rect(ui, id);
-        bool narrow = opr.w > 0 && opr.w < 460;
-        const char *labels[CUI_LOG_LEVEL_COUNT] = { "Trace", "Debug", "Info", "Warn", "Error" };
-        if (narrow) { labels[0] = "T"; labels[1] = "D"; labels[2] = "I"; labels[3] = "W"; labels[4] = "E"; }
-        if (b->level_count[CUI_LOG_WARN] > 0) labels[CUI_LOG_WARN] = cui__frame_printf(ui, "%s %d", labels[CUI_LOG_WARN], b->level_count[CUI_LOG_WARN]);
-        if (b->level_count[CUI_LOG_ERROR] > 0) labels[CUI_LOG_ERROR] = cui__frame_printf(ui, "%s %d", labels[CUI_LOG_ERROR], b->level_count[CUI_LOG_ERROR]);
-        cui_toggle_group_opts go;
-        memset(&go, 0, sizeof go);
-        go.size = CUI_SIZE_SM;
-        cui_toggle_group_ex(ui, "levels", labels, CUI_LOG_LEVEL_COUNT, s->levels, &go);
-        cui_input_opts io;
-        memset(&io, 0, sizeof io);
-        io.size = CUI_SIZE_SM;
-        io.width = CUI_FILL;
-        io.placeholder = "Filter lines";
-        if (s->search[0] && s->applied[0] && !strcmp(s->search, s->applied)) io.suffix = cui__frame_printf(ui, "%d found", s->nrows);
-        cui_search_ex(ui, "search", s->search, sizeof s->search, &io);
-        ui->nodes[ui->last_node].min_w = 140;
-        /* the actions stay together when the toolbar wraps */
-        cui_box ab;
-        memset(&ab, 0, sizeof ab);
-        ab.dir = CUI_ROW; ab.align = CUI_ALIGN_CENTER; ab.gap = 4;
-        cui_box_begin(ui, &ab);
-        bool follow_was = s->follow;
-        static const char *const follow_label[1] = { "Follow" };
-        static const char *const follow_icon[1] = { CUI_ICON_ARROW_DOWN };
-        go.icons = follow_icon;
-        cui_toggle_group_ex(ui, "follow", follow_label, 1, &s->follow, &go);
-        if (s->follow && !follow_was) ss->ty = 1e9f;   /* clamped to the bottom next frame */
-        cui_button_opts bo;
-        memset(&bo, 0, sizeof bo);
-        bo.size = CUI_SIZE_SM;
-        bool copied = s->copied_at > 0 && ui->time - s->copied_at < 1.2;
-        if (copied) cui__wakeup_after(ui, (float)(1.2 - (ui->time - s->copied_at)) + 0.01f);
-        bo.tooltip = "Copy lines";   /* the selection, or every line shown */
-        bo.disabled = s->nrows == 0;
-        if (cui_icon_button_ex(ui, CUI_ICON_COPY, &bo)) copy_now = true;
-        if (copied) {
-            /* confirm with a green check in place, keeping the button (and its focus) */
-            cui_node *bn = &ui->nodes[ui->last_node];
-            for (int k = bn->first; k >= 0; k = ui->nodes[k].next)
-                if (ui->nodes[k].font == CUI_FONT_ICONS) {
-                    ui->nodes[k].text = CUI_ICON_CHECK;
-                    ui->nodes[k].text_len = (int)strlen(CUI_ICON_CHECK);
-                    ui->nodes[k].text_color = CUI_C(ui, SUCCESS);
-                }
+/* the copy button turns into a green check for a moment, keeping the button (and its focus) */
+static void cui__lvf_copied_check(cui_ctx *ui) {
+    cui_node *bn = &ui->nodes[ui->last_node];
+    for (int k = bn->first; k >= 0; k = ui->nodes[k].next)
+        if (ui->nodes[k].font == CUI_FONT_ICONS) {
+            ui->nodes[k].text = CUI_ICON_CHECK;
+            ui->nodes[k].text_len = (int)strlen(CUI_ICON_CHECK);
+            ui->nodes[k].text_color = CUI_C(ui, SUCCESS);
         }
-        bo.tooltip = "Clear log";
-        bo.disabled = b->count == 0 || !buf;
-        if (cui_icon_button_ex(ui, CUI_ICON_TRASH_2, &bo) && buf) {
-            cui_log_clear(buf);
-            s->has_sel = s->has_cursor = false;
-        }
-        cui_box_end(ui);
-        cui_box_end(ui);
-    }
+}
 
-    /* ---- filter ---- */
-    int dropped = cui__logv_refresh(ui, s, b);
-    if (s->has_sel && s->nrows > 0 && CUI_MAX(s->anchor, s->cursor) < s->rows[0]) s->has_sel = false;
-    if (dropped > 0 && !s->follow) {
-        /* lines left the top of the buffer: keep the ones in view still */
-        ss->y = CUI_MAX(0, ss->y - dropped * row_h);
-        ss->ty = CUI_MAX(0, ss->ty - dropped * row_h);
+/* the toolbar: level toggles with counts, the filter, follow, copy and clear */
+static void cui__lvf_build_toolbar(cui__lvf *f) {
+    cui_ctx *ui = f->ui;
+    cui__logv_state *s = f->s;
+    const cui_log_buffer *b = f->b;
+    cui_box tb;
+    memset(&tb, 0, sizeof tb);
+    tb.dir = CUI_ROW; tb.align = CUI_ALIGN_CENTER; tb.gap = 8; tb.wrap = true;
+    tb.width = CUI_FILL;
+    cui_box_begin(ui, &tb);
+    /* narrow (a phone): initials, so the counts stay readable instead of
+     * every label being cut to "Tra..." */
+    cui_rect opr = cui__prev_rect(ui, f->id);
+    bool narrow = opr.w > 0 && opr.w < 460;
+    const char *labels[CUI_LOG_LEVEL_COUNT] = { "Trace", "Debug", "Info", "Warn", "Error" };
+    if (narrow) { labels[0] = "T"; labels[1] = "D"; labels[2] = "I"; labels[3] = "W"; labels[4] = "E"; }
+    if (b->level_count[CUI_LOG_WARN] > 0) labels[CUI_LOG_WARN] = cui__frame_printf(ui, "%s %d", labels[CUI_LOG_WARN], b->level_count[CUI_LOG_WARN]);
+    if (b->level_count[CUI_LOG_ERROR] > 0) labels[CUI_LOG_ERROR] = cui__frame_printf(ui, "%s %d", labels[CUI_LOG_ERROR], b->level_count[CUI_LOG_ERROR]);
+    cui_toggle_group_opts go;
+    memset(&go, 0, sizeof go);
+    go.size = CUI_SIZE_SM;
+    cui_toggle_group_ex(ui, "levels", labels, CUI_LOG_LEVEL_COUNT, s->levels, &go);
+    cui_input_opts io;
+    memset(&io, 0, sizeof io);
+    io.size = CUI_SIZE_SM;
+    io.width = CUI_FILL;
+    io.placeholder = "Filter lines";
+    if (s->search[0] && s->applied[0] && !strcmp(s->search, s->applied)) io.suffix = cui__frame_printf(ui, "%d found", s->nrows);
+    cui_search_ex(ui, "search", s->search, sizeof s->search, &io);
+    ui->nodes[ui->last_node].min_w = 140;
+    /* the actions stay together when the toolbar wraps */
+    cui_box ab;
+    memset(&ab, 0, sizeof ab);
+    ab.dir = CUI_ROW; ab.align = CUI_ALIGN_CENTER; ab.gap = 4;
+    cui_box_begin(ui, &ab);
+    bool follow_was = s->follow;
+    static const char *const follow_label[1] = { "Follow" };
+    static const char *const follow_icon[1] = { CUI_ICON_ARROW_DOWN };
+    go.icons = follow_icon;
+    cui_toggle_group_ex(ui, "follow", follow_label, 1, &s->follow, &go);
+    if (s->follow && !follow_was) f->ss->ty = 1e9f;   /* clamped to the bottom next frame */
+    cui_button_opts bo;
+    memset(&bo, 0, sizeof bo);
+    bo.size = CUI_SIZE_SM;
+    bool copied = s->copied_at > 0 && ui->time - s->copied_at < 1.2;
+    if (copied) cui__wakeup_after(ui, (float)(1.2 - (ui->time - s->copied_at)) + 0.01f);
+    bo.tooltip = "Copy lines";   /* the selection, or every line shown */
+    bo.disabled = s->nrows == 0;
+    if (cui_icon_button_ex(ui, CUI_ICON_COPY, &bo)) f->copy_now = true;
+    if (copied) cui__lvf_copied_check(ui);
+    bo.tooltip = "Clear log";
+    bo.disabled = b->count == 0 || !f->buf;
+    if (cui_icon_button_ex(ui, CUI_ICON_TRASH_2, &bo) && f->buf) {
+        cui_log_clear(f->buf);
+        s->has_sel = s->has_cursor = false;
     }
+    cui_box_end(ui);
+    cui_box_end(ui);
+}
 
-    /* ---- input on the list ---- */
-    cui_interact lr = cui__interact(ui, lid, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
-    cui_rect cr = cui__prev_rect(ui, lid);
-    int hover_row = -1;
-    if (cr.h > 0 && (lr.hovered || lr.active)) {
-        float fy = (ui->my - cr.y - pad_y) / row_h;
+/* the pointer on the list: a press selects a line (Shift extends), dragging extends */
+static void cui__lvf_pointer(cui__lvf *f) {
+    cui_ctx *ui = f->ui;
+    cui__logv_state *s = f->s;
+    f->lr = cui__interact(ui, f->lid, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    cui_rect cr = cui__prev_rect(ui, f->lid);
+    f->hover_row = -1;
+    if (cr.h > 0 && (f->lr.hovered || f->lr.active)) {
+        float fy = (ui->my - cr.y - f->pad_y) / f->row_h;
         int ri = (int)floorf(fy);
-        if (fy >= 0 && ri < s->nrows) hover_row = ri;
-        if (lr.active && s->nrows > 0) {   /* dragging past the ends picks the end rows */
+        if (fy >= 0 && ri < s->nrows) f->hover_row = ri;
+        if (f->lr.active && s->nrows > 0) {   /* dragging past the ends picks the end rows */
             if (ri < 0) ri = 0;
             if (ri >= s->nrows) ri = s->nrows - 1;
         }
-        if (lr.hovered && ui->mpressed[0]) {
-            if (hover_row >= 0) {
-                uint64_t seq = s->rows[hover_row];
+        if (f->lr.hovered && ui->mpressed[0]) {
+            if (f->hover_row >= 0) {
+                uint64_t seq = s->rows[f->hover_row];
                 if ((ui->mods & CUI_MOD_SHIFT) && s->has_cursor) { if (!s->has_sel) s->anchor = s->cursor; }
                 else s->anchor = seq;
                 s->cursor = seq;
@@ -877,91 +864,84 @@ static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffe
                 s->dragging = true;
             } else s->has_sel = false;
         }
-        if (s->dragging && lr.active && ui->mdown[0] && s->nrows > 0 && ri >= 0 && ri < s->nrows && s->rows[ri] != s->cursor) {
+        if (s->dragging && f->lr.active && ui->mdown[0] && s->nrows > 0 && ri >= 0 && ri < s->nrows && s->rows[ri] != s->cursor) {
             s->cursor = s->rows[ri];
             s->has_sel = true;
         }
     }
     if (!ui->mdown[0]) s->dragging = false;
-    float wheel = ui->scroll_target == sid ? ui->scroll_dy : 0;
-    bool key_up = false, key_end = false;
-    if (ui->focus == lid && s->nrows > 0) {
-        int ci = s->has_cursor ? cui__logv_lower(s, s->cursor) : s->nrows;
-        if (ci >= s->nrows) ci = s->nrows - 1;
-        int page = CUI_MAX(1, (int)(view_h / row_h) - 1);
-        int to = ci;
-        bool moved = false;
-        if (cui_key_pressed(ui, CUI_KEY_DOWN)) { to++; moved = true; }
-        if (cui_key_pressed(ui, CUI_KEY_UP)) { to--; moved = true; }
-        if (cui_key_pressed(ui, CUI_KEY_PAGE_DOWN)) { to += page; moved = true; }
-        if (cui_key_pressed(ui, CUI_KEY_PAGE_UP)) { to -= page; moved = true; }
-        if (cui_key_pressed(ui, CUI_KEY_HOME)) { to = 0; moved = true; }
-        if (cui_key_pressed(ui, CUI_KEY_END)) { to = s->nrows - 1; moved = true; key_end = true; }
-        if (moved) {
-            to = CUI_CLAMP(to, 0, s->nrows - 1);
-            uint64_t prev = s->has_cursor ? s->cursor : s->rows[to];
-            s->cursor = s->rows[to];
-            if (ui->mods & CUI_MOD_SHIFT) { if (!s->has_sel) s->anchor = prev; }
-            else s->anchor = s->cursor;
-            s->has_sel = s->has_cursor = true;
-            if (to < s->nrows - 1) key_up = true;
-            /* keep the cursor row in view */
-            float top = pad_y + to * row_h, bottom = top + row_h;
-            if (top - pad_y < ss->ty) ss->ty = top - pad_y;
-            if (bottom + pad_y > ss->ty + view_h) ss->ty = bottom + pad_y - view_h;
-            ui->animating = true;
-        }
-        if ((ui->mods & CUI_MOD_PRIMARY) && cui_key_pressed(ui, CUI_KEY_A)) {
-            s->anchor = s->rows[0];
-            s->cursor = s->rows[s->nrows - 1];
-            s->has_sel = s->has_cursor = true;
-        }
-        if ((ui->mods & CUI_MOD_PRIMARY) && cui_key_pressed(ui, CUI_KEY_C)) copy_now = true;
-        if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && s->has_sel) { s->has_sel = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
-    }
-    if (copy_now) { cui__logv_copy(ui, s, b, o->timestamps); s->copied_at = ui->time; }
-    cui__tween(ui, &s->hover, hover_row >= 0 && !lr.active ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    f->wheel = ui->scroll_target == f->sid ? ui->scroll_dy : 0;
+}
 
-    /* ---- the list ---- */
-    float total_h = s->nrows * row_h + pad_y * 2;
-    int frame = cui__node_new(ui, 0);
-    cui_node *fn = &ui->nodes[frame];
-    fn->w = CUI_FILL; fn->h = CUI_FILL; fn->min_h = 80;
-    fn->radius = CUI_CORNERS(ui->theme.radius_control);
-    fn->border = 1; fn->border_color = CUI_C(ui, BORDER);
-    cui_color list_bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    fn->bg = list_bg;   /* the code block's surface */
-    fn->flags |= CUI_NF_CLIP;
-    cui__open(ui, frame);
-    cui_box sb;
-    memset(&sb, 0, sizeof sb);
-    sb.width = CUI_FILL; sb.height = CUI_FILL;
-    int scroll = cui__scroll_begin_ex(ui, sid, &sb, true);
-    /* follow: scrolling up turns it off, coming back to the bottom turns it on */
+/* keys while the list has focus: arrows, pages, Home and End move the cursor line (Shift
+ * selects), Ctrl+A, Ctrl+C, Escape clears the selection */
+static void cui__lvf_keys(cui__lvf *f) {
+    cui_ctx *ui = f->ui;
+    cui__logv_state *s = f->s;
+    cui_scroll_state *ss = f->ss;
+    float row_h = f->row_h, pad_y = f->pad_y, view_h = f->view_h;
+    int ci = s->has_cursor ? cui__logv_lower(s, s->cursor) : s->nrows;
+    if (ci >= s->nrows) ci = s->nrows - 1;
+    int page = CUI_MAX(1, (int)(view_h / row_h) - 1);
+    int to = ci;
+    bool moved = false;
+    if (cui_key_pressed(ui, CUI_KEY_DOWN)) { to++; moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_UP)) { to--; moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_PAGE_DOWN)) { to += page; moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_PAGE_UP)) { to -= page; moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) { to = 0; moved = true; }
+    if (cui_key_pressed(ui, CUI_KEY_END)) { to = s->nrows - 1; moved = true; f->key_end = true; }
+    if (moved) {
+        to = CUI_CLAMP(to, 0, s->nrows - 1);
+        uint64_t prev = s->has_cursor ? s->cursor : s->rows[to];
+        s->cursor = s->rows[to];
+        if (ui->mods & CUI_MOD_SHIFT) { if (!s->has_sel) s->anchor = prev; }
+        else s->anchor = s->cursor;
+        s->has_sel = s->has_cursor = true;
+        if (to < s->nrows - 1) f->key_up = true;
+        /* keep the cursor row in view */
+        float top = pad_y + to * row_h, bottom = top + row_h;
+        if (top - pad_y < ss->ty) ss->ty = top - pad_y;
+        if (bottom + pad_y > ss->ty + view_h) ss->ty = bottom + pad_y - view_h;
+        ui->animating = true;
+    }
+    if ((ui->mods & CUI_MOD_PRIMARY) && cui_key_pressed(ui, CUI_KEY_A)) {
+        s->anchor = s->rows[0];
+        s->cursor = s->rows[s->nrows - 1];
+        s->has_sel = s->has_cursor = true;
+    }
+    if ((ui->mods & CUI_MOD_PRIMARY) && cui_key_pressed(ui, CUI_KEY_C)) f->copy_now = true;
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && s->has_sel) { s->has_sel = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
+}
+
+/* follow: scrolling up turns it off, coming back to the bottom turns it on; while on, the
+ * view stays at the bottom */
+static void cui__lvf_follow(cui__lvf *f, float total_h) {
+    cui__logv_state *s = f->s;
+    cui_scroll_state *ss = f->ss;
     float max_y = CUI_MAX(0, ss->content_h - ss->view_h);
-    if (s->follow && (wheel > 0 || key_up || (ss->drag_y && ss->ty < max_y - 1))) s->follow = false;
-    else if (!s->follow && (wheel < 0 || ss->drag_y || key_end) && ss->ty >= max_y - 1) s->follow = true;
+    if (s->follow && (f->wheel > 0 || f->key_up || (ss->drag_y && ss->ty < max_y - 1))) s->follow = false;
+    else if (!s->follow && (f->wheel < 0 || ss->drag_y || f->key_end) && ss->ty >= max_y - 1) s->follow = true;
     if (s->follow) {
-        float bottom = CUI_MAX(0, total_h - view_h);
-        if (ss->ty != bottom) { ss->ty = bottom; ui->animating = true; }
+        float bottom = CUI_MAX(0, total_h - f->view_h);
+        if (ss->ty != bottom) { ss->ty = bottom; f->ui->animating = true; }
     }
-    float y = ui->nodes[scroll].scroll_y;
-    int first = (int)floorf((y - pad_y) / row_h) - 2;
-    int last = (int)ceilf((y + view_h) / row_h) + 2;
-    if (first < 0) first = 0;
-    if (last > s->nrows) last = s->nrows;
-    if (first > last) first = last;
+}
 
+/* what every row's paint shares: the columns and the colors per level */
+static cui__logv_common *cui__lvf_common(cui__lvf *f, cui_color list_bg, float pad_x) {
+    cui_ctx *ui = f->ui;
+    const cui_log_view_opts *o = f->o;
+    float size = f->size;
     cui__logv_common *c = cui__frame_alloc(ui, sizeof *c);
     memset(c, 0, sizeof *c);
-    c->size = size; c->row_h = row_h; c->timestamps = o->timestamps;
-    float pad_x = 12;
+    c->size = size; c->row_h = f->row_h; c->timestamps = o->timestamps;
     float time_w = cui__text_width(ui, CUI_FONT_MONO, size, "00:00:00.000", 12, true);
     float tag_w = cui__text_width(ui, CUI_FONT_MONO, size, "error", 5, true);
     c->x_time = pad_x;
     c->x_tag = o->timestamps ? pad_x + time_w + 14 : pad_x;
     c->x_text = c->x_tag + tag_w + 14;
-    c->query = s->applied[0] ? cui__frame_strdup(ui, s->applied, -1) : NULL;
+    c->query = f->s->applied[0] ? cui__frame_strdup(ui, f->s->applied, -1) : NULL;
     c->qn = c->query ? (int)strlen(c->query) : 0;
     bool dark = ui->mode == CUI_THEME_DARK;
     cui_color fg = CUI_C(ui, FOREGROUND);
@@ -982,8 +962,75 @@ static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffe
     c->hover = CUI_C(ui, HOVER);
     c->match = cui_alpha(cui__emphasis(ui), dark ? 0.32f : 0.20f);
     c->bar = cui__emphasis(ui);
+    return c;
+}
 
-    int content = cui__node_new(ui, lid);
+/* the lines in view, each copied (the app may append, and overwrite this text, before
+ * painting); the widest seen sets how far the list scrolls sideways */
+static void cui__lvf_build_rows(cui__lvf *f, cui__logv_common *c, int first, int last) {
+    cui_ctx *ui = f->ui;
+    cui__logv_state *s = f->s;
+    const cui_log_buffer *b = f->b;
+    float size = f->size;
+    cui__leaf(ui, 0, CUI_FILL, CUI_PX(f->pad_y + first * f->row_h));
+    uint64_t sel_lo = CUI_MIN(s->anchor, s->cursor), sel_hi = CUI_MAX(s->anchor, s->cursor);
+    bool show_cursor = ui->focus == f->lid && ui->focus_visible && s->has_cursor;
+    for (int i = first; i < last; i++) {
+        uint64_t seq = s->rows[i];
+        const cui_log_line *l = cui__log_at(b, seq);
+        if (!l) continue;
+        cui__logv_row *p = cui__frame_alloc(ui, sizeof *p);
+        memset(p, 0, sizeof *p);
+        p->c = c;
+        const char *src = b->text + l->offset;
+        int len = cui__utf8_cut(src, (int)l->len, CUI__LOG_DRAW_MAX);
+        p->text = cui__frame_strdup(ui, src, len);
+        p->len = len;
+        p->more = (int)l->len - len;
+        p->level = l->level;
+        if (f->o->timestamps) cui__log_time(p->time, sizeof p->time, l->time);
+        p->selected = s->has_sel && seq >= sel_lo && seq <= sel_hi;
+        p->cursor = show_cursor && seq == s->cursor;
+        p->hover = i == f->hover_row ? s->hover : 0;
+        float w = cui__text_width(ui, CUI_FONT_MONO, size, p->text, len, true);
+        if (p->more > 0) w += cui__text_width(ui, CUI_FONT_MONO, size, "  ... 000000 more bytes", -1, true);
+        if (w > s->max_w) s->max_w = w;
+        int rn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(f->row_h));
+        ui->nodes[rn].paint = cui__paint_log_row;
+        ui->nodes[rn].paint_data = p;
+    }
+}
+
+/* the list: a framed scroll area with the lines in view, or why there are none */
+static int cui__lvf_build_list(cui__lvf *f) {
+    cui_ctx *ui = f->ui;
+    cui__logv_state *s = f->s;
+    float row_h = f->row_h, pad_y = f->pad_y, view_h = f->view_h;
+    float total_h = s->nrows * row_h + pad_y * 2;
+    int frame = cui__node_new(ui, 0);
+    cui_node *fn = &ui->nodes[frame];
+    fn->w = CUI_FILL; fn->h = CUI_FILL; fn->min_h = 80;
+    fn->radius = CUI_CORNERS(ui->theme.radius_control);
+    fn->border = 1; fn->border_color = CUI_C(ui, BORDER);
+    cui_color list_bg = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
+    fn->bg = list_bg;   /* the code block's surface */
+    fn->flags |= CUI_NF_CLIP;
+    cui__open(ui, frame);
+    cui_box sb;
+    memset(&sb, 0, sizeof sb);
+    sb.width = CUI_FILL; sb.height = CUI_FILL;
+    int scroll = cui__scroll_begin_ex(ui, f->sid, &sb, true);
+    cui__lvf_follow(f, total_h);
+    float y = ui->nodes[scroll].scroll_y;
+    int first = (int)floorf((y - pad_y) / row_h) - 2;
+    int last = (int)ceilf((y + view_h) / row_h) + 2;
+    if (first < 0) first = 0;
+    if (last > s->nrows) last = s->nrows;
+    if (first > last) first = last;
+    float pad_x = 12;
+    cui__logv_common *c = cui__lvf_common(f, list_bg, pad_x);
+
+    int content = cui__node_new(ui, f->lid);
     cui_node *cn = &ui->nodes[content];
     cn->w = CUI_FILL;
     cn->h = CUI_PX(CUI_MAX(total_h, view_h));
@@ -995,45 +1042,70 @@ static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffe
         ui->nodes[e].w = CUI_FILL; ui->nodes[e].h = CUI_FILL;
         ui->nodes[e].align = CUI_ALIGN_CENTER; ui->nodes[e].justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, e);
-        const char *msg = b->count == 0 ? "No log lines yet" : "No lines match the filter";
+        const char *msg = f->b->count == 0 ? "No log lines yet" : "No lines match the filter";
         cui__text_node(ui, msg, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, TEXT_MUTED), false);
         cui__close(ui);
     } else {
-        cui__leaf(ui, 0, CUI_FILL, CUI_PX(pad_y + first * row_h));
-        uint64_t sel_lo = CUI_MIN(s->anchor, s->cursor), sel_hi = CUI_MAX(s->anchor, s->cursor);
-        bool show_cursor = ui->focus == lid && ui->focus_visible && s->has_cursor;
-        for (int i = first; i < last; i++) {
-            uint64_t seq = s->rows[i];
-            const cui_log_line *l = cui__log_at(b, seq);
-            if (!l) continue;
-            cui__logv_row *p = cui__frame_alloc(ui, sizeof *p);
-            memset(p, 0, sizeof *p);
-            p->c = c;
-            const char *src = b->text + l->offset;
-            int len = cui__utf8_cut(src, (int)l->len, CUI__LOG_DRAW_MAX);
-            /* a copy: the app may append (and overwrite this text) before painting */
-            p->text = cui__frame_strdup(ui, src, len);
-            p->len = len;
-            p->more = (int)l->len - len;
-            p->level = l->level;
-            if (o->timestamps) cui__log_time(p->time, sizeof p->time, l->time);
-            p->selected = s->has_sel && seq >= sel_lo && seq <= sel_hi;
-            p->cursor = show_cursor && seq == s->cursor;
-            p->hover = i == hover_row ? s->hover : 0;
-            float w = cui__text_width(ui, CUI_FONT_MONO, size, p->text, len, true);
-            if (p->more > 0) w += cui__text_width(ui, CUI_FONT_MONO, size, "  ... 000000 more bytes", -1, true);
-            if (w > s->max_w) s->max_w = w;
-            int rn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(row_h));
-            ui->nodes[rn].paint = cui__paint_log_row;
-            ui->nodes[rn].paint_data = p;
-        }
+        cui__lvf_build_rows(f, c, first, last);
     }
     cui__close(ui);   /* content */
     ui->nodes[content].min_w = c->x_text + s->max_w + pad_x;
     cui__scroll_end_ex(ui);
     cui__close(ui);   /* frame */
-    if (ui->focus == lid) cui__focus_ring(ui, frame, ui->focus_visible ? 1.0f : 0.0f);
+    return frame;
+}
+
+static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffer *buf, const cui_log_view_opts *o) {
+    cui_log_view_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    static const cui_log_buffer empty_buf = {0};   /* stands in for a NULL buffer: never written */
+    cui__lvf f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o; f.buf = buf;
+    f.b = buf ? buf : &empty_buf;
+    f.id = cui_make_id(ui, id_str);
+    f.lid = f.id ^ 0x11575u; f.sid = f.id ^ 0x5C2011u;
+    cui__logv_state *s = f.s = cui_state(ui, f.id ^ 0x106Bu, sizeof *s);
+    cui__state_set_dtor(ui, f.id ^ 0x106Bu, cui__logv_dtor);
+    if (!s->init) {
+        for (int k = 0; k < CUI_LOG_LEVEL_COUNT; k++) s->levels[k] = true;
+        s->follow = true;
+        s->init = true;
+    }
+    f.size = cui__fs(ui, o->size > 0 ? o->size : 12);
+    f.row_h = roundf(f.size * 1.8f);
+    f.pad_y = 6;
+    cui_scroll_state *ss = f.ss = cui_state(ui, f.sid, sizeof *ss);
+    f.view_h = ss->view_h > 0 ? ss->view_h : 300;
+
+    int outer = cui__node_new(ui, f.id);
+    cui_node *on = &ui->nodes[outer];
+    on->gap = 8;
+    on->w = o->width.kind ? o->width : CUI_FILL;
+    on->h = o->height < 0 ? CUI_FILL : CUI_PX(o->height > 0 ? o->height : 320);
+    cui__open(ui, outer);
+    cui_push_id(ui, id_str);
+    if (!o->no_toolbar) cui__lvf_build_toolbar(&f);
+
+    /* the filter */
+    int dropped = cui__logv_refresh(ui, s, f.b);
+    if (s->has_sel && s->nrows > 0 && CUI_MAX(s->anchor, s->cursor) < s->rows[0]) s->has_sel = false;
+    if (dropped > 0 && !s->follow) {
+        /* lines left the top of the buffer: keep the ones in view still */
+        ss->y = CUI_MAX(0, ss->y - dropped * f.row_h);
+        ss->ty = CUI_MAX(0, ss->ty - dropped * f.row_h);
+    }
+
+    /* input on the list */
+    cui__lvf_pointer(&f);
+    if (ui->focus == f.lid && s->nrows > 0) cui__lvf_keys(&f);
+    if (f.copy_now) { cui__logv_copy(ui, s, f.b, o->timestamps); s->copied_at = ui->time; }
+    cui__tween(ui, &s->hover, f.hover_row >= 0 && !f.lr.active ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+
+    int frame = cui__lvf_build_list(&f);
+    if (ui->focus == f.lid) cui__focus_ring(ui, frame, ui->focus_visible ? 1.0f : 0.0f);
     cui_pop_id(ui);
     cui__close(ui);   /* outer */
-    ui->last_id = id;
+    ui->last_id = f.id;
 }
