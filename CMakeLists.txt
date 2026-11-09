@@ -125,6 +125,7 @@ else()
     add_library(cui STATIC ${CUI_CORE_SOURCES})
 endif()
 add_library(cui::cui ALIAS cui)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/CuiApp.cmake)   # cui_app_target(), for apps that link CUI
 
 target_include_directories(cui PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
