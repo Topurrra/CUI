@@ -26,3 +26,13 @@ const char *cui__weekday_name(cui_ctx *ui, int d) { CUI__STR(weekday, 7, d); }
 const char *cui__weekday_short(cui_ctx *ui, int d) { CUI__STR(weekday_short, 7, d); }
 const char *cui__weekday_min(cui_ctx *ui, int d) { CUI__STR(weekday_min, 7, d); }
 const char *cui__today_text(cui_ctx *ui) { return ui->strings && ui->strings->today ? ui->strings->today : cui__english.today; }
+
+/* a byte count: "512 bytes", "4.2 KB", "18 MB" (powers of 1000) */
+const char *cui__size_text(cui_ctx *ui, double v) {
+    if (v < 1000) return cui__frame_printf(ui, "%.0f bytes", v);
+    static const char *u[] = { "KB", "MB", "GB", "TB" };
+    int k = 0;
+    v /= 1000;   /* at least 1 KB here */
+    while (v >= 1000 && k < 3) { v /= 1000; k++; }
+    return cui__frame_printf(ui, v < 10 ? "%.1f %s" : "%.0f %s", v, u[k]);
+}

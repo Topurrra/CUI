@@ -185,14 +185,7 @@ static const char *cui__file_icon(const cui_file_entry *e) {
 }
 
 static const char *cui__file_size(cui_ctx *ui, const cui_file_entry *e) {
-    if (e->dir) return "\xe2\x80\x94";
-    double v = (double)e->size;
-    if (v < 1000) return cui__frame_printf(ui, "%.0f bytes", v);
-    static const char *u[] = { "KB", "MB", "GB", "TB" };
-    int k = 0;
-    v /= 1000;   /* at least 1 KB here */
-    while (v >= 1000 && k < 3) { v /= 1000; k++; }
-    return cui__frame_printf(ui, v < 10 ? "%.1f %s" : "%.0f %s", v, u[k]);
+    return e->dir ? "\xe2\x80\x94" : cui__size_text(ui, (double)e->size);
 }
 
 static const char *cui__file_date(cui_ctx *ui, int64_t t, time_t now) {

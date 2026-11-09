@@ -640,6 +640,7 @@ const char *cui__weekday_name(cui_ctx *ui, int d);    /* d 0..6, Monday first */
 const char *cui__weekday_short(cui_ctx *ui, int d);   /* "Mon" */
 const char *cui__weekday_min(cui_ctx *ui, int d);     /* "Mo" */
 const char *cui__today_text(cui_ctx *ui);
+const char *cui__size_text(cui_ctx *ui, double bytes);   /* "4.2 KB" */
 
 /* ---- shared widget pieces ---- */
 void cui__widgets_begin_frame(cui_ctx *ui);
