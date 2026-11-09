@@ -698,6 +698,654 @@ static void cui__tl_lerp(const cui__tl_state *st, double p, double *s, double *e
 
 /* ---- the component ---- */
 
+/* one frame of the editor: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_timeline_editor_opts *o;
+    cui_timeline_editor_result *res;
+    cui__tl_state *st;
+    cui_id id, sid;
+    cui_timeline_track *tracks; int count;
+    cui_timeline_view *v;
+    float *tp;                          /* the playhead */
+    float s0, s1, fps, frame, min_range, row_h;
+    int ruler;
+    bool range_on;                      /* in and out marks shown */
+    int ct, ck;                         /* the current track and key */
+    int *rows, *sub_end; uint8_t *tone; int nr;   /* the visible rows, in order */
+    bool has_rect; cui_rect R; cui__tl_geo g;
+    cui_interact bi;
+    float mx, my;
+    bool shift, prim, alt, snap;
+    bool user_moved, relist;
+    int sel_any;                        /* selection changed */
+    double k;                           /* pixels per second */
+    /* what the pointer is over */
+    int hov_track, hov_key, hov_clip, hov_part, hov_row, hov_list_part, hot_mark;
+} cui__tle_frame;
+
+/* the time under x, and the row under y */
+static float cui__tle_t_at(const cui__tle_frame *f, double x) { return (float)(f->v->start + (x - f->g.plot_x) / f->k); }
+static int cui__tle_row_at(const cui__tle_frame *f, float y) { return (int)floorf((y - f->g.body_y + f->v->scroll) / f->row_h); }
+
+/* wheel: zoom time around the pointer; Shift or sideways pans; over the list, scroll the rows.
+ * The middle button pans both ways. */
+static void cui__tle_wheel_and_pan(cui__tle_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__tl_state *st = f->st;
+    cui_timeline_view *v = f->v;
+    float mx = f->mx, my = f->my;
+    if (ui->scroll_target == f->sid && ui->hot_layer == ui->current_layer && (ui->scroll_dx != 0 || ui->scroll_dy != 0)) {
+        double range = v->end - v->start;
+        if (mx < f->g.area_x && ui->scroll_dx == 0) {
+            v->scroll -= ui->scroll_dy * 40.0f;
+        } else if (ui->scroll_dx != 0 || f->shift) {
+            float dl = ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy;
+            double dt = (double)dl * 40.0 / f->g.plot_w * range;
+            v->start = (float)(v->start - dt); v->end = (float)(v->end - dt);
+        } else {
+            double z = pow(1.12, (double)ui->scroll_dy);
+            double nrng = CUI_MIN(CUI_MAX(range / z, (double)f->min_range), (double)(f->s1 - f->s0));
+            double u = (double)(mx - f->g.plot_x) / f->g.plot_w;
+            double tm = v->start + u * range;
+            double ns = tm - u * nrng;
+            v->start = (float)ns; v->end = (float)(ns + nrng);
+        }
+        ui->scroll_dx = ui->scroll_dy = 0;
+        f->user_moved = true;
+    }
+    if (st->mode == TL_IDLE && ui->mpressed[CUI_MOUSE_MIDDLE] && ui->hot == f->id) {
+        st->mode = TL_PAN; st->last_x = mx; st->last_y = my;
+    }
+    if (st->mode == TL_PAN) {
+        double dt = (double)(mx - st->last_x) / f->k;
+        v->start = (float)(v->start - dt); v->end = (float)(v->end - dt);
+        v->scroll -= my - st->last_y;
+        st->last_x = mx; st->last_y = my;
+        cui__set_cursor(ui, CUI_CURSOR_MOVE);
+        f->user_moved = true;
+        if (!ui->mdown[CUI_MOUSE_MIDDLE]) st->mode = TL_IDLE;
+    }
+}
+
+/* a press in the track list: a group's chevron, hide, lock, or the name (selects the track's keys) */
+static void cui__tle_press_list(cui__tle_frame *f, int tr_i) {
+    cui_timeline_track *tr = &f->tracks[tr_i];
+    cui_timeline_editor_result *res = f->res;
+    const cui__tl_geo *g = &f->g;
+    float mx = f->mx;
+    bool group = f->sub_end[tr_i] > tr_i + 1;
+    float cx = g->list_mode == 2 ? f->R.x + 6 : f->R.x + 8 + CUI_CLAMP(tr->depth, 0, 1000) * CUI__TL_INDENT;
+    float lx = f->R.x + g->list_w - 4 - CUI__TL_TOGGLE, hx = lx - CUI__TL_TOGGLE;
+    if (group && ((g->list_mode == 2) || (mx >= cx - 4 && mx < cx + CUI__TL_CHEV)) ) {
+        tr->collapsed = !tr->collapsed; res->toggled = tr_i; res->changed = f->relist = true;
+    } else if (g->list_mode == 0 && mx >= lx) {
+        tr->locked = !tr->locked; res->toggled = tr_i; res->changed = true;
+    } else if (g->list_mode == 0 && mx >= hx) {
+        tr->muted = !tr->muted; res->toggled = tr_i; res->changed = true;
+    } else if (group && f->bi.double_clicked) {
+        tr->collapsed = !tr->collapsed; res->toggled = tr_i; res->changed = f->relist = true;
+    } else {
+        if (!f->shift && !f->prim && cui__tl_clear(f->tracks, f->count)) f->sel_any = 1;
+        int kn = cui__tl_keys_n(tr);
+        if (tr->key_selected && !tr->locked)
+            for (int j = 0; j < kn; j++) if (!tr->key_selected[j]) { tr->key_selected[j] = true; f->sel_any = 1; }
+        f->ct = tr_i; f->ck = -1;
+    }
+}
+
+/* a press on a track's row: a key, a clip (body or an edge), a double click adds a key,
+ * anything else starts a box selection */
+static void cui__tle_press_row(cui__tle_frame *f, int tr_i) {
+    cui__tl_state *st = f->st;
+    cui_timeline_track *tr = &f->tracks[tr_i];
+    cui_timeline_track *tracks = f->tracks;
+    int count = f->count;
+    int kh = cui__tl_key_at(tr, cui__tle_t_at(f, f->mx), (float)(CUI__TL_HIT / f->k));
+    int part = 0, ch = kh < 0 ? cui__tl_clip_at(tr, &f->g, f->v->start, f->k, f->mx, &part) : -1;
+    if (kh >= 0) {
+        f->ct = tr_i; f->ck = kh;
+        st->grab_track = tr_i; st->grab_key = kh; st->grab_t = tr->keys[kh].x;
+        bool *sel = tr->key_selected;
+        if (!sel || tr->locked) {
+            /* shown, not editable */
+        } else if (f->prim) {
+            sel[kh] = !sel[kh]; f->sel_any = 1;
+            if (sel[kh]) st->mode = TL_KEY; else f->ck = -1;
+        } else if (f->shift) {
+            if (!sel[kh]) { sel[kh] = true; f->sel_any = 1; }
+            st->mode = TL_KEY;
+        } else if (!sel[kh]) {
+            cui__tl_clear(tracks, count);
+            sel[kh] = true; f->sel_any = 1;
+            st->mode = TL_KEY;
+        } else {
+            st->was_selected = true;
+            st->mode = TL_KEY;
+        }
+    } else if (ch >= 0 && !tr->locked) {
+        cui_timeline_clip *c = &tr->clips[ch];
+        st->grab_track = tr_i; st->grab_key = ch;
+        st->grab_s = c->start; st->grab_e = c->end; st->grab_off = c->offset;
+        if (f->prim) { c->selected = !c->selected; f->sel_any = 1; }
+        else if (f->shift) { if (!c->selected) { c->selected = true; f->sel_any = 1; } }
+        else if (!c->selected) { if (cui__tl_clear(tracks, count)) f->sel_any = 1; c->selected = true; f->sel_any = 1; }
+        else st->was_selected = true;
+        f->ct = tr_i; f->ck = -1;
+        if (c->selected) st->mode = part == 1 ? TL_CLIP_IN : part == 2 ? TL_CLIP_OUT : TL_CLIP;
+    } else if (f->bi.double_clicked && !tr->locked) {
+        float t = cui__tle_t_at(f, f->mx);
+        if (!f->o->free_drag) t = cui__tl_snap(t, f->fps);
+        t = cui__clampf(t, f->s0, f->s1);
+        bool existed;
+        int j = cui__tl_add(tr, t, &existed);
+        if (j >= 0) {
+            cui__tl_clear(tracks, count);
+            if (tr->key_selected) tr->key_selected[j] = true;
+            f->sel_any = 1;
+            f->ct = tr_i; f->ck = j;
+            if (!existed) { f->res->added_track = tr_i; f->res->added_key = j; f->res->changed = true; }
+        }
+    } else {
+        st->mode = TL_EMPTY;
+    }
+}
+
+/* a left press: on the ruler (scrub, or an in or out mark), the track list, or a row */
+static void cui__tle_press(cui__tle_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__tl_state *st = f->st;
+    const cui__tl_geo *g = &f->g;
+    float mx = f->mx, my = f->my;
+    st->press_x = st->last_x = mx; st->press_y = st->last_y = my;
+    st->moved = false; st->was_selected = false;
+    st->mods = ui->mods;
+    st->mode = TL_NONE;
+    int row = cui__tle_row_at(f, my);
+    int tr_i = my >= g->body_y && row >= 0 && row < f->nr ? f->rows[row] : -1;
+    st->grab_row = row;
+    if (my < g->body_y - 1) {
+        if (mx >= g->area_x) {
+            const cui_timeline_editor_opts *o = f->o;
+            float xi = f->range_on ? (float)(g->plot_x + (*o->in - f->v->start) * f->k) : 0, xo = f->range_on ? (float)(g->plot_x + (*o->out - f->v->start) * f->k) : 0;
+            if (f->range_on && fabsf(mx - xi) <= 5 && fabsf(mx - xi) <= fabsf(mx - xo)) st->mode = TL_MARK_IN;
+            else if (f->range_on && fabsf(mx - xo) <= 5) st->mode = TL_MARK_OUT;
+            else st->mode = TL_SCRUB;
+        }
+    } else if (mx < g->area_x) {
+        if (tr_i >= 0) cui__tle_press_list(f, tr_i);
+    } else if (tr_i >= 0) {
+        cui__tle_press_row(f, tr_i);
+    } else if (my >= g->body_y) {
+        st->mode = TL_EMPTY;
+    }
+    if (st->mode == TL_SCRUB) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
+}
+
+/* dragging a clip, or one of its ends, between its neighbors */
+static void cui__tle_drag_clip(cui__tle_frame *f, float dx) {
+    cui__tl_state *st = f->st;
+    cui_timeline_track *tr = st->grab_track >= 0 && st->grab_track < f->count ? &f->tracks[st->grab_track] : NULL;
+    int cn = tr ? cui__tl_clips_n(tr) : 0;
+    if (!tr || st->grab_key < 0 || st->grab_key >= cn || !st->moved) return;
+    float s0 = f->s0, s1 = f->s1, fps = f->fps, frame = f->frame;
+    bool snap = f->snap;
+    cui_timeline_clip *c = &tr->clips[st->grab_key];
+    float lo = st->grab_key > 0 ? CUI_MAX(s0, tr->clips[st->grab_key - 1].end) : s0;
+    float hi = st->grab_key + 1 < cn ? CUI_MIN(s1, tr->clips[st->grab_key + 1].start) : s1;
+    float d = (float)(dx / f->k);
+    float ps = c->start, pe = c->end, po = c->offset;
+    if (st->mode == TL_CLIP) {
+        float len = st->grab_e - st->grab_s;
+        float ns = st->grab_s + d;
+        if (snap) ns = cui__tl_snap(ns, fps);
+        ns = cui__clampf(ns, lo, CUI_MAX(lo, hi - len));
+        c->start = ns; c->end = ns + len;
+    } else if (st->mode == TL_CLIP_IN) {
+        float ns = st->grab_s + d;
+        if (snap) ns = cui__tl_snap(ns, fps);
+        ns = cui__clampf(ns, lo, CUI_MAX(lo, st->grab_e - frame));
+        c->start = ns; c->offset = st->grab_off + (ns - st->grab_s);
+    } else {
+        float ne = st->grab_e + d;
+        if (snap) ne = cui__tl_snap(ne, fps);
+        c->end = cui__clampf(ne, CUI_MIN(hi, st->grab_s + frame), hi);
+    }
+    if (c->start != ps || c->end != pe || c->offset != po) {
+        f->res->clip_track = st->grab_track; f->res->clip = st->grab_key; f->res->changed = true;
+    }
+    cui__set_cursor(f->ui, st->mode == TL_CLIP ? CUI_CURSOR_MOVE : CUI_CURSOR_RESIZE_EW);
+}
+
+/* while the left button is down: scrub, move a mark, the selected keys or a clip */
+static void cui__tle_drag(cui__tle_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__tl_state *st = f->st;
+    const cui_timeline_editor_opts *o = f->o;
+    cui_timeline_editor_result *res = f->res;
+    float s0 = f->s0, s1 = f->s1, fps = f->fps;
+    float dx = f->mx - st->press_x, dy = f->my - st->press_y;
+    if (!st->moved && dx * dx + dy * dy > CUI__TL_DRAG * CUI__TL_DRAG) st->moved = true;
+    float t = cui__tle_t_at(f, f->mx);
+    switch (st->mode) {
+    case TL_SCRUB: {
+        t = cui__clampf(t, CUI_MAX(s0, f->v->start), CUI_MIN(s1, f->v->end));
+        if (f->snap) t = cui__clampf(cui__tl_snap(t, fps), s0, s1);
+        *f->tp = t;
+        res->scrubbing = true;
+        cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
+    } break;
+    case TL_MARK_IN: case TL_MARK_OUT: {
+        if (f->snap) t = cui__tl_snap(t, fps);
+        if (st->mode == TL_MARK_IN) *o->in = cui__clampf(t, s0, CUI_MAX(s0, *o->out - f->frame));
+        else *o->out = cui__clampf(t, CUI_MIN(s1, *o->in + f->frame), s1);
+        res->changed = true;
+        cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
+    } break;
+    case TL_KEY: {
+        if (!st->moved) break;
+        cui_timeline_track *gtr = st->grab_track >= 0 && st->grab_track < f->count ? &f->tracks[st->grab_track] : NULL;
+        if (!gtr || st->grab_key < 0 || st->grab_key >= cui__tl_keys_n(gtr)) break;
+        float tg = st->grab_t + (float)(dx / f->k);
+        if (f->snap) tg = cui__tl_snap(tg, fps);
+        float cur = gtr->keys[st->grab_key].x;
+        int fk = f->ck, gk = st->grab_key;
+        if (cui__tl_move(f->tracks, f->count, tg - cur, f->snap, fps, s0, s1, st->grab_track, &gk, tg, f->ct, &fk)) {
+            res->keys_moved = res->changed = true;
+        }
+        st->grab_key = gk; f->ck = fk;
+        cui__set_cursor(ui, CUI_CURSOR_MOVE);
+    } break;
+    case TL_CLIP: case TL_CLIP_IN: case TL_CLIP_OUT:
+        cui__tle_drag_clip(f, dx);
+        break;
+    default: break;
+    }
+}
+
+/* the button is up: a click inside a selection selects just that key or clip; a click on
+ * nothing clears the selection; a box selects the keys inside it */
+static void cui__tle_release(cui__tle_frame *f) {
+    cui__tl_state *st = f->st;
+    cui_timeline_track *tracks = f->tracks;
+    int count = f->count;
+    bool additive = (st->mods & (CUI_MOD_SHIFT | CUI_MOD_PRIMARY)) != 0;
+    if (st->mode == TL_KEY && !st->moved && st->was_selected && !additive) {
+        cui_timeline_track *tr = st->grab_track < count ? &tracks[st->grab_track] : NULL;
+        if (tr && tr->key_selected && st->grab_key < cui__tl_keys_n(tr)) {
+            cui__tl_clear(tracks, count);
+            tr->key_selected[st->grab_key] = true;
+            f->sel_any = 1;
+        }
+    } else if ((st->mode == TL_CLIP || st->mode == TL_CLIP_IN || st->mode == TL_CLIP_OUT) && !st->moved && st->was_selected && !additive) {
+        cui_timeline_track *tr = st->grab_track < count ? &tracks[st->grab_track] : NULL;
+        if (tr && st->grab_key < cui__tl_clips_n(tr)) {
+            cui__tl_clear(tracks, count);
+            tr->clips[st->grab_key].selected = true;
+            f->sel_any = 1;
+        }
+    } else if (st->mode == TL_EMPTY) {
+        if (!st->moved) {
+            if (!additive && cui__tl_clear(tracks, count)) f->sel_any = 1;
+            if (!additive) {
+                f->ck = -1;
+                if (st->grab_row >= 0 && st->grab_row < f->nr) f->ct = f->rows[st->grab_row];
+            }
+        } else {
+            /* box selection */
+            if (!additive && cui__tl_clear(tracks, count)) f->sel_any = 1;
+            float ta = cui__tle_t_at(f, CUI_MIN(st->press_x, f->mx)), tb = cui__tle_t_at(f, CUI_MAX(st->press_x, f->mx));
+            int ra = cui__tle_row_at(f, CUI_MIN(st->press_y, f->my)), rb = cui__tle_row_at(f, CUI_MAX(st->press_y, f->my));
+            ra = CUI_MAX(ra, 0); rb = CUI_MIN(rb, f->nr - 1);
+            for (int ri = ra; ri <= rb; ri++) {
+                cui_timeline_track *tr = &tracks[f->rows[ri]];
+                if (tr->locked || !tr->key_selected) continue;
+                int kn = cui__tl_keys_n(tr);
+                for (int j = cui__tl_key_lb(tr->keys, kn, ta); j < kn && tr->keys[j].x <= tb; j++)
+                    if (!tr->key_selected[j]) { tr->key_selected[j] = true; f->sel_any = 1; }
+            }
+        }
+    }
+    st->mode = TL_IDLE;
+}
+
+/* the playhead moved by Up or Down to the next or previous key on any visible row */
+static void cui__tle_key_jump(cui__tle_frame *f, bool next) {
+    float best = next ? 1e30f : -1e30f, t = *f->tp, eps = f->frame * 0.01f;
+    for (int ri = 0; ri < f->nr; ri++) {
+        const cui_timeline_track *tr = &f->tracks[f->rows[ri]];
+        int kn = cui__tl_keys_n(tr);
+        if (!kn) continue;
+        int j = cui__tl_key_lb(tr->keys, kn, next ? t + eps : t - eps);
+        if (next && j < kn) { while (j < kn && tr->keys[j].x <= t + eps) j++; if (j < kn) best = CUI_MIN(best, tr->keys[j].x); }
+        if (!next && j > 0) best = CUI_MAX(best, tr->keys[j - 1].x);
+    }
+    if (fabsf(best) < 1e29f) *f->tp = best;
+}
+
+/* keys while focused: arrows step the playhead (Alt moves the selected keys), Up and Down
+ * jump between keys, Home, End, Space, Delete, Escape, Ctrl+A, zoom with = and -, F fits */
+static void cui__tle_keys(cui__tle_frame *f) {
+    cui_ctx *ui = f->ui;
+    cui__tl_state *st = f->st;
+    cui_timeline_view *v = f->v;
+    cui_timeline_editor_result *res = f->res;
+    float *tp = f->tp, s0 = f->s0, s1 = f->s1, fps = f->fps, frame = f->frame;
+    int steps = f->shift ? 10 : 1;
+    bool left = cui_key_pressed(ui, CUI_KEY_LEFT) != 0, right = cui_key_pressed(ui, CUI_KEY_RIGHT) != 0;
+    if ((left || right) && f->alt) {
+        int fk = f->ck;
+        if (cui__tl_move(f->tracks, f->count, (right ? 1.0f : -1.0f) * (float)steps * frame, true, fps, s0, s1, -1, NULL, NAN, f->ct, &fk))
+            res->keys_moved = res->changed = true;
+        f->ck = fk;
+    } else if (left || right) {
+        float t = cui__tl_on_frame(*tp, fps) ? cui__tl_snap(*tp, fps) : (right ? floorf(*tp * fps) : ceilf(*tp * fps)) / fps;
+        t = cui__tl_snap(t + (right ? 1.0f : -1.0f) * (float)steps * frame, fps);
+        *tp = cui__clampf(t, s0, s1);
+    }
+    if (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN)) cui__tle_key_jump(f, cui_key_pressed(ui, CUI_KEY_DOWN) != 0);
+    ui->kpressed[CUI_KEY_LEFT] = ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_UP] = ui->kpressed[CUI_KEY_DOWN] = 0;
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) { *tp = s0; ui->kpressed[CUI_KEY_HOME] = 0; }
+    if (cui_key_pressed(ui, CUI_KEY_END)) { *tp = s1; ui->kpressed[CUI_KEY_END] = 0; }
+    if (cui_key_pressed(ui, CUI_KEY_SPACE)) { res->play_toggled = true; ui->kpressed[CUI_KEY_SPACE] = 0; }
+    if (cui_key_pressed(ui, CUI_KEY_DELETE) || cui_key_pressed(ui, CUI_KEY_BACKSPACE)) {
+        cui__tl_delete(f->tracks, f->count, f->ct, &f->ck, &res->removed_keys, &res->removed_clips);
+        if (res->removed_keys || res->removed_clips) { res->changed = true; f->sel_any = 1; }
+        ui->kpressed[CUI_KEY_DELETE] = ui->kpressed[CUI_KEY_BACKSPACE] = 0;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        if (cui__tl_clear(f->tracks, f->count)) f->sel_any = 1;
+        f->ck = -1;
+        ui->kpressed[CUI_KEY_ESCAPE] = 0;
+    }
+    if (f->prim && cui_key_pressed(ui, CUI_KEY_A)) {
+        for (int ri = 0; ri < f->nr; ri++) {
+            cui_timeline_track *tr = &f->tracks[f->rows[ri]];
+            if (tr->locked || !tr->key_selected) continue;
+            int kn = cui__tl_keys_n(tr);
+            for (int j = 0; j < kn; j++) if (!tr->key_selected[j]) { tr->key_selected[j] = true; f->sel_any = 1; }
+        }
+        ui->kpressed[CUI_KEY_A] = 0;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_EQUAL) || cui_key_pressed(ui, CUI_KEY_MINUS)) {
+        double z = cui_key_pressed(ui, CUI_KEY_EQUAL) ? 1 / 1.25 : 1.25;
+        double range = v->end - v->start;
+        double nrng = CUI_MIN(CUI_MAX(range * z, (double)f->min_range), (double)(s1 - s0));
+        double c = CUI_MIN(CUI_MAX((double)*tp, (double)v->start), (double)v->end);
+        double u = (c - v->start) / range;
+        v->start = (float)(c - u * nrng); v->end = (float)(c - u * nrng + nrng);
+        f->user_moved = true;
+        ui->kpressed[CUI_KEY_EQUAL] = ui->kpressed[CUI_KEY_MINUS] = 0;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_F) && !f->prim) {
+        st->a0 = v->start; st->a1 = v->end; st->b0 = s0; st->b1 = s1;
+        st->anim.x = 0; st->anim.v = 0;
+        st->anim_on = true;
+        ui->kpressed[CUI_KEY_F] = 0;
+    }
+}
+
+/* the view: follows the playhead when it leaves (keys, playback), glides to fit after F,
+ * and otherwise stays inside the sequence */
+static void cui__tle_move_view(cui__tle_frame *f) {
+    cui__tl_state *st = f->st;
+    cui_timeline_view *v = f->v;
+    float *tp = f->tp;
+    if (f->user_moved) st->anim_on = false;
+    if (*tp != st->last_time && st->mode != TL_SCRUB && st->mode != TL_PAN && !st->anim_on) {
+        float range = v->end - v->start;
+        if (*tp > v->end) { v->start = *tp - range * 0.1f; v->end = v->start + range; }
+        else if (*tp < v->start) { v->start = *tp - range * 0.9f; v->end = v->start + range; }
+    }
+    if (st->anim_on) {
+        float pr = cui__spring(f->ui, &st->anim, 1.0f, CUI__SPRING_EXPAND);
+        double a, b;
+        cui__tl_lerp(st, pr >= 1.0f ? 1.0 : (double)pr, &a, &b);
+        v->start = (float)a; v->end = (float)b;
+        if (pr >= 1.0f && st->anim.v == 0) { v->start = (float)st->b0; v->end = (float)st->b1; st->anim_on = false; }
+    } else {
+        cui__tl_clamp(v, f->s0, f->s1, f->min_range);
+    }
+}
+
+/* what the pointer is over, for highlights, the cursor and tooltips */
+static void cui__tle_hover(cui__tle_frame *f) {
+    cui_ctx *ui = f->ui;
+    const cui__tl_geo *g = &f->g;
+    float mx = f->mx, my = f->my;
+    f->hov_track = f->hov_key = f->hov_clip = f->hov_row = -1;
+    f->hov_part = f->hov_list_part = f->hot_mark = 0;
+    bool idle = f->st->mode == TL_IDLE && !ui->mdown[CUI_MOUSE_LEFT];
+    if (!(f->has_rect && f->bi.hovered && cui__rect_contains(f->R, mx, my) && (idle || f->st->mode == TL_NONE))) return;
+    int row = cui__tle_row_at(f, my);
+    if (my >= g->body_y && row >= 0 && row < f->nr) {
+        f->hov_row = row;
+        int ti = f->rows[row];
+        const cui_timeline_track *tr = &f->tracks[ti];
+        if (mx >= g->area_x) {
+            int kh = cui__tl_key_at(tr, cui__tle_t_at(f, mx), (float)(CUI__TL_HIT / f->k));
+            if (kh >= 0) { f->hov_track = ti; f->hov_key = kh; if (!tr->locked && tr->key_selected) cui__set_cursor(ui, CUI_CURSOR_HAND); }
+            else if (!tr->locked) {
+                f->hov_clip = cui__tl_clip_at(tr, g, f->v->start, f->k, mx, &f->hov_part);
+                if (f->hov_clip >= 0) { f->hov_track = ti; cui__set_cursor(ui, f->hov_part ? CUI_CURSOR_RESIZE_EW : CUI_CURSOR_HAND); }
+            }
+        } else {
+            bool group = f->sub_end[ti] > ti + 1;
+            float cx = f->R.x + 8 + CUI_CLAMP(tr->depth, 0, 1000) * CUI__TL_INDENT;
+            float lx = f->R.x + g->list_w - 4 - CUI__TL_TOGGLE, hx = lx - CUI__TL_TOGGLE;
+            if (group && (g->list_mode == 2 || (mx >= cx - 4 && mx < cx + CUI__TL_CHEV))) f->hov_list_part = 1;
+            else if (g->list_mode == 0 && mx >= lx) f->hov_list_part = 3;
+            else if (g->list_mode == 0 && mx >= hx) f->hov_list_part = 2;
+            if (f->hov_list_part) cui__set_cursor(ui, CUI_CURSOR_HAND);
+        }
+    } else if (my < g->body_y - 1 && mx >= g->area_x && f->range_on) {
+        float xi = (float)(g->plot_x + (*f->o->in - f->v->start) * f->k), xo = (float)(g->plot_x + (*f->o->out - f->v->start) * f->k);
+        if (fabsf(mx - xi) <= 5) f->hot_mark = 1;
+        else if (fabsf(mx - xo) <= 5) f->hot_mark = 2;
+        if (f->hot_mark) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
+    }
+}
+
+/* the editor's node and its paint data, without the rows */
+static cui__tl_paint *cui__tle_build_panel(cui__tle_frame *f, int *node) {
+    cui_ctx *ui = f->ui;
+    const cui_timeline_editor_opts *o = f->o;
+    cui_timeline_view *v = f->v;
+    int en = cui__node_new(ui, f->id);
+    cui_node *nd = &ui->nodes[en];
+    nd->w = o->width.kind == CUI_SIZE_FIT && o->width.value == 0 ? CUI_FILL : o->width;
+    float def_h = CUI__TL_RULER + 2 + CUI_MAX(3, f->count) * f->row_h;
+    nd->h = CUI_PX(o->height > 0 ? o->height : CUI_MIN(360.0f, def_h));
+    nd->bg = CUI_C(ui, SURFACE);
+    nd->border = 1;
+    nd->border_color = CUI_C(ui, BORDER);
+    nd->radius = CUI_CORNERS(ui->theme.radius_panel);
+    nd->flags |= CUI_NF_CLIP;
+    cui__mark_interactive(ui, en, CUI_IF_FOCUSABLE);
+    cui__tl_paint *p = cui__frame_alloc(ui, sizeof *p);
+    memset(p, 0, sizeof *p);
+    p->st = f->st; p->sid = f->sid;
+    p->v0 = v->start; p->v1 = v->end; p->scroll = v->scroll;
+    p->row_h = f->row_h; p->track_w = o->track_width; p->toggles = o->toggles;
+    p->seq0 = f->s0; p->seq1 = f->s1; p->fps = f->fps; p->ruler = f->ruler;
+    p->time = cui__clampf(*f->tp, f->s0, f->s1);
+    p->range = f->range_on;
+    if (f->range_on) { p->in = *o->in; p->out = *o->out; }
+    p->hot_mark = f->hot_mark;
+    p->nrows = f->nr;
+    p->empty = f->count == 0;
+    cui__tween(ui, &f->st->focus, f->bi.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+    p->focus = f->st->focus;
+    nd->paint = cui__paint_timeline;
+    nd->paint_data = p;
+    *node = en;
+    return p;
+}
+
+/* a box selection in progress: keys inside it draw as selected before the release */
+typedef struct { bool on, add; float x0, x1; int r0, r1; } cui__tle_marquee;
+
+/* a row's keys, one per point at most (selected ones always) */
+static void cui__tle_row_keys(cui__tle_frame *f, cui__tl_paint *p, const cui__tle_marquee *mq, int ri, float tv0, float tv1, uint8_t dim) {
+    int ti = f->rows[ri];
+    const cui_timeline_track *tr = &f->tracks[ti];
+    const cui_timeline_view *v = f->v;
+    double k = f->k;
+    float plot_x = f->g.plot_x;
+    int kn = cui__tl_keys_n(tr);
+    bool in_mq = mq->on && ri >= mq->r0 && ri <= mq->r1 && !tr->locked && tr->key_selected;
+    float last_x = -1e9f;
+    for (int j = cui__tl_key_lb(tr->keys, kn, tv0); j < kn && tr->keys[j].x <= tv1;) {
+        float x = (float)(plot_x + (tr->keys[j].x - v->start) * k);
+        bool sel = tr->key_selected && tr->key_selected[j];
+        if (mq->on) {
+            bool inside = in_mq && x >= mq->x0 && x <= mq->x1;
+            sel = mq->add ? sel || inside : inside;
+        }
+        if (!sel && x - last_x < 1.0f) {
+            int nj = cui__tl_key_lb(tr->keys, kn, (float)(v->start + (last_x + 1.0f - plot_x) / k));
+            j = CUI_MAX(nj, j + 1);
+            continue;
+        }
+        cui__tl_mark m;
+        int mode = tr->keys[j].mode;
+        m.t = tr->keys[j].x; m.row = ri;
+        m.shape = (uint8_t)(mode == CUI_CURVE_LINEAR ? TL_CIRCLE : mode == CUI_CURVE_STEP ? TL_SQUARE : TL_DIAMOND);
+        m.flags = (uint8_t)(dim | (sel ? TL_F_SEL : 0) | (ti == f->hov_track && j == f->hov_key ? TL_F_HOVER : 0));
+        m.tone = f->tone[ti];
+        cui__tl_push_mark(f->ui, p, &m);
+        if (!sel) last_x = x;
+        j++;
+    }
+}
+
+/* a group's row: its tracks' keys as small marks, one per pixel; `seen` has pw bytes */
+static void cui__tle_row_summary(cui__tle_frame *f, cui__tl_paint *p, int ri, float tv0, float tv1, uint8_t *seen, int pw) {
+    int ti = f->rows[ri];
+    double k = f->k;
+    float v0 = f->v->start;
+    memset(seen, 0, (size_t)pw);
+    for (int d = ti + 1; d < f->sub_end[ti]; d++) {
+        const cui_timeline_track *dt = &f->tracks[d];
+        int dn = cui__tl_keys_n(dt);
+        for (int j = cui__tl_key_lb(dt->keys, dn, tv0); j < dn && dt->keys[j].x <= tv1; j++) {
+            int px = (int)((dt->keys[j].x - v0) * k) + 2 * (int)CUI__TL_PADX;
+            if (px < 0 || px >= pw) continue;
+            if (seen[px]) {
+                /* skip the keys at this point */
+                int nj = cui__tl_key_lb(dt->keys, dn, (float)(v0 + (px + 1 - 2 * CUI__TL_PADX) / k));
+                j = CUI_MAX(nj, j + 1) - 1;
+                continue;
+            }
+            seen[px] = 1;
+            cui__tl_mark m;
+            m.t = dt->keys[j].x; m.row = ri; m.shape = TL_DIAMOND; m.flags = TL_F_SUMMARY; m.tone = 0;
+            cui__tl_push_mark(f->ui, p, &m);
+        }
+    }
+}
+
+/* what is in view: the rows, their clips and keys, copied into frame memory for the paint */
+static void cui__tle_build_rows(cui__tle_frame *f, cui__tl_paint *p) {
+    cui_ctx *ui = f->ui;
+    cui__tl_state *st = f->st;
+    const cui_timeline_view *v = f->v;
+    const cui__tl_geo *g = &f->g;
+    float row_h = f->row_h;
+    cui__tle_marquee mq = { st->mode == TL_EMPTY && st->moved, (st->mods & (CUI_MOD_SHIFT | CUI_MOD_PRIMARY)) != 0, 0, 0, 0, -1 };
+    if (mq.on) {
+        p->marquee = true;
+        p->mq = (cui_rect){ CUI_MIN(st->press_x, f->mx), CUI_MIN(st->press_y, f->my), fabsf(f->mx - st->press_x), fabsf(f->my - st->press_y) };
+        mq.x0 = p->mq.x; mq.x1 = p->mq.x + p->mq.w;
+        mq.r0 = cui__tle_row_at(f, p->mq.y); mq.r1 = cui__tle_row_at(f, p->mq.y + p->mq.h);
+    }
+    if (!(f->nr > 0 && g->body_h > 0)) return;
+    int r0 = CUI_MAX(0, (int)floorf(v->scroll / row_h)), r1 = CUI_MIN(f->nr - 1, (int)floorf((v->scroll + g->body_h) / row_h));
+    p->rows = cui__frame_alloc(ui, sizeof *p->rows * (size_t)CUI_MAX(1, r1 - r0 + 1));
+    float margin = (float)((CUI__TL_KEY + 3) / f->k);
+    float tv0 = v->start - margin, tv1 = v->end + margin;
+    int pw = (int)g->plot_w + 4 * (int)CUI__TL_PADX + 4;
+    uint8_t *seen = NULL;
+    for (int ri = r0; ri <= r1; ri++) {
+        int ti = f->rows[ri];
+        cui_timeline_track *tr = &f->tracks[ti];
+        bool group = f->sub_end[ti] > ti + 1;
+        cui__tl_row *row = &p->rows[p->nr++];
+        memset(row, 0, sizeof *row);
+        row->row = ri;
+        row->name_len = tr->name ? cui__display_len(tr->name) : 0;
+        row->name = row->name_len ? cui__frame_strdup(ui, tr->name, row->name_len) : NULL;
+        row->icon = tr->icon ? cui__frame_strdup(ui, tr->icon, (int)strlen(tr->icon)) : NULL;
+        row->depth = CUI_CLAMP(tr->depth, 0, 64);
+        row->tone = f->tone[ti];
+        row->flags = (uint16_t)((group ? TL_R_GROUP : 0) | (tr->collapsed && group ? TL_R_COLLAPSED : 0) | (tr->muted ? TL_R_MUTED : 0) |
+                                (tr->locked ? TL_R_LOCKED : 0) | (ti == f->ct ? TL_R_CURRENT : 0) | (ri == f->hov_row && f->mx < g->area_x ? TL_R_HOVER : 0));
+        if (ri == f->hov_row && f->hov_list_part) row->flags |= (uint16_t)(f->hov_list_part == 1 ? TL_R_HOT_CHEV : f->hov_list_part == 2 ? TL_R_HOT_MUTE : TL_R_HOT_LOCK);
+        uint8_t dim = tr->muted ? TL_F_DIM : 0;
+        /* clips */
+        int cn = cui__tl_clips_n(tr);
+        for (int j = CUI_MAX(0, cui__tl_clip_lb(tr->clips, cn, tv0)); j < cn && tr->clips[j].start <= tv1; j++) {
+            cui__tl_bar b;
+            memset(&b, 0, sizeof b);
+            const cui_timeline_clip *c = &tr->clips[j];
+            b.s = c->start; b.e = c->end; b.row = ri; b.tone = f->tone[ti];
+            b.flags = (uint8_t)(dim | (c->selected ? TL_F_SEL : 0));
+            if (ti == f->hov_track && j == f->hov_clip) b.flags |= (uint8_t)(f->hov_part == 1 ? TL_F_EDGE_IN : f->hov_part == 2 ? TL_F_EDGE_OUT : TL_F_EDGE_IN | TL_F_EDGE_OUT);
+            if (c->name) { b.name_len = cui__display_len(c->name); b.name = cui__frame_strdup(ui, c->name, b.name_len); }
+            cui__tl_push_bar(ui, p, &b);
+        }
+        cui__tle_row_keys(f, p, &mq, ri, tv0, tv1, dim);
+        if (group) {
+            if (!seen) seen = cui__frame_alloc(ui, (size_t)pw);
+            cui__tle_row_summary(f, p, ri, tv0, tv1, seen, pw);
+        }
+    }
+}
+
+/* the tooltip for what is under the pointer, anchored on a small box at the thing it describes */
+static void cui__tle_tooltip(cui__tle_frame *f) {
+    cui_ctx *ui = f->ui;
+    const cui__tl_geo *g = &f->g;
+    const cui_timeline_view *v = f->v;
+    cui_rect R = f->R;
+    float row_h = f->row_h;
+    int hov_row = f->hov_row, hov_list_part = f->hov_list_part;
+    if (!(f->has_rect && ui->active == 0 && !ui->mdown[CUI_MOUSE_LEFT])) return;
+    const char *tip = NULL;
+    cui_rect box = { 0, 0, 0, 0 };
+    uint32_t key[3] = { 0, 0, 0 };
+    if (f->hov_key >= 0) {
+        const cui_timeline_track *tr = &f->tracks[f->hov_track];
+        const cui_curve_key *kk = &tr->keys[f->hov_key];
+        float x = (float)(g->plot_x + (kk->x - v->start) * f->k), y = g->body_y + hov_row * row_h - v->scroll;
+        box = (cui_rect){ x - 6, y + 2, 12, row_h - 4 };
+        tip = cui__frame_printf(ui, "%.*s\n%s \xc2\xb7 %s", tr->name ? cui__display_len(tr->name) : 0, tr->name ? tr->name : "",
+                                cui__tl_time_text(ui, f->ruler, f->fps, f->s1, kk->x), cui__tl_value(ui, kk->y));
+        key[0] = 1; key[1] = (uint32_t)f->hov_track; key[2] = (uint32_t)f->hov_key;
+    } else if (f->hov_clip >= 0 && f->hov_part == 0) {
+        const cui_timeline_clip *c = &f->tracks[f->hov_track].clips[f->hov_clip];
+        float y = g->body_y + hov_row * row_h - v->scroll;
+        box = (cui_rect){ f->mx - 1, y + 3, 2, row_h - 7 };
+        tip = cui__frame_printf(ui, "%.*s\n%s \xc2\xb7 %.2f s", c->name ? cui__display_len(c->name) : 0, c->name ? c->name : "",
+                                cui__tl_time_text(ui, f->ruler, f->fps, f->s1, c->start), (double)(c->end - c->start));
+        key[0] = 2; key[1] = (uint32_t)f->hov_track; key[2] = (uint32_t)f->hov_clip;
+    } else if (hov_row >= 0 && f->mx < g->area_x) {
+        const cui_timeline_track *tr = &f->tracks[f->rows[hov_row]];
+        float y = g->body_y + hov_row * row_h - v->scroll;
+        box = (cui_rect){ R.x + 2, y, g->list_w - 4, row_h - 1 };
+        if (hov_list_part == 2) tip = tr->muted ? "Show track" : "Hide track";
+        else if (hov_list_part == 3) tip = tr->locked ? "Unlock track" : "Lock track";
+        else if (g->list_mode == 2 && tr->name) tip = cui__frame_printf(ui, "%.*s", cui__display_len(tr->name), tr->name);
+        if (hov_list_part >= 2) box = (cui_rect){ hov_list_part == 3 ? R.x + g->list_w - 4 - CUI__TL_TOGGLE : R.x + g->list_w - 4 - 2 * CUI__TL_TOGGLE, y, CUI__TL_TOGGLE, row_h - 1 };
+        key[0] = 3 + (uint32_t)hov_list_part; key[1] = (uint32_t)f->rows[hov_row];
+    }
+    if (tip) {
+        cui_id tid = cui__hash(key, sizeof key, f->id ^ 0x7117u);
+        cui__absolute(ui, tid, box.x - R.x, box.y - R.y, box.w, box.h);
+        cui__tooltip_passive(ui, tid, tip);
+    }
+}
+
 cui_timeline_editor_result cui_timeline_editor_ex(cui_ctx *ui, const char *id_str, cui_timeline_track *tracks, int count,
                                                   float *time, const cui_timeline_editor_opts *o) {
     cui_timeline_editor_opts dflt;
@@ -709,599 +1357,92 @@ cui_timeline_editor_result cui_timeline_editor_ex(cui_ctx *ui, const char *id_st
     res.hovered_track = res.hovered_key = -1;
     if (!tracks || count < 0) count = 0;
 
-    cui_id id = cui_make_id(ui, id_str ? id_str : "timeline");
-    cui_id sid = id ^ 0x71AE5C01u;
-    cui__tl_state *st = cui_state(ui, id ^ 0x71AEu, sizeof *st);
+    cui__tle_frame f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o; f.res = &res; f.tracks = tracks; f.count = count;
+    f.id = cui_make_id(ui, id_str ? id_str : "timeline");
+    f.sid = f.id ^ 0x71AE5C01u;
+    cui__tl_state *st = f.st = cui_state(ui, f.id ^ 0x71AEu, sizeof *st);
     if (!st->init) { st->own_track = st->own_key = -1; st->init = true; }
-    cui_timeline_view *v = o->view ? o->view : &st->own_view;
-    float *tp = time ? time : &st->own_time;
+    cui_timeline_view *v = f.v = o->view ? o->view : &st->own_view;
+    float *tp = f.tp = time ? time : &st->own_time;
     int *ctp = o->current_track ? o->current_track : &st->own_track;
     int *ckp = o->current_key ? o->current_key : &st->own_key;
 
     float s0 = o->start, s1 = o->end;
     if (!isfinite(s0) || !isfinite(s1)) s0 = s1 = 0;
     if (!(s1 > s0)) s1 = s0 + 10;
-    float fps = o->fps > 0 && isfinite(o->fps) ? CUI_MIN(o->fps, 1000.0f) : 30;
-    float frame = 1.0f / fps;
-    float min_range = CUI_MIN(CUI_MAX(8.0f * frame, 1e-3f), s1 - s0);
-    float row_h = o->row_height > 0 ? CUI_MAX(12.0f, o->row_height) : CUI__TL_ROW;
-    int ruler = o->ruler >= CUI_TIMELINE_FRAMES && o->ruler <= CUI_TIMELINE_TIMECODE ? o->ruler : CUI_TIMELINE_FRAMES;
-    bool range_on = o->in && o->out;
+    f.s0 = s0; f.s1 = s1;
+    f.fps = o->fps > 0 && isfinite(o->fps) ? CUI_MIN(o->fps, 1000.0f) : 30;
+    f.frame = 1.0f / f.fps;
+    f.min_range = CUI_MIN(CUI_MAX(8.0f * f.frame, 1e-3f), s1 - s0);
+    f.row_h = o->row_height > 0 ? CUI_MAX(12.0f, o->row_height) : CUI__TL_ROW;
+    f.ruler = o->ruler >= CUI_TIMELINE_FRAMES && o->ruler <= CUI_TIMELINE_TIMECODE ? o->ruler : CUI_TIMELINE_FRAMES;
+    f.range_on = o->in && o->out;
     float t_before = *tp;
     if (!isfinite(*tp)) *tp = s0;
-    int ct = *ctp, ck = *ckp;
-    if (ct < -1 || ct >= count) ct = -1;
-    if (ct < 0 || ck < -1 || ck >= cui__tl_keys_n(&tracks[ct])) ck = -1;
+    f.ct = *ctp; f.ck = *ckp;
+    if (f.ct < -1 || f.ct >= count) f.ct = -1;
+    if (f.ct < 0 || f.ck < -1 || f.ck >= cui__tl_keys_n(&tracks[f.ct])) f.ck = -1;
 
     /* rows */
-    int *rows = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, count));
-    int *sub_end = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, count));
-    uint8_t *tone = cui__frame_alloc(ui, (size_t)CUI_MAX(1, count));
-    int nr = cui__tl_flatten(tracks, count, rows, tone, sub_end);
+    f.rows = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, count));
+    f.sub_end = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, count));
+    f.tone = cui__frame_alloc(ui, (size_t)CUI_MAX(1, count));
+    f.nr = cui__tl_flatten(tracks, count, f.rows, f.tone, f.sub_end);
 
-    bool has_rect = cui__has_prev_rect(ui, id);
-    cui_rect R = cui__prev_rect(ui, id);
-    cui__tl_geo g = cui__tl_geo_of(has_rect ? R : (cui_rect){ 0, 0, 800, 300 }, row_h, o->track_width, o->toggles);
+    f.has_rect = cui__has_prev_rect(ui, f.id);
+    f.R = cui__prev_rect(ui, f.id);
+    f.g = cui__tl_geo_of(f.has_rect ? f.R : (cui_rect){ 0, 0, 800, 300 }, f.row_h, o->track_width, o->toggles);
 
     float b0 = v->start, b1 = v->end, bs = v->scroll;
     if (!(v->end > v->start) || !isfinite(v->start) || !isfinite(v->end)) { v->start = s0; v->end = s1; st->anim_on = false; }
 
-    cui_interact bi = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
-    float mx = ui->mx, my = ui->my;
-    bool shift = (ui->mods & CUI_MOD_SHIFT) != 0, prim = (ui->mods & CUI_MOD_PRIMARY) != 0, alt = (ui->mods & CUI_MOD_ALT) != 0;
-    bool snap = !o->free_drag && !shift;
-    bool user_moved = false, relist = false;
-    int sel_any = 0;   /* selection changed */
-    double k = (double)g.plot_w / (double)(v->end - v->start);
-#define T_AT(x) ((float)(v->start + ((double)(x) - g.plot_x) / k))
-#define ROW_AT(y) ((int)floorf(((y) - g.body_y + v->scroll) / row_h))
+    f.bi = cui__interact(ui, f.id, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    f.mx = ui->mx; f.my = ui->my;
+    f.shift = (ui->mods & CUI_MOD_SHIFT) != 0; f.prim = (ui->mods & CUI_MOD_PRIMARY) != 0; f.alt = (ui->mods & CUI_MOD_ALT) != 0;
+    f.snap = !o->free_drag && !f.shift;
+    f.k = (double)f.g.plot_w / (double)(v->end - v->start);
 
-    if (has_rect) {
-        /* wheel: zoom time around the pointer; Shift or sideways pans; over the list, scroll the rows */
-        if (ui->scroll_target == sid && ui->hot_layer == ui->current_layer && (ui->scroll_dx != 0 || ui->scroll_dy != 0)) {
-            double range = v->end - v->start;
-            if (mx < g.area_x && ui->scroll_dx == 0) {
-                v->scroll -= ui->scroll_dy * 40.0f;
-            } else if (ui->scroll_dx != 0 || shift) {
-                float dl = ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy;
-                double dt = (double)dl * 40.0 / g.plot_w * range;
-                v->start = (float)(v->start - dt); v->end = (float)(v->end - dt);
-            } else {
-                double f = pow(1.12, (double)ui->scroll_dy);
-                double nrng = CUI_MIN(CUI_MAX(range / f, (double)min_range), (double)(s1 - s0));
-                double u = (double)(mx - g.plot_x) / g.plot_w;
-                double tm = v->start + u * range;
-                double ns = tm - u * nrng;
-                v->start = (float)ns; v->end = (float)(ns + nrng);
-            }
-            ui->scroll_dx = ui->scroll_dy = 0;
-            user_moved = true;
-        }
-        /* middle button: pan both ways */
-        if (st->mode == TL_IDLE && ui->mpressed[CUI_MOUSE_MIDDLE] && ui->hot == id) {
-            st->mode = TL_PAN; st->last_x = mx; st->last_y = my;
-        }
-        if (st->mode == TL_PAN) {
-            double dt = (double)(mx - st->last_x) / k;
-            v->start = (float)(v->start - dt); v->end = (float)(v->end - dt);
-            v->scroll -= my - st->last_y;
-            st->last_x = mx; st->last_y = my;
-            cui__set_cursor(ui, CUI_CURSOR_MOVE);
-            user_moved = true;
-            if (!ui->mdown[CUI_MOUSE_MIDDLE]) st->mode = TL_IDLE;
-        }
-        k = (double)g.plot_w / (double)(v->end - v->start);
-
-        /* left press */
-        if (bi.hovered && ui->mpressed[CUI_MOUSE_LEFT] && st->mode == TL_IDLE) {
-            st->press_x = st->last_x = mx; st->press_y = st->last_y = my;
-            st->moved = false; st->was_selected = false;
-            st->mods = ui->mods;
-            st->mode = TL_NONE;
-            int row = ROW_AT(my);
-            int tr_i = my >= g.body_y && row >= 0 && row < nr ? rows[row] : -1;
-            st->grab_row = row;
-            if (my < g.body_y - 1) {
-                if (mx >= g.area_x) {
-                    float xi = range_on ? (float)(g.plot_x + (*o->in - v->start) * k) : 0, xo = range_on ? (float)(g.plot_x + (*o->out - v->start) * k) : 0;
-                    if (range_on && fabsf(mx - xi) <= 5 && fabsf(mx - xi) <= fabsf(mx - xo)) st->mode = TL_MARK_IN;
-                    else if (range_on && fabsf(mx - xo) <= 5) st->mode = TL_MARK_OUT;
-                    else st->mode = TL_SCRUB;
-                }
-            } else if (mx < g.area_x) {
-                if (tr_i >= 0) {
-                    cui_timeline_track *tr = &tracks[tr_i];
-                    bool group = sub_end[tr_i] > tr_i + 1;
-                    float cx = g.list_mode == 2 ? R.x + 6 : R.x + 8 + CUI_CLAMP(tr->depth, 0, 1000) * CUI__TL_INDENT;
-                    float lx = R.x + g.list_w - 4 - CUI__TL_TOGGLE, hx = lx - CUI__TL_TOGGLE;
-                    if (group && ((g.list_mode == 2) || (mx >= cx - 4 && mx < cx + CUI__TL_CHEV)) ) {
-                        tr->collapsed = !tr->collapsed; res.toggled = tr_i; res.changed = relist = true;
-                    } else if (g.list_mode == 0 && mx >= lx) {
-                        tr->locked = !tr->locked; res.toggled = tr_i; res.changed = true;
-                    } else if (g.list_mode == 0 && mx >= hx) {
-                        tr->muted = !tr->muted; res.toggled = tr_i; res.changed = true;
-                    } else if (group && bi.double_clicked) {
-                        tr->collapsed = !tr->collapsed; res.toggled = tr_i; res.changed = relist = true;
-                    } else {
-                        /* the name: select the track's keys */
-                        if (!shift && !prim && cui__tl_clear(tracks, count)) sel_any = 1;
-                        int kn = cui__tl_keys_n(tr);
-                        if (tr->key_selected && !tr->locked)
-                            for (int j = 0; j < kn; j++) if (!tr->key_selected[j]) { tr->key_selected[j] = true; sel_any = 1; }
-                        ct = tr_i; ck = -1;
-                    }
-                }
-            } else if (tr_i >= 0) {
-                cui_timeline_track *tr = &tracks[tr_i];
-                int kh = cui__tl_key_at(tr, T_AT(mx), (float)(CUI__TL_HIT / k));
-                int part = 0, ch = kh < 0 ? cui__tl_clip_at(tr, &g, v->start, k, mx, &part) : -1;
-                if (kh >= 0) {
-                    ct = tr_i; ck = kh;
-                    st->grab_track = tr_i; st->grab_key = kh; st->grab_t = tr->keys[kh].x;
-                    bool *sel = tr->key_selected;
-                    if (!sel || tr->locked) {
-                        /* shown, not editable */
-                    } else if (prim) {
-                        sel[kh] = !sel[kh]; sel_any = 1;
-                        if (sel[kh]) st->mode = TL_KEY; else ck = -1;
-                    } else if (shift) {
-                        if (!sel[kh]) { sel[kh] = true; sel_any = 1; }
-                        st->mode = TL_KEY;
-                    } else if (!sel[kh]) {
-                        cui__tl_clear(tracks, count);
-                        sel[kh] = true; sel_any = 1;
-                        st->mode = TL_KEY;
-                    } else {
-                        st->was_selected = true;
-                        st->mode = TL_KEY;
-                    }
-                } else if (ch >= 0 && !tr->locked) {
-                    cui_timeline_clip *c = &tr->clips[ch];
-                    st->grab_track = tr_i; st->grab_key = ch;
-                    st->grab_s = c->start; st->grab_e = c->end; st->grab_off = c->offset;
-                    if (prim) { c->selected = !c->selected; sel_any = 1; }
-                    else if (shift) { if (!c->selected) { c->selected = true; sel_any = 1; } }
-                    else if (!c->selected) { if (cui__tl_clear(tracks, count)) sel_any = 1; c->selected = true; sel_any = 1; }
-                    else st->was_selected = true;
-                    ct = tr_i; ck = -1;
-                    if (c->selected) st->mode = part == 1 ? TL_CLIP_IN : part == 2 ? TL_CLIP_OUT : TL_CLIP;
-                } else if (bi.double_clicked && !tr->locked) {
-                    float t = T_AT(mx);
-                    if (!o->free_drag) t = cui__tl_snap(t, fps);
-                    t = cui__clampf(t, s0, s1);
-                    bool existed;
-                    int j = cui__tl_add(tr, t, &existed);
-                    if (j >= 0) {
-                        cui__tl_clear(tracks, count);
-                        if (tr->key_selected) tr->key_selected[j] = true;
-                        sel_any = 1;
-                        ct = tr_i; ck = j;
-                        if (!existed) { res.added_track = tr_i; res.added_key = j; res.changed = true; }
-                    }
-                } else {
-                    st->mode = TL_EMPTY;
-                }
-            } else if (my >= g.body_y) {
-                st->mode = TL_EMPTY;
-            }
-            if (st->mode == TL_SCRUB) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
-        }
-        /* drags */
-        if (st->mode != TL_IDLE && st->mode != TL_PAN && ui->mdown[CUI_MOUSE_LEFT]) {
-            float dx = mx - st->press_x, dy = my - st->press_y;
-            if (!st->moved && dx * dx + dy * dy > CUI__TL_DRAG * CUI__TL_DRAG) st->moved = true;
-            float t = T_AT(mx);
-            switch (st->mode) {
-            case TL_SCRUB: {
-                t = cui__clampf(t, CUI_MAX(s0, v->start), CUI_MIN(s1, v->end));
-                if (snap) t = cui__clampf(cui__tl_snap(t, fps), s0, s1);
-                *tp = t;
-                res.scrubbing = true;
-                cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
-            } break;
-            case TL_MARK_IN: case TL_MARK_OUT: {
-                if (snap) t = cui__tl_snap(t, fps);
-                if (st->mode == TL_MARK_IN) *o->in = cui__clampf(t, s0, CUI_MAX(s0, *o->out - frame));
-                else *o->out = cui__clampf(t, CUI_MIN(s1, *o->in + frame), s1);
-                res.changed = true;
-                cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
-            } break;
-            case TL_KEY: {
-                if (!st->moved) break;
-                cui_timeline_track *gtr = st->grab_track >= 0 && st->grab_track < count ? &tracks[st->grab_track] : NULL;
-                if (!gtr || st->grab_key < 0 || st->grab_key >= cui__tl_keys_n(gtr)) break;
-                float tg = st->grab_t + (float)(dx / k);
-                if (snap) tg = cui__tl_snap(tg, fps);
-                float cur = gtr->keys[st->grab_key].x;
-                int fk = ck, gk = st->grab_key;
-                if (cui__tl_move(tracks, count, tg - cur, snap, fps, s0, s1, st->grab_track, &gk, tg, ct, &fk)) {
-                    res.keys_moved = res.changed = true;
-                }
-                st->grab_key = gk; ck = fk;
-                cui__set_cursor(ui, CUI_CURSOR_MOVE);
-            } break;
-            case TL_CLIP: case TL_CLIP_IN: case TL_CLIP_OUT: {
-                cui_timeline_track *tr = st->grab_track >= 0 && st->grab_track < count ? &tracks[st->grab_track] : NULL;
-                int cn = tr ? cui__tl_clips_n(tr) : 0;
-                if (!tr || st->grab_key < 0 || st->grab_key >= cn || !st->moved) break;
-                cui_timeline_clip *c = &tr->clips[st->grab_key];
-                float lo = st->grab_key > 0 ? CUI_MAX(s0, tr->clips[st->grab_key - 1].end) : s0;
-                float hi = st->grab_key + 1 < cn ? CUI_MIN(s1, tr->clips[st->grab_key + 1].start) : s1;
-                float d = (float)(dx / k);
-                float ps = c->start, pe = c->end, po = c->offset;
-                if (st->mode == TL_CLIP) {
-                    float len = st->grab_e - st->grab_s;
-                    float ns = st->grab_s + d;
-                    if (snap) ns = cui__tl_snap(ns, fps);
-                    ns = cui__clampf(ns, lo, CUI_MAX(lo, hi - len));
-                    c->start = ns; c->end = ns + len;
-                } else if (st->mode == TL_CLIP_IN) {
-                    float ns = st->grab_s + d;
-                    if (snap) ns = cui__tl_snap(ns, fps);
-                    ns = cui__clampf(ns, lo, CUI_MAX(lo, st->grab_e - frame));
-                    c->start = ns; c->offset = st->grab_off + (ns - st->grab_s);
-                } else {
-                    float ne = st->grab_e + d;
-                    if (snap) ne = cui__tl_snap(ne, fps);
-                    c->end = cui__clampf(ne, CUI_MIN(hi, st->grab_s + frame), hi);
-                }
-                if (c->start != ps || c->end != pe || c->offset != po) {
-                    res.clip_track = st->grab_track; res.clip = st->grab_key; res.changed = true;
-                }
-                cui__set_cursor(ui, st->mode == TL_CLIP ? CUI_CURSOR_MOVE : CUI_CURSOR_RESIZE_EW);
-            } break;
-            default: break;
-            }
-        }
-        /* release */
-        if (st->mode != TL_IDLE && st->mode != TL_PAN && !ui->mdown[CUI_MOUSE_LEFT]) {
-            bool additive = (st->mods & (CUI_MOD_SHIFT | CUI_MOD_PRIMARY)) != 0;
-            if (st->mode == TL_KEY && !st->moved && st->was_selected && !additive) {
-                /* a click on a key of a selection selects just that key */
-                cui_timeline_track *tr = st->grab_track < count ? &tracks[st->grab_track] : NULL;
-                if (tr && tr->key_selected && st->grab_key < cui__tl_keys_n(tr)) {
-                    cui__tl_clear(tracks, count);
-                    tr->key_selected[st->grab_key] = true;
-                    sel_any = 1;
-                }
-            } else if ((st->mode == TL_CLIP || st->mode == TL_CLIP_IN || st->mode == TL_CLIP_OUT) && !st->moved && st->was_selected && !additive) {
-                cui_timeline_track *tr = st->grab_track < count ? &tracks[st->grab_track] : NULL;
-                if (tr && st->grab_key < cui__tl_clips_n(tr)) {
-                    cui__tl_clear(tracks, count);
-                    tr->clips[st->grab_key].selected = true;
-                    sel_any = 1;
-                }
-            } else if (st->mode == TL_EMPTY) {
-                if (!st->moved) {
-                    if (!additive && cui__tl_clear(tracks, count)) sel_any = 1;
-                    if (!additive) {
-                        ck = -1;
-                        if (st->grab_row >= 0 && st->grab_row < nr) ct = rows[st->grab_row];
-                    }
-                } else {
-                    /* box selection */
-                    if (!additive && cui__tl_clear(tracks, count)) sel_any = 1;
-                    float ta = T_AT(CUI_MIN(st->press_x, mx)), tb = T_AT(CUI_MAX(st->press_x, mx));
-                    int ra = ROW_AT(CUI_MIN(st->press_y, my)), rb = ROW_AT(CUI_MAX(st->press_y, my));
-                    ra = CUI_MAX(ra, 0); rb = CUI_MIN(rb, nr - 1);
-                    for (int ri = ra; ri <= rb; ri++) {
-                        cui_timeline_track *tr = &tracks[rows[ri]];
-                        if (tr->locked || !tr->key_selected) continue;
-                        int kn = cui__tl_keys_n(tr);
-                        for (int j = cui__tl_key_lb(tr->keys, kn, ta); j < kn && tr->keys[j].x <= tb; j++)
-                            if (!tr->key_selected[j]) { tr->key_selected[j] = true; sel_any = 1; }
-                    }
-                }
-            }
-            st->mode = TL_IDLE;
-        }
-
-        /* keyboard */
-        if (bi.focused && !ui->edit_prev) {
-            int steps = shift ? 10 : 1;
-            bool left = cui_key_pressed(ui, CUI_KEY_LEFT) != 0, right = cui_key_pressed(ui, CUI_KEY_RIGHT) != 0;
-            if ((left || right) && alt) {
-                int fk = ck;
-                if (cui__tl_move(tracks, count, (right ? 1.0f : -1.0f) * (float)steps * frame, true, fps, s0, s1, -1, NULL, NAN, ct, &fk))
-                    res.keys_moved = res.changed = true;
-                ck = fk;
-            } else if (left || right) {
-                float t = cui__tl_on_frame(*tp, fps) ? cui__tl_snap(*tp, fps) : (right ? floorf(*tp * fps) : ceilf(*tp * fps)) / fps;
-                t = cui__tl_snap(t + (right ? 1.0f : -1.0f) * (float)steps * frame, fps);
-                *tp = cui__clampf(t, s0, s1);
-            }
-            if (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN)) {
-                bool next = cui_key_pressed(ui, CUI_KEY_DOWN) != 0;
-                float best = next ? 1e30f : -1e30f, t = *tp, eps = frame * 0.01f;
-                for (int ri = 0; ri < nr; ri++) {
-                    const cui_timeline_track *tr = &tracks[rows[ri]];
-                    int kn = cui__tl_keys_n(tr);
-                    if (!kn) continue;
-                    int j = cui__tl_key_lb(tr->keys, kn, next ? t + eps : t - eps);
-                    if (next && j < kn) { while (j < kn && tr->keys[j].x <= t + eps) j++; if (j < kn) best = CUI_MIN(best, tr->keys[j].x); }
-                    if (!next && j > 0) best = CUI_MAX(best, tr->keys[j - 1].x);
-                }
-                if (fabsf(best) < 1e29f) *tp = best;
-            }
-            ui->kpressed[CUI_KEY_LEFT] = ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_UP] = ui->kpressed[CUI_KEY_DOWN] = 0;
-            if (cui_key_pressed(ui, CUI_KEY_HOME)) { *tp = s0; ui->kpressed[CUI_KEY_HOME] = 0; }
-            if (cui_key_pressed(ui, CUI_KEY_END)) { *tp = s1; ui->kpressed[CUI_KEY_END] = 0; }
-            if (cui_key_pressed(ui, CUI_KEY_SPACE)) { res.play_toggled = true; ui->kpressed[CUI_KEY_SPACE] = 0; }
-            if (cui_key_pressed(ui, CUI_KEY_DELETE) || cui_key_pressed(ui, CUI_KEY_BACKSPACE)) {
-                cui__tl_delete(tracks, count, ct, &ck, &res.removed_keys, &res.removed_clips);
-                if (res.removed_keys || res.removed_clips) { res.changed = true; sel_any = 1; }
-                ui->kpressed[CUI_KEY_DELETE] = ui->kpressed[CUI_KEY_BACKSPACE] = 0;
-            }
-            if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
-                if (cui__tl_clear(tracks, count)) sel_any = 1;
-                ck = -1;
-                ui->kpressed[CUI_KEY_ESCAPE] = 0;
-            }
-            if (prim && cui_key_pressed(ui, CUI_KEY_A)) {
-                for (int ri = 0; ri < nr; ri++) {
-                    cui_timeline_track *tr = &tracks[rows[ri]];
-                    if (tr->locked || !tr->key_selected) continue;
-                    int kn = cui__tl_keys_n(tr);
-                    for (int j = 0; j < kn; j++) if (!tr->key_selected[j]) { tr->key_selected[j] = true; sel_any = 1; }
-                }
-                ui->kpressed[CUI_KEY_A] = 0;
-            }
-            if (cui_key_pressed(ui, CUI_KEY_EQUAL) || cui_key_pressed(ui, CUI_KEY_MINUS)) {
-                double f = cui_key_pressed(ui, CUI_KEY_EQUAL) ? 1 / 1.25 : 1.25;
-                double range = v->end - v->start;
-                double nrng = CUI_MIN(CUI_MAX(range * f, (double)min_range), (double)(s1 - s0));
-                double c = CUI_MIN(CUI_MAX((double)*tp, (double)v->start), (double)v->end);
-                double u = (c - v->start) / range;
-                v->start = (float)(c - u * nrng); v->end = (float)(c - u * nrng + nrng);
-                user_moved = true;
-                ui->kpressed[CUI_KEY_EQUAL] = ui->kpressed[CUI_KEY_MINUS] = 0;
-            }
-            if (cui_key_pressed(ui, CUI_KEY_F) && !prim) {
-                st->a0 = v->start; st->a1 = v->end; st->b0 = s0; st->b1 = s1;
-                st->anim.x = 0; st->anim.v = 0;
-                st->anim_on = true;
-                ui->kpressed[CUI_KEY_F] = 0;
-            }
-        }
-        if (user_moved) st->anim_on = false;
-        /* the view follows the playhead when it leaves the view (keys, playback) */
-        if (*tp != st->last_time && st->mode != TL_SCRUB && st->mode != TL_PAN && !st->anim_on) {
-            float range = v->end - v->start;
-            if (*tp > v->end) { v->start = *tp - range * 0.1f; v->end = v->start + range; }
-            else if (*tp < v->start) { v->start = *tp - range * 0.9f; v->end = v->start + range; }
-        }
-        if (st->anim_on) {
-            float pr = cui__spring(ui, &st->anim, 1.0f, CUI__SPRING_EXPAND);
-            double a, b;
-            cui__tl_lerp(st, pr >= 1.0f ? 1.0 : (double)pr, &a, &b);
-            v->start = (float)a; v->end = (float)b;
-            if (pr >= 1.0f && st->anim.v == 0) { v->start = (float)st->b0; v->end = (float)st->b1; st->anim_on = false; }
-        } else {
-            cui__tl_clamp(v, s0, s1, min_range);
-        }
+    /* input */
+    if (f.has_rect) {
+        cui__tle_wheel_and_pan(&f);
+        f.k = (double)f.g.plot_w / (double)(v->end - v->start);
+        if (f.bi.hovered && ui->mpressed[CUI_MOUSE_LEFT] && st->mode == TL_IDLE) cui__tle_press(&f);
+        if (st->mode != TL_IDLE && st->mode != TL_PAN && ui->mdown[CUI_MOUSE_LEFT]) cui__tle_drag(&f);
+        if (st->mode != TL_IDLE && st->mode != TL_PAN && !ui->mdown[CUI_MOUSE_LEFT]) cui__tle_release(&f);
+        if (f.bi.focused && !ui->edit_prev) cui__tle_keys(&f);
+        cui__tle_move_view(&f);
     } else {
-        cui__tl_clamp(v, s0, s1, min_range);
+        cui__tl_clamp(v, s0, s1, f.min_range);
     }
-    if (relist) nr = cui__tl_flatten(tracks, count, rows, tone, sub_end);
+    if (f.relist) f.nr = cui__tl_flatten(tracks, count, f.rows, f.tone, f.sub_end);
     {
-        float max_s = CUI_MAX(0.0f, nr * row_h - g.body_h);
+        float max_s = CUI_MAX(0.0f, f.nr * f.row_h - f.g.body_h);
         if (!(v->scroll >= 0)) v->scroll = 0;
         if (v->scroll > max_s) v->scroll = max_s;
     }
-    if (ct < 0 || ct >= count) ct = -1;
-    if (ct < 0 || ck >= cui__tl_keys_n(&tracks[ct])) ck = -1;
-    k = (double)g.plot_w / (double)(v->end - v->start);
+    if (f.ct < 0 || f.ct >= count) f.ct = -1;
+    if (f.ct < 0 || f.ck >= cui__tl_keys_n(&tracks[f.ct])) f.ck = -1;
+    f.k = (double)f.g.plot_w / (double)(v->end - v->start);
 
-    /* hover */
-    int hov_track = -1, hov_key = -1, hov_clip = -1, hov_part = 0, hov_row = -1, hov_list_part = 0, hot_mark = 0;
-    bool idle = st->mode == TL_IDLE && !ui->mdown[CUI_MOUSE_LEFT];
-    if (has_rect && bi.hovered && cui__rect_contains(R, mx, my) && (idle || st->mode == TL_NONE)) {
-        int row = ROW_AT(my);
-        if (my >= g.body_y && row >= 0 && row < nr) {
-            hov_row = row;
-            int ti = rows[row];
-            if (mx >= g.area_x) {
-                const cui_timeline_track *tr = &tracks[ti];
-                int kh = cui__tl_key_at(tr, T_AT(mx), (float)(CUI__TL_HIT / k));
-                if (kh >= 0) { hov_track = ti; hov_key = kh; if (!tr->locked && tr->key_selected) cui__set_cursor(ui, CUI_CURSOR_HAND); }
-                else if (!tr->locked) {
-                    hov_clip = cui__tl_clip_at(tr, &g, v->start, k, mx, &hov_part);
-                    if (hov_clip >= 0) { hov_track = ti; cui__set_cursor(ui, hov_part ? CUI_CURSOR_RESIZE_EW : CUI_CURSOR_HAND); }
-                }
-            } else {
-                const cui_timeline_track *tr = &tracks[ti];
-                bool group = sub_end[ti] > ti + 1;
-                float cx = R.x + 8 + CUI_CLAMP(tr->depth, 0, 1000) * CUI__TL_INDENT;
-                float lx = R.x + g.list_w - 4 - CUI__TL_TOGGLE, hx = lx - CUI__TL_TOGGLE;
-                if (group && (g.list_mode == 2 || (mx >= cx - 4 && mx < cx + CUI__TL_CHEV))) hov_list_part = 1;
-                else if (g.list_mode == 0 && mx >= lx) hov_list_part = 3;
-                else if (g.list_mode == 0 && mx >= hx) hov_list_part = 2;
-                if (hov_list_part) cui__set_cursor(ui, CUI_CURSOR_HAND);
-            }
-        } else if (my < g.body_y - 1 && mx >= g.area_x && range_on) {
-            float xi = (float)(g.plot_x + (*o->in - v->start) * k), xo = (float)(g.plot_x + (*o->out - v->start) * k);
-            if (fabsf(mx - xi) <= 5) hot_mark = 1;
-            else if (fabsf(mx - xo) <= 5) hot_mark = 2;
-            if (hot_mark) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
-        }
-    }
-    res.hovered_track = hov_key >= 0 ? hov_track : -1;
-    res.hovered_key = hov_key;
-
-    /* the panel */
-    int en = cui__node_new(ui, id);
-    cui_node *nd = &ui->nodes[en];
-    nd->w = o->width.kind == CUI_SIZE_FIT && o->width.value == 0 ? CUI_FILL : o->width;
-    float def_h = CUI__TL_RULER + 2 + CUI_MAX(3, count) * row_h;
-    nd->h = CUI_PX(o->height > 0 ? o->height : CUI_MIN(360.0f, def_h));
-    nd->bg = CUI_C(ui, SURFACE);
-    nd->border = 1;
-    nd->border_color = CUI_C(ui, BORDER);
-    nd->radius = CUI_CORNERS(ui->theme.radius_panel);
-    nd->flags |= CUI_NF_CLIP;
-    cui__mark_interactive(ui, en, CUI_IF_FOCUSABLE);
-    cui__tl_paint *p = cui__frame_alloc(ui, sizeof *p);
-    memset(p, 0, sizeof *p);
-    p->st = st; p->sid = sid;
-    p->v0 = v->start; p->v1 = v->end; p->scroll = v->scroll;
-    p->row_h = row_h; p->track_w = o->track_width; p->toggles = o->toggles;
-    p->seq0 = s0; p->seq1 = s1; p->fps = fps; p->ruler = ruler;
-    p->time = cui__clampf(*tp, s0, s1);
-    p->range = range_on;
-    if (range_on) { p->in = *o->in; p->out = *o->out; }
-    p->hot_mark = hot_mark;
-    p->nrows = nr;
-    p->empty = count == 0;
-    cui__tween(ui, &st->focus, bi.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
-    p->focus = st->focus;
-    nd->paint = cui__paint_timeline;
-    nd->paint_data = p;
-
-    /* what is in view */
-    bool mq_on = st->mode == TL_EMPTY && st->moved;
-    bool mq_add = (st->mods & (CUI_MOD_SHIFT | CUI_MOD_PRIMARY)) != 0;
-    float mqx0 = 0, mqx1 = 0;
-    int mqr0 = 0, mqr1 = -1;
-    if (mq_on) {
-        p->marquee = true;
-        p->mq = (cui_rect){ CUI_MIN(st->press_x, mx), CUI_MIN(st->press_y, my), fabsf(mx - st->press_x), fabsf(my - st->press_y) };
-        mqx0 = p->mq.x; mqx1 = p->mq.x + p->mq.w;
-        mqr0 = ROW_AT(p->mq.y); mqr1 = ROW_AT(p->mq.y + p->mq.h);
-    }
-    if (nr > 0 && g.body_h > 0) {
-        int r0 = CUI_MAX(0, (int)floorf(v->scroll / row_h)), r1 = CUI_MIN(nr - 1, (int)floorf((v->scroll + g.body_h) / row_h));
-        p->rows = cui__frame_alloc(ui, sizeof *p->rows * (size_t)CUI_MAX(1, r1 - r0 + 1));
-        float margin = (float)((CUI__TL_KEY + 3) / k);
-        float tv0 = v->start - margin, tv1 = v->end + margin;
-        int pw = (int)g.plot_w + 4 * (int)CUI__TL_PADX + 4;
-        uint8_t *seen = NULL;
-        for (int ri = r0; ri <= r1; ri++) {
-            int ti = rows[ri];
-            cui_timeline_track *tr = &tracks[ti];
-            bool group = sub_end[ti] > ti + 1;
-            cui__tl_row *row = &p->rows[p->nr++];
-            memset(row, 0, sizeof *row);
-            row->row = ri;
-            row->name_len = tr->name ? cui__display_len(tr->name) : 0;
-            row->name = row->name_len ? cui__frame_strdup(ui, tr->name, row->name_len) : NULL;
-            row->icon = tr->icon ? cui__frame_strdup(ui, tr->icon, (int)strlen(tr->icon)) : NULL;
-            row->depth = CUI_CLAMP(tr->depth, 0, 64);
-            row->tone = tone[ti];
-            row->flags = (uint16_t)((group ? TL_R_GROUP : 0) | (tr->collapsed && group ? TL_R_COLLAPSED : 0) | (tr->muted ? TL_R_MUTED : 0) |
-                                    (tr->locked ? TL_R_LOCKED : 0) | (ti == ct ? TL_R_CURRENT : 0) | (ri == hov_row && mx < g.area_x ? TL_R_HOVER : 0));
-            if (ri == hov_row && hov_list_part) row->flags |= (uint16_t)(hov_list_part == 1 ? TL_R_HOT_CHEV : hov_list_part == 2 ? TL_R_HOT_MUTE : TL_R_HOT_LOCK);
-            uint8_t dim = tr->muted ? TL_F_DIM : 0;
-            /* clips */
-            int cn = cui__tl_clips_n(tr);
-            for (int j = CUI_MAX(0, cui__tl_clip_lb(tr->clips, cn, tv0)); j < cn && tr->clips[j].start <= tv1; j++) {
-                cui__tl_bar b;
-                memset(&b, 0, sizeof b);
-                const cui_timeline_clip *c = &tr->clips[j];
-                b.s = c->start; b.e = c->end; b.row = ri; b.tone = tone[ti];
-                b.flags = (uint8_t)(dim | (c->selected ? TL_F_SEL : 0));
-                if (ti == hov_track && j == hov_clip) b.flags |= (uint8_t)(hov_part == 1 ? TL_F_EDGE_IN : hov_part == 2 ? TL_F_EDGE_OUT : TL_F_EDGE_IN | TL_F_EDGE_OUT);
-                if (c->name) { b.name_len = cui__display_len(c->name); b.name = cui__frame_strdup(ui, c->name, b.name_len); }
-                cui__tl_push_bar(ui, p, &b);
-            }
-            /* keys, one per point at most (selected ones always) */
-            int kn = cui__tl_keys_n(tr);
-            bool in_mq = mq_on && ri >= mqr0 && ri <= mqr1 && !tr->locked && tr->key_selected;
-            float last_x = -1e9f;
-            for (int j = cui__tl_key_lb(tr->keys, kn, tv0); j < kn && tr->keys[j].x <= tv1;) {
-                float x = (float)(g.plot_x + (tr->keys[j].x - v->start) * k);
-                bool sel = tr->key_selected && tr->key_selected[j];
-                if (mq_on) {
-                    bool inside = in_mq && x >= mqx0 && x <= mqx1;
-                    sel = mq_add ? sel || inside : inside;
-                }
-                if (!sel && x - last_x < 1.0f) {
-                    int nj = cui__tl_key_lb(tr->keys, kn, (float)(v->start + (last_x + 1.0f - g.plot_x) / k));
-                    j = CUI_MAX(nj, j + 1);
-                    continue;
-                }
-                cui__tl_mark m;
-                int mode = tr->keys[j].mode;
-                m.t = tr->keys[j].x; m.row = ri;
-                m.shape = (uint8_t)(mode == CUI_CURVE_LINEAR ? TL_CIRCLE : mode == CUI_CURVE_STEP ? TL_SQUARE : TL_DIAMOND);
-                m.flags = (uint8_t)(dim | (sel ? TL_F_SEL : 0) | (ti == hov_track && j == hov_key ? TL_F_HOVER : 0));
-                m.tone = tone[ti];
-                cui__tl_push_mark(ui, p, &m);
-                if (!sel) last_x = x;
-                j++;
-            }
-            /* a group's row: its tracks' keys as small marks, one per point */
-            if (group) {
-                if (!seen) seen = cui__frame_alloc(ui, (size_t)pw);
-                memset(seen, 0, (size_t)pw);
-                for (int d = ti + 1; d < sub_end[ti]; d++) {
-                    const cui_timeline_track *dt = &tracks[d];
-                    int dn = cui__tl_keys_n(dt);
-                    for (int j = cui__tl_key_lb(dt->keys, dn, tv0); j < dn && dt->keys[j].x <= tv1; j++) {
-                        int px = (int)((dt->keys[j].x - v->start) * k) + 2 * (int)CUI__TL_PADX;
-                        if (px < 0 || px >= pw) continue;
-                        if (seen[px]) {
-                            /* skip the keys at this point */
-                            int nj = cui__tl_key_lb(dt->keys, dn, (float)(v->start + (px + 1 - 2 * CUI__TL_PADX) / k));
-                            j = CUI_MAX(nj, j + 1) - 1;
-                            continue;
-                        }
-                        seen[px] = 1;
-                        cui__tl_mark m;
-                        m.t = dt->keys[j].x; m.row = ri; m.shape = TL_DIAMOND; m.flags = TL_F_SUMMARY; m.tone = 0;
-                        cui__tl_push_mark(ui, p, &m);
-                    }
-                }
-            }
-        }
-    }
-
-    /* tooltips anchor on a small box at the thing they describe */
+    /* build */
+    cui__tle_hover(&f);
+    res.hovered_track = f.hov_key >= 0 ? f.hov_track : -1;
+    res.hovered_key = f.hov_key;
+    int en;
+    cui__tl_paint *p = cui__tle_build_panel(&f, &en);
+    cui__tle_build_rows(&f, p);
     cui__open(ui, en);
-    if (has_rect && ui->active == 0 && !ui->mdown[CUI_MOUSE_LEFT]) {
-        const char *tip = NULL;
-        cui_rect box = { 0, 0, 0, 0 };
-        uint32_t key[3] = { 0, 0, 0 };
-        if (hov_key >= 0) {
-            const cui_timeline_track *tr = &tracks[hov_track];
-            const cui_curve_key *kk = &tr->keys[hov_key];
-            float x = (float)(g.plot_x + (kk->x - v->start) * k), y = g.body_y + hov_row * row_h - v->scroll;
-            box = (cui_rect){ x - 6, y + 2, 12, row_h - 4 };
-            tip = cui__frame_printf(ui, "%.*s\n%s \xc2\xb7 %s", tr->name ? cui__display_len(tr->name) : 0, tr->name ? tr->name : "",
-                                    cui__tl_time_text(ui, ruler, fps, s1, kk->x), cui__tl_value(ui, kk->y));
-            key[0] = 1; key[1] = (uint32_t)hov_track; key[2] = (uint32_t)hov_key;
-        } else if (hov_clip >= 0 && hov_part == 0) {
-            const cui_timeline_clip *c = &tracks[hov_track].clips[hov_clip];
-            float y = g.body_y + hov_row * row_h - v->scroll;
-            box = (cui_rect){ mx - 1, y + 3, 2, row_h - 7 };
-            tip = cui__frame_printf(ui, "%.*s\n%s \xc2\xb7 %.2f s", c->name ? cui__display_len(c->name) : 0, c->name ? c->name : "",
-                                    cui__tl_time_text(ui, ruler, fps, s1, c->start), (double)(c->end - c->start));
-            key[0] = 2; key[1] = (uint32_t)hov_track; key[2] = (uint32_t)hov_clip;
-        } else if (hov_row >= 0 && mx < g.area_x) {
-            const cui_timeline_track *tr = &tracks[rows[hov_row]];
-            float y = g.body_y + hov_row * row_h - v->scroll;
-            box = (cui_rect){ R.x + 2, y, g.list_w - 4, row_h - 1 };
-            if (hov_list_part == 2) tip = tr->muted ? "Show track" : "Hide track";
-            else if (hov_list_part == 3) tip = tr->locked ? "Unlock track" : "Lock track";
-            else if (g.list_mode == 2 && tr->name) tip = cui__frame_printf(ui, "%.*s", cui__display_len(tr->name), tr->name);
-            if (hov_list_part >= 2) box = (cui_rect){ hov_list_part == 3 ? R.x + g.list_w - 4 - CUI__TL_TOGGLE : R.x + g.list_w - 4 - 2 * CUI__TL_TOGGLE, y, CUI__TL_TOGGLE, row_h - 1 };
-            key[0] = 3 + (uint32_t)hov_list_part; key[1] = (uint32_t)rows[hov_row];
-        }
-        if (tip) {
-            cui_id tid = cui__hash(key, sizeof key, id ^ 0x7117u);
-            cui__absolute(ui, tid, box.x - R.x, box.y - R.y, box.w, box.h);
-            cui__tooltip_passive(ui, tid, tip);
-        }
-    }
+    cui__tle_tooltip(&f);
     cui__close(ui);
-#undef T_AT
-#undef ROW_AT
 
     if (*tp != t_before) res.time_changed = true;
-    if (sel_any) res.selection_changed = true;
+    if (f.sel_any) res.selection_changed = true;
     res.view_changed = v->start != b0 || v->end != b1 || v->scroll != bs;
     st->last_time = *tp;
-    *ctp = ct; *ckp = ck;
-    res.current_track = ct; res.current_key = ck;
-    ui->last_id = id;
+    *ctp = f.ct; *ckp = f.ck;
+    res.current_track = f.ct; res.current_key = f.ck;
+    ui->last_id = f.id;
     return res;
 }
