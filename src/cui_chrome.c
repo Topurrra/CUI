@@ -721,6 +721,287 @@ static void cui__paint_dirty_dot(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_circle(ui, ctr, 4.0f, cui_alpha(p->c, p->alpha));
 }
 
+/* one frame of the tab strip: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_doc_tabs_opts *o;
+    cui_doc_tabs_result *res;
+    cui_id id, sid;                     /* the strip, its scroll area */
+    cui__dtabs_state *st;
+    const cui_doc_tab *tabs; int count;
+    int *selected;                      /* the app's selection, drawn this frame */
+    int sel;                            /* the selection after this frame's input */
+    cui_id *tid;                        /* each tab's id */
+    float *left, *wid;                  /* each tab's x and width, last frame */
+    bool have;                          /* every tab has last frame's geometry */
+    int pose_from, pose_to;             /* a drag in progress: the tab, where it would land */
+    float pose_x;                       /* and the dragged tab's x */
+} cui__dtf;
+
+/* identities and last frame's geometry */
+static void cui__dtf_geometry(cui__dtf *f) {
+    cui_ctx *ui = f->ui;
+    int count = f->count;
+    size_t nn = (size_t)(count > 0 ? count : 1);
+    f->tid = cui__frame_alloc(ui, sizeof(cui_id) * nn);
+    f->left = cui__frame_alloc(ui, sizeof(float) * nn); f->wid = cui__frame_alloc(ui, sizeof(float) * nn);
+    f->have = count > 0;
+    for (int k = 0; k < count; k++) {
+        const char *t = f->tabs[k].title;
+        f->tid[k] = t && t[0] ? cui_make_id(ui, t) : cui__hash(&k, sizeof k, f->id ^ 0xD7Bu);
+        if (!cui__has_prev_rect(ui, f->tid[k])) { f->have = false; f->left[k] = f->wid[k] = 0; continue; }
+        cui_rect r = cui__prev_rect(ui, f->tid[k]);
+        f->left[k] = r.x; f->wid[k] = r.w;
+    }
+}
+
+/* window wide shortcuts (opt in): Ctrl+Tab and Ctrl+PageDown, Ctrl+Shift+Tab and
+ * Ctrl+PageUp, Ctrl+W closes */
+static void cui__dtf_shortcuts(cui__dtf *f) {
+    cui_ctx *ui = f->ui;
+    int count = f->count, cur = *f->selected;
+    bool valid = cur >= 0 && cur < count;
+    if (cui_shortcut(ui, CUI_MOD_CTRL, CUI_KEY_TAB) || cui_shortcut(ui, CUI_MOD_CTRL, CUI_KEY_PAGE_DOWN)) {
+        f->sel = valid ? (f->sel + 1) % count : 0;
+        ui->kpressed[CUI_KEY_TAB] = ui->kpressed[CUI_KEY_PAGE_DOWN] = 0;
+    }
+    if (cui_shortcut(ui, CUI_MOD_CTRL | CUI_MOD_SHIFT, CUI_KEY_TAB) || cui_shortcut(ui, CUI_MOD_CTRL, CUI_KEY_PAGE_UP)) {
+        f->sel = valid ? (f->sel + count - 1) % count : count - 1;
+        ui->kpressed[CUI_KEY_TAB] = ui->kpressed[CUI_KEY_PAGE_UP] = 0;
+    }
+    if (!f->o->no_close && valid && cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_W)) { f->res->close = cur; ui->kpressed[CUI_KEY_W] = 0; }
+    if (f->sel != cur && valid && ui->focus == f->tid[cur]) ui->focus = f->tid[f->sel];   /* focus follows when it was on the strip */
+}
+
+/* after a drop or a move: the moved tab glides from where it was, from `from_x` */
+static void cui__dtf_glide_moved(cui__dtf *f, int from, int to, float from_x) {
+    float new_x = to > from ? f->left[to] + f->wid[to] - f->wid[from] : f->left[to];
+    f->st->dropped = f->tid[from];
+    f->st->drop_off = from_x - new_x;
+    f->st->seq++;
+    f->st->seq_frame = f->ui->frame + 1;
+}
+
+/* keys on the focused tab (only the selected tab is in the Tab order): arrows, Home and End
+ * select, Shift+arrows move the tab, Delete closes it */
+static void cui__dtf_keys(cui__dtf *f) {
+    cui_ctx *ui = f->ui;
+    int sel = f->sel, count = f->count;
+    int m = ui->mods & (CUI_MOD_CTRL | CUI_MOD_ALT | CUI_MOD_SUPER | CUI_MOD_SHIFT);
+    int to = -1;
+    bool move = false;
+    if (cui_key_pressed(ui, CUI_KEY_LEFT) && sel > 0) { to = sel - 1; move = m == CUI_MOD_SHIFT; }
+    if (cui_key_pressed(ui, CUI_KEY_RIGHT) && sel < count - 1) { to = sel + 1; move = m == CUI_MOD_SHIFT; }
+    if (cui_key_pressed(ui, CUI_KEY_HOME) && !m) to = 0;
+    if (cui_key_pressed(ui, CUI_KEY_END) && !m) to = count - 1;
+    if (to >= 0 && (m == 0 || move) && to != sel) {
+        if (move && !f->o->no_reorder) {
+            /* selection follows below; the moved tab glides from its old slot */
+            f->res->move_from = sel; f->res->move_to = to;
+            if (f->have) cui__dtf_glide_moved(f, sel, to, f->left[sel]);
+        } else if (!move) {
+            ui->focus = f->tid[to];
+            f->sel = to;
+        }
+        ui->focus_visible = true;
+    }
+    if (cui_key_pressed(ui, CUI_KEY_DELETE) && !f->o->no_close && !m) { f->res->close = f->sel; ui->focus_visible = true; }
+    ui->kpressed[CUI_KEY_LEFT] = ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_HOME] = ui->kpressed[CUI_KEY_END] = 0;
+}
+
+/* dragging a tab: the pattern of the reorderable list, along x */
+static void cui__dtf_drag(cui__dtf *f) {
+    cui_ctx *ui = f->ui;
+    cui__dtabs_state *st = f->st;
+    int count = f->count;
+    const float *left = f->left, *wid = f->wid;
+    if (st->pending && ui->mdown[0] && fabsf(ui->mx - st->press_x) > 4 && f->have && st->press_pos < count) {
+        st->pending = false;
+        st->from = st->to = st->press_pos;
+        st->grab = st->press_x - left[st->from];
+    }
+    if (!ui->mdown[0]) st->pending = false;
+    if (st->from >= 0 && f->have) {
+        int from = st->from;
+        float lo = left[0], hi = left[count - 1] + wid[count - 1] - wid[from];
+        float x0 = cui__clampf(ui->mx - st->grab, lo, CUI_MAX(lo, hi));
+        /* tabs differ in width, so the leading edge decides: a tab is passed
+         * once the dragged tab's edge crosses its middle */
+        int to = from;
+        for (int k = from + 1; k < count; k++) if (x0 + wid[from] > left[k] + wid[k] * 0.5f) to = k;
+        for (int k = from - 1; k >= 0; k--) if (x0 < left[k] + wid[k] * 0.5f) to = k;
+        st->to = to;
+        /* near an edge of a strip that scrolls, keep scrolling */
+        cui_rect vr = cui__prev_rect(ui, f->sid);
+        cui_scroll_state *ss = cui_state(ui, f->sid, sizeof *ss);
+        if (vr.w > 0 && ss->content_w > ss->view_w + 0.5f) {
+            float edge = 28, speed = 520 * ui->dt;
+            if (ui->mx < vr.x + edge) { ss->tx -= speed; ui->animating = true; }
+            if (ui->mx > vr.x + vr.w - edge) { ss->tx += speed; ui->animating = true; }
+        }
+        f->pose_from = from; f->pose_to = to; f->pose_x = x0;
+        if (!ui->mdown[0]) {   /* the drop */
+            cui__dtab_state *ds = cui_state(ui, f->tid[from] ^ 0x1u, sizeof *ds);
+            if (to != from) {
+                f->res->move_from = from; f->res->move_to = to;
+                cui__dtf_glide_moved(f, from, to, x0);
+            } else {
+                ds->x.x = x0 - left[from]; ds->x.v = 0;   /* glides back to its slot */
+                f->pose_from = f->pose_to = -1;
+            }
+            st->from = -1;
+        }
+    }
+    if (st->from >= 0 && !ui->mdown[0]) st->from = -1;
+    if (st->from >= 0) ui->active = f->id;   /* keep the pointer while dragging */
+}
+
+/* the strip scrolls sideways: a newly selected tab comes into view, a plain wheel scrolls */
+static void cui__dtf_scroll_strip(cui__dtf *f, cui_scroll_state *ss) {
+    cui_ctx *ui = f->ui;
+    cui__dtabs_state *st = f->st;
+    int shown_sel = f->sel;
+    if (shown_sel >= 0 && shown_sel < f->count && st->last_sel != shown_sel + 1 && ss->content_w > ss->view_w + 0.5f && f->have) {
+        cui_rect vr = cui__prev_rect(ui, f->sid);
+        if (vr.w > 0) {
+            float margin = 24;
+            if (f->left[shown_sel] < vr.x) ss->tx -= vr.x - f->left[shown_sel] + margin;
+            else if (f->left[shown_sel] + f->wid[shown_sel] > vr.x + vr.w) ss->tx += f->left[shown_sel] + f->wid[shown_sel] - (vr.x + vr.w) + margin;
+        }
+    }
+    if (shown_sel >= 0) st->last_sel = shown_sel + 1;
+    if (ui->scroll_dy != 0 && ui->scroll_dx == 0 && ss->content_w > ss->view_w + 0.5f) {
+        cui_rect vr = cui__prev_rect(ui, f->sid);
+        if (vr.w > 0 && cui__rect_contains(vr, ui->mx, ui->my)) {
+            ss->tx -= ui->scroll_dy * 44;
+            ss->last_activity = ui->time;
+            ui->scroll_dy = 0;
+        }
+    }
+}
+
+/* where tab k slides: after a drop every tab re-seats once; while dragging, the tabs between
+ * the dragged tab's slot and where it would land make room */
+static void cui__dtf_tab_motion(cui__dtf *f, cui__dtab_state *ts, int k) {
+    cui_ctx *ui = f->ui;
+    cui__dtabs_state *st = f->st;
+    if (ts->seq != st->seq && ui->frame >= st->seq_frame) {   /* after a drop: every tab is already in its new slot */
+        ts->x.x = f->tid[k] == st->dropped ? st->drop_off : 0;
+        ts->x.v = 0;
+        ts->seq = st->seq;
+    }
+    bool dragged = f->pose_from == k;
+    float target = 0;
+    if (f->pose_from >= 0 && !dragged) {
+        float shift = f->wid[f->pose_from] + CUI__DTAB_GAP;
+        if (f->pose_from < f->pose_to && k > f->pose_from && k <= f->pose_to) target = -shift;
+        if (f->pose_from > f->pose_to && k >= f->pose_to && k < f->pose_from) target = shift;
+    }
+    if (dragged) { ts->x.x = f->pose_x - f->left[k]; ts->x.v = 0; }
+    else cui__spring(ui, &ts->x, target, CUI_SPRING_SMOOTH);
+}
+
+/* the close button's slot: an x that shows on hover, focus or the selected tab, and in its
+ * place a dot for unsaved changes */
+static void cui__dtf_build_close(cui_ctx *ui, const cui_doc_tab *tb, const cui__dtab_state *ts, cui_id cid, cui_interact sr) {
+    int slot = cui__node_new(ui, cid);
+    cui_node *s = &ui->nodes[slot];
+    s->dir = CUI_STACK; s->align = CUI_ALIGN_CENTER; s->justify = CUI_JUSTIFY_CENTER;
+    s->w = CUI_PX(20); s->h = CUI_PX(20);
+    s->radius = CUI_CORNERS(CUI__R_SMALL);
+    s->bg = sr.pressed ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), ts->slot_hover * 1.6f);
+    s->self_align = CUI_ALIGN_CENTER;
+    cui__mark_interactive(ui, slot, 0);
+    if (sr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    cui__open(ui, slot);
+    cui__icon_node(ui, CUI_ICON_X, 14, cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), ts->slot_hover));
+    ui->nodes[ui->node_count - 1].opacity = CUI_MAX(0.001f, ts->xshow);
+    int dot = cui__leaf(ui, 0, CUI_PX(20), CUI_PX(20));
+    cui__dot_paint *dp = CUI_PAINT_DATA(ui, cui__dot_paint);
+    dp->c = CUI_C(ui, TEXT_SECONDARY);
+    dp->alpha = tb->dirty ? 1.0f - ts->xshow : 0.0f;
+    ui->nodes[dot].paint = cui__paint_dirty_dot;
+    ui->nodes[dot].paint_data = dp;
+    cui__close(ui);
+}
+
+/* tab k: input (select, start a drag, close with the middle button or the x), motion, nodes */
+static void cui__dtf_build_tab(cui__dtf *f, int k, int vis_sel, float rad, float fs) {
+    cui_ctx *ui = f->ui;
+    const cui_doc_tabs_opts *o = f->o;
+    cui__dtabs_state *st = f->st;
+    const cui_doc_tab *tb = &f->tabs[k];
+    cui_id tid = f->tid[k];
+    bool active = k == vis_sel;
+    cui_id cid = tid ^ 0xC105Eu;
+    cui_interact sr;
+    memset(&sr, 0, sizeof sr);
+    if (!o->no_close) sr = cui__interact(ui, cid, CUI_IF_KEEP_FOCUS);
+    cui_interact tr = cui__interact(ui, tid, active ? CUI_IF_FOCUSABLE : CUI_IF_KEEP_FOCUS);
+    if (tr.hovered && ui->mpressed[CUI_MOUSE_LEFT]) {
+        if (f->sel != k) { f->sel = k; ui->focus = tid; ui->focus_visible = false; }
+        if (!o->no_reorder) { st->pending = true; st->press_x = ui->mx; st->press_pos = k; }
+    }
+    if (!o->no_close && (ui->hot == tid || ui->hot == cid) && ui->mpressed[CUI_MOUSE_MIDDLE] && st->from < 0) f->res->close = k;
+    if (sr.clicked) f->res->close = k;
+
+    cui__dtab_state *ts = cui_state(ui, tid ^ 0x1u, sizeof *ts);
+    cui__dtf_tab_motion(f, ts, k);
+    bool dragged = f->pose_from == k;
+    bool hov = (tr.hovered || sr.hovered) && f->pose_from < 0;
+    bool want_x = !o->no_close && (hov || tr.focus_visible || (active && !tb->dirty));
+    cui__tween(ui, &ts->hover, hov ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &ts->slot_hover, sr.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &ts->xshow, want_x ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &ts->focus, tr.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+
+    int i = cui__node_new(ui, tid);
+    cui_node *n = &ui->nodes[i];
+    n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
+    n->h = CUI_PX(CUI__DTAB_H);
+    n->pad[3] = 12;
+    n->pad[1] = o->no_close ? 12 : 6;
+    n->radius.tl = n->radius.tr = rad;
+    n->self_align = CUI_ALIGN_END;
+    n->tx = ts->x.x;
+    if (active || dragged) {
+        cui__folder_paint *fp = CUI_PAINT_DATA(ui, cui__folder_paint);
+        fp->bg = active ? CUI_C(ui, SURFACE) : CUI_C(ui, SURFACE_RAISED);
+        fp->border = CUI_C(ui, BORDER);
+        fp->r = rad;
+        fp->full = dragged;
+        n->paint = cui__paint_folder;
+        n->paint_data = fp;
+    } else {
+        n->bg = cui_alpha(CUI_C(ui, HOVER), ts->hover);
+    }
+    if (dragged) {
+        n->elevation = CUI_ELEVATION_FLOATING;
+        n->elevation_alpha = st->lift.x;
+        n->radius.br = n->radius.bl = rad;
+        n->flags |= CUI_NF_ON_TOP;
+    }
+    cui__mark_interactive(ui, i, active ? CUI_IF_FOCUSABLE : 0);
+    if (tr.hovered || dragged) cui__set_cursor(ui, dragged ? CUI_CURSOR_MOVE : CUI_CURSOR_HAND);
+    cui__open(ui, i);
+    cui_color fg = active ? CUI_C(ui, FOREGROUND) : cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), ts->hover * 0.7f);
+    if (tb->icon) cui__icon_node(ui, tb->icon, 14, active ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
+    const char *title = tb->title ? tb->title : "";
+    int t = cui__text_node(ui, title, cui__display_len(title), CUI_FONT_BODY, fs, fg, false);
+    ui->nodes[t].line_height = 1.3f;
+    ui->nodes[t].max_w = 200;
+    if (!o->no_close) cui__dtf_build_close(ui, tb, ts, cid, sr);
+    cui__close(ui);
+    cui__focus_ring(ui, i, ts->focus);
+    if (!o->no_close) {
+        ui->last_id = cid;
+        cui_tooltip(ui, o->shortcuts && active ? (CUI_MOD_PRIMARY == CUI_MOD_SUPER ? "Close  \xc2\xb7  Cmd W" : "Close  \xc2\xb7  Ctrl W") : "Close");
+    }
+    ui->last_id = tid;
+    ui->last_node = i;
+    if (tb->tooltip && st->from < 0) cui_tooltip(ui, tb->tooltip);
+}
+
 cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_doc_tab *tabs, int count, int *selected, const cui_doc_tabs_opts *o) {
     cui_doc_tabs_opts d;
     memset(&d, 0, sizeof d);
@@ -730,281 +1011,61 @@ cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_d
     int sel_local = 0;
     if (!selected) selected = &sel_local;
     if (!tabs || count < 0) count = 0;
-    cui_id id = cui_make_id(ui, id_str);
-    cui__dtabs_state *st = cui_state(ui, id, sizeof *st);
+    cui__dtf f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o; f.res = &res; f.tabs = tabs; f.count = count; f.selected = selected;
+    f.id = cui_make_id(ui, id_str);
+    f.sid = f.id ^ 0xD0C7u;
+    cui__dtabs_state *st = f.st = cui_state(ui, f.id, sizeof *st);
     if (!st->init) { st->from = -1; st->init = true; }
     if (st->from >= count) { st->from = -1; st->pending = false; }
     if (st->press_pos >= count) st->pending = false;
     cui_push_id(ui, id_str);
+    cui__dtf_geometry(&f);
+    f.sel = *selected;
 
-    /* identities and last frame's geometry */
-    size_t nn = (size_t)(count > 0 ? count : 1);
-    cui_id *tid = cui__frame_alloc(ui, sizeof(cui_id) * nn);
-    float *left = cui__frame_alloc(ui, sizeof(float) * nn), *wid = cui__frame_alloc(ui, sizeof(float) * nn);
-    bool have = count > 0;
-    for (int k = 0; k < count; k++) {
-        const char *t = tabs[k].title;
-        tid[k] = t && t[0] ? cui_make_id(ui, t) : cui__hash(&k, sizeof k, id ^ 0xD7Bu);
-        if (!cui__has_prev_rect(ui, tid[k])) { have = false; left[k] = wid[k] = 0; continue; }
-        cui_rect r = cui__prev_rect(ui, tid[k]);
-        left[k] = r.x; wid[k] = r.w;
-    }
-    int sel = *selected;
-    bool valid = sel >= 0 && sel < count;
-
-    /* window wide shortcuts (opt in) */
-    if (o->shortcuts && count > 0) {
-        if (cui_shortcut(ui, CUI_MOD_CTRL, CUI_KEY_TAB) || cui_shortcut(ui, CUI_MOD_CTRL, CUI_KEY_PAGE_DOWN)) {
-            sel = valid ? (sel + 1) % count : 0;
-            ui->kpressed[CUI_KEY_TAB] = ui->kpressed[CUI_KEY_PAGE_DOWN] = 0;
-        }
-        if (cui_shortcut(ui, CUI_MOD_CTRL | CUI_MOD_SHIFT, CUI_KEY_TAB) || cui_shortcut(ui, CUI_MOD_CTRL, CUI_KEY_PAGE_UP)) {
-            sel = valid ? (sel + count - 1) % count : count - 1;
-            ui->kpressed[CUI_KEY_TAB] = ui->kpressed[CUI_KEY_PAGE_UP] = 0;
-        }
-        if (!o->no_close && valid && cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_W)) { res.close = *selected; ui->kpressed[CUI_KEY_W] = 0; }
-        if (sel != *selected && valid && ui->focus == tid[*selected]) ui->focus = tid[sel];   /* focus follows when it was on the strip */
-    }
-
-    /* keys on the focused tab (only the selected tab is in the Tab order) */
-    valid = *selected >= 0 && *selected < count;
-    if (valid && sel == *selected && ui->focus == tid[sel] && !cui__keys_covered(ui)) {
-        int m = ui->mods & (CUI_MOD_CTRL | CUI_MOD_ALT | CUI_MOD_SUPER | CUI_MOD_SHIFT);
-        int to = -1;
-        bool move = false;
-        if (cui_key_pressed(ui, CUI_KEY_LEFT) && sel > 0) { to = sel - 1; move = m == CUI_MOD_SHIFT; }
-        if (cui_key_pressed(ui, CUI_KEY_RIGHT) && sel < count - 1) { to = sel + 1; move = m == CUI_MOD_SHIFT; }
-        if (cui_key_pressed(ui, CUI_KEY_HOME) && !m) to = 0;
-        if (cui_key_pressed(ui, CUI_KEY_END) && !m) to = count - 1;
-        if (to >= 0 && (m == 0 || move) && to != sel) {
-            if (move && !o->no_reorder) {
-                /* selection follows below; the moved tab glides from its old slot */
-                res.move_from = sel; res.move_to = to;
-                if (have) {
-                    float new_x = to > sel ? left[to] + wid[to] - wid[sel] : left[to];
-                    st->dropped = tid[sel];
-                    st->drop_off = left[sel] - new_x;
-                    st->seq++;
-                    st->seq_frame = ui->frame + 1;
-                }
-            } else if (!move) {
-                ui->focus = tid[to];
-                sel = to;
-            }
-            ui->focus_visible = true;
-        }
-        if (cui_key_pressed(ui, CUI_KEY_DELETE) && !o->no_close && !m) { res.close = sel; ui->focus_visible = true; }
-        ui->kpressed[CUI_KEY_LEFT] = ui->kpressed[CUI_KEY_RIGHT] = ui->kpressed[CUI_KEY_HOME] = ui->kpressed[CUI_KEY_END] = 0;
-    }
-
-    /* dragging: the pattern of the reorderable list, along x */
-    int pose_from = -1, pose_to = -1;
-    float pose_x = 0;
-    if (!o->no_reorder) {
-        if (st->pending && ui->mdown[0] && fabsf(ui->mx - st->press_x) > 4 && have && st->press_pos < count) {
-            st->pending = false;
-            st->from = st->to = st->press_pos;
-            st->grab = st->press_x - left[st->from];
-        }
-        if (!ui->mdown[0]) st->pending = false;
-        if (st->from >= 0 && have) {
-            int from = st->from;
-            float lo = left[0], hi = left[count - 1] + wid[count - 1] - wid[from];
-            float x0 = cui__clampf(ui->mx - st->grab, lo, CUI_MAX(lo, hi));
-            /* tabs differ in width, so the leading edge decides: a tab is passed
-             * once the dragged tab's edge crosses its middle */
-            int to = from;
-            for (int k = from + 1; k < count; k++) if (x0 + wid[from] > left[k] + wid[k] * 0.5f) to = k;
-            for (int k = from - 1; k >= 0; k--) if (x0 < left[k] + wid[k] * 0.5f) to = k;
-            st->to = to;
-            /* near an edge of a strip that scrolls, keep scrolling */
-            cui_id sid = id ^ 0xD0C7u;
-            cui_rect vr = cui__prev_rect(ui, sid);
-            cui_scroll_state *ss = cui_state(ui, sid, sizeof *ss);
-            if (vr.w > 0 && ss->content_w > ss->view_w + 0.5f) {
-                float edge = 28, speed = 520 * ui->dt;
-                if (ui->mx < vr.x + edge) { ss->tx -= speed; ui->animating = true; }
-                if (ui->mx > vr.x + vr.w - edge) { ss->tx += speed; ui->animating = true; }
-            }
-            pose_from = from; pose_to = to; pose_x = x0;
-            if (!ui->mdown[0]) {
-                cui__dtab_state *ds = cui_state(ui, tid[from] ^ 0x1u, sizeof *ds);
-                if (to != from) {
-                    res.move_from = from; res.move_to = to;
-                    float new_x = to > from ? left[to] + wid[to] - wid[from] : left[to];
-                    st->dropped = tid[from];
-                    st->drop_off = x0 - new_x;
-                    st->seq++;
-                    st->seq_frame = ui->frame + 1;
-                } else {
-                    ds->x.x = x0 - left[from]; ds->x.v = 0;   /* glides back to its slot */
-                    pose_from = pose_to = -1;
-                }
-                st->from = -1;
-            }
-        }
-        if (st->from >= 0 && !ui->mdown[0]) st->from = -1;
-        if (st->from >= 0) ui->active = id;   /* keep the pointer while dragging */
-    }
+    /* input */
+    if (o->shortcuts && count > 0) cui__dtf_shortcuts(&f);
+    bool valid = *selected >= 0 && *selected < count;
+    if (valid && f.sel == *selected && ui->focus == f.tid[f.sel] && !cui__keys_covered(ui)) cui__dtf_keys(&f);
+    f.pose_from = f.pose_to = -1;
+    if (!o->no_reorder) cui__dtf_drag(&f);
     cui__spring(ui, &st->lift, st->from >= 0 ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
-
-    /* the strip scrolls sideways; a newly selected tab comes into view */
     int vis_sel = *selected;   /* this frame is drawn in the order the app gave us */
-    cui_id sid = id ^ 0xD0C7u;
-    cui_scroll_state *ss = cui_state(ui, sid, sizeof *ss);
-    int shown_sel = sel;
-    if (shown_sel >= 0 && shown_sel < count && st->last_sel != shown_sel + 1 && ss->content_w > ss->view_w + 0.5f && have) {
-        cui_rect vr = cui__prev_rect(ui, sid);
-        if (vr.w > 0) {
-            float margin = 24;
-            if (left[shown_sel] < vr.x) ss->tx -= vr.x - left[shown_sel] + margin;
-            else if (left[shown_sel] + wid[shown_sel] > vr.x + vr.w) ss->tx += left[shown_sel] + wid[shown_sel] - (vr.x + vr.w) + margin;
-        }
-    }
-    if (shown_sel >= 0) st->last_sel = shown_sel + 1;
-    /* a plain wheel scrolls the strip sideways */
-    if (ui->scroll_dy != 0 && ui->scroll_dx == 0 && ss->content_w > ss->view_w + 0.5f) {
-        cui_rect vr = cui__prev_rect(ui, sid);
-        if (vr.w > 0 && cui__rect_contains(vr, ui->mx, ui->my)) {
-            ss->tx -= ui->scroll_dy * 44;
-            ss->last_activity = ui->time;
-            ui->scroll_dy = 0;
-        }
-    }
+    cui_scroll_state *ss = cui_state(ui, f.sid, sizeof *ss);
+    cui__dtf_scroll_strip(&f, ss);
 
+    /* build */
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
-    int col = cui__scroll_begin_ex(ui, sid, &sb, true);
+    int col = cui__scroll_begin_ex(ui, f.sid, &sb, true);
     cui_node *cn = &ui->nodes[col];
     cn->flags &= ~(uint32_t)CUI_NF_SCROLL_Y;
     cn->self_align = CUI_ALIGN_STRETCH;
     cui__bar_edge(ui, col, false);
     ss->fade = cui__backdrop(ui);   /* the strip has no fill of its own: fade into what it sits on */
-    int row = cui__node_new(ui, id ^ 0x5707u);
+    int row = cui__node_new(ui, f.id ^ 0x5707u);
     cui_node *rn = &ui->nodes[row];
     rn->dir = CUI_ROW; rn->align = CUI_ALIGN_END; rn->gap = CUI__DTAB_GAP;
     rn->pad[0] = 4; rn->pad[1] = rn->pad[3] = 6;
     cui__open(ui, row);
-
     float rad = CUI__R_ITEM(ui);
     float fs = cui__fs(ui, ui->theme.text_body);
-    for (int k = 0; k < count; k++) {
-        const cui_doc_tab *tb = &tabs[k];
-        bool active = k == vis_sel;
-        cui_id cid = tid[k] ^ 0xC105Eu;
-        cui_interact sr;
-        memset(&sr, 0, sizeof sr);
-        if (!o->no_close) sr = cui__interact(ui, cid, CUI_IF_KEEP_FOCUS);
-        cui_interact tr = cui__interact(ui, tid[k], active ? CUI_IF_FOCUSABLE : CUI_IF_KEEP_FOCUS);
-        if (tr.hovered && ui->mpressed[CUI_MOUSE_LEFT]) {
-            if (sel != k) { sel = k; ui->focus = tid[k]; ui->focus_visible = false; }
-            if (!o->no_reorder) { st->pending = true; st->press_x = ui->mx; st->press_pos = k; }
-        }
-        if (!o->no_close && (ui->hot == tid[k] || ui->hot == cid) && ui->mpressed[CUI_MOUSE_MIDDLE] && st->from < 0) res.close = k;
-        if (sr.clicked) res.close = k;
-
-        cui__dtab_state *ts = cui_state(ui, tid[k] ^ 0x1u, sizeof *ts);
-        if (ts->seq != st->seq && ui->frame >= st->seq_frame) {   /* after a drop: every tab is already in its new slot */
-            ts->x.x = tid[k] == st->dropped ? st->drop_off : 0;
-            ts->x.v = 0;
-            ts->seq = st->seq;
-        }
-        bool dragged = pose_from == k;
-        float target = 0;
-        if (pose_from >= 0 && !dragged) {
-            float shift = wid[pose_from] + CUI__DTAB_GAP;
-            if (pose_from < pose_to && k > pose_from && k <= pose_to) target = -shift;
-            if (pose_from > pose_to && k >= pose_to && k < pose_from) target = shift;
-        }
-        if (dragged) { ts->x.x = pose_x - left[k]; ts->x.v = 0; }
-        else cui__spring(ui, &ts->x, target, CUI_SPRING_SMOOTH);
-
-        bool hov = (tr.hovered || sr.hovered) && pose_from < 0;
-        bool want_x = !o->no_close && (hov || tr.focus_visible || (active && !tb->dirty));
-        cui__tween(ui, &ts->hover, hov ? 1.0f : 0.0f, CUI__T_HOVER);
-        cui__tween(ui, &ts->slot_hover, sr.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
-        cui__tween(ui, &ts->xshow, want_x ? 1.0f : 0.0f, CUI__T_HOVER);
-        cui__tween(ui, &ts->focus, tr.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
-
-        int i = cui__node_new(ui, tid[k]);
-        cui_node *n = &ui->nodes[i];
-        n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
-        n->h = CUI_PX(CUI__DTAB_H);
-        n->pad[3] = 12;
-        n->pad[1] = o->no_close ? 12 : 6;
-        n->radius.tl = n->radius.tr = rad;
-        n->self_align = CUI_ALIGN_END;
-        n->tx = ts->x.x;
-        if (active || dragged) {
-            cui__folder_paint *fp = CUI_PAINT_DATA(ui, cui__folder_paint);
-            fp->bg = active ? CUI_C(ui, SURFACE) : CUI_C(ui, SURFACE_RAISED);
-            fp->border = CUI_C(ui, BORDER);
-            fp->r = rad;
-            fp->full = dragged;
-            n->paint = cui__paint_folder;
-            n->paint_data = fp;
-        } else {
-            n->bg = cui_alpha(CUI_C(ui, HOVER), ts->hover);
-        }
-        if (dragged) {
-            n->elevation = CUI_ELEVATION_FLOATING;
-            n->elevation_alpha = st->lift.x;
-            n->radius.br = n->radius.bl = rad;
-            n->flags |= CUI_NF_ON_TOP;
-        }
-        cui__mark_interactive(ui, i, active ? CUI_IF_FOCUSABLE : 0);
-        if (tr.hovered || dragged) cui__set_cursor(ui, dragged ? CUI_CURSOR_MOVE : CUI_CURSOR_HAND);
-        cui__open(ui, i);
-        cui_color fg = active ? CUI_C(ui, FOREGROUND) : cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), ts->hover * 0.7f);
-        if (tb->icon) cui__icon_node(ui, tb->icon, 14, active ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
-        const char *title = tb->title ? tb->title : "";
-        int t = cui__text_node(ui, title, cui__display_len(title), CUI_FONT_BODY, fs, fg, false);
-        ui->nodes[t].line_height = 1.3f;
-        ui->nodes[t].max_w = 200;
-        if (!o->no_close) {
-            int slot = cui__node_new(ui, cid);
-            cui_node *s = &ui->nodes[slot];
-            s->dir = CUI_STACK; s->align = CUI_ALIGN_CENTER; s->justify = CUI_JUSTIFY_CENTER;
-            s->w = CUI_PX(20); s->h = CUI_PX(20);
-            s->radius = CUI_CORNERS(CUI__R_SMALL);
-            s->bg = sr.pressed ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), ts->slot_hover * 1.6f);
-            s->self_align = CUI_ALIGN_CENTER;
-            cui__mark_interactive(ui, slot, 0);
-            if (sr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
-            cui__open(ui, slot);
-            cui__icon_node(ui, CUI_ICON_X, 14, cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), ts->slot_hover));
-            ui->nodes[ui->node_count - 1].opacity = CUI_MAX(0.001f, ts->xshow);
-            int dot = cui__leaf(ui, 0, CUI_PX(20), CUI_PX(20));
-            cui__dot_paint *dp = CUI_PAINT_DATA(ui, cui__dot_paint);
-            dp->c = CUI_C(ui, TEXT_SECONDARY);
-            dp->alpha = tb->dirty ? 1.0f - ts->xshow : 0.0f;
-            ui->nodes[dot].paint = cui__paint_dirty_dot;
-            ui->nodes[dot].paint_data = dp;
-            cui__close(ui);
-        }
-        cui__close(ui);
-        cui__focus_ring(ui, i, ts->focus);
-        if (!o->no_close) {
-            ui->last_id = cid;
-            cui_tooltip(ui, o->shortcuts && active ? (CUI_MOD_PRIMARY == CUI_MOD_SUPER ? "Close  \xc2\xb7  Cmd W" : "Close  \xc2\xb7  Ctrl W") : "Close");
-        }
-        ui->last_id = tid[k];
-        ui->last_node = i;
-        if (tb->tooltip && st->from < 0) cui_tooltip(ui, tb->tooltip);
-    }
+    for (int k = 0; k < count; k++) cui__dtf_build_tab(&f, k, vis_sel, rad, fs);
     cui__close(ui);
     cui__scroll_end_ex(ui);
     cui_pop_id(ui);
 
     /* selection follows a move, so the app only has to move its own array */
+    int sel = f.sel;
     if (res.move_from >= 0) {
-        int f = res.move_from, t = res.move_to;
-        if (sel == f) sel = t;
-        else if (f < t && sel > f && sel <= t) sel--;
-        else if (f > t && sel >= t && sel < f) sel++;
+        int mf = res.move_from, mt = res.move_to;
+        if (sel == mf) sel = mt;
+        else if (mf < mt && sel > mf && sel <= mt) sel--;
+        else if (mf > mt && sel >= mt && sel < mf) sel++;
     }
     if (sel != *selected) { *selected = sel; res.changed = true; }
-    ui->last_id = id;
+    ui->last_id = f.id;
     return res;
 }
