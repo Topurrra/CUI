@@ -1080,209 +1080,187 @@ cui_diff_result cui_diff_view_ex(cui_ctx *ui, const char *id_str, const char *ol
     return r;
 }
 
-static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, const char *old_text, const char *new_text, const cui_diff_opts *o) {
-    cui_diff_opts d;
-    memset(&d, 0, sizeof d);
-    if (!o) o = &d;
-    cui_diff_result res;
-    memset(&res, 0, sizeof res);
-    res.current = -1;
-    cui_id id = cui_make_id(ui, id_str);
-    cui_id lid = id ^ 0xD1FF11u, sid = id ^ 0xD1FF5Cu;
-    cui__diff_state *s = cui_state(ui, id ^ CUI__DIFF_SALT, sizeof *s);
-    cui__state_set_dtor(ui, id ^ CUI__DIFF_SALT, cui__diff_dtor);
-    if (!s->init) {
-        s->init = true;
-        s->current = -1;
-        s->hover_row = -1;
-    }
-    if (!s->c) {
-        s->c = cui__alloc(ui, sizeof *s->c);
-        if (s->c) { memset(s->c, 0, sizeof *s->c); s->c->D.A = &ui->alloc; }
-    }
-    cui__diff_cache *c = s->c;
-    if (!c) return res;
-    cui__diff *D = &c->D;
+/* one frame of the diff view: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_diff_opts *o;
+    cui_diff_result *res;
+    cui_id id, lid, sid;                /* the view, its rows, its scroll area */
+    cui__diff_state *s;
+    cui__diff_cache *c;
+    cui__diff *D;
+    const char *lang;                   /* for highlighting, or NULL */
+    float size, row_h, cw, gutter;      /* text size, row height, column width, line number width */
+    cui_rect prev; bool known;          /* the view, last frame (known: it has one) */
+    bool split, nofold;
+    int context;
+    cui_scroll_state *ss;
+    int nrows, nchanges;
+    float header_h, content_h, height, view_h, view_w;
+    cui_interact lr;
+    int hover_row;
+    bool rebuild;                       /* a fold opened or closed: rebuild the rows */
+} cui__dvf;
 
-    /* ---- diff again only when a text (or how lines compare) changed ---- */
+/* diff again only when a text (or how lines compare) changed */
+static void cui__dvf_rediff(cui__dvf *f, const char *old_text, const char *new_text) {
+    cui_ctx *ui = f->ui;
+    cui__diff_cache *c = f->c;
+    cui__diff *D = f->D;
+    cui__diff_state *s = f->s;
     if (!old_text) old_text = "";
     if (!new_text) new_text = "";
     size_t ol = strlen(old_text), nl = strlen(new_text);
     if (ol > CUI__DIFF_MAX_LEN) ol = CUI__DIFF_MAX_LEN;
     if (nl > CUI__DIFF_MAX_LEN) nl = CUI__DIFF_MAX_LEN;
-    bool same = D->text[0] && D->text[1] && D->len[0] == ol && D->len[1] == nl && D->ignore_eol == o->ignore_eol &&
+    bool same = D->text[0] && D->text[1] && D->len[0] == ol && D->len[1] == nl && D->ignore_eol == f->o->ignore_eol &&
                 memcmp(D->text[0], old_text, ol) == 0 && memcmp(D->text[1], new_text, nl) == 0;
-    if (!same) {
-        cui__df_compute(D, old_text, ol, new_text, nl, o->ignore_eol, true);
-        res.recomputed = true;
-        c->rows_valid = false;
-        cui__free(ui, c->expanded);
-        c->expanded = D->nblocks + 1 > 0 ? cui__alloc(ui, (size_t)D->nblocks + 1) : NULL;
-        c->nexpanded = c->expanded ? D->nblocks + 1 : 0;
-        if (c->expanded) memset(c->expanded, 0, (size_t)c->nexpanded);
-        if (s->current >= D->nblocks) s->current = D->nblocks - 1;
-        s->max_w = 0;
+    if (same) return;
+    cui__df_compute(D, old_text, ol, new_text, nl, f->o->ignore_eol, true);
+    f->res->recomputed = true;
+    c->rows_valid = false;
+    cui__free(ui, c->expanded);
+    c->expanded = D->nblocks + 1 > 0 ? cui__alloc(ui, (size_t)D->nblocks + 1) : NULL;
+    c->nexpanded = c->expanded ? D->nblocks + 1 : 0;
+    if (c->expanded) memset(c->expanded, 0, (size_t)c->nexpanded);
+    if (s->current >= D->nblocks) s->current = D->nblocks - 1;
+    s->max_w = 0;
+}
+
+/* the rows, rebuilt when the diff, the mode or a fold changes; the line at the top stays in
+ * view across a change of mode */
+static void cui__dvf_rows(cui__dvf *f) {
+    cui__diff_cache *c = f->c;
+    cui_scroll_state *ss = f->ss;
+    if (!(!c->rows_valid || c->rows_split != f->split || c->rows_context != f->context || c->rows_nofold != f->nofold)) return;
+    int top_a = -1, top_b = -1;
+    if (c->rows_valid && c->nrows > 0 && !f->res->recomputed) {
+        int ti = CUI_CLAMP((int)((ss->y - CUI__DIFF_INSET) / f->row_h), 0, c->nrows - 1);
+        top_a = c->rows[ti].a; top_b = c->rows[ti].b;
     }
-    const char *lang = o->language && o->language[0] ? o->language : NULL;
-    if (lang) cui__diff_lang(ui, D, lang);
-
-    /* ---- geometry ---- */
-    float size = cui__fs(ui, o->size > 0 ? o->size : 12);
-    float row_h = roundf(size * 1.75f);
-    float cw = cui__text_width(ui, CUI_FONT_MONO, size, "0000000000000000", 16, true) / 16.0f;
-    int digits = 2;
-    for (int v = CUI_MAX(D->n[0], D->n[1]); v >= 100; v /= 10) digits++;
-    float gutter = (float)digits * cw;
-    cui_rect prev = cui__prev_rect(ui, id);
-    bool known = cui__has_prev_rect(ui, id);
-    if (!known) ui->animating = true;   /* lay out again once the width is known */
-    float split_min = o->split_min_width > 0 ? o->split_min_width : CUI__DIFF_SPLIT_MIN;
-    bool split = o->mode == CUI_DIFF_SPLIT && (!known || prev.w >= split_min);
-    int context = o->context > 0 ? o->context : 3;
-    bool nofold = o->no_fold;
-
-    /* ---- rows (rebuilt when the diff, the mode or a fold changes) ---- */
-    cui_scroll_state *ss = cui_state(ui, sid, sizeof *ss);
-    if (!c->rows_valid || c->rows_split != split || c->rows_context != context || c->rows_nofold != nofold) {
-        /* keep the line at the top in view across a change of mode */
-        int top_a = -1, top_b = -1;
-        if (c->rows_valid && c->nrows > 0 && !res.recomputed) {
-            int ti = CUI_CLAMP((int)((ss->y - CUI__DIFF_INSET) / row_h), 0, c->nrows - 1);
-            top_a = c->rows[ti].a; top_b = c->rows[ti].b;
+    cui__dr_build(f->ui, c, f->split, f->context, f->nofold);
+    if (top_a >= 0 || top_b >= 0) {
+        int ti = 0;
+        for (; ti < c->nrows; ti++) {
+            const cui__drow *r = &c->rows[ti];
+            if ((top_a >= 0 && r->a >= top_a) || (top_a < 0 && r->b >= top_b)) break;
         }
-        cui__dr_build(ui, c, split, context, nofold);
-        if (top_a >= 0 || top_b >= 0) {
-            int ti = 0;
-            for (; ti < c->nrows; ti++) {
-                const cui__drow *r = &c->rows[ti];
-                if ((top_a >= 0 && r->a >= top_a) || (top_a < 0 && r->b >= top_b)) break;
-            }
-            ss->y = ss->ty = (float)CUI_MIN(ti, CUI_MAX(0, c->nrows - 1)) * row_h;
+        ss->y = ss->ty = (float)CUI_MIN(ti, CUI_MAX(0, c->nrows - 1)) * f->row_h;
+    }
+}
+
+/* the change the caller selects through o->current, when it set a new one */
+static void cui__dvf_caller_current(cui__dvf *f) {
+    cui__diff_state *s = f->s;
+    int want = *f->o->current;
+    if (want < -1) want = -1;
+    if (want >= f->nchanges) want = f->nchanges - 1;
+    if (!s->has_reported || want != s->reported) {
+        if (want != s->current || !s->has_reported) {
+            s->current = want;
+            if (want >= 0) s->goto_pending = true;
         }
     }
-    int nrows = c->nrows;
+}
 
-    /* ---- the selected change ---- */
-    int nchanges = D->nblocks;
-    if (s->current >= nchanges) s->current = nchanges - 1;
-    int before_current = s->current;
-    if (o->current) {
-        int want = *o->current;
-        if (want < -1) want = -1;
-        if (want >= nchanges) want = nchanges - 1;
-        if (!s->has_reported || want != s->reported) {
-            if (want != s->current || !s->has_reported) {
-                s->current = want;
-                if (want >= 0) s->goto_pending = true;
-            }
-        }
-    }
-
-    float header_h = o->old_title || o->new_title ? 32 : 0;
-    float content_h = (float)nrows * row_h + 2 * CUI__DIFF_INSET;
-    float height = o->height > 0 ? o->height : CUI_MIN(420.0f, header_h + CUI_MAX(content_h, 2 * row_h + 2 * CUI__DIFF_INSET) + 2);
-    float view_h = ss->view_h > 0 ? ss->view_h : height - header_h - 2;
-    float view_w = ss->view_w > 0 ? ss->view_w : (known ? prev.w - 2 : 600);
-
-    /* ---- pointer ---- */
-    cui_interact lr = cui__interact(ui, lid, CUI_IF_FOCUSABLE);
-    cui_rect cr = cui__prev_rect(ui, lid);
-    int hover_row = -1;
-    if (cr.h > 0 && lr.hovered) {
-        float fy = (ui->my - cr.y - CUI__DIFF_INSET) / row_h;
+/* the pointer: the row under it; a click opens a fold or selects a change */
+static void cui__dvf_pointer(cui__dvf *f) {
+    cui_ctx *ui = f->ui;
+    cui__diff_cache *c = f->c;
+    f->lr = cui__interact(ui, f->lid, CUI_IF_FOCUSABLE);
+    cui_rect cr = cui__prev_rect(ui, f->lid);
+    f->hover_row = -1;
+    if (cr.h > 0 && f->lr.hovered) {
+        float fy = (ui->my - cr.y - CUI__DIFF_INSET) / f->row_h;
         int ri = (int)floorf(fy);
-        if (fy >= 0 && ri < nrows) hover_row = ri;
+        if (fy >= 0 && ri < f->nrows) f->hover_row = ri;
     }
-    bool rebuild = false;
-    if (hover_row >= 0 && c->rows[hover_row].kind == CUI_DIFF_ROW_FOLD) cui__set_cursor(ui, CUI_CURSOR_HAND);
-    if (lr.clicked && hover_row >= 0) {
-        const cui__drow *r = &c->rows[hover_row];
-        if (r->kind == CUI_DIFF_ROW_FOLD && r->gap >= 0 && r->gap < c->nexpanded) { c->expanded[r->gap] = 1; rebuild = true; }
-        else if (r->change >= 0) s->current = r->change;
+    if (f->hover_row >= 0 && c->rows[f->hover_row].kind == CUI_DIFF_ROW_FOLD) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    if (f->lr.clicked && f->hover_row >= 0) {
+        const cui__drow *r = &c->rows[f->hover_row];
+        if (r->kind == CUI_DIFF_ROW_FOLD && r->gap >= 0 && r->gap < c->nexpanded) { c->expanded[r->gap] = 1; f->rebuild = true; }
+        else if (r->change >= 0) f->s->current = r->change;
     }
+}
 
-    /* ---- keys ---- */
-    if (ui->focus == lid) {
-        int mods = ui->mods;
-        bool alt = (mods & CUI_MOD_ALT) != 0, cmd = (mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) != 0;
-        int step = 0;
-        if (!cmd && ((!alt && cui_key_pressed(ui, CUI_KEY_N)) || (alt && cui_key_pressed(ui, CUI_KEY_DOWN)))) step = 1;
-        if (!cmd && ((!alt && cui_key_pressed(ui, CUI_KEY_P)) || (alt && cui_key_pressed(ui, CUI_KEY_UP)))) step = -1;
-        if (step && nchanges > 0) {
-            int to;
-            if (s->current < 0) {
-                /* from where the view is: the first change at or below its top, or the last above it */
-                int top = (int)floorf((ss->ty - CUI__DIFF_INSET) / row_h + 0.5f);
-                to = step > 0 ? nchanges - 1 : 0;
-                if (step > 0) { for (int k = 0; k < nchanges; k++) if (cui__diff_row_of_change(c, k) >= top) { to = k; break; } }
-                else { for (int k = nchanges - 1; k >= 0; k--) if (cui__diff_row_of_change(c, k) < top) { to = k; break; } }
-            } else to = CUI_CLAMP(s->current + step, 0, nchanges - 1);
-            s->current = to;
-            s->goto_pending = true;
-        }
-        if (!alt && !cmd) {
-            float dy = 0;
-            if (cui_key_pressed(ui, CUI_KEY_DOWN)) dy = row_h;
-            if (cui_key_pressed(ui, CUI_KEY_UP)) dy = -row_h;
-            if (cui_key_pressed(ui, CUI_KEY_PAGE_DOWN)) dy = CUI_MAX(row_h, view_h - row_h);
-            if (cui_key_pressed(ui, CUI_KEY_PAGE_UP)) dy = -CUI_MAX(row_h, view_h - row_h);
-            if (cui_key_pressed(ui, CUI_KEY_HOME)) dy = -1e9f;
-            if (cui_key_pressed(ui, CUI_KEY_END)) dy = 1e9f;
-            if (dy != 0) { ss->ty = cui__clampf(ss->ty + dy, 0, CUI_MAX(0, content_h - view_h)); ui->animating = true; }
-            float dx = 0;
-            if (cui_key_pressed(ui, CUI_KEY_RIGHT)) dx = cw * 8;
-            if (cui_key_pressed(ui, CUI_KEY_LEFT)) dx = -cw * 8;
-            if (dx != 0) { ss->tx = CUI_MAX(0, ss->tx + dx); ui->animating = true; }
-            if (cui_key_pressed(ui, CUI_KEY_E) && c->nexpanded > 0) {
-                memset(c->expanded, (mods & CUI_MOD_SHIFT) ? 0 : 1, (size_t)c->nexpanded);   /* Shift+E folds again */
-                rebuild = true;
-            }
-        }
-        if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && s->current >= 0) { s->current = -1; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
-    }
-    if (rebuild) {
-        cui__dr_build(ui, c, split, context, nofold);
-        nrows = c->nrows;
-        content_h = (float)nrows * row_h + 2 * CUI__DIFF_INSET;
-        hover_row = -1;
-    }
+/* the next or previous change; with none selected, from where the view is: the first change
+ * at or below its top, or the last above it */
+static void cui__dvf_step(cui__dvf *f, int step) {
+    cui__diff_state *s = f->s;
+    int nchanges = f->nchanges, to;
+    if (s->current < 0) {
+        int top = (int)floorf((f->ss->ty - CUI__DIFF_INSET) / f->row_h + 0.5f);
+        to = step > 0 ? nchanges - 1 : 0;
+        if (step > 0) { for (int k = 0; k < nchanges; k++) if (cui__diff_row_of_change(f->c, k) >= top) { to = k; break; } }
+        else { for (int k = nchanges - 1; k >= 0; k--) if (cui__diff_row_of_change(f->c, k) < top) { to = k; break; } }
+    } else to = CUI_CLAMP(s->current + step, 0, nchanges - 1);
+    s->current = to;
+    s->goto_pending = true;
+}
 
-    /* ---- go to the selected change ---- */
-    /* once the scroll area has laid out these rows (it clamps to its last layout) */
-    bool laid_out = ss->view_h > 0 && fabsf(ss->content_h - CUI_MAX(content_h, ss->view_h)) < 1.0f;
-    if (s->goto_pending && s->current >= 0 && s->current < nchanges && !laid_out) ui->animating = true;
-    else if (s->goto_pending && s->current >= 0 && s->current < nchanges) {
-        int r0 = cui__diff_row_of_change(c, s->current), r1 = cui__diff_row_end(c, s->current);
+/* keys while focused: N and P (or Alt+arrows) step through the changes, arrows, pages, Home
+ * and End scroll, E opens every fold (Shift+E folds again), Escape clears the selection */
+static void cui__dvf_keys(cui__dvf *f) {
+    cui_ctx *ui = f->ui;
+    cui_scroll_state *ss = f->ss;
+    float row_h = f->row_h, view_h = f->view_h;
+    int mods = ui->mods;
+    bool alt = (mods & CUI_MOD_ALT) != 0, cmd = (mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) != 0;
+    int step = 0;
+    if (!cmd && ((!alt && cui_key_pressed(ui, CUI_KEY_N)) || (alt && cui_key_pressed(ui, CUI_KEY_DOWN)))) step = 1;
+    if (!cmd && ((!alt && cui_key_pressed(ui, CUI_KEY_P)) || (alt && cui_key_pressed(ui, CUI_KEY_UP)))) step = -1;
+    if (step && f->nchanges > 0) cui__dvf_step(f, step);
+    if (!alt && !cmd) {
+        float dy = 0;
+        if (cui_key_pressed(ui, CUI_KEY_DOWN)) dy = row_h;
+        if (cui_key_pressed(ui, CUI_KEY_UP)) dy = -row_h;
+        if (cui_key_pressed(ui, CUI_KEY_PAGE_DOWN)) dy = CUI_MAX(row_h, view_h - row_h);
+        if (cui_key_pressed(ui, CUI_KEY_PAGE_UP)) dy = -CUI_MAX(row_h, view_h - row_h);
+        if (cui_key_pressed(ui, CUI_KEY_HOME)) dy = -1e9f;
+        if (cui_key_pressed(ui, CUI_KEY_END)) dy = 1e9f;
+        if (dy != 0) { ss->ty = cui__clampf(ss->ty + dy, 0, CUI_MAX(0, f->content_h - view_h)); ui->animating = true; }
+        float dx = 0;
+        if (cui_key_pressed(ui, CUI_KEY_RIGHT)) dx = f->cw * 8;
+        if (cui_key_pressed(ui, CUI_KEY_LEFT)) dx = -f->cw * 8;
+        if (dx != 0) { ss->tx = CUI_MAX(0, ss->tx + dx); ui->animating = true; }
+        if (cui_key_pressed(ui, CUI_KEY_E) && f->c->nexpanded > 0) {
+            memset(f->c->expanded, (mods & CUI_MOD_SHIFT) ? 0 : 1, (size_t)f->c->nexpanded);   /* Shift+E folds again */
+            f->rebuild = true;
+        }
+    }
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && f->s->current >= 0) { f->s->current = -1; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
+}
+
+/* scroll to the selected change, once the scroll area has laid out these rows (it clamps to
+ * its last layout) */
+static void cui__dvf_goto(cui__dvf *f) {
+    cui_ctx *ui = f->ui;
+    cui__diff_state *s = f->s;
+    cui_scroll_state *ss = f->ss;
+    float row_h = f->row_h, view_h = f->view_h;
+    bool laid_out = ss->view_h > 0 && fabsf(ss->content_h - CUI_MAX(f->content_h, ss->view_h)) < 1.0f;
+    if (s->goto_pending && s->current >= 0 && s->current < f->nchanges && !laid_out) ui->animating = true;
+    else if (s->goto_pending && s->current >= 0 && s->current < f->nchanges) {
+        int r0 = cui__diff_row_of_change(f->c, s->current), r1 = cui__diff_row_end(f->c, s->current);
         float top = CUI__DIFF_INSET + (float)r0 * row_h, bottom = CUI__DIFF_INSET + (float)r1 * row_h;
         bool seen = top >= ss->ty && bottom <= ss->ty + view_h;
         if (!seen) {
             float t = top - CUI_MIN(view_h * 0.25f, 3 * row_h);
             if (bottom - top > view_h * 0.75f) t = top - row_h;
-            ss->ty = cui__clampf(t, 0, CUI_MAX(0, content_h - view_h));
+            ss->ty = cui__clampf(t, 0, CUI_MAX(0, f->content_h - view_h));
             ui->animating = true;
         }
         s->goto_pending = false;
     } else if (s->current < 0) s->goto_pending = false;
-    cui__tween(ui, &s->hover, hover_row >= 0 && c->rows[hover_row].kind == CUI_DIFF_ROW_FOLD ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
-    if (hover_row >= 0) s->hover_row = hover_row;
+}
 
-    /* ---- build ---- */
-    bool dark = ui->mode == CUI_THEME_DARK;
-    int outer = cui__node_new(ui, id);
-    cui_node *on = &ui->nodes[outer];
-    on->w = o->width.kind ? o->width : CUI_FILL;
-    on->h = o->height < 0 ? CUI_FILL : CUI_PX(height);
-    on->radius = CUI_CORNERS(ui->theme.radius_control);
-    on->border = 1; on->border_color = CUI_C(ui, BORDER);
-    cui_color bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
-    on->bg = bg;   /* the code block's surface */
-    on->flags |= CUI_NF_CLIP;
-    cui__open(ui, outer);
-
+/* what every row's paint shares: metrics and colors */
+static cui__diff_common *cui__dvf_common(cui__dvf *f, cui_color bg, bool dark) {
+    cui_ctx *ui = f->ui;
     cui__diff_common *cm = cui__frame_alloc(ui, sizeof *cm);
     memset(cm, 0, sizeof *cm);
-    cm->size = size; cm->row_h = row_h; cm->cw = cw; cm->gutter = gutter;
-    cm->split = split; cm->syntax = lang != NULL;
+    cm->size = f->size; cm->row_h = f->row_h; cm->cw = f->cw; cm->gutter = f->gutter;
+    cm->split = f->split; cm->syntax = f->lang != NULL;
     cui_color fg = CUI_C(ui, FOREGROUND), danger = CUI_C(ui, DANGER), success = CUI_C(ui, SUCCESS);
     cm->fg = fg;
     cm->muted = CUI_C(ui, TEXT_MUTED);
@@ -1300,25 +1278,69 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
     cm->marker = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     cm->line = CUI_C(ui, BORDER);
     cm->bg = bg;
-    if (lang) cui__syntax_colors(ui, cm->colors);
+    if (f->lang) cui__syntax_colors(ui, cm->colors);
+    return cm;
+}
 
-    if (header_h > 0) {
-        int head = cui__leaf(ui, 0, CUI_FILL, CUI_PX(header_h));
-        cui__diff_headp *hp = cui__frame_alloc(ui, sizeof *hp);
-        hp->c = cm;
-        hp->title[0] = o->old_title ? cui__frame_strdup(ui, o->old_title, -1) : NULL;
-        hp->title[1] = o->new_title ? cui__frame_strdup(ui, o->new_title, -1) : NULL;
-        hp->added = D->added; hp->removed = D->removed;
-        hp->sum = nchanges > 0;
-        ui->nodes[head].bg = CUI_C(ui, SURFACE);
-        ui->nodes[head].paint = cui__paint_diff_head;
-        ui->nodes[head].paint_data = hp;
+/* the header: the two titles and the counts */
+static void cui__dvf_build_header(cui__dvf *f, cui__diff_common *cm) {
+    cui_ctx *ui = f->ui;
+    int head = cui__leaf(ui, 0, CUI_FILL, CUI_PX(f->header_h));
+    cui__diff_headp *hp = cui__frame_alloc(ui, sizeof *hp);
+    hp->c = cm;
+    hp->title[0] = f->o->old_title ? cui__frame_strdup(ui, f->o->old_title, -1) : NULL;
+    hp->title[1] = f->o->new_title ? cui__frame_strdup(ui, f->o->new_title, -1) : NULL;
+    hp->added = f->D->added; hp->removed = f->D->removed;
+    hp->sum = f->nchanges > 0;
+    ui->nodes[head].bg = CUI_C(ui, SURFACE);
+    ui->nodes[head].paint = cui__paint_diff_head;
+    ui->nodes[head].paint_data = hp;
+}
+
+/* one row's paint data: both sides when split, one otherwise; the widest text seen is kept for
+ * the sideways scroll */
+static void cui__dvf_build_row(cui__dvf *f, cui__diff_common *cm, int i) {
+    cui_ctx *ui = f->ui;
+    cui__diff_state *s = f->s;
+    const cui__drow *r = &f->c->rows[i];
+    cui__diff_rowp *p = cui__frame_alloc(ui, sizeof *p);
+    memset(p, 0, sizeof *p);
+    p->c = cm;
+    p->kind = r->kind;
+    p->current = r->change >= 0 && r->change == s->current;
+    p->hidden = r->hidden;
+    p->hover = i == f->hover_row ? s->hover : 0;
+    if (r->kind != CUI_DIFF_ROW_FOLD) {
+        if (f->split) {
+            if (r->a >= 0) cui__diff_side_fill(ui, f->D, 0, r->a, f->lang, &p->side[0]);
+            if (r->b >= 0) cui__diff_side_fill(ui, f->D, 1, r->b, f->lang, &p->side[1]);
+            p->side[0].tone = r->a < 0 ? 3 : r->kind == CUI_DIFF_ROW_SAME ? 0 : 1;
+            p->side[1].tone = r->b < 0 ? 3 : r->kind == CUI_DIFF_ROW_SAME ? 0 : 2;
+            for (int t = 0; t < 2; t++)
+                if (p->side[t].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__text_width(ui, CUI_FONT_MONO, f->size, p->side[t].text, p->side[t].len, true));
+        } else {
+            int sd = r->a >= 0 ? 0 : 1;
+            cui__diff_side_fill(ui, f->D, sd, sd ? r->b : r->a, f->lang, &p->side[0]);
+            p->side[0].num = r->a >= 0 ? r->a + 1 : 0;
+            p->side[1].num = r->b >= 0 ? r->b + 1 : 0;
+            p->side[0].tone = r->kind == CUI_DIFF_ROW_REMOVED ? 1 : r->kind == CUI_DIFF_ROW_ADDED ? 2 : 0;
+            if (p->side[0].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__text_width(ui, CUI_FONT_MONO, f->size, p->side[0].text, p->side[0].len, true));
+        }
     }
+    int rn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(f->row_h));
+    ui->nodes[rn].paint = cui__paint_diff_row;
+    ui->nodes[rn].paint_data = p;
+}
 
+/* the scroll area: the rows in view, or why there are none */
+static void cui__dvf_build_body(cui__dvf *f, cui__diff_common *cm) {
+    cui_ctx *ui = f->ui;
+    float row_h = f->row_h, view_h = f->view_h, view_w = f->view_w, cw = f->cw;
+    int nrows = f->nrows;
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL; sb.height = CUI_FILL;
-    int scroll = cui__scroll_begin_ex(ui, sid, &sb, true);
+    int scroll = cui__scroll_begin_ex(ui, f->sid, &sb, true);
     float y = ui->nodes[scroll].scroll_y;
     int first = (int)floorf((y - CUI__DIFF_INSET) / row_h) - 2;
     int last = (int)ceilf((y + view_h) / row_h) + 2;
@@ -1330,19 +1352,19 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
     cui__diff_cols c0, c1;
     cui__diff_side_cols(cm, view_w, 0, &c0);
     cui__diff_side_cols(cm, view_w, 1, &c1);
-    float text_w = split ? CUI_MIN(c0.right - c0.text, c1.right - c1.text) : c0.right - c0.text;
-    double widest = (double)CUI_MAX(D->maxcols[0], D->maxcols[1]) * cw;
+    float text_w = f->split ? CUI_MIN(c0.right - c0.text, c1.right - c1.text) : c0.right - c0.text;
+    double widest = (double)CUI_MAX(f->D->maxcols[0], f->D->maxcols[1]) * cw;
     if (widest > CUI__DIFF_DRAW_MAX * cw) widest = CUI__DIFF_DRAW_MAX * cw;
-    widest = CUI_MAX(widest, s->max_w);
+    widest = CUI_MAX(widest, f->s->max_w);
     float extra = CUI_MAX(0.0f, (float)widest + cw * 3 - text_w);
 
-    int content = cui__node_new(ui, lid);
+    int content = cui__node_new(ui, f->lid);
     cui_node *cn = &ui->nodes[content];
     cn->w = CUI_FILL;
     cn->min_w = extra > 0 ? view_w + extra : 0;
-    cn->h = CUI_PX(CUI_MAX(content_h, view_h));
+    cn->h = CUI_PX(CUI_MAX(f->content_h, view_h));
     cui__mark_interactive(ui, content, CUI_IF_FOCUSABLE);
-    if (split && nrows > 0) {
+    if (f->split && nrows > 0) {
         cn->paint = cui__paint_diff_divider;
         cn->paint_data = cm;
     }
@@ -1352,58 +1374,121 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
         ui->nodes[e].w = CUI_FILL; ui->nodes[e].h = CUI_FILL;
         ui->nodes[e].align = CUI_ALIGN_CENTER; ui->nodes[e].justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, e);
-        const char *msg = D->failed ? "Not enough memory to compare these texts" : "Both texts are empty";
+        const char *msg = f->D->failed ? "Not enough memory to compare these texts" : "Both texts are empty";
         cui__text_node(ui, msg, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, TEXT_MUTED), false);
         cui__close(ui);
     } else {
         cui__leaf(ui, 0, CUI_FILL, CUI_PX(CUI__DIFF_INSET + (float)first * row_h));
-        for (int i = first; i < last; i++) {
-            const cui__drow *r = &c->rows[i];
-            cui__diff_rowp *p = cui__frame_alloc(ui, sizeof *p);
-            memset(p, 0, sizeof *p);
-            p->c = cm;
-            p->kind = r->kind;
-            p->current = r->change >= 0 && r->change == s->current;
-            p->hidden = r->hidden;
-            p->hover = i == hover_row ? s->hover : 0;
-            if (r->kind != CUI_DIFF_ROW_FOLD) {
-                if (split) {
-                    if (r->a >= 0) cui__diff_side_fill(ui, D, 0, r->a, lang, &p->side[0]);
-                    if (r->b >= 0) cui__diff_side_fill(ui, D, 1, r->b, lang, &p->side[1]);
-                    p->side[0].tone = r->a < 0 ? 3 : r->kind == CUI_DIFF_ROW_SAME ? 0 : 1;
-                    p->side[1].tone = r->b < 0 ? 3 : r->kind == CUI_DIFF_ROW_SAME ? 0 : 2;
-                    for (int t = 0; t < 2; t++)
-                        if (p->side[t].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__text_width(ui, CUI_FONT_MONO, size, p->side[t].text, p->side[t].len, true));
-                } else {
-                    int sd = r->a >= 0 ? 0 : 1;
-                    cui__diff_side_fill(ui, D, sd, sd ? r->b : r->a, lang, &p->side[0]);
-                    p->side[0].num = r->a >= 0 ? r->a + 1 : 0;
-                    p->side[1].num = r->b >= 0 ? r->b + 1 : 0;
-                    p->side[0].tone = r->kind == CUI_DIFF_ROW_REMOVED ? 1 : r->kind == CUI_DIFF_ROW_ADDED ? 2 : 0;
-                    if (p->side[0].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__text_width(ui, CUI_FONT_MONO, size, p->side[0].text, p->side[0].len, true));
-                }
-            }
-            int rn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(row_h));
-            ui->nodes[rn].paint = cui__paint_diff_row;
-            ui->nodes[rn].paint_data = p;
-        }
+        for (int i = first; i < last; i++) cui__dvf_build_row(f, cm, i);
     }
     cui__close(ui);   /* content */
     cui__scroll_end_ex(ui);
-    if (ui->focus == lid) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
-    cui__close(ui);   /* outer */
-    ui->last_id = id;
+}
 
-    /* ---- result ---- */
+static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, const char *old_text, const char *new_text, const cui_diff_opts *o) {
+    cui_diff_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_diff_result res;
+    memset(&res, 0, sizeof res);
+    res.current = -1;
+    cui__dvf f;
+    memset(&f, 0, sizeof f);
+    f.ui = ui; f.o = o; f.res = &res;
+    f.id = cui_make_id(ui, id_str);
+    f.lid = f.id ^ 0xD1FF11u; f.sid = f.id ^ 0xD1FF5Cu;
+    cui__diff_state *s = f.s = cui_state(ui, f.id ^ CUI__DIFF_SALT, sizeof *s);
+    cui__state_set_dtor(ui, f.id ^ CUI__DIFF_SALT, cui__diff_dtor);
+    if (!s->init) {
+        s->init = true;
+        s->current = -1;
+        s->hover_row = -1;
+    }
+    if (!s->c) {
+        s->c = cui__alloc(ui, sizeof *s->c);
+        if (s->c) { memset(s->c, 0, sizeof *s->c); s->c->D.A = &ui->alloc; }
+    }
+    cui__diff_cache *c = f.c = s->c;
+    if (!c) return res;
+    cui__diff *D = f.D = &c->D;
+
+    cui__dvf_rediff(&f, old_text, new_text);
+    f.lang = o->language && o->language[0] ? o->language : NULL;
+    if (f.lang) cui__diff_lang(ui, D, f.lang);
+
+    /* geometry */
+    f.size = cui__fs(ui, o->size > 0 ? o->size : 12);
+    f.row_h = roundf(f.size * 1.75f);
+    f.cw = cui__text_width(ui, CUI_FONT_MONO, f.size, "0000000000000000", 16, true) / 16.0f;
+    int digits = 2;
+    for (int v = CUI_MAX(D->n[0], D->n[1]); v >= 100; v /= 10) digits++;
+    f.gutter = (float)digits * f.cw;
+    f.prev = cui__prev_rect(ui, f.id);
+    f.known = cui__has_prev_rect(ui, f.id);
+    if (!f.known) ui->animating = true;   /* lay out again once the width is known */
+    float split_min = o->split_min_width > 0 ? o->split_min_width : CUI__DIFF_SPLIT_MIN;
+    f.split = o->mode == CUI_DIFF_SPLIT && (!f.known || f.prev.w >= split_min);
+    f.context = o->context > 0 ? o->context : 3;
+    f.nofold = o->no_fold;
+
+    f.ss = cui_state(ui, f.sid, sizeof *f.ss);
+    cui__dvf_rows(&f);
+    f.nrows = c->nrows;
+
+    /* the selected change */
+    f.nchanges = D->nblocks;
+    if (s->current >= f.nchanges) s->current = f.nchanges - 1;
+    int before_current = s->current;
+    if (o->current) cui__dvf_caller_current(&f);
+
+    f.header_h = o->old_title || o->new_title ? 32 : 0;
+    f.content_h = (float)f.nrows * f.row_h + 2 * CUI__DIFF_INSET;
+    f.height = o->height > 0 ? o->height : CUI_MIN(420.0f, f.header_h + CUI_MAX(f.content_h, 2 * f.row_h + 2 * CUI__DIFF_INSET) + 2);
+    f.view_h = f.ss->view_h > 0 ? f.ss->view_h : f.height - f.header_h - 2;
+    f.view_w = f.ss->view_w > 0 ? f.ss->view_w : (f.known ? f.prev.w - 2 : 600);
+
+    /* input */
+    cui__dvf_pointer(&f);
+    if (ui->focus == f.lid) cui__dvf_keys(&f);
+    if (f.rebuild) {
+        cui__dr_build(ui, c, f.split, f.context, f.nofold);
+        f.nrows = c->nrows;
+        f.content_h = (float)f.nrows * f.row_h + 2 * CUI__DIFF_INSET;
+        f.hover_row = -1;
+    }
+    cui__dvf_goto(&f);
+    cui__tween(ui, &s->hover, f.hover_row >= 0 && c->rows[f.hover_row].kind == CUI_DIFF_ROW_FOLD ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    if (f.hover_row >= 0) s->hover_row = f.hover_row;
+
+    /* build */
+    bool dark = ui->mode == CUI_THEME_DARK;
+    int outer = cui__node_new(ui, f.id);
+    cui_node *on = &ui->nodes[outer];
+    on->w = o->width.kind ? o->width : CUI_FILL;
+    on->h = o->height < 0 ? CUI_FILL : CUI_PX(f.height);
+    on->radius = CUI_CORNERS(ui->theme.radius_control);
+    on->border = 1; on->border_color = CUI_C(ui, BORDER);
+    cui_color bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
+    on->bg = bg;   /* the code block's surface */
+    on->flags |= CUI_NF_CLIP;
+    cui__open(ui, outer);
+    cui__diff_common *cm = cui__dvf_common(&f, bg, dark);
+    if (f.header_h > 0) cui__dvf_build_header(&f, cm);
+    cui__dvf_build_body(&f, cm);
+    if (ui->focus == f.lid) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
+    cui__close(ui);   /* outer */
+    ui->last_id = f.id;
+
+    /* result */
     if (o->current) *o->current = s->current;
     s->reported = s->current;
     s->has_reported = true;
     res.added = D->added;
     res.removed = D->removed;
-    res.changes = nchanges;
+    res.changes = f.nchanges;
     res.current = s->current;
     res.current_changed = s->current != before_current;
-    res.mode = split ? CUI_DIFF_SPLIT : CUI_DIFF_INLINE;
+    res.mode = f.split ? CUI_DIFF_SPLIT : CUI_DIFF_INLINE;
     res.approximate = D->approx;
     res.folds = c->folds;
     res.hidden = c->hidden;
