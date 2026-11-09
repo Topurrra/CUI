@@ -770,12 +770,12 @@ typedef struct {
     float size, row_h, cw, gutter;    /* gutter: a line number column */
     bool split, syntax;
     cui_color fg, muted, sign_c[2], num_c[2], tint[2], gut[2], word[2], filler, fold, hover, marker, line, bg;
-    cui_color colors[CUI__CODE_KINDS];
+    cui_color colors[CUI__TK_COUNT];
 } cui__diff_common;
 
 typedef struct {
     const char *text; int len;        /* display text: tabs expanded */
-    const cui__code_tok *toks; int ntok;
+    const cui__tok *toks; int ntok;
     const cui__drange *marks; int nmarks;   /* in display bytes */
     const char *tag;                  /* "No newline at end of file", "CRLF" */
     int num;                          /* 1 based, 0 none */
@@ -1016,9 +1016,9 @@ static void cui__diff_side_fill(cui_ctx *ui, const cui__diff *D, int side, int l
     /* syntax */
     if (lang && o > 0) {
         bool block = D->inblock[side] && D->inblock[side][line];
-        cui__code_tok tk[256];
-        int nt = cui__code_tokens(lang, dst, o, &block, tk, 256);
-        cui__code_tok *keep = cui__frame_alloc(ui, sizeof *keep * (size_t)(nt > 0 ? nt : 1));
+        cui__tok tk[256];
+        int nt = cui__tokenize_lang(lang, dst, o, &block, tk, 256);
+        cui__tok *keep = cui__frame_alloc(ui, sizeof *keep * (size_t)(nt > 0 ? nt : 1));
         memcpy(keep, tk, sizeof *keep * (size_t)nt);
         out->toks = keep;
         out->ntok = nt;
@@ -1032,7 +1032,7 @@ static void cui__diff_lang(cui_ctx *ui, cui__diff *D, const char *lang) {
     D->lang_ready = true;
     D->lang_hash = h;
     if (!lang) return;
-    cui__code_tok tk[256];
+    cui__tok tk[256];
     for (int s = 0; s < 2; s++) {
         if (!D->inblock[s]) D->inblock[s] = cui__df_alloc(D->A, (size_t)D->n[s]);
         if (!D->inblock[s]) return;
@@ -1041,7 +1041,7 @@ static void cui__diff_lang(cui_ctx *ui, cui__diff *D, const char *lang) {
             D->inblock[s][i] = block;
             const cui__dline *l = &D->lines[s][i];
             int n = (int)CUI_MIN(l->len, (uint32_t)CUI__DIFF_DRAW_MAX);
-            cui__code_tokens(lang, D->text[s] + l->off, n, &block, tk, 256);   /* the copy ends in a terminator */
+            cui__tokenize_lang(lang, D->text[s] + l->off, n, &block, tk, 256);   /* the copy ends in a terminator */
         }
     }
     (void)ui;
@@ -1300,7 +1300,7 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
     cm->marker = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     cm->line = CUI_C(ui, BORDER);
     cm->bg = bg;
-    if (lang) cui__code_colors(ui, cm->colors);
+    if (lang) cui__syntax_colors(ui, cm->colors);
 
     if (header_h > 0) {
         int head = cui__leaf(ui, 0, CUI_FILL, CUI_PX(header_h));

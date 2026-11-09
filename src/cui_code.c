@@ -146,18 +146,12 @@ void cui__syntax_colors(cui_ctx *ui, cui_color *c) {
     c[TK_CONST] = dark ? cui_oklch(0.80f, 0.13f, 60, 1) : cui_oklch(0.58f, 0.16f, 50, 1);
 }
 
-/* The highlighter for other components (the diff viewer): one line at a time,
- * the token kinds index the colors from cui__code_colors. */
-typedef char cui__code_kinds_match[TK_COUNT == CUI__CODE_KINDS ? 1 : -1];
-int cui__code_tokens(const char *lang, const char *s, int n, bool *in_block, cui__code_tok *out, int cap) {
+/* the highlighter by language name, for other components (the diff viewer) */
+int cui__tokenize_lang(const char *lang, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
     bool json = lang && !strcmp(lang, "json");
     cui__lang L = cui__lang_for(json ? NULL : lang);
-    cui__tok toks[256];
-    int count = cui__tokenize(&L, json, s, n, in_block, toks, cap < 256 ? cap : 256);
-    for (int k = 0; k < count; k++) { out[k].start = toks[k].start; out[k].len = toks[k].len; out[k].kind = toks[k].kind; }
-    return count;
+    return cui__tokenize(&L, json, s, n, in_block, out, cap < 256 ? cap : 256);
 }
-void cui__code_colors(cui_ctx *ui, cui_color *colors) { cui__syntax_colors(ui, colors); }
 
 /* ------------------------------------------------------------------------ */
 /* Code block                                                               */
