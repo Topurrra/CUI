@@ -2962,6 +2962,246 @@ CUI_API cui_timeline_editor_result cui_timeline_editor_ex(cui_ctx *ui, const cha
 #endif
 
 /* ------------------------------------------------------------------------ */
+/* Developer tools                                                          */
+/* ------------------------------------------------------------------------ */
+
+/* ---- Key-value editor ---- */
+
+/* Rows of key = value pairs: HTTP headers, query parameters, environment
+ * variables. You own the array and it is edited in place. The checkbox turns
+ * a pair on or off, typing in the empty row at the end adds a pair, the x
+ * removes one. Secret values show as dots with an eye to reveal them. A key
+ * used twice, or one with a space, is marked. On a phone each key sits above
+ * its value. Returns true when anything changed.
+ *
+ *     static cui_kv_pair headers[16] = { { "Accept", "application/json", true } };
+ *     static int n = 1;
+ *     cui_kv_editor(ui, "headers", headers, &n, 16);
+ */
+typedef struct cui_kv_pair { char key[64]; char value[256]; bool enabled; bool secret; } cui_kv_pair;
+typedef struct cui_kv_editor_opts {
+    int _;
+    const char *key_placeholder;     /* default "Key" */
+    const char *value_placeholder;   /* default "Value" */
+    bool no_toggles;                 /* no checkboxes: every pair is on */
+    bool no_secrets;                 /* no eye button */
+    bool read_only;
+    cui_size width;                  /* default fill */
+} cui_kv_editor_opts;
+CUI_API bool cui_kv_editor_ex(cui_ctx *ui, const char *id, cui_kv_pair *pairs, int *count, int capacity, const cui_kv_editor_opts *opts);
+
+/* ---- Problems panel ---- */
+
+/* Compiler and linter diagnostics, grouped by file: errors, warnings, notes
+ * and hints with their position, source and code. Toggles above filter by
+ * severity (with counts) and a field filters by text. A file's header folds
+ * its group. Up and Down move the selection, Left and Right fold and unfold,
+ * Enter or a double-click reports `activated` (open the file there). Only the
+ * rows in view are built, so thousands of diagnostics stay fast. The array
+ * needs to be valid only during the call. */
+typedef enum cui_severity { CUI_SEVERITY_ERROR = 0, CUI_SEVERITY_WARNING, CUI_SEVERITY_INFO, CUI_SEVERITY_HINT } cui_severity;
+typedef struct cui_diagnostic {
+    cui_severity severity;
+    const char *message;
+    const char *file;                /* groups the rows; NULL or "" groups as "No file" */
+    int line, column;                /* 1 based; 0 leaves it out */
+    const char *source;              /* "gcc", "clang-tidy"... (may be NULL) */
+    const char *code;                /* "-Wunused-variable"... (may be NULL) */
+} cui_diagnostic;
+typedef struct cui_problems_opts { int _; cui_size width; float height; bool no_toolbar; } cui_problems_opts;
+typedef struct cui_problems_result {
+    int selected;                    /* diagnostic selected, or -1 */
+    int activated;                   /* diagnostic opened this frame (Enter, double-click), or -1 */
+    int shown;                       /* diagnostics that pass the filters */
+} cui_problems_result;
+CUI_API cui_problems_result cui_problems_ex(cui_ctx *ui, const char *id, const cui_diagnostic *diags, int count, const cui_problems_opts *opts);
+
+/* ---- Pipeline ---- */
+
+/* A CI/CD run: stages left to right, each a column of jobs with their status
+ * and duration. A stage's header sums up its jobs (failed, running, passed).
+ * Running jobs spin. Click a job to get its index (open its log). Below 560
+ * points the stages stack top to bottom. */
+typedef enum cui_job_status { CUI_JOB_PENDING = 0, CUI_JOB_RUNNING, CUI_JOB_PASSED, CUI_JOB_FAILED, CUI_JOB_SKIPPED, CUI_JOB_CANCELED } cui_job_status;
+typedef struct cui_pipeline_job {
+    const char *name;
+    int stage;                       /* index into the stage names */
+    cui_job_status status;
+    float duration;                  /* seconds; negative when it has not run */
+    bool allow_failure;              /* a failure does not fail the stage */
+} cui_pipeline_job;
+typedef struct cui_pipeline_opts { int _; cui_size width; int *selected; /* job shown selected, set on a click */ } cui_pipeline_opts;
+typedef struct cui_pipeline_result { int clicked; int hovered; } cui_pipeline_result;   /* job indices, or -1 */
+CUI_API cui_pipeline_result cui_pipeline_ex(cui_ctx *ui, const char *id, const char *const *stages, int stage_count,
+                                            const cui_pipeline_job *jobs, int job_count, const cui_pipeline_opts *opts);
+
+/* ---- Query builder ---- */
+
+/* Conditions joined by "all" or "any", in groups you can nest: the filter of
+ * an issue tracker, a log search or a database view. You own the nodes, in
+ * order, each with its depth: node 0 is the outer group (made for you when
+ * count is 0). A rule picks a field, an operator for the field's type and a
+ * value; a group picks all or any. Returns true when anything changed.
+ * cui_query_text writes the query as a sentence, cui_query_match tests a
+ * record against it. */
+typedef enum cui_query_type { CUI_QUERY_TEXT = 0, CUI_QUERY_NUMBER, CUI_QUERY_CHOICE, CUI_QUERY_BOOL } cui_query_type;
+typedef struct cui_query_field {
+    const char *name;
+    cui_query_type type;
+    const char *const *choices;      /* CUI_QUERY_CHOICE: the values to pick from */
+    int choice_count;
+} cui_query_field;
+typedef struct cui_query_node {
+    int depth;                       /* 0 for the outer group */
+    bool group;
+    bool any;                        /* group: any rule (or) instead of all (and) */
+    int field;                       /* rule: index into the fields */
+    int op;                          /* rule: see cui_query_op_name */
+    char value[64];                  /* rule: the text, number or choice compared with */
+} cui_query_node;
+typedef struct cui_query_opts { int _; cui_size width; int max_depth; /* default 3 */ bool read_only; } cui_query_opts;
+CUI_API bool cui_query_builder_ex(cui_ctx *ui, const char *id, const cui_query_field *fields, int field_count,
+                                  cui_query_node *nodes, int *count, int capacity, const cui_query_opts *opts);
+/* the operators of a type: text "is", "is not", "contains", "does not contain",
+ * "starts with", "ends with"; number "=", "!=", ">", ">=", "<", "<="; choice
+ * "is", "is not"; bool "is true", "is false". NULL past the last. */
+CUI_API const char *cui_query_op_name(cui_query_type type, int op);
+CUI_API size_t cui_query_text(const cui_query_field *fields, int field_count, const cui_query_node *nodes, int count, char *out, size_t cap);
+/* values[i] is the record's value for field i, as text ("1", "true", "open"). */
+CUI_API bool cui_query_match(const cui_query_field *fields, int field_count, const cui_query_node *nodes, int count, const char *const *values);
+
+/* ---- Schedule picker ---- */
+
+/* A cron schedule edited the friendly way: every N minutes, hourly at a
+ * minute, daily at a time, weekly on chosen days, monthly on a day, or a
+ * custom expression. It reads and writes `cron` (five fields: minute hour
+ * day month weekday) and shows what it means and when it runs next. Weekday
+ * and month names come from cui_set_strings. */
+typedef struct cui_schedule_opts {
+    int _;
+    cui_size width;
+    int64_t now;                     /* the next runs are counted from here, Unix seconds; 0: the clock */
+    bool utc;                        /* times in UTC instead of local time */
+    int next_count;                  /* runs listed, default 3, 0 hides them */
+} cui_schedule_opts;
+typedef struct cui_schedule_result { bool changed; bool valid; int64_t next; /* the next run, Unix seconds, 0 none */ } cui_schedule_result;
+CUI_API cui_schedule_result cui_schedule_picker_ex(cui_ctx *ui, const char *id, char *cron, size_t cap, const cui_schedule_opts *opts);
+/* The first time after `after` (Unix seconds) the expression matches, in the
+ * time zone that is utc_offset minutes east of UTC. Supports *, lists,
+ * ranges, steps and the names JAN-DEC and SUN-SAT. False when it is invalid
+ * or never runs in the next five years. */
+CUI_API bool cui_cron_next(const char *cron, int64_t after, int utc_offset, int64_t *next);
+/* "Every weekday at 09:30", in frame memory; NULL when invalid. */
+CUI_API const char *cui_cron_describe(cui_ctx *ui, const char *cron);
+
+/* ---- Keymap ---- */
+
+/* A keyboard with your shortcuts on it: each bound key shows its action and
+ * the color of its category, for the modifiers chosen above it. Keys bound
+ * twice are marked as conflicts. Hover a key for every binding on it; click it
+ * to get the key (to rebind it). The keyboard keeps its own layout in a
+ * right-to-left interface and scales to the width it gets. */
+typedef struct cui_keymap_binding {
+    cui_key_combo combo;
+    const char *action;
+    int category;                    /* index into the categories, colors the key */
+} cui_keymap_binding;
+typedef struct cui_keymap_opts {
+    int _;
+    cui_size width;
+    const char *const *categories;   /* names for the legend */
+    int category_count;
+    int *mods;                       /* the modifiers shown; NULL: kept for you */
+    bool no_function_row;
+} cui_keymap_opts;
+typedef struct cui_keymap_result { cui_key clicked; int conflicts; } cui_keymap_result;
+CUI_API cui_keymap_result cui_keymap_ex(cui_ctx *ui, const char *id, const cui_keymap_binding *bindings, int count, const cui_keymap_opts *opts);
+
+/* ---- Commit graph ---- */
+
+/* Version history: the branch lanes drawn beside each commit, newest first,
+ * with its message, branch and tag names, author, date and short hash. Each
+ * commit names its parents by row (parents come later in the array), so
+ * merges and branches draw as lines between lanes. Only the rows in view are
+ * built. Up and Down move the selection; Enter or a double-click activates. */
+typedef struct cui_commit {
+    const char *hash;
+    const char *message;             /* the first line is shown */
+    const char *author;
+    const char *date;                /* already formatted: "2 hours ago", "Mar 3" */
+    const char *refs;                /* "main, origin/main, tag: v1.2", may be NULL */
+    int parent[2];                   /* row of each parent, -1 for none */
+} cui_commit;
+typedef struct cui_commit_graph_opts { int _; cui_size width; float height; int *selected; } cui_commit_graph_opts;
+typedef struct cui_commit_graph_result { int clicked; int activated; int hovered; } cui_commit_graph_result;
+CUI_API cui_commit_graph_result cui_commit_graph_ex(cui_ctx *ui, const char *id, const cui_commit *commits, int count, const cui_commit_graph_opts *opts);
+
+/* ---- Dependency graph ---- */
+
+/* Nodes and directed edges laid out in layers (each edge points to a later
+ * layer, cycles are broken), for build targets, packages, services or call
+ * graphs. The layout is computed when the graph changes. Wheel zooms, drag
+ * pans, click selects; hovering a node lights up what it depends on and what
+ * depends on it. F fits the graph. */
+typedef struct cui_graph_node { const char *label; const char *detail; cui_tone tone; } cui_graph_node;
+typedef struct cui_graph_edge { int from, to; } cui_graph_edge;
+typedef struct cui_graph_opts { int _; cui_size width; float height; bool top_down; int *selected; } cui_graph_opts;
+typedef struct cui_graph_result { int clicked; int activated; int hovered; } cui_graph_result;
+CUI_API cui_graph_result cui_graph_view_ex(cui_ctx *ui, const char *id, const cui_graph_node *nodes, int node_count,
+                                           const cui_graph_edge *edges, int edge_count, const cui_graph_opts *opts);
+
+/* ---- Network waterfall ---- */
+
+/* HTTP requests as a table with a timing bar each: queued, DNS, connect, TLS,
+ * waiting for the first byte and downloading, on one time scale with the
+ * page's DOMContentLoaded and load lines. Hover a bar for the breakdown.
+ * Narrow panels drop the type and size columns. Only the rows in view are
+ * built. Up and Down move the selection. */
+typedef struct cui_net_request {
+    const char *name;                /* path or URL; the last part is shown */
+    const char *method;              /* "GET" */
+    int status;                      /* 0 while pending or when it failed */
+    const char *type;                /* "fetch", "script", "image"... */
+    double size;                     /* bytes transferred */
+    double start;                    /* seconds from the start of the page */
+    float timing[6];                 /* seconds: queued, dns, connect, tls, waiting, download */
+} cui_net_request;
+typedef struct cui_waterfall_opts { int _; cui_size width; float height; int *selected; double dom_loaded, loaded; /* seconds; 0: no line */ } cui_waterfall_opts;
+typedef struct cui_waterfall_result { int clicked; int activated; int hovered; } cui_waterfall_result;
+CUI_API cui_waterfall_result cui_waterfall_ex(cui_ctx *ui, const char *id, const cui_net_request *requests, int count, const cui_waterfall_opts *opts);
+
+/* ---- Trace viewer ---- */
+
+/* A tracing timeline: one lane per thread, process or service, each with its
+ * nested spans, on one time ruler, with markers (frames, GC pauses, deploys)
+ * drawn across every lane. Wheel zooms around the pointer, Shift+wheel or a
+ * drag pans, click selects a span, Shift+drag measures a time range. A lane's
+ * name folds it. Keys: Left and Right step through the selected span's lane,
+ * + and - zoom, F fits, Esc clears. Spans must be sorted by track, depth and
+ * start (cui_trace_sort), with no overlap within a depth of a track. Like the
+ * flame graph, only what is in view is visited. */
+typedef struct cui_trace_track { const char *name; bool collapsed; } cui_trace_track;
+typedef struct cui_trace_span { const char *name; double start, end; int track, depth; uint32_t color_key; } cui_trace_span;
+typedef struct cui_trace_marker { const char *name; double time; cui_tone tone; } cui_trace_marker;
+typedef struct cui_trace_view {
+    double start, end;               /* visible time range; end <= start fits everything */
+    float scroll;                    /* points scrolled down */
+    double mark_start, mark_end;     /* measured range; mark_end <= mark_start: none */
+} cui_trace_view;
+typedef struct cui_trace_opts {
+    int _;
+    cui_size width;
+    float height;                    /* default 320 */
+    float row_height;                /* default 20 */
+    const cui_trace_marker *markers;
+    int marker_count;
+} cui_trace_opts;
+typedef struct cui_trace_result { bool selection_changed; bool view_changed; int hovered; } cui_trace_result;
+CUI_API cui_trace_result cui_trace_view_ex(cui_ctx *ui, const char *id, cui_trace_track *tracks, int track_count,
+                                           const cui_trace_span *spans, int span_count, cui_trace_view *view, int *selected, const cui_trace_opts *opts);
+CUI_API void cui_trace_sort(cui_trace_span *spans, int count);
+
+/* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
 
@@ -3219,6 +3459,20 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_prop_vec4(ui, label, v, ...)    cui_prop_vec_ex((ui), (label), (v), 4, CUI__OPTS(cui_prop_opts, __VA_ARGS__))
 #define cui_log_view(ui, id, buf, ...)      cui_log_view_ex((ui), (id), (buf), CUI__OPTS(cui_log_view_opts, __VA_ARGS__))
 #define cui_hex_view(ui, id, data, size, sel, ...) cui_hex_view_ex((ui), (id), (data), (size), (sel), CUI__OPTS(cui_hex_view_opts, __VA_ARGS__))
+#define cui_kv_editor(ui, id, pairs, count, capacity, ...) cui_kv_editor_ex((ui), (id), (pairs), (count), (capacity), CUI__OPTS(cui_kv_editor_opts, __VA_ARGS__))
+#define cui_problems(ui, id, diags, count, ...) cui_problems_ex((ui), (id), (diags), (count), CUI__OPTS(cui_problems_opts, __VA_ARGS__))
+#define cui_pipeline(ui, id, stages, stage_count, jobs, job_count, ...) \
+    cui_pipeline_ex((ui), (id), (stages), (stage_count), (jobs), (job_count), CUI__OPTS(cui_pipeline_opts, __VA_ARGS__))
+#define cui_query_builder(ui, id, fields, field_count, nodes, count, capacity, ...) \
+    cui_query_builder_ex((ui), (id), (fields), (field_count), (nodes), (count), (capacity), CUI__OPTS(cui_query_opts, __VA_ARGS__))
+#define cui_schedule_picker(ui, id, cron, cap, ...) cui_schedule_picker_ex((ui), (id), (cron), (cap), CUI__OPTS(cui_schedule_opts, __VA_ARGS__))
+#define cui_keymap(ui, id, bindings, count, ...) cui_keymap_ex((ui), (id), (bindings), (count), CUI__OPTS(cui_keymap_opts, __VA_ARGS__))
+#define cui_commit_graph(ui, id, commits, count, ...) cui_commit_graph_ex((ui), (id), (commits), (count), CUI__OPTS(cui_commit_graph_opts, __VA_ARGS__))
+#define cui_graph_view(ui, id, nodes, node_count, edges, edge_count, ...) \
+    cui_graph_view_ex((ui), (id), (nodes), (node_count), (edges), (edge_count), CUI__OPTS(cui_graph_opts, __VA_ARGS__))
+#define cui_waterfall(ui, id, requests, count, ...) cui_waterfall_ex((ui), (id), (requests), (count), CUI__OPTS(cui_waterfall_opts, __VA_ARGS__))
+#define cui_trace_view(ui, id, tracks, track_count, spans, span_count, view, selected, ...) \
+    cui_trace_view_ex((ui), (id), (tracks), (track_count), (spans), (span_count), (view), (selected), CUI__OPTS(cui_trace_opts, __VA_ARGS__))
 #define cui_flame_graph(ui, id, spans, count, view, selected, ...) \
     cui_flame_graph_ex((ui), (id), (spans), (count), (view), (selected), CUI__OPTS(cui_flame_opts, __VA_ARGS__))
 /* curve and gradient editors */

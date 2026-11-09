@@ -67,6 +67,8 @@ set(CUI_CORE_SOURCES
     src/cui_dials.c
     src/cui_month.c
     src/cui_strings.c
+    src/cui_devtools.c
+    src/cui_graph.c
     src/cui_tour.c
     src/cui_photo.c
     src/cui_files.c

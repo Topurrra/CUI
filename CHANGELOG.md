@@ -2,6 +2,23 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
+## Unreleased
+
+### Added
+
+- **Developer tools**, ten components for the tools developers build. Each works at phone width and in a right-to-left interface, builds or draws only what is in view, and allocates only when its data changes. See [Developer tools](docs/components-more.md#developer-tools) and the gallery's new *Developer tools* page.
+  - **Trace viewer**: lanes of nested spans for threads, processes or services, with markers across every lane. It zooms around the pointer, pans, measures a range with Shift+drag, folds a lane from its name and walks the call tree with the arrows. 200,000 spans take under a millisecond a frame.
+  - **Network waterfall**: requests as a table with timing bars showing queued, DNS, connect, TLS, waiting and download phases, plus DOMContentLoaded and load lines, a breakdown on hover, a summary and a legend.
+  - **Dependency graph**: nodes and edges laid out in layers, with cycles broken. Long edges are routed between the nodes, and the order within each layer is chosen to cross fewer edges. Hovering a node lights up its neighbours. It zooms, pans and fits, left to right or top down.
+  - **Commit graph**: history with branch lanes, merges, and badges for branches, remote branches and tags. Fifty thousand commits lay out in a few milliseconds.
+  - **Pipeline**: the stages of a CI or CD run, with their jobs, status, durations and a summary for each stage. Jobs allowed to fail do not fail their stage, and the stages stack on a phone.
+  - **Problems panel**: diagnostics grouped by file, with toggles that filter by severity and show counts, a text filter, folding, keys, and activation to open the file.
+  - **Key-value editor**: headers, parameters or environment variables. Typing in the last row adds a pair, and pairs can be switched off, kept secret, or flagged as duplicate keys.
+  - **Query builder**: conditions in nested all/any groups, with operators that fit each field's type. `cui_query_text` writes the query as a sentence and `cui_query_match` tests a record.
+  - **Schedule picker**: a cron expression edited as every N minutes, hourly, daily, weekly, monthly or custom, with the next runs listed. `cui_cron_next` and `cui_cron_describe` are public.
+  - **Keymap**: shortcuts drawn on a keyboard by modifier set, with categories, conflicts, the bindings on hover, and the clicked key returned for rebinding.
+- `tests/test_devtools.c`: the ten components under clicks, keys and random input, at three widths, in both directions and both themes, with timing checks on large inputs.
+
 ## 2026-11-09 · 1.2: phones, tablets, right to left and performance
 
 ### Added

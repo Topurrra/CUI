@@ -160,6 +160,7 @@ On Linux you need the X11 development headers (`libx11-dev`). Windows and macOS 
 | **Data** | card, metric, table, virtualized data grid, tree table, path bar, list, tree, accordion, filter bar, file browser and open/save dialog |
 | **Code** | code block, code editor, diff viewer, markdown view, JSON viewer |
 | **Tool panels** | property inspector, log console, terminal, node editor, flame graph, hex viewer, curve and gradient editors, timeline editor, level meter |
+| **Developer tools** | trace viewer, network waterfall, dependency graph, commit graph, CI pipeline, problems panel, key-value editor, query builder, cron schedule picker, keymap |
 | **Charts** | line, area, bar, donut, sparkline, gauge and radial gauge, candlestick, heatmap, treemap, radar, funnel, sankey, waffle, scatter and more |
 | **Media** | image viewer with zoom and pan, image cropper, image compare, carousel |
 | **Planning** | kanban board, week and month calendars, gantt chart with dependencies |

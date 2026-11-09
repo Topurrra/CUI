@@ -60,7 +60,8 @@ Components are grouped by family, one family per file, so a change to one compon
 | `cui_overlay.c` | popovers, menus, dialogs, sheets, toasts, tooltips, the command palette |
 | `cui_pickers.c` | select, combobox, date and time pickers, color picker |
 | `cui_data.c`, `cui_grid.c`, `cui_treetable.c` | tables, lists, trees, the data grid, tree tables and path bars |
-| `cui_charts.c`, `cui_viz.c`, `cui_dials.c`, `cui_flame.c` | charts, heatmaps, gauges, knobs, faders, the flame graph |
+| `cui_charts.c`, `cui_viz.c`, `cui_dials.c`, `cui_flame.c` | charts, heatmaps, gauges, knobs, faders, the flame graph, the trace viewer and the network waterfall (which share its ruler) |
+| `cui_devtools.c`, `cui_graph.c` | developer tools: key-value editor, problems panel, pipeline, query builder, schedule picker and cron, keymap; the commit graph and the dependency graph |
 | `cui_planning.c`, `cui_month.c`, `cui_timeline.c` | kanban, week calendar, gantt, month calendar, timeline editor |
 | `cui_code.c`, `cui_editor.c`, `cui_diff.c`, `cui_hex.c`, `cui_terminal.c`, `cui_markdown.c` | code and text tools |
 | `cui_ai.c`, `cui_social.c`, `cui_media.c`, `cui_photo.c`, `cui_emoji.c` | AI, conversation, media and image components |

@@ -254,7 +254,7 @@ CATEGORIES = [
     ("basics", "Basics"), ("actions", "Actions"), ("inputs", "Inputs"), ("selection", "Selection"),
     ("pickers", "Pickers"), ("navigation", "Navigation"), ("overlays", "Overlays"), ("feedback", "Feedback"),
     ("data", "Data display"), ("charts", "Charts"), ("planning", "Planning"), ("social", "Conversation and media"),
-    ("motion", "Motion"), ("ai", "AI interfaces"),
+    ("motion", "Motion"), ("ai", "AI interfaces"), ("devtools", "Developer tools"),
 ]
 MAIN_CAT = {
     "Text": "basics", "Badge, avatar and keycap": "basics", "Card and metric": "basics", "Image": "basics",
@@ -276,7 +276,7 @@ MORE_CAT = {
     "Feedback": "feedback", "Data": "data", "Code": "data", "Conversation": "social", "Media": "social",
     "Planning": "planning", "More charts": "charts", "Motion": "motion", "AI interfaces": "ai",
     "App chrome": "navigation",
-    "Tool panels": "data",
+    "Tool panels": "data", "Developer tools": "devtools",
 }
 ITEM_CAT = {"Table of contents": "navigation"}
 # sections whose docs have no screenshot: the scene that shows them

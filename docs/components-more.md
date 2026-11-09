@@ -838,6 +838,145 @@ The wheel zooms time around the pointer, as in the flame graph and the node edit
 
 With the editor focused, Left and Right step the playhead by a frame (Shift: ten frames), Alt+Left and Alt+Right move the selected keys by a frame (Shift: ten), Up and Down jump to the previous and next key on the visible tracks, Home and End go to the start and end, Space reports a play request (`play_toggled`; you advance the time), Delete or Backspace removes the selected keys and clips, Ctrl+A selects every key on the visible tracks, Esc clears the selection, + and - zoom around the playhead and F fits the whole sequence. Fitting animates and snaps with reduced motion.
 
+## Developer tools
+
+Panels for the tools developers build: an HTTP client, an IDE, a CI dashboard, a profiler, a network inspector. The table-like ones (problems, commit graph, waterfall) build only the rows in view; the timelines and graphs (trace viewer, dependency graph) draw only what is in view. A panel whose content is drawn on a time or graph axis (the keymap, the dependency graph, the trace viewer, the waterfall's bars) keeps its left-to-right geometry in a right-to-left interface, while the labels, columns and controls around it mirror.
+
+### Key-value editor
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/kv-editor-dark.png"><img src="images/components/kv-editor.png" alt="Key-value editor"></picture>
+
+```c
+static cui_kv_pair headers[16] = { { "Accept", "application/json", true } };
+static int count = 1;
+
+if (cui_kv_editor(ui, "headers", headers, &count, 16))
+    rebuild_request();
+```
+
+Rows of key and value fields for HTTP headers, query parameters or environment variables. You own the array, and it is edited in place. The checkbox turns a pair on or off, typing in the empty row at the end adds a pair, and the x removes one. The lock marks a value as secret: it shows as dots, and the field's eye reveals it. A key used twice by enabled pairs, or one with a space in it, is marked under its field. Below 480 points each key sits above its value. Options: `key_placeholder`, `value_placeholder`, `no_toggles`, `no_secrets`, `read_only`, `width`.
+
+### Problems panel
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/problems-dark.png"><img src="images/components/problems.png" alt="Problems panel"></picture>
+
+```c
+cui_problems_result r = cui_problems(ui, "problems", diags, diag_count, .height = 300);
+if (r.activated >= 0)
+    open_file_at(diags[r.activated].file, diags[r.activated].line, diags[r.activated].column);
+```
+
+Compiler and linter output grouped by file, with each file's count. Toggles above it filter by severity and show the count of each, and the field filters by text in the message, file, source or code. A file's header folds its group. Up and Down move the selection, Left and Right fold and unfold (swapped in a right-to-left interface), and Enter or a double click reports `activated`. A hover shows the whole message and its position. Below 520 points the source and code are left out. Twenty thousand diagnostics take about a millisecond a frame.
+
+### Pipeline
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/pipeline-dark.png"><img src="images/components/pipeline.png" alt="Pipeline"></picture>
+
+```c
+static const char *stages[] = { "Build", "Test", "Deploy" };
+static int selected = -1;
+cui_pipeline_result r = cui_pipeline(ui, "run", stages, 3, jobs, job_count, .selected = &selected);
+if (r.clicked >= 0) show_log(&jobs[r.clicked]);
+```
+
+A CI or CD run: each stage is a column of its jobs with their status and duration, and connectors run between the stages. A stage's header sums up its jobs: failed beats running, then pending; a failure with `allow_failure` shows a warning and does not fail the stage. Running jobs show a spinner. Below 560 points the stages stack top to bottom.
+
+### Query builder
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/query-builder-dark.png"><img src="images/components/query-builder.png" alt="Query builder"></picture>
+
+```c
+static cui_query_node nodes[32];   /* node 0, the outer group, is made for you */
+static int count;
+if (cui_query_builder(ui, "filter", fields, field_count, nodes, &count, 32)) {
+    for (int i = 0; i < issue_count; i++)
+        issues[i].shown = cui_query_match(fields, field_count, nodes, count, issue_values(i));
+}
+```
+
+Conditions joined by all or any, in groups you can nest (three deep by default, `max_depth`). The nodes are a flat array in order, each with its depth, so they are easy to save. A rule picks a field, an operator that fits the field's type, and a value: a text field, a number, a choice from the field's list, or nothing for a yes or no field. `cui_query_text` writes the query as a sentence, and `cui_query_match` tests a record whose values you pass as text. On a phone each rule's value moves to its own line.
+
+### Schedule picker
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/schedule-picker-dark.png"><img src="images/components/schedule-picker.png" alt="Schedule picker"></picture>
+
+```c
+static char cron[64] = "30 9 * * 1-5";
+cui_schedule_result r = cui_schedule_picker(ui, "backup", cron, sizeof cron);
+if (r.changed && r.valid) save_schedule(cron);
+```
+
+A cron expression edited the friendly way: every N minutes, hourly at a minute, daily at a time, weekly on chosen days, monthly on a day, or a custom expression typed in. It reads the expression you give it, picks the mode it is written in, and writes it back only when you change something. Below the controls it says what the schedule means, shows the expression, and lists the next runs (`next_count`, three by default) in local time or in UTC (`utc`). Weekday and month names come from `cui_set_strings`.
+
+The same parser is public. `cui_cron_next(cron, after, utc_offset, &next)` finds the next run after a time, in a time zone given in minutes east of UTC. It supports lists, ranges, steps, the names JAN to DEC and SUN to SAT, and 0 or 7 for Sunday. When both the day of the month and the weekday are restricted, either one matches, as in cron. It returns false for an invalid expression, or one that never runs within five years (February 31). `cui_cron_describe` returns the sentence ("Every weekday at 09:30").
+
+### Keymap
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/keymap-dark.png"><img src="images/components/keymap.png" alt="Keymap"></picture>
+
+```c
+static int mods = CUI_MOD_PRIMARY;
+cui_keymap_result r = cui_keymap(ui, "keys", bindings, binding_count,
+                                 .categories = categories, .category_count = 4, .mods = &mods);
+if (r.clicked) start_rebinding(r.clicked, mods);
+```
+
+A keyboard with the shortcuts on it. Each bound key shows its action, and a bar in its category's color. Tabs above it pick the modifiers, and each tab shows how many shortcuts use them. A key bound twice is outlined in red, and the count of conflicts is shown and returned. A hover lists every binding on the key, and a click returns it. Labels shrink to fit a key and then are cut short. The navigation cluster drops out below 600 points, and the keyboard scales to the width it gets. `no_function_row` leaves out the function keys.
+
+### Commit graph
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/commit-graph-dark.png"><img src="images/components/commit-graph.png" alt="Commit graph"></picture>
+
+```c
+/* newest first; each commit names its parents by row */
+static const cui_commit log[] = {
+    { "a91f3c2", "Merge branch 'feature'", "Maya", "2 hours ago", "main, origin/main", { 1, 2 } },
+    { "7be04d1", "Docs", "Maya", "3 hours ago", NULL, { 3, -1 } },
+    ...
+};
+cui_commit_graph(ui, "history", log, count, .selected = &selected, .height = 320);
+```
+
+Version history with its branch lanes. Each commit's dot sits in its lane, curves join branches and merges, and a merge commit is drawn as a ring. Refs show as badges: local branches green, remote branches gray, and tags violet. The lanes are worked out once when the history changes, so fifty thousand commits take a few milliseconds to lay out and then cost nothing more. Up and Down move the selection, and Enter or a double click reports `activated`. Below 560 points the author and date are left out.
+
+### Dependency graph
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/graph-view-dark.png"><img src="images/components/graph-view.png" alt="Dependency graph"></picture>
+
+```c
+static const cui_graph_node nodes[] = { { "app", "executable", CUI_TONE_VIOLET }, { "ui", "libcui.a" }, { "zlib" } };
+static const cui_graph_edge edges[] = { { 0, 1 }, { 1, 2 } };
+cui_graph_view(ui, "deps", nodes, 3, edges, 2, .selected = &selected, .height = 340);
+```
+
+Nodes and directed edges laid out in layers, for build targets, packages, services or call graphs. Each edge points into a later layer. A cycle is broken for the layout but still drawn. An edge that skips layers is routed between the nodes, not through them, and the order within each layer is chosen to cross fewer edges. Hovering or selecting a node lights up what it depends on and what depends on it, and dims the rest. The wheel zooms around the pointer, dragging pans, a click selects, and a double click activates. With the graph focused, the arrows move along edges or to the neighbour in the same layer, + and - zoom, F fits, and Esc clears. `top_down` stacks the layers instead of placing them side by side. The layout runs once when the graph changes: 400 nodes with 900 edges take about 20 ms.
+
+### Network waterfall
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/waterfall-dark.png"><img src="images/components/waterfall.png" alt="Network waterfall"></picture>
+
+```c
+cui_waterfall_result r = cui_waterfall(ui, "network", requests, request_count,
+                                       .selected = &selected, .dom_loaded = 0.395, .loaded = 0.68);
+```
+
+HTTP requests as a table with a timing bar each. The bar shows its phases in order: a thin line while queued, then DNS, connect, TLS, waiting for the first byte, and download, all on one time scale. Lines mark DOMContentLoaded and load. The name column shows the last part of the path, and failed responses are shown in red. A hover on a bar breaks its time down, and a summary with a legend sits under the table. Up, Down, Home and End move the selection, Enter reports `activated`, and Esc clears. Below 600 points the method, type and size columns are left out. Thirty thousand requests take under two milliseconds a frame.
+
+### Trace viewer
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/trace-view-dark.png"><img src="images/components/trace-view.png" alt="Trace viewer"></picture>
+
+```c
+static cui_trace_track tracks[] = { { "Main thread" }, { "Render" }, { "Worker 1" } };
+static cui_trace_view view;   /* zeroed: fits everything */
+static int selected = -1;
+cui_trace_sort(spans, span_count);   /* once: by track, depth, then start */
+cui_trace_view(ui, "trace", tracks, 3, spans, span_count, &view, &selected,
+               .markers = markers, .marker_count = marker_count);
+```
+
+A tracing timeline in the manner of a performance panel. Each thread, process or service has a lane of nested spans, drawn like the flame graph and sharing its colors and ruler. Markers (vsync, a GC pause, a deploy) run across every lane, with their names in a strip under the ruler. The wheel zooms around the pointer, Shift+wheel pans, and over the lane names the wheel scrolls the lanes. Dragging pans, a click selects, and a double click zooms to a span. Shift+drag measures a range, which `view.mark_start` and `mark_end` hold and the ruler labels with its length. A click on a lane's name folds it to its top row, and `collapsed` keeps that in your track array. With the viewer focused, Left and Right step along the row, Up goes to the parent and Down to the first child. + and - zoom, Enter zooms to the selection, F fits, and Esc clears the measurement and then the selection. Only the rows and spans in view are visited, and spans thinner than a point merge into runs, so 200,000 spans take under a millisecond a frame. Below 560 points the lane names get a narrower column.
+
 ## Conversation
 
 ### Chat
