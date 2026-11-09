@@ -590,7 +590,7 @@ static void cui__cvf_build_plot(cui__cvf *f) {
     memset(pp, 0, sizeof *pp);
     pp->n = n;
     pp->keys = cui__frame_alloc(ui, sizeof(cui_curve_key) * (size_t)CUI_MAX(1, n));
-    if (n) memcpy(pp->keys, f->keys, sizeof(cui_curve_key) * (size_t)n);
+    if (n > 0) memcpy(pp->keys, f->keys, sizeof(cui_curve_key) * (size_t)n);
     pp->key_hover = cui__frame_alloc(ui, sizeof(float) * (size_t)CUI_MAX(1, n));
     for (int i = 0; i < n; i++) {
         float *hv = cui_state(ui, cui__cv_key_id(f->id, i) ^ 0x40u, sizeof(float));
