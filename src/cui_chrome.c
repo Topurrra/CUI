@@ -12,14 +12,14 @@ typedef struct { cui__menubar_state *bar; cui__toolbar_build *tb; } cui__chrome_
 static cui__chrome_slots *cui__slots(cui_ctx *ui) { return cui_state(ui, 0xC4203E5u, sizeof(cui__chrome_slots)); }
 
 /* a hairline along one edge of a bar */
-typedef struct { cui_color c; bool top; } cui__edge_paint;
+typedef struct { cui_color c; bool top; } cui__bar_edge_paint;
 static void cui__paint_edge(cui_ctx *ui, cui_node *n, void *data) {
-    cui__edge_paint *p = data;
+    cui__bar_edge_paint *p = data;
     cui_rect r = n->rect;
     cui_draw_rect(ui, (cui_rect){ r.x, p->top ? r.y : r.y + r.h - 1, r.w, 1 }, CUI_CORNERS(0), p->c);
 }
 static void cui__bar_edge(cui_ctx *ui, int node, bool top) {
-    cui__edge_paint *p = CUI_PAINT_DATA(ui, cui__edge_paint);
+    cui__bar_edge_paint *p = CUI_PAINT_DATA(ui, cui__bar_edge_paint);
     p->c = CUI_C(ui, BORDER);
     p->top = top;
     ui->nodes[node].paint = cui__paint_edge;
@@ -713,9 +713,9 @@ static void cui__paint_folder(cui_ctx *ui, cui_node *n, void *data) {
     cui_pop_clip(ui);
 }
 
-typedef struct { cui_color c; float alpha; } cui__dot_paint;
+typedef struct { cui_color c; float alpha; } cui__dirty_dot_paint;
 static void cui__paint_dirty_dot(cui_ctx *ui, cui_node *n, void *data) {
-    cui__dot_paint *p = data;
+    cui__dirty_dot_paint *p = data;
     if (p->alpha <= 0.01f) return;
     cui_vec2 ctr = { n->rect.x + n->rect.w * 0.5f, n->rect.y + n->rect.h * 0.5f };
     cui_draw_circle(ui, ctr, 4.0f, cui_alpha(p->c, p->alpha));
@@ -917,7 +917,7 @@ static void cui__dtf_build_close(cui_ctx *ui, const cui_doc_tab *tb, const cui__
     cui__icon_node(ui, CUI_ICON_X, 14, cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), ts->slot_hover));
     ui->nodes[ui->node_count - 1].opacity = CUI_MAX(0.001f, ts->xshow);
     int dot = cui__leaf(ui, 0, CUI_PX(20), CUI_PX(20));
-    cui__dot_paint *dp = CUI_PAINT_DATA(ui, cui__dot_paint);
+    cui__dirty_dot_paint *dp = CUI_PAINT_DATA(ui, cui__dirty_dot_paint);
     dp->c = CUI_C(ui, TEXT_SECONDARY);
     dp->alpha = tb->dirty ? 1.0f - ts->xshow : 0.0f;
     ui->nodes[dot].paint = cui__paint_dirty_dot;

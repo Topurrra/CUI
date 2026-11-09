@@ -531,13 +531,13 @@ bool cui_tree_cell(cui_ctx *ui, const char *label, int depth, bool has_children,
 
 static int cui__popcount(uint32_t v) { int n = 0; while (v) { n += v & 1; v >>= 1; } return n; }
 
-typedef struct { uint32_t active; } cui__fb_state;   /* fields shown as chips even with nothing picked */
+typedef struct { uint32_t active; } cui__filter_bar_state;   /* fields shown as chips even with nothing picked */
 
 bool cui_filter_bar(cui_ctx *ui, const char *id_str, const cui_filter_field *fields, int count, uint32_t *selected,
                     char *search, size_t search_cap) {
     if (count > 32) count = 32;
     cui_id id = cui_make_id(ui, id_str);
-    cui__fb_state *st = cui_state(ui, id, sizeof *st);
+    cui__filter_bar_state *st = cui_state(ui, id, sizeof *st);
     bool changed = false;
     cui_push_id(ui, id_str);
     int row = cui__node_new(ui, id);

@@ -977,9 +977,9 @@ static const char *cui__mmss(cui_ctx *ui, float s) {
     return cui__frame_printf(ui, "%d:%02d", t / 60, t % 60);
 }
 
-typedef struct { float frac, hover; } cui__scrub_paint;
-static void cui__paint_scrub(cui_ctx *ui, cui_node *n, void *data) {
-    cui__scrub_paint *p = data;
+typedef struct { float frac, hover; } cui__np_scrub_paint;
+static void cui__paint_np_scrub(cui_ctx *ui, cui_node *n, void *data) {
+    cui__np_scrub_paint *p = data;
     cui_rect r = n->rect;
     float th = 4 + 2 * p->hover, y = r.y + (r.h - th) * 0.5f;
     cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, th }, CUI_CORNERS(th * 0.5f), CUI_C(ui, CONTROL_TRACK));
@@ -1103,9 +1103,9 @@ int cui_now_playing_ex(cui_ctx *ui, const char *id_str, cui_now_playing *np, con
     int t0 = cui__text_node(ui, cui__mmss(ui, pos), -1, CUI_FONT_BODY, fx, CUI_C(ui, TEXT_MUTED), false);
     ui->nodes[t0].flags |= CUI_NF_TABULAR; ui->nodes[t0].line_height = 1.2f;
     int bar = cui__leaf(ui, sid, CUI_FILL, CUI_PX(14));
-    cui__scrub_paint *sp = cui__frame_alloc(ui, sizeof *sp);
+    cui__np_scrub_paint *sp = cui__frame_alloc(ui, sizeof *sp);
     sp->frac = frac; sp->hover = st->hover;
-    ui->nodes[bar].paint = cui__paint_scrub;
+    ui->nodes[bar].paint = cui__paint_np_scrub;
     ui->nodes[bar].paint_data = sp;
     cui__mark_interactive(ui, bar, CUI_IF_DRAG);
     int t1 = cui__text_node(ui, cui__frame_printf(ui, "-%s", cui__mmss(ui, np->duration - pos)), -1, CUI_FONT_BODY, fx, CUI_C(ui, TEXT_MUTED), false);

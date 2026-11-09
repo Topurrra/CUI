@@ -426,12 +426,12 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 /* ------------------------------------------------------------------------ */
 
 typedef struct { char text[256]; cui_id anchor, shown; cui_spring t, ox, oy; double last_shown; bool visible, passive; } cui__tooltip_state;
-static cui__tooltip_state *cui__tip(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
+static cui__tooltip_state *cui__tooltip_get(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
 void cui_tooltip(cui_ctx *ui, const char *text) {
     cui_id anchor = ui->last_id;
     if (!anchor || !text) return;
-    cui__tooltip_state *tt = cui__tip(ui);
+    cui__tooltip_state *tt = cui__tooltip_get(ui);
     bool hovered = ui->hot == anchor && ui->active == 0 && !ui->mdown[0];
     if (hovered) {
         if (ui->tooltip_id != anchor) {
@@ -456,7 +456,7 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
 /* Like cui_tooltip, for a rect that is not interactive (a truncated label). A
  * widget's own tooltip wins if both ask in the same frame. */
 void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
-    cui__tooltip_state *tt = cui__tip(ui);
+    cui__tooltip_state *tt = cui__tooltip_get(ui);
     if (tt->visible && !tt->passive) return;
     if (ui->active != 0) return;
     /* callers test the pointer against a plain rect; a menu, popover or dialog
@@ -476,7 +476,7 @@ void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
 }
 
 static void cui__tooltip_render(cui_ctx *ui) {
-    cui__tooltip_state *tt = cui__tip(ui);
+    cui__tooltip_state *tt = cui__tooltip_get(ui);
     bool show = tt->visible && (tt->passive || ui->hot == tt->anchor);
     cui__spring(ui, &tt->t, show ? 1.0f : 0.0f, show ? 0.2f : 0.12f, 0.0f);
     if (show) tt->last_shown = ui->time;

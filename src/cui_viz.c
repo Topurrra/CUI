@@ -445,7 +445,7 @@ static void cui__squarify(const float *v, int n, cui_rect r, cui_rect *out) {
     }
 }
 
-typedef struct { cui_viz_item *items; int count; int *order; float total; const char *format; float intro; int hover; cui__tip tip; } cui__tm_paint;
+typedef struct { cui_viz_item *items; int count; int *order; float total; const char *format; float intro; int hover; cui__tip tip; } cui__treemap_paint;
 
 /* explicit colors stay; the rest are shades of one hue, darker for more */
 static cui_color cui__tm_color(cui_ctx *ui, const cui_viz_item *items, const int *order, int idx) {
@@ -467,7 +467,7 @@ static cui_rect *cui__tm_layout(cui_ctx *ui, cui_rect r, const cui_viz_item *ite
 }
 
 static void cui__paint_treemap(cui_ctx *ui, cui_node *n, void *data) {
-    cui__tm_paint *p = data;
+    cui__treemap_paint *p = data;
     cui_rect *rc = cui__tm_layout(ui, n->rect, p->items, p->order, p->count, p->total);
     float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
     for (int k = 0; k < p->count; k++) {
@@ -520,7 +520,7 @@ int cui_treemap_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *items_in
             if (ui->mx >= rc[k].x && ui->mx < rc[k].x + rc[k].w && ui->my >= rc[k].y && ui->my < rc[k].y + rc[k].h) hover = order[k];
     }
     cui__viz_hover(ui, st, hover);
-    cui__tm_paint *p = cui__frame_alloc(ui, sizeof *p);
+    cui__treemap_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
     p->items = items; p->count = count; p->order = order; p->total = total; p->format = o->format;
     p->intro = st->intro.x;
@@ -1348,13 +1348,13 @@ int cui_bar_list_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *items_i
 /* Activity rings                                                           */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_viz_item *items; int count; cui_rings_opts o; float size, th; float *prog; int hover; cui__tip tip; float label_w; } cui__ring_paint;
+typedef struct { cui_viz_item *items; int count; cui_rings_opts o; float size, th; float *prog; int hover; cui__tip tip; float label_w; } cui__rings_paint;
 
 #define CUI__RING_LEGEND_GAP 28
 #define CUI__RING_ROW 26
 
 static void cui__paint_rings(cui_ctx *ui, cui_node *n, void *data) {
-    cui__ring_paint *p = data;
+    cui__rings_paint *p = data;
     cui_rect r = n->rect;
     cui_vec2 c = { r.x + (p->o.legend ? p->size * 0.5f : r.w * 0.5f), r.y + p->size * 0.5f };
     float a0 = -CUI_PI * 0.5f;
@@ -1418,7 +1418,7 @@ int cui_activity_rings_ex(cui_ctx *ui, const char *id_str, const cui_viz_item *r
     cui__viz_state *st = cui_state(ui, id, sizeof *st + sizeof(cui_spring) * 8);
     cui_spring *sp = (cui_spring *)(st + 1);
     float size = o->size > 0 ? o->size : 150;
-    cui__ring_paint *p = cui__frame_alloc(ui, sizeof *p);
+    cui__rings_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
     float lw = 0;   /* the legend beside the rings */
     if (o->legend) {
