@@ -262,7 +262,6 @@ static int cui__month_days(int y, int m) {
     if (m == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) return 29;
     return dm[(m - 1 + 12) % 12];
 }
-static const char *cui__mon[12] = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
 
 typedef struct { int view_y, view_m; bool init, picking; int hover; } cui__rcal_state;
 
@@ -306,7 +305,7 @@ static void cui__range_month(cui_ctx *ui, cui_id cal_id, cui__rcal_state *st, in
         bo.tooltip = "Previous month";
         if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_LEFT, &bo)) { if (--st->view_m < 1) { st->view_m = 12; st->view_y--; } }
     } else cui_gap(ui, 30);
-    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__mon[m - 1], y), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body),
+    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_name(ui, m - 1), y), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body),
                             CUI_C(ui, FOREGROUND), false);
     ui->nodes[ht].w = CUI_FILL;
     ui->nodes[ht].text_align = CUI_TEXT_CENTER;
@@ -323,9 +322,8 @@ static void cui__range_month(cui_ctx *ui, cui_id cal_id, cui__rcal_state *st, in
     cui__apply_box(ui, &ui->nodes[grid], &gb);
     ui->nodes[grid].w = CUI_FILL;
     cui__open(ui, grid);
-    static const char *wd[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
     for (int k = 0; k < 7; k++) {
-        int t = cui__text_node(ui, wd[k], -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
+        int t = cui__text_node(ui, cui__weekday_min(ui, k), -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[t].text_align = CUI_TEXT_CENTER;
         ui->nodes[t].line_height = 2.2f;
     }
@@ -436,14 +434,15 @@ bool cui_range_calendar(cui_ctx *ui, const char *id_str, cui_date_range *range, 
 
 typedef struct { float hover; int preset; } cui__drp_state;
 
-static void cui__fmt_range(char *out, size_t cap, cui_date_range r) {
+static void cui__fmt_range(cui_ctx *ui, char *out, size_t cap, cui_date_range r) {
     if (!r.start.year) { out[0] = 0; return; }
-    if (!r.end.year) { snprintf(out, cap, "%.3s %d, %d", cui__mon[r.start.month - 1], r.start.day, r.start.year); return; }
+    const char *m0 = cui__month_short(ui, r.start.month - 1);
+    if (!r.end.year) { snprintf(out, cap, "%s %d, %d", m0, r.start.day, r.start.year); return; }
+    const char *m1 = cui__month_short(ui, r.end.month - 1);
     if (r.start.year == r.end.year)
-        snprintf(out, cap, "%.3s %d \xe2\x80\x93 %.3s %d, %d", cui__mon[r.start.month - 1], r.start.day, cui__mon[r.end.month - 1], r.end.day, r.end.year);
+        snprintf(out, cap, "%s %d \xe2\x80\x93 %s %d, %d", m0, r.start.day, m1, r.end.day, r.end.year);
     else
-        snprintf(out, cap, "%.3s %d, %d \xe2\x80\x93 %.3s %d, %d", cui__mon[r.start.month - 1], r.start.day, r.start.year,
-                 cui__mon[r.end.month - 1], r.end.day, r.end.year);
+        snprintf(out, cap, "%s %d, %d \xe2\x80\x93 %s %d, %d", m0, r.start.day, r.start.year, m1, r.end.day, r.end.year);
 }
 
 /* The preset ranges, as menu items in the current container. */
@@ -498,7 +497,7 @@ bool cui_date_range_picker_ex(cui_ctx *ui, const char *id_str, cui_date_range *r
     cui__open(ui, field);
     cui__icon_node(ui, CUI_ICON_CALENDAR, 16, CUI_C(ui, TEXT_MUTED));
     char txt[96];
-    cui__fmt_range(txt, sizeof txt, *range);
+    cui__fmt_range(ui, txt, sizeof txt, *range);
     bool has = txt[0] != 0;
     int t = cui__text_node(ui, has ? cui__frame_strdup(ui, txt, -1) : (o->placeholder ? o->placeholder : "Pick a date range"), -1, CUI_FONT_BODY,
                            cui__fs(ui, ui->theme.text_body), has ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), false);

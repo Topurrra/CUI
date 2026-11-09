@@ -12,10 +12,11 @@
 #define CUI__MC_MAXIT  512
 #define CUI__MC_NARROW 520.0f  /* below this width: dots in the cells, an agenda under them */
 
-static const char *cui__mc_months[12] = { "January", "February", "March", "April", "May", "June", "July",
-                                          "August", "September", "October", "November", "December" };
-static const char *cui__mc_days[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-static const char *cui__mc_long_days[7] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+/* the month and short day names: the caller's options, else the context's text (cui_set_strings) */
+static void cui__mc_names(cui_ctx *ui, const cui_month_opts *o, const char *mn[12], const char *dn[7]) {
+    for (int k = 0; k < 12; k++) mn[k] = o->month_names ? o->month_names[k] : cui__month_name(ui, k);
+    for (int k = 0; k < 7; k++) dn[k] = o->day_names ? o->day_names[k] : cui__weekday_short(ui, k);
+}
 
 enum { CUI__MC_BAR = 0, CUI__MC_TIMED, CUI__MC_MORE };
 typedef struct { int16_t row, c0, c1, line; uint8_t kind; bool cont_l, cont_r; int ev, more, day; } cui__mc_item;
@@ -256,10 +257,11 @@ static void cui__paint_month(cui_ctx *ui, cui_node *n, void *data) {
 static int cui__mc_agenda(cui_ctx *ui, cui_id id, const cui_month_event *ev, int count, int day, const cui_month_opts *o) {
     int clicked = -1;
     cui_date d = cui_date_from_days(day);
-    const char *const *mn = o->month_names ? o->month_names : cui__mc_months;
+    const char *mn[12], *dn[7];
+    cui__mc_names(ui, o, mn, dn);
     int wd = cui__mc_weekday(day);
     const char *head = o->day_names ? cui__frame_printf(ui, "%s %d %s", o->day_names[wd], d.day, mn[d.month - 1])
-                                    : cui__frame_printf(ui, "%s, %d %s", cui__mc_long_days[wd], d.day, mn[d.month - 1]);
+                                    : cui__frame_printf(ui, "%s, %d %s", cui__weekday_name(ui, wd), d.day, mn[d.month - 1]);
     int col = cui__node_new(ui, id ^ 0xA6E0u);
     ui->nodes[col].gap = 2; ui->nodes[col].w = CUI_FILL; ui->nodes[col].pad[0] = 6;
     cui__open(ui, col);
@@ -351,8 +353,8 @@ cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id_str, cui_date
 #define CUI__MC_SHIFT(n) do { int m_ = mon->year * 12 + (mon->month - 1) + (n); mon->year = m_ / 12; mon->month = m_ % 12 + 1; res.month_changed = true; } while (0)
     cui_rect pr = cui__prev_rect(ui, id);
     bool compact = pr.w > 0 && pr.w < CUI__MC_NARROW;
-    const char *const *mn = o->month_names ? o->month_names : cui__mc_months;
-    const char *const *dn = o->day_names ? o->day_names : cui__mc_days;
+    const char *mn[12], *dn[7];
+    cui__mc_names(ui, o, mn, dn);
     int col = cui__node_new(ui, id);
     ui->nodes[col].w = CUI_FILL; ui->nodes[col].gap = 8; ui->nodes[col].self_align = CUI_ALIGN_STRETCH;
     cui__open(ui, col);
@@ -366,7 +368,7 @@ cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id_str, cui_date
     cui_button_opts bo;
     memset(&bo, 0, sizeof bo);
     bo.size = CUI_SIZE_SM; bo.variant = CUI_BUTTON_OUTLINE;
-    if (cui_button_ex(ui, "Today", &bo)) {
+    if (cui_button_ex(ui, cui__today_text(ui), &bo)) {
         res.month_changed = mon->year != today.year || mon->month != today.month;
         mon->year = today.year; mon->month = today.month;
         st->focus_day = today_n;
@@ -386,7 +388,10 @@ cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id_str, cui_date
     for (int c = 0; c < 7; c++) {
         const char *nm = dn[(fwd + c) % 7];
         char one[8];
-        if (compact && !o->day_names) { snprintf(one, sizeof one, "%.1s", nm); nm = cui__frame_strdup(ui, one, -1); }
+        if (compact && !o->day_names) {   /* the first letter */
+            snprintf(one, sizeof one, "%.*s", cui__utf8_next(nm, (int)strlen(nm), 0), nm);
+            nm = cui__frame_strdup(ui, one, -1);
+        }
         int t = cui__text_node(ui, nm, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[t].w = CUI_GROW(1); ui->nodes[t].min_w = 0;
         ui->nodes[t].text_align = compact ? CUI_TEXT_CENTER : CUI_TEXT_LEFT;

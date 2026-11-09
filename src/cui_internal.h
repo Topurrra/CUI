@@ -18,6 +18,7 @@
  *   popups and toasts                cui_overlay.c
  *   the context                      struct cui_ctx: everything one context owns
  *   theme                            cui_theme.c, plus cui__fs and cui__emphasis
+ *   user-facing text                 cui_strings.c (month and weekday names, for translation)
  *   shared widget pieces             cui_widgets.c, cui_controls.c, cui_overlay.c...
  *   text editing primitives          cui_textedit.c (shared with the code editor)
  *   syntax highlighting              cui_code.c (code block, code editor, diff viewer)
@@ -531,6 +532,7 @@ struct cui_ctx {
     bool reduced_motion;
     float theme_t;              /* theme transition progress */
     cui_theme from_theme;
+    const cui_strings *strings; /* the app's text for another language, or NULL (cui_strings.c) */
 
     /* fonts */
 #ifdef CUI_TEXT_SHAPING
@@ -630,6 +632,14 @@ static inline float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.f
 static inline cui_color cui__emphasis(cui_ctx *ui) {
     return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
 }
+
+/* ---- user-facing text (cui_strings.c): the app's table (cui_set_strings) or English ---- */
+const char *cui__month_name(cui_ctx *ui, int m);      /* m 0..11, January first */
+const char *cui__month_short(cui_ctx *ui, int m);     /* "Jan" */
+const char *cui__weekday_name(cui_ctx *ui, int d);    /* d 0..6, Monday first */
+const char *cui__weekday_short(cui_ctx *ui, int d);   /* "Mon" */
+const char *cui__weekday_min(cui_ctx *ui, int d);     /* "Mo" */
+const char *cui__today_text(cui_ctx *ui);
 
 /* ---- shared widget pieces ---- */
 void cui__widgets_begin_frame(cui_ctx *ui);

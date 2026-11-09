@@ -2,6 +2,12 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
+## Unreleased
+
+### Added
+
+- `cui_set_strings(ui, &table)`: month names, short month names, weekday names and "Today" in another language, switched at runtime with one call (issue #11, by pdenapo). A partial table falls back to English for what it leaves out. The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser use it. The names used to be copied in seven files; they now live in one small file that only these components link. See [Integration](docs/integration.md#text-in-other-languages).
+
 ## 2026-11-08 · 1.2: phones, tablets, right to left and performance
 
 ### Added

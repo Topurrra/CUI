@@ -967,9 +967,6 @@ static int cui__weekday(int y, int m, int d) {
     return (w + 6) % 7;
 }
 
-static const char *cui__month_names[12] = { "January", "February", "March", "April", "May", "June", "July",
-                                            "August", "September", "October", "November", "December" };
-
 typedef struct { int view_y, view_m; bool init; } cui__cal_state;
 
 bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
@@ -995,7 +992,7 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     int head = cui__node_new(ui, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].gap = 2; ui->nodes[head].pad[3] = 6;
     cui__open(ui, head);
-    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_names[st->view_m - 1], st->view_y), -1,
+    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_name(ui, st->view_m - 1), st->view_y), -1,
                             CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body + 1), CUI_C(ui, FOREGROUND), false);
     ui->nodes[ht].line_height = 1.3f;
     ui->nodes[ht].w = CUI_FILL;
@@ -1013,9 +1010,8 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     int grid = cui__node_new(ui, 0);
     cui__apply_box(ui, &ui->nodes[grid], &gb);
     cui__open(ui, grid);
-    static const char *wd[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
     for (int k = 0; k < 7; k++) {
-        int t = cui__text_node(ui, wd[k], -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
+        int t = cui__text_node(ui, cui__weekday_min(ui, k), -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[t].text_align = CUI_TEXT_CENTER;
         ui->nodes[t].line_height = 2.0f;
     }
@@ -1107,7 +1103,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
     cui__open(ui, i);
     cui__icon_node(ui, CUI_ICON_CALENDAR, 16, CUI_C(ui, TEXT_MUTED));
     bool has = value && value->year > 0;
-    const char *txt = has ? cui__frame_printf(ui, "%.3s %d, %d", cui__month_names[(value->month - 1) % 12], value->day, value->year)
+    const char *txt = has ? cui__frame_printf(ui, "%s %d, %d", cui__month_short(ui, value->month - 1), value->day, value->year)
                           : (o->placeholder ? o->placeholder : "Pick a date");
     int t = cui__text_node(ui, txt, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), has ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), false);
     ui->nodes[t].line_height = 1.3f;

@@ -373,8 +373,6 @@ static void cui__paint_event_bar(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_rect(ui, (cui_rect){ r.x + 3, r.y + 4, 3, r.h - 8 }, CUI_CORNERS(1.5f), p->bar);
 }
 
-static const char *cui__wd_short[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-
 #define CUI__WEEK_MIN_DAY 76   /* narrowest readable day column */
 
 static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date week_start, cui_cal_event *ev, int count, const cui_week_opts *o);
@@ -469,7 +467,7 @@ static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date 
         ui->nodes[c].w = CUI_FILL; ui->nodes[c].dir = CUI_ROW; ui->nodes[c].gap = 8;
         ui->nodes[c].align = CUI_ALIGN_CENTER; ui->nodes[c].justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, c);
-        int t = cui__text_node(ui, cui__wd_short[k], -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), is_today ? cui__emphasis(ui) : CUI_C(ui, TEXT_MUTED), false);
+        int t = cui__text_node(ui, cui__weekday_short(ui, k), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), is_today ? cui__emphasis(ui) : CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[t].line_height = 1.3f;
         int nb = cui__node_new(ui, 0);
         cui_node *nn = &ui->nodes[nb];
@@ -810,7 +808,6 @@ static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *t
     int mrow = cui__node_new(ui, 0);
     ui->nodes[mrow].dir = CUI_ROW; ui->nodes[mrow].h = CUI_PX(24);
     cui__open(ui, mrow);
-    static const char *mon[12] = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
     for (int dd = 0; dd < days;) {
         cui_date cd = cui_date_from_days(base + dd);
         int left = 0;
@@ -819,7 +816,7 @@ static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *t
         ui->nodes[mc].w = CUI_PX(left * dw); ui->nodes[mc].pad[3] = 8; ui->nodes[mc].dir = CUI_ROW; ui->nodes[mc].align = CUI_ALIGN_END;
         ui->nodes[mc].flags |= CUI_NF_CLIP;
         cui__open(ui, mc);
-        int mt = cui__text_node(ui, cui__frame_printf(ui, "%s %d", mon[cd.month - 1], cd.year), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs),
+        int mt = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_name(ui, cd.month - 1), cd.year), -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs),
                                 CUI_C(ui, TEXT_SECONDARY), false);
         ui->nodes[mt].line_height = 1.6f;
         cui__close(ui);

@@ -134,6 +134,25 @@ Going smaller:
 | `-DCUI_STB_IMAGE=OFF` (upload pixels yourself with `cui_image_create`) | about 24 KB |
 | `-DCUI_WITH_APP=OFF` (core only, for use inside your engine) | the window layer and dialogs |
 
+## Text in other languages
+
+The date components show month and weekday names and a "Today" button. Give CUI a table to show them in another language; it keeps the pointer and reads it every frame, so switching language is one call, and passing `NULL` goes back to English. An entry you leave `NULL` stays English. Weeks start on Monday, as in every CUI calendar.
+
+```c
+static const cui_strings es = {
+    .month = { "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+               "agosto", "septiembre", "octubre", "noviembre", "diciembre" },
+    .month_short = { "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic" },
+    .weekday = { "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo" },
+    .weekday_short = { "lun", "mar", "mié", "jue", "vie", "sáb", "dom" },
+    .weekday_min = { "lu", "ma", "mi", "ju", "vi", "sá", "do" },
+    .today = "Hoy",
+};
+cui_set_strings(ui, &es);
+```
+
+The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser read the table. A component option that names its own words (the month calendar's `month_names`, the tour's button labels) wins over it. The order of day, month and year in a date stays the English one for now, and the date range picker's preset names ("Last 7 days") are not in the table yet. The English names live in one small file that only these components link, so an app without them pays nothing.
+
 ## Optional Arabic-script text shaping
 
 Configure with `-DCUI_TEXT_SHAPING=ON` to enable experimental static

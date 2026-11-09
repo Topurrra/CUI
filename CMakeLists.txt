@@ -66,6 +66,7 @@ set(CUI_CORE_SOURCES
     src/cui_timeline.c
     src/cui_dials.c
     src/cui_month.c
+    src/cui_strings.c
     src/cui_tour.c
     src/cui_photo.c
     src/cui_files.c

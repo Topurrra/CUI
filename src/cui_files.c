@@ -204,10 +204,9 @@ static const char *cui__file_date(cui_ctx *ui, int64_t t, time_t now) {
 #else
     localtime_r(&tt, &a); localtime_r(&now, &b);
 #endif
-    static const char *mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    if (a.tm_year == b.tm_year && a.tm_yday == b.tm_yday) return cui__frame_printf(ui, "Today, %d:%02d", a.tm_hour, a.tm_min);
-    if (a.tm_year == b.tm_year) return cui__frame_printf(ui, "%s %d, %d:%02d", mon[a.tm_mon], a.tm_mday, a.tm_hour, a.tm_min);
-    return cui__frame_printf(ui, "%s %d, %d", mon[a.tm_mon], a.tm_mday, a.tm_year + 1900);
+    if (a.tm_year == b.tm_year && a.tm_yday == b.tm_yday) return cui__frame_printf(ui, "%s, %d:%02d", cui__today_text(ui), a.tm_hour, a.tm_min);
+    if (a.tm_year == b.tm_year) return cui__frame_printf(ui, "%s %d, %d:%02d", cui__month_short(ui, a.tm_mon), a.tm_mday, a.tm_hour, a.tm_min);
+    return cui__frame_printf(ui, "%s %d, %d", cui__month_short(ui, a.tm_mon), a.tm_mday, a.tm_year + 1900);
 }
 
 /* ------------------------------------------------------------------------ */

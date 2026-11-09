@@ -288,8 +288,6 @@ typedef struct {
     float intro; int hover; cui__tip tip;
 } cui__cal_paint;
 
-static const char *cui__mon3[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-static const char *cui__wd3[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
 
 static int cui__cal_level(float v, float maxv) {
     if (v <= 0 || maxv <= 0) return 0;
@@ -312,7 +310,7 @@ static void cui__paint_calendar(cui_ctx *ui, cui_node *n, void *data) {
     float fs = cui__fs(ui, ui->theme.text_xs), step = p->cell + p->gap;
     float gx = r.x + CUI__CAL_LW, gy = r.y + CUI__CAL_TOP;
     float rad = p->cell >= 12 ? 3 : 2;
-    for (int k = 0; k < 5; k += 2) cui__draw_text_at(ui, CUI_FONT_BODY, fs, r.x, gy + k * step + p->cell * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), cui__wd3[k], false);
+    for (int k = 0; k < 5; k += 2) cui__draw_text_at(ui, CUI_FONT_BODY, fs, r.x, gy + k * step + p->cell * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), cui__weekday_short(ui, k), false);
     float last_end = -1e9f;
     for (int w = 0; w < p->weeks; w++) {
         int first = w * 7 - p->wd0;   /* day index of this column's Monday */
@@ -320,8 +318,8 @@ static void cui__paint_calendar(cui_ctx *ui, cui_node *n, void *data) {
         bool starts = first <= 0 ? (w == 0) : dd.day <= 7;
         float x = gx + w * step;
         if (starts && x > last_end + 4 && w < p->weeks - 1) {
-            cui__draw_text_at(ui, CUI_FONT_BODY, fs, x, r.y + 8, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), cui__mon3[dd.month - 1], false);
-            last_end = x + cui__text_width(ui, CUI_FONT_BODY, fs, cui__mon3[dd.month - 1], -1, false);
+            cui__draw_text_at(ui, CUI_FONT_BODY, fs, x, r.y + 8, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), cui__month_short(ui, dd.month - 1), false);
+            last_end = x + cui__text_width(ui, CUI_FONT_BODY, fs, cui__month_short(ui, dd.month - 1), -1, false);
         }
         for (int k = 0; k < 7; k++) {
             int di = first + k;
@@ -397,7 +395,7 @@ int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id_str, cui_date start, con
         cui_date dd = cui_date_from_days(base + p->hover);
         int wd = ((base + p->hover + 3) % 7 + 7) % 7;
         p->tip.alpha = st->hover_t; p->tip.x = ui->mx; p->tip.y = ui->my; p->tip.bounds = pr;
-        p->tip.title = cui__frame_printf(ui, "%s, %s %d, %d", cui__wd3[wd], cui__mon3[dd.month - 1], dd.day, dd.year);
+        p->tip.title = cui__frame_printf(ui, "%s, %s %d, %d", cui__weekday_short(ui, wd), cui__month_short(ui, dd.month - 1), dd.day, dd.year);
         cui__tip_row(&p->tip, o->unit ? o->unit : "Value", cui__fmt_value(ui, o->format, values[p->hover]),
                      cui__cal_color(ui, p->base, cui__cal_level(values[p->hover], maxv)));
     }

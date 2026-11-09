@@ -333,6 +333,28 @@ CUI_API cui_accent cui_get_accent(cui_ctx *ui);
 CUI_API cui_theme *cui_theme_get(cui_ctx *ui);
 CUI_API void cui_set_reduced_motion(cui_ctx *ui, bool reduced);
 CUI_API cui_color cui_color_of(cui_ctx *ui, cui_color c);   /* resolves tokens */
+
+/* Text the components show, for another language. CUI keeps the pointer (the
+ * table must outlive its use) and reads it every frame, so switching language
+ * is one call. An entry left NULL falls back to English, so a partial table is
+ * fine. Weeks start on Monday, as in every CUI calendar. NULL restores English.
+ *
+ *     static const cui_strings es = { .month = { "enero", "febrero", ... }, .today = "Hoy" };
+ *     cui_set_strings(ui, &es);
+ *
+ * Used by the date picker, date range picker, month and week calendars, gantt,
+ * calendar heatmap and file browser. A component's own option (such as the
+ * month calendar's month_names) wins over the table. */
+typedef struct cui_strings {
+    const char *month[12];          /* "January" ... */
+    const char *month_short[12];    /* "Jan" ... */
+    const char *weekday[7];         /* "Monday" ... "Sunday" */
+    const char *weekday_short[7];   /* "Mon" ... */
+    const char *weekday_min[7];     /* "Mo" ... */
+    const char *today;              /* "Today" */
+} cui_strings;
+CUI_API void cui_set_strings(cui_ctx *ui, const cui_strings *strings);
+CUI_API const cui_strings *cui_get_strings(cui_ctx *ui);   /* what was set, or NULL */
 CUI_API cui_color cui_token_color(cui_ctx *ui, cui_token token);
 CUI_API const char *cui_accent_name(cui_accent accent);
 

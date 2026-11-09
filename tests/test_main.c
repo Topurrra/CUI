@@ -6253,6 +6253,51 @@ static void test_candles(void) {
     cui_destroy(ui);
 }
 
+/* ---- translated text (cui_set_strings) ---- */
+static uint64_t draw_hash(cui_ctx *ui) {
+    const cui_draw_data *d = cui_get_draw_data(ui);
+    uint64_t h = 1469598103934665603ull;
+    const unsigned char *b = (const unsigned char *)d->vertices;
+    for (size_t i = 0; i < sizeof(cui_vertex) * (size_t)d->vertex_count; i++) h = (h ^ b[i]) * 1099511628211ull;
+    return h;
+}
+static void build_dates(cui_ctx *ui, void *u) {
+    cui_date *d = u;
+    cui_column(ui, .pad = 10, .gap = 10) {
+        cui_calendar(ui, "cal", d);
+        cui_date_picker(ui, "dp", d);
+        cui_date month = { 2026, 11, 1 };
+        cui_month_calendar(ui, "mc", &month, NULL, 0, .today = (cui_date){ 2026, 11, 8 }, .cell_height = 40);
+    }
+}
+static void test_strings(void) {
+    static const cui_strings es = {
+        .month = { "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre" },
+        .month_short = { "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic" },
+        .weekday_short = { "lun", "mar", "mi\xc3\xa9", "jue", "vie", "s\xc3\xa1" "b", "dom" },
+        .weekday_min = { "lu", "ma", "mi", "ju", "vi", "s\xc3\xa1", "do" },
+        .today = "Hoy",
+    };
+    static const cui_strings only_today = { .today = "Hoy" };
+    cui_ctx *ui = new_ctx();
+    cui_date d = { 2026, 11, 8 };
+    CHECK(cui_get_strings(ui) == NULL);
+    run(ui, build_dates, &d, 3);
+    uint64_t english = draw_hash(ui);
+    cui_set_strings(ui, &es);
+    CHECK(cui_get_strings(ui) == &es);
+    run(ui, build_dates, &d, 3);
+    CHECK(draw_hash(ui) != english);   /* the names changed */
+    cui_set_strings(ui, &only_today);  /* a partial table: the rest stays English */
+    run(ui, build_dates, &d, 3);
+    uint64_t partial = draw_hash(ui);
+    CHECK(partial != english);
+    cui_set_strings(ui, NULL);         /* back to English, exactly */
+    run(ui, build_dates, &d, 3);
+    CHECK(draw_hash(ui) == english);
+    cui_destroy(ui);
+}
+
 /* ---- month calendar ---- */
 typedef struct { cui_date month, sel; const cui_month_event *ev; int n; cui_month_result r; cui_rect gr; float w; } mc_ctx;
 static void build_mc(cui_ctx *ui, void *u) {
@@ -7053,6 +7098,7 @@ int main(void) {
     test_more_inputs();
     test_swipe();
     test_date_math();
+    test_strings();
     test_pickers();
     test_disclosure();
     test_checklist();
