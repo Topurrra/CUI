@@ -4,7 +4,6 @@
 #include <time.h>
 
 
-static cui_color cui__acc(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* ------------------------------------------------------------------------ */
 /* Kanban                                                                   */
@@ -129,7 +128,7 @@ bool cui_kanban_column_begin_ex(cui_ctx *ui, const char *title, int card_count, 
     if (st->drag_card >= 0 && st->from_col == c) cn->flags |= CUI_NF_ON_TOP;   /* the lifted card paints above other columns */
     cui__kcol_paint *cp = cui__frame_alloc(ui, sizeof *cp);
     bool neutral = ui->accent == CUI_ACCENT_NEUTRAL;
-    cp->hl = cs->hl; cp->hl_c = neutral ? CUI_C(ui, BORDER_STRONG) : cui_alpha(cui__acc(ui), 0.45f);
+    cp->hl = cs->hl; cp->hl_c = neutral ? CUI_C(ui, BORDER_STRONG) : cui_alpha(cui__emphasis(ui), 0.45f);
     cn->paint = cui__paint_kanban_col;
     cn->paint_data = cp;
     cn->flags |= CUI_NF_PAINT_AFTER;
@@ -283,9 +282,9 @@ void cui_kanban_column_end(cui_ctx *ui) {
             h->h = CUI_PX(st->drag_h);
             /* a flat, quiet slot: a hairline and the faintest fill, no tinted glow */
             bool neutral = ui->accent == CUI_ACCENT_NEUTRAL;
-            h->bg = neutral ? cui_alpha(CUI_C(ui, FOREGROUND), 0.025f) : cui_alpha(cui__acc(ui), ui->mode == CUI_THEME_DARK ? 0.07f : 0.045f);
+            h->bg = neutral ? cui_alpha(CUI_C(ui, FOREGROUND), 0.025f) : cui_alpha(cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.07f : 0.045f);
             h->border = 1;
-            h->border_color = neutral ? CUI_C(ui, BORDER_STRONG) : cui_alpha(cui__acc(ui), 0.4f);
+            h->border_color = neutral ? CUI_C(ui, BORDER_STRONG) : cui_alpha(cui__emphasis(ui), 0.4f);
         }
     }
     cui__close(ui);
@@ -470,7 +469,7 @@ static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date 
         ui->nodes[c].w = CUI_FILL; ui->nodes[c].dir = CUI_ROW; ui->nodes[c].gap = 8;
         ui->nodes[c].align = CUI_ALIGN_CENTER; ui->nodes[c].justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, c);
-        int t = cui__text_node(ui, cui__wd_short[k], -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), is_today ? cui__acc(ui) : CUI_C(ui, TEXT_MUTED), false);
+        int t = cui__text_node(ui, cui__wd_short[k], -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), is_today ? cui__emphasis(ui) : CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[t].line_height = 1.3f;
         int nb = cui__node_new(ui, 0);
         cui_node *nn = &ui->nodes[nb];

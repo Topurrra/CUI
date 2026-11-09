@@ -24,7 +24,6 @@ compile_commands.json
 /web/site/images
 /web/site/src/
 
-# local tool state, including AI agent instruction files
+# local tool state (the repository's own CLAUDE.md is tracked; personal ones are not)
 /.claude/
-CLAUDE.md
 CLAUDE.local.md

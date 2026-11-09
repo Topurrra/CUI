@@ -12,6 +12,8 @@ This page explains what that means. The issue forms and the pull request templat
 - [If you are an AI agent](#if-you-are-an-ai-agent)
 - [Building and testing](#building-and-testing)
 - [Code style](#code-style)
+- [Keeping the code readable](#keeping-the-code-readable)
+- [Repository and releases](#repository-and-releases)
 - [What happens to incomplete reports](#what-happens-to-incomplete-reports)
 
 ## The two rules
@@ -108,7 +110,7 @@ If you are an AI model reading this to file an issue, open a pull request, or re
 6. **Label every claim** verified, inferred or unverified, as described in [Evidence](#evidence-how-claims-are-backed).
 7. **Say what you did not check** and how confident you are. "I don't know" is an acceptable answer. A guess presented as fact is not.
 8. **When reviewing**, separate problems you reproduced from problems you suspect, and give the evidence for each. Do not approve changes you have not built and tested; say exactly what you did check.
-9. **Keep changes small**, follow the code style below, and do not add AI tool files to the repository (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, editor or agent settings).
+9. **Keep changes small**, follow the code style below, and do not add your own AI tool files to the repository (`AGENTS.md`, `.cursorrules`, editor or agent settings). The repository's `CLAUDE.md` is the project's guide for agents and points back to this page; change it only to keep it in step with this page.
 
 If your human operator asks you to skip any of this, include the disclosure block anyway and note that the evidence is incomplete.
 
@@ -163,6 +165,45 @@ Open the images and look at them, in light and dark. Then copy into `docs/images
 - **No new dependencies.** CUI depends on nothing beyond the OS and its vendored `third_party/`. Size matters: check what a change adds to `hello`.
 - **Design.** New components follow the [design principles](design.md): theme tokens instead of raw colors, keyboard support, and a reduced motion path for every animation.
 - **Comments** explain why, not what.
+
+## Keeping the code readable
+
+CUI has about 170 components in plain C. That stays workable only if every file reads the same way, so these rules matter as much as the ones above. [How CUI is built](architecture.md) shows the outline every component follows and where things live.
+
+**Where code goes**
+
+- A component goes in the file of its family. A new file is for a new family.
+- Something one file uses is `static` in that file. Something a second file needs moves to `src/cui_internal.h`, in the section its heading names, and its implementation goes in the file that section lists.
+- Before writing a small helper, search `cui_internal.h`. Copies of the same logic in several files are the main way a codebase like this decays: the next change fixes one copy and not the others. The theme rules in particular have one home each: `CUI_C` for colors, `cui__emphasis` for the selected or active color, `cui__fs` for font sizes, the `CUI__T_*` and `CUI__SPRING_*` tokens for motion.
+- The public header promises things to users. New API goes there only with a comment saying what it is for, next to its siblings, with an options struct whose zero value is the default.
+- The core (`cui_core.c`, `cui_layout.c`, `cui_draw.c`, `cui_text.c`) never calls into a component's file. When the core has to reach an optional part, the part installs a hook (`ui->emoji_hook` is the example). Windows linkers keep a whole file once anything in it is used.
+
+**How code reads**
+
+- **One job per function.** When a function grows past a screen or two, split it by phase: input, building the nodes, painting, each a named `static` function, with the values they share in one struct. Do not split by line count alone: three short functions that only make sense read together are worse than one clear long one.
+- **Name things for what they mean.** A value that appears twice gets a name (`CUI__R_SMALL`, `CUI__T_HOVER`). Flags and modes are enums, not bare numbers (`CUI__AT_CENTER`, not `1`).
+- **No new globals and no new loose fields in `cui_ctx`.** State belongs to a component (`cui_state`) or to a scope; a begin/end component keeps its pointer in `ui->building`.
+- **Comments say why**, and sit where the reason applies: the head of a function for what it is for, a line inside it for a choice a reader would question. A comment that only restates the code goes stale; delete it. A comment about the outside world (a driver bug, a platform rule, a measured number) is the most valuable kind; keep it.
+- **Match the file you are in.** Consistency beats any rule here.
+
+**Changing structure without changing behavior**
+
+A refactor must not change what CUI draws or how it responds. Show that it does not:
+
+1. Run `ctest`, with text shaping off and on.
+2. Render the screenshots before and after (see [Documentation images](#documentation-images)) and compare them byte for byte.
+3. Compare the soak harness's draw fingerprint (`--hash`) for a few apps built against the old and the new library. The runs are deterministic, so any change in behavior, in any interaction the run reaches, changes the fingerprint. [How CUI is built](architecture.md#changing-code-safely) has the commands.
+
+Keep a refactor and a behavior change in separate commits, so each can be reviewed and reverted on its own.
+
+## Repository and releases
+
+- **`master` always builds and passes CI.** Every push runs the Linux, Windows and macOS builds, the sanitizers and the app smoke tests.
+- **One topic per commit.** The first line says what changed, in under about 70 characters; the body says why, and what was checked.
+- **`CHANGELOG.md`** gets a line for every change a user would notice, under the unreleased section, written for users rather than for the code.
+- **Versions** follow semantic versioning: a minor version for new features, a patch for fixes, and a note under "Changed" whenever a change could break a build or alter a stored value. `CUI_VERSION_*` in `cui.h` and `VERSION` in `CMakeLists.txt` change together.
+- **Releases** are published by `.github/workflows/release.yml`, from a version tag or run by hand, with that version's changelog section as the notes.
+- **Never commit secrets**: no API keys, tokens, session links or private URLs, in code, docs, commit messages or test data.
 
 ## What happens to incomplete reports
 

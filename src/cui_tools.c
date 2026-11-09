@@ -2,7 +2,6 @@
 #include "cui_internal.h"
 
 
-static cui_color cui__tools_accent(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* ======================================================================== */
 /* Property inspector                                                       */
@@ -188,7 +187,7 @@ void cui_inspector_end(cui_ctx *ui) {
         p->hover = b->st->hover;
         p->active = ui->active == b->resize_id ? 1.0f : 0.0f;
         p->line = CUI_C(ui, BORDER_STRONG);
-        p->on = cui__tools_accent(ui);
+        p->on = cui__emphasis(ui);
         ui->nodes[h].paint = cui__paint_insp_line;
         ui->nodes[h].paint_data = p;
     }
@@ -981,8 +980,8 @@ static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffe
     c->muted = CUI_C(ui, TEXT_MUTED);
     c->sel = ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, ACTIVE) : cui_mix(list_bg, CUI_C(ui, ACCENT), dark ? 0.18f : 0.11f);
     c->hover = CUI_C(ui, HOVER);
-    c->match = cui_alpha(cui__tools_accent(ui), dark ? 0.32f : 0.20f);
-    c->bar = cui__tools_accent(ui);
+    c->match = cui_alpha(cui__emphasis(ui), dark ? 0.32f : 0.20f);
+    c->bar = cui__emphasis(ui);
 
     int content = cui__node_new(ui, lid);
     cui_node *cn = &ui->nodes[content];

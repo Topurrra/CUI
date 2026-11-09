@@ -10,7 +10,6 @@
  * themselves from the current rectangle. */
 #include "cui_internal.h"
 
-static cui_color cui__cv_accent(cui_ctx *ui) { return cui__emphasis(ui); }
 
 /* ======================================================================== */
 /* Curve math                                                               */
@@ -572,7 +571,7 @@ cui_curve_result cui_curve_editor_ex(cui_ctx *ui, const char *id_str, cui_curve_
     pp->hot_handle = hot_handle; pp->active_handle = active_handle;
     pp->hover = res.hovered; pp->hx = res.hover_x; pp->hy = res.hover_y;
     pp->playhead = o->show_playhead; pp->px = o->playhead;
-    pp->curve = cui__cv_accent(ui);
+    pp->curve = cui__emphasis(ui);
     ui->nodes[pn].paint = cui__paint_curve;
     ui->nodes[pn].paint_data = pp;
     cui__open(ui, pn);
@@ -972,7 +971,7 @@ cui_gradient_result cui_gradient_editor_ex(cui_ctx *ui, const char *id_str, cui_
     tp->stops = copy; tp->n = n; tp->sel = sel; tp->focus = focus; tp->hot = hot;
     tp->pending = pending; tp->pending_dy = pending_dy;
     tp->light = light; tp->dark = darkc; tp->edge = edge;
-    tp->ring = CUI_C(ui, BORDER_STRONG); tp->ring_on = cui__cv_accent(ui); tp->surface = CUI_C(ui, SURFACE);
+    tp->ring = CUI_C(ui, BORDER_STRONG); tp->ring_on = cui__emphasis(ui); tp->surface = CUI_C(ui, SURFACE);
     ui->nodes[track].paint = cui__paint_gradient_track;
     ui->nodes[track].paint_data = tp;
     cui__open(ui, track);
