@@ -585,9 +585,9 @@ function installBlock() {
 
 const FACTS = [
   ['0.1 to 0.25 ms a frame', 'A full screen builds, lays out and paints in a fraction of a millisecond. An idle app uses no CPU.'],
-  ['About 250 KB', 'That is a complete app. CUI has no dependencies, and the library is one C99 codebase.'],
+  ['About 250 KB', 'That is a complete app, window and fonts included. CUI draws its own components, so there is no browser, no runtime and no dependency to ship.'],
   ['Win32, Cocoa and X11', 'Or SDL2 and GLFW, drawn with OpenGL or the software renderer. The core only emits triangles, so your own renderer works too.'],
-  ['Keyboard and reduced motion', 'Every component works from the keyboard and every animation has a reduced motion path. Text meets 4.5:1 contrast.'],
+  ['Keyboard and reduced motion', 'Controls take Tab, Enter, Space and the arrow keys, and each component page lists its keys. Every animation has a reduced motion path, and text meets 4.5:1 contrast.'],
 ];
 const ART = 'img/tetons.jpg';
 
@@ -603,7 +603,7 @@ const C_LOGO = `<svg class="c-logo" viewBox="-14 -14 388 432" role="img" aria-la
 </g></svg>`;
 // the landing page: the hero's controls, the showcase, the bento and the
 // playground are all the library itself, compiled to WebAssembly
-const STRIP = [['~160', 'components'], ['~250 KB', 'a complete app'], ['< 0.25 ms', 'per frame'], ['Win · Mac · Linux', 'one C99 codebase'], ['0', 'dependencies']];
+const STRIP = [['~190', 'components'], ['~250 KB', 'a complete app'], ['< 0.25 ms', 'per frame'], ['Win · Mac · Linux · Web', 'one C99 codebase'], ['0', 'dependencies']];
 const SHOWCASE = [['stage-mosaic', 'Overview', 'layers'], ['app-chrome', 'Editor', 'window'], ['hero-data', 'Data', 'table'],
                   ['hero-plan', 'Planning', 'kanban'], ['hero-ai', 'Assistant', 'message'], ['hero-charts', 'Charts', 'chart']];
 const BENTO = [
@@ -767,7 +767,7 @@ function viewHome() {
       h('h1', { class: 'hero-title', 'aria-label': 'Native UI components for C' },
         ...['Native', 'UI', 'components', 'for'].map((w) => h('span', { class: 'hw' }, w)),
         h('span', { class: 'hw hw-logo', html: C_LOGO })),
-      h('p', { class: 'lede' }, 'Spring motion and full keyboard support, from one C99 codebase.'),
+      h('p', { class: 'lede' }, 'About 190 components, compiled to machine code with no browser or runtime inside. Windows, macOS, Linux and the web, from one C99 codebase.'),
       h('div', { class: 'hero-actions' },
         h('a', { class: 'btn primary', href: '#/guide/getting-started', html: 'Get started' + I.arrow }),
         h('a', { class: 'btn', href: '#/components' }, 'Browse components')),
@@ -1034,6 +1034,20 @@ function optionsBlock(it) {
     many ? null : [' Declared as ', ghLink('include/cui/cui.h', it.options[0].line, it.options[0].struct), ' in cui.h.'])];
 }
 
+// the structs a component's functions take and return, so the page says what to fill in and read back
+function typesBlock(it) {
+  const role = { data: 'You fill this in', result: 'Returned' };
+  return it.types.map((t) => h('div', { class: 'opt-block' },
+    h('h3', { class: 'opt-fn' }, h('code', {}, t.struct), h('span', { class: 'opt-struct' }, role[t.role] || '', ' · ', ghLink('include/cui/cui.h', t.line, 'cui.h'))),
+    h('div', { class: 'opt-scroll' }, h('table', { class: 'opt-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Field'), h('th', {}, 'Type'), h('th', {}, 'Description'))),
+      h('tbody', {}, t.fields.map((f) => h('tr', {},
+        h('td', {}, h('code', {}, f.name)),
+        h('td', { class: 'opt-type' }, h('code', {}, f.type)),
+        h('td', { class: 'opt-doc', html: f.doc || '' })))))),
+    t.enums.map((e) => h('p', { class: 'opt-caption' }, h('code', {}, e.name), ': ', e.values.map((v, i) => [i ? ', ' : '', h('code', {}, v)])))));
+}
+
 function viewItem(id, sec) {
   const it = CAT.items[id];
   if (!it) return viewMissing();
@@ -1084,7 +1098,10 @@ function viewItem(id, sec) {
   if (usage.length) section('usage', 'Usage', docEl(usage));
   if (rest.length) section('behavior', usage.length ? 'Behavior' : 'Overview', docEl(rest));
   if (it.keyboard?.length) section('keyboard', 'Keyboard', h('ul', { class: 'kbd-list' }, it.keyboard.map((k) => h('li', { html: k }))));
+  else if (it.keyboard_note) section('keyboard', 'Keyboard', h('p', { class: 'kbd-note', html: it.keyboard_note }));
+  else if (it.display_only) section('keyboard', 'Keyboard', h('p', { class: 'kbd-note' }, 'This component only displays: there is nothing to focus or press.'));
   if (it.options?.length) section('options', 'Options', ...optionsBlock(it));
+  if (it.types?.length) section('types', 'Data and results', ...typesBlock(it));
   const rel = (it.related || []).map((r) => CAT.items[r]).filter(Boolean);
   if (rel.length) section('related', 'Related', h('div', { class: 'related-grid' }, rel.map((r) => h('a', { class: 'rel-card', href: `#/c/${r.id}` },
     h('span', { class: 'rel-title' }, r.title, newBadge(r.id)), h('span', { class: 'rel-text' }, r.summary), h('span', { class: 'rel-go', html: I.arrow })))));
@@ -1191,7 +1208,9 @@ function sceneLabel(s, it) {
 function pageText(it) {
   const tmp = h('div', { html: it.html });
   tmp.querySelectorAll('pre').forEach((p) => { p.textContent = '\n```c\n' + p.textContent.trim() + '\n```\n'; });
-  return `# ${it.title}\n\n${it.summary || ''}\n\n${tmp.innerText.trim()}\n`;
+  const types = (it.types || []).map((t) => `\n## ${t.struct} (${t.role === 'result' ? 'returned' : 'you fill this in'})\n\n` +
+    t.fields.map((f) => `- ${f.type} ${f.name}${f.doc ? ': ' + h('span', { html: f.doc }).textContent : ''}`).join('\n') + '\n').join('');
+  return `# ${it.title}\n\n${it.summary || ''}\n\n${tmp.innerText.trim()}\n${types}`;
 }
 
 function viewShowcase() {

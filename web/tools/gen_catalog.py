@@ -119,7 +119,34 @@ def scene_sources(table):
     return out
 
 # ---------------------------------------------------------------- markdown
+REPO_URL = "https://github.com/yappologistic/CUI"
+
+def doc_link(label, target, anchors):
+    """A markdown link as the site shows it: a guide or component page, the web, or a file in the repository."""
+    anchor = target.split("#", 1)[1] if "#" in target else None
+    if target.startswith("http"):
+        return f'<a href="{target}" target="_blank" rel="noreferrer">{label}</a>'
+    if anchor and anchor in anchors:
+        return f'<a href="#/c/{anchors[anchor]}">{label}</a>'
+    doc = re.match(r"^(?:\.\./)?(?:docs/)?([\w-]+)\.md(?:#([\w-]+))?$", target)
+    if doc and doc.group(1) in GUIDE_IDS:
+        return f'<a href="#/guide/{doc.group(1)}' + (f'/{doc.group(2)}' if doc.group(2) else '') + f'">{label}</a>'
+    if doc and doc.group(1) in ("components", "components-more"):
+        return f'<a href="#/components">{label}</a>'
+    repo = re.match(r"^\.\./([\w./-]+)$", target)   # a file or folder of the repository, from docs/
+    if repo:
+        kind = "blob" if "." in repo.group(1).rsplit("/", 1)[-1] else "tree"
+        return f'<a href="{REPO_URL}/{kind}/master/{repo.group(1)}" target="_blank" rel="noreferrer">{label}</a>'
+    return f'<span class="doc-ref" title="{html.escape(target)}">{label}</span>'
+
 def inline(text, anchors):
+    # a link whose label is code, [`examples/todo.c`](../examples/todo.c): made first, since
+    # the split on backticks below would cut it in two
+    kept = []
+    def code_link(m):
+        kept.append(doc_link(f"<code>{html.escape(m.group(1))}</code>", m.group(2), anchors))
+        return f"\x00{len(kept) - 1}\x00"
+    text = re.sub(r"\[`([^`]+)`\]\(([^)]+)\)", code_link, text)
     parts = re.split(r"(`[^`]+`)", text)
     out = []
     for p in parts:
@@ -130,31 +157,18 @@ def inline(text, anchors):
         # images in running text or table cells (component screenshots are shown live instead)
         p = re.sub(r"!\[([^\]]*)\]\((images/[\w/\-]+\.png)\)", r'<img class="doc-img" src="\2" alt="\1" loading="lazy">', p)
         p = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", "", p)
-        def link(m):
-            label, target = m.group(1), m.group(2)
-            anchor = target.split("#", 1)[1] if "#" in target else None
-            if target.startswith("http"):
-                return f'<a href="{target}" target="_blank" rel="noreferrer">{label}</a>'
-            if anchor and anchor in anchors:
-                return f'<a href="#/c/{anchors[anchor]}">{label}</a>'
-            doc = re.match(r"^(?:\.\./)?(?:docs/)?([\w-]+)\.md(?:#([\w-]+))?$", target)
-            if doc and doc.group(1) in GUIDE_IDS:
-                return f'<a href="#/guide/{doc.group(1)}' + (f'/{doc.group(2)}' if doc.group(2) else '') + f'">{label}</a>'
-            if doc and doc.group(1) in ("components", "components-more"):
-                return f'<a href="#/components">{label}</a>'
-            return f'<span class="doc-ref" title="{html.escape(target)}">{label}</span>'
-        p = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, p)
+        p = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", lambda m: doc_link(m.group(1), m.group(2), anchors), p)
         p = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", p)
         p = re.sub(r"(?<![\w*])\*([^*\s][^*]*)\*(?![\w*])", r"<em>\1</em>", p)
         p = re.sub(r"(?<![\w])_([^_\s][^_]*)_(?![\w])", r"<em>\1</em>", p)
         out.append(p)
-    return "".join(out)
+    return re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], "".join(out))
 
 # the guide: docs/*.md in reading order (components have their own pages)
-GUIDES = ["getting-started", "layout", "theming", "icons", "custom-components", "integration", "rendering", "performance", "design"]
+GUIDES = ["getting-started", "tutorial", "layout", "theming", "icons", "custom-components", "integration", "rendering", "performance", "design"]
 GUIDE_IDS = set(GUIDES)
 
-IMG_RE = re.compile(r"images/(components|showcase)/([\w\-]+?)(?:-dark)?\.png")
+IMG_RE = re.compile(r"images/((?:components|showcase)/)?([\w\-]+?)(?:-dark)?\.png")
 
 def md_to_html(lines, anchors, scenes):
     """Returns (html, scene names in order, static images) for a section body."""
@@ -186,7 +200,7 @@ def md_to_html(lines, anchors, scenes):
                     if name not in found: found.append(name)
                 else:
                     alt = re.search(r'alt="([^"]*)"', s) or re.search(r"!\[([^\]]*)\]", s)
-                    entry = {"src": f"images/{kind}/{name}", "alt": alt.group(1) if alt else name}
+                    entry = {"src": f"images/{kind}{name}", "alt": alt.group(1) if alt else name}
                     if entry not in statics: statics.append(entry)
             i += 1
             continue
@@ -317,6 +331,7 @@ APPS = [
     ("settings", "Settings", "Account, notifications, appearance and billing settings.", "examples/settings.c"),
     ("tracker", "Tracker", "Orbit: an issue tracker with boards and filters.", "examples/tracker.c"),
     ("assistant", "Assistant", "Muse: an AI assistant with reasoning, tools and attachments.", "examples/assistant.c"),
+    ("todo", "To do", "The app the tutorial builds: a list you add to, tick off, filter and clear, in about 130 lines.", "examples/todo.c"),
 ]
 
 # ---------------------------------------------------------------- options (from the header)
@@ -355,9 +370,56 @@ def header_index():
     for m in re.finditer(r"typedef\s+struct\s+(cui_\w+)\s*\{", src):
         end = brace_block(src, m.start())
         body = src[src.index("{", m.start()) + 1:end - 1]
-        if not re.match(r"\s*int\s+_\s*;", body): continue   # only named-argument structs
-        structs[m.group(1)] = {"line": src.count("\n", 0, m.start()) + 1, "fields": parse_fields(body)}
+        entry = {"line": src.count("\n", 0, m.start()) + 1, "fields": parse_fields(body)}
+        if re.match(r"\s*int\s+_\s*;", body): structs[m.group(1)] = entry   # a named-argument struct
+        else: DATA_STRUCTS[m.group(1)] = entry                              # data the caller owns, or a result
+    for m in re.finditer(r"typedef\s+enum\s+(cui_\w+)\s*\{([^}]*)\}", flat, re.S):
+        ENUMS[m.group(1)] = re.findall(r"\b(CUI_\w+)\b(?!\s*\()", re.sub(r"=[^,]*", "", m.group(2)))
+    # what each function takes and returns: the cui_ types among them
+    for m in re.finditer(r"CUI_API\s+((?:const\s+)?\w+(?:\s*\*)*)\s*(cui_\w+)\s*\(([^;{]*?)\)\s*(?:CUI_\w+\([^)]*\)\s*)?;", flat, re.S):
+        ret = re.sub(r"\bconst\b|\*|\s", "", m.group(1))
+        params = re.findall(r"\b(cui_\w+)\b\s*\**\s*(?:const\s*)?\w*\s*(?:,|$)", m.group(3))
+        FN_SIG[m.group(2)] = (ret, params)
     return fn_struct, structs
+
+DATA_STRUCTS, ENUMS, FN_SIG = {}, {}, {}
+# value types every page uses; their fields are in the Layout and Theming guides
+CORE_TYPES = {"cui_ctx", "cui_rect", "cui_vec2", "cui_color", "cui_size", "cui_corners", "cui_box", "cui_texture",
+              "cui_font", "cui_id", "cui_date", "cui_key_combo"}
+
+def item_types(it, owners):
+    """The structs an item's own functions take (data) and return (results), with the
+    enums their fields use: what a caller has to fill in and read back."""
+    out, seen = [], set()
+    def add(st, role, fn):
+        if st in CORE_TYPES or st not in DATA_STRUCTS or not DATA_STRUCTS[st]["fields"]: return
+        if st in seen:
+            e = next(x for x in out if x["struct"] == st)
+            if fn not in e["fn"]: e["fn"].append(fn)
+            return
+        seen.add(st)
+        fields = DATA_STRUCTS[st]["fields"]
+        enums = []
+        for f in fields:
+            base = re.sub(r"\bconst\b|\*|\[[^\]]*\]|\s", "", f["type"])
+            if base in ENUMS and base not in [e["name"] for e in enums]: enums.append({"name": base, "values": ENUMS[base]})
+            if base in DATA_STRUCTS and base not in CORE_TYPES: nested.append((base, role, fn))
+        out.append({"struct": st, "role": role, "fn": [fn], "line": DATA_STRUCTS[st]["line"],
+                    "fields": [{"name": f["name"], "type": f["type"], "doc": f["doc"]} for f in fields], "enums": enums})
+    nested = []
+    for a in it["apis"]:
+        if it["id"] not in owners.get(a, set()): continue
+        for c in [a, a + "_ex", a + "_begin", a + "_begin_ex"]:
+            if c not in FN_SIG: continue
+            ret, params = FN_SIG[c]
+            for st in params:
+                if not st.endswith("_opts"): add(st, "data", a)
+            add(ret, "result", a)
+    while nested:   # a struct inside a struct (a diagnostic's position, a trace's view)
+        st, role, fn = nested.pop(0)
+        add(st, role, fn)
+    out.sort(key=lambda x: (x["role"] != "data", ))
+    return out
 
 def comment_text(c):
     c = re.sub(r"^\s*/\*+|\*+/\s*$|^\s*//", "", c.strip())
@@ -517,21 +579,41 @@ def kbd_wrap(s):
         return "+".join(f"<kbd>{k}</kbd>" if re.fullmatch(KEY, k) or len(k) == 1 else k for k in keys)
     return "".join(p if p.startswith("<") else KEY_RE.sub(one, p) for p in parts)
 
+# Components that only show something: nothing to focus or press. Every other page says what
+# the keyboard does (tools/check_catalog.mjs holds every page to one or the other).
+DISPLAY_ONLY = {
+    "icons", "badge-avatar-and-keycap", "image", "password-strength",
+    "progress-meter-spinner-and-skeleton", "timeline-and-progress-ring", "charts", "heatmap",
+    "calendar-heatmap", "treemap-and-radar", "funnel-split-bar-and-waffle", "sankey",
+    "bar-list-and-activity-rings", "scatter-and-bubble", "radial-gauge", "presence-counter-and-ticker",
+    "text-effects", "loaders", "chat", "uptime-bars"
+}
+
 def keyboard_lines(body_html):
-    out = []
+    """(lines, note): the sentences that name keys, and for a page whose "Keyboard:"
+    paragraph names none ("none yet, it is dragged with the pointer") that paragraph."""
+    out, note = [], ""
     blocks = re.findall(r"<(p|li)>(.*?)</\1>", body_html, re.S)
     for _, block in blocks:
+        text = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<code>.*?</code>", " ", block)))
+        # a paragraph that opens with "Keyboard:" is about the keyboard all the way through: one line
+        if re.match(r"\s*Keyboard:", text):
+            s = re.sub(r"^\s*Keyboard:\s*", "", block.strip())
+            if s: s = s[0].upper() + s[1:]
+            if TRIGGER_RE.search(text):
+                s = kbd_wrap(s)
+                if s not in out: out.append(s)
+            else: note = s
+            continue
         # sentences end at . ! ? before a capital letter or a tag (not inside "e.g." or "1.2")
         for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z<])", block):
             plain = re.sub(r"<code>.*?</code>", " ", sent)
             plain = html.unescape(re.sub(r"<[^>]+>", "", plain))
             if not TRIGGER_RE.search(plain): continue
-            # "Keyboard: arrows move the selection." reads as the list item itself
-            s = re.sub(r"^\s*Keyboard:\s*", "", sent.strip())
-            if s != sent.strip() and s: s = s[0].upper() + s[1:]
-            s = kbd_wrap(s)
+            s = re.sub(r"^Keyboard:\s*", "", sent.strip())   # the section is already titled Keyboard
+            if s: s = kbd_wrap(s[0].upper() + s[1:])
             if s and s not in out: out.append(s)
-    return out
+    return out, note
 
 # ---------------------------------------------------------------- related components
 def related_items(it, items, cats_order, owners):
@@ -621,7 +703,10 @@ def main():
     cats_order = {c: ids for c, ids in cats.items()}
     for it in items.values():
         it["options"] = item_options(it, owners, fn_struct, structs)
-        it["keyboard"] = keyboard_lines(it["html"])
+        it["types"] = item_types(it, owners)
+        it["keyboard"], it["keyboard_note"] = keyboard_lines(it["html"])
+        it["html"] = re.sub(r"\n?<p>Keyboard:.*?</p>", "", it["html"], flags=re.S)   # said once, in the page's Keyboard section
+        it["display_only"] = it["id"] in DISPLAY_ONLY and not it["keyboard"] and not it["keyboard_note"]
     for it in items.values():
         it["related"] = related_items(it, items, cats_order, owners)
 

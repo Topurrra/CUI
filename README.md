@@ -9,8 +9,9 @@
 
 **Native UI components for C.**
 
-About 190 components with spring motion and full keyboard support.<br>
-Windows, macOS and Linux from one C99 codebase. No dependencies, about 240 KB.
+About 190 components with spring motion and keyboard support.<br>
+Compiled C with no browser or runtime inside: a complete app is about 250 KB.<br>
+Windows, macOS, Linux and the web from one C99 codebase, with no dependencies.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/yappologistic/CUI/ci.yml?branch=master&label=CI&style=flat-square&labelColor=24292f)](https://github.com/yappologistic/CUI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-57606a.svg?style=flat-square&labelColor=24292f&color=57606a)](LICENSE)
@@ -99,7 +100,7 @@ Buttons, fields, pickers, dialogs and tables, plus a command palette, a virtuali
 
 **Small and fast**
 
-A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 240 KB.
+A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CPU. A complete app is about 250 KB.
 
 </td>
 </tr>
@@ -108,14 +109,14 @@ A full screen builds, lays out and paints in 0.1 to 0.25 ms. Idle apps use no CP
 
 **Native everywhere**
 
-Win32, Cocoa and X11, or SDL2 and GLFW, drawn with OpenGL or a software renderer. The core only emits triangles, so your own renderer works too. Layouts mirror for Persian, Arabic and Hebrew with one setting.
+Native here means compiled code that talks to Win32, Cocoa and X11 directly (or SDL2 and GLFW), with no browser or runtime in between. CUI draws its own components with OpenGL or a software renderer; it does not wrap the system's buttons, so an app looks the same on every system. The core only emits triangles, so your own renderer works too. Layouts mirror for Persian, Arabic and Hebrew with one setting.
 
 </td>
 <td valign="top">
 
 **Careful by default**
 
-Neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed. Every component works from the keyboard and every animation has a reduced motion path. The [design principles](docs/design.md) list the rules.
+Neutral surfaces, one accent, hairline borders, shadows only on things that float, and motion that explains what changed. Controls work from the keyboard, and each component's page lists its keys and the few gestures that still need a pointer. Every animation has a reduced motion path. The [design principles](docs/design.md) list the rules.
 
 </td>
 </tr>
@@ -129,9 +130,10 @@ CUI uses CMake and builds with GCC, Clang, MSVC and MinGW. Add it to your projec
 include(FetchContent)
 FetchContent_Declare(cui
     GIT_REPOSITORY https://github.com/yappologistic/CUI.git
-    GIT_TAG master)
+    GIT_TAG v1.3.1)
 FetchContent_MakeAvailable(cui)
 target_link_libraries(my_app PRIVATE cui::cui)
+cui_app_target(my_app)   # no console window on Windows, and only the code your app uses
 ```
 
 Or build it and run an example:
@@ -246,7 +248,7 @@ Capture (dropzone with real file drops, avatar upload, signature pad), conversat
 
 ## Example apps
 
-Complete apps in [`examples/`](examples), each a single C file.
+Complete apps in [`examples/`](examples), each a single C file. Each [release](https://github.com/yappologistic/CUI/releases) has them built and ready to run for Windows, macOS and Linux, and they run in the browser on the [site](https://yappologistic.github.io/CUI/#/apps).
 
 <table>
 <tr>
@@ -313,7 +315,7 @@ All colors are semantic tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_TEXT_SECONDARY`,
 
 | Measure | Result |
 |---|---|
-| `hello` on Linux, stripped, whole executable | about 240 KB |
+| `hello` on Linux, stripped, whole executable | about 250 KB |
 | `assistant` (the AI app above), whole executable | about 350 KB |
 | Whole library: about 190 components, both renderers, X11 backend, fonts and icons | about 1,050 KB |
 | Build, layout and paint a frame (gallery pages, 1240 × 820 points at 2×) | 0.09 to 0.75 ms, most under 0.25 |
@@ -353,6 +355,7 @@ CUI 1.3 is complete enough to build real desktop apps. Every push runs unit, int
 | Guide | What it covers |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, build, the frame loop, your first screens |
+| [Tutorial](docs/tutorial.md) | Build a small, complete app step by step: a list, a dialog, saving |
 | [Layout](docs/layout.md) | Rows, columns, sizes, alignment, grids, scrolling, split views |
 | [Components](docs/components.md) and [more](docs/components-more.md) | Every component with screenshots, options and keyboard support |
 | [Theming](docs/theming.md) | Tokens, light and dark, accents, fonts, motion |

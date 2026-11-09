@@ -2,6 +2,33 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
+## 2026-11-09 · 1.3.1: first steps, a tutorial and ready-to-run examples
+
+A release for people starting out. Every step of the getting-started guide was followed as written, and what did not work is fixed.
+
+### Added
+
+- **Tutorial**: [build a to-do app](docs/tutorial.md) in about 130 lines, step by step: your data as the state, a list that grows, ids for repeated rows, a filter, a dialog and saving to a file. The finished app is `examples/todo.c`, and a test types into it and checks that it does what the tutorial says.
+- **Ready-to-run examples**: each release now attaches the example apps built for Windows, macOS and Linux, so you can try them without a compiler.
+- `cui_app_target(my_app)` for CMake projects. It gives a window app no console on Windows and keeps `int main(void)` as the entry point, and in release builds it links only the library code the app calls. A first window is about 250 KB with it and about 470 KB without.
+- **Component pages on the site list their data.** Under the options, each page now shows the structs you fill in and the structs you get back, with their fields and the values of their enums (105 tables on 63 pages).
+- **Every component page says what the keyboard does.** 119 pages list their keys, 20 are marked as display only, and 8 say plainly that they still need a pointer: the rating, the histogram slider's handles, swipe actions, the reorderable list, the JSON viewer, the agent plan's steps, blame and the time histogram.
+- [From C++](docs/integration.md#from-c): how to call CUI from C++, with an example the tests compile.
+- `tests/first_steps.sh`, run on every push: it takes the code and the commands out of the getting-started guide and runs them, without CMake, as one file, with CMake and from an installed copy.
+
+### Changed
+
+- **Metric cards** put the change under the value when the card is too narrow for both, instead of cutting both short.
+- The install snippets name a release (`GIT_TAG v1.3.1`), so a build does not change under you.
+- The docs say what "native" means here: compiled code with no browser or runtime, drawing its own components. They also say how to get the small sizes they quote.
+
+### Fixed
+
+- An installed CUI could not be used through `find_package(cui)`: the package did not look for the thread library it links.
+- The getting-started guide's "Without CMake" command left out `src/platform/cui_dialogs.c` and did not link.
+- With the single-file distribution, the guide's first window did not compile: it needs `#include "cui.h"`, which the guide now says. The guide's one-line build also gave a 1.6 MB program; it now shows the two commands that give about 265 KB.
+- The Windows link line in the guide and in `cui.pc` lacked `comdlg32` and `ole32`.
+
 ## 2026-11-09 · 1.3: developer tools
 
 ### Added
