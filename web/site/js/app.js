@@ -1045,7 +1045,7 @@ function typesBlock(it) {
         h('td', {}, h('code', {}, f.name)),
         h('td', { class: 'opt-type' }, h('code', {}, f.type)),
         h('td', { class: 'opt-doc', html: f.doc || '' })))))),
-    t.enums.map((e) => h('p', { class: 'opt-caption' }, h('code', {}, e.name), ': ', e.values.map((v, i) => [i ? ', ' : '', h('code', {}, v)])))));
+    t.enums.map((e) => h('p', { class: 'opt-caption' }, h('code', {}, e.name), ': ', e.values.flatMap((v, i) => (i ? [', ', h('code', {}, v)] : [h('code', {}, v)]))))));
 }
 
 function viewItem(id, sec) {
@@ -1416,23 +1416,52 @@ $('#settings-open').addEventListener('click', (e) => (openSettings.close ? close
 $('#theme-toggle').addEventListener('click', () => { prefs.theme = isDark() ? 'light' : 'dark'; savePrefs(); applyTheme(); });
 
 // ---------------------------------------------------------------- search palette
+// Everything the palette searches, built once. `hay` is what a page is about (its title,
+// description and functions) and ranks first; `body` is the rest of its text, so a word
+// that only appears in a guide's prose or an option's name still finds its page.
+let searchEntries = null;
+function plainText(html) { const d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.replace(/\s+/g, ' ').trim(); }
+function buildSearch() {
+  const optText = (it) => [...it.options.flatMap((o) => [o.struct, ...o.fields.flatMap((f) => [f.name, plainText(f.doc)])]),
+    ...(it.types || []).flatMap((t) => [t.struct, ...t.fields.flatMap((f) => [f.name, plainText(f.doc)]), ...t.enums.flatMap((e) => [e.name, ...e.values])])].join(' ');
+  const E = (href, title, sub, group, hay, body, minor) => ({ href, title, sub, group, minor, hay: `${title} ${hay}`.toLowerCase(), body, lbody: body.toLowerCase() });
+  return [
+    ...CAT.guides.flatMap((g) => [E(`#/guide/${g.id}`, g.title, g.lede, 'Guide', g.lede, plainText(g.intro)),
+      ...g.sections.map((x) => E(`#/guide/${g.id}/${x.id}`, x.title, g.title, 'Guide', g.title, plainText(x.html), true))]),
+    ...order.map((id) => { const it = CAT.items[id]; return E(`#/c/${id}`, it.title, it.summary, CAT.categories.find((c) => c.id === it.category).title,
+      `${it.summary} ${it.apis.join(' ')} ${it.scenes.join(' ')}`, `${plainText(it.html)} ${plainText(it.keyboard.join(' '))} ${plainText(it.keyboard_note)} ${optText(it)}`); }),
+    ...CAT.showcase.map((x) => E('#/showcase', x.title, x.summary, 'Showcase', `${x.summary} ${x.id}`, '')),
+    ...CAT.apps.map((a) => E(`#/app/${a.id}`, `${a.title} app`, a.summary, 'Apps', `${a.summary} app`, '')),
+    ...CAT.changelog.releases.map((r) => E(`#/changelog/${r.id}`, `Changelog: ${r.title}`, r.date, 'Changelog', '', plainText(r.html), true)),
+  ];
+}
+// the words around the first place a term appears, to show why a page matched
+function snippet(e, terms) {
+  const at = Math.min(...terms.map((t) => e.lbody.indexOf(t)).filter((i) => i >= 0));
+  if (!isFinite(at)) return e.sub;
+  let a = Math.max(0, at - 48), b = Math.min(e.body.length, at + 72);
+  if (a > 0) a = e.body.indexOf(' ', a) + 1;
+  if (b < e.body.length) b = e.body.lastIndexOf(' ', b);
+  return `${a > 0 ? '… ' : ''}${e.body.slice(a, b)}${b < e.body.length ? ' …' : ''}`;
+}
 function openSearch() {
   if ($('.scrim')) return;
-  const entries = [
-    ...CAT.guides.flatMap((g) => [{ href: `#/guide/${g.id}`, title: g.title, sub: g.lede, group: 'Guide', hay: `${g.title} ${g.lede}`.toLowerCase() },
-      ...g.sections.map((x) => ({ href: `#/guide/${g.id}/${x.id}`, title: x.title, sub: g.title, group: 'Guide', hay: `${x.title} ${g.title}`.toLowerCase(), minor: true }))]),
-    ...order.map((id) => { const it = CAT.items[id]; return { href: `#/c/${id}`, title: it.title, sub: it.summary, group: CAT.categories.find((c) => c.id === it.category).title, hay: `${it.title} ${it.summary} ${it.apis.join(' ')} ${it.scenes.join(' ')}`.toLowerCase() }; }),
-    ...CAT.showcase.map((s) => ({ href: '#/showcase', title: s.title, sub: s.summary, group: 'Showcase', hay: `${s.title} ${s.summary} ${s.id}`.toLowerCase() })),
-    ...CAT.apps.map((a) => ({ href: `#/app/${a.id}`, title: `${a.title} app`, sub: a.summary, group: 'Apps', hay: `${a.title} ${a.summary} app`.toLowerCase() })),
-  ];
+  const entries = searchEntries || (searchEntries = buildSearch());
   const input = h('input', { placeholder: 'Search the guide, components and functions', 'aria-label': 'Search' });
   const list = h('div', { class: 'palette-list', role: 'listbox' });
   let results = [], sel = 0;
   const render = () => {
     const q = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    results = entries.filter((e) => (q.length || !e.minor) && q.every((t) => e.hay.includes(t)));
-    if (q.length) results.sort((a, b) => (b.title.toLowerCase().startsWith(q[0]) - a.title.toLowerCase().startsWith(q[0])));
-    results = results.slice(0, 60);
+    // a page that is about the words comes before a page that only mentions them
+    const score = (e) => {
+      const title = e.title.toLowerCase(), phrase = q.join(' ');
+      if (q.every((t) => e.hay.includes(t))) return (title === phrase ? 400 : title.startsWith(q[0]) ? 300 : q.every((t) => title.includes(t)) ? 250 : 200) - (e.minor ? 20 : 0);
+      if (q.every((t) => e.hay.includes(t) || e.lbody.includes(t))) return (e.lbody.includes(phrase) ? 100 : 50) + 30 * q.filter((t) => title.includes(t)).length - (e.minor ? 0 : 5);
+      return 0;
+    };
+    results = entries.filter((e) => (q.length || !e.minor)).map((e) => ({ e, s: q.length ? score(e) : 1 })).filter((r) => r.s > 0);
+    if (q.length) results.sort((a, b) => b.s - a.s);
+    results = results.slice(0, 60).map((r) => (r.s < 200 && q.length ? { ...r.e, sub: snippet(r.e, q) } : r.e));
     sel = Math.min(sel, Math.max(0, results.length - 1));
     list.replaceChildren();
     let group = null;

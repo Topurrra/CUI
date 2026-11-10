@@ -24,6 +24,8 @@ for (const it of items) {
   if (!inCats.has(id)) bad(id, 'not in any category');
   for (const k of ['title', 'summary', 'html']) if (typeof it[k] !== 'string') bad(id, `${k} is not a string`);
   if (!Array.isArray(it.scenes) || !it.scenes.every((s) => C.scenes[s])) bad(id, 'a scene that does not exist');
+  // the description under the title: a sentence that says what the component is
+  if (typeof it.summary === 'string' && (it.summary.split(/\s+/).length < 5 || !/[.]$/.test(it.summary))) bad(id, `no description under its heading in the docs (got ${JSON.stringify(it.summary)})`);
   if (!it.doc || typeof it.doc.file !== 'string' || !Number.isInteger(it.doc.line) || it.doc.line < 1) bad(id, 'doc file/line missing');
 
   // options: [{fn: [names], struct, line, fields: [{name, type, default, doc}]}]

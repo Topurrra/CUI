@@ -668,20 +668,16 @@ def main():
         scenes_for = found or NO_IMAGE.get(s["title"]) or (group_scenes.get(s["group"]) if s["group"] else None) or []
         scenes_for = [x for x in PREPEND.get(s["title"], []) + scenes_for + EXTRA_FOR.get(s["title"], []) if x in srcs]
         cat = ITEM_CAT.get(s["title"]) or (MORE_CAT.get(s["group"]) if s["group"] else MAIN_CAT.get(s["title"])) or "basics"
+        # the page's description is the paragraph right under its heading, before any picture or code
         summary = ""
-        for para in re.findall(r"<p>(.*?)</p>", body_html, re.S):
-            text = html.unescape(re.sub(r"<[^>]+>", "", para)).strip()
-            # skip option lists, return values and key maps: they do not say what the thing is
-            if para.lstrip().startswith("<code>") or re.match(r"(Options|Keyboard|Returns|Each returns|Pass|Use `|Set )", text):
-                continue
-            if len(text.split()) < 5: continue
-            summary = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0][:200]
-            break
-        if not summary:
-            first = re.search(r"<p>(.*?)</p>", body_html, re.S)
-            if first:
-                text = html.unescape(re.sub(r"<[^>]+>", "", first.group(1))).strip()
-                summary = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0][:200]
+        lead = next((n for n, l in enumerate(s["body"]) if l.strip()), None)
+        if lead is not None and s["body"][lead].strip()[0] not in "<|-#`*":
+            end = lead
+            while end < len(s["body"]) and s["body"][end].strip(): end += 1
+            summary = re.sub(r"[`*]", "", " ".join(l.strip() for l in s["body"][lead:end]))
+            body_html, found, statics = md_to_html(s["body"][:lead] + s["body"][end:], anchors, srcs)
+            scenes_for = found or NO_IMAGE.get(s["title"]) or (group_scenes.get(s["group"]) if s["group"] else None) or []
+            scenes_for = [x for x in PREPEND.get(s["title"], []) + scenes_for + EXTRA_FOR.get(s["title"], []) if x in srcs]
         apis = sorted(set(re.findall(r"\bcui_[a-z0-9_]+(?=\()", html.unescape(body_html))))
         items[s["id"]] = {"id": s["id"], "title": s["title"], "category": cat, "summary": summary,
                           "doc": {"file": s["file"], "line": s["line"], "group": s["group"]},
@@ -709,6 +705,14 @@ def main():
         it["display_only"] = it["id"] in DISPLAY_ONLY and not it["keyboard"] and not it["keyboard_note"]
     for it in items.values():
         it["related"] = related_items(it, items, cats_order, owners)
+    for it in items.values():
+        # the page lists its own functions, not the helpers its sample happens to call
+        own = [a for a in it["apis"] if it["id"] in owners.get(a, ())]
+        it["apis"] = own or it["apis"]
+        # "Options: `a`, `b` and `c`." only repeats the table that follows it
+        if it["options"]:
+            it["html"] = re.sub(r"\s*Options: (?:<code>[\w.]+</code>(?:, and |, | and )?)+\.(?=\s|</p>)", "", it["html"])
+            it["html"] = re.sub(r"<p>\s*</p>\n?", "", it["html"])
 
     guides = []
     for gid in GUIDES:

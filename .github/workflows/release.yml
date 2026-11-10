@@ -4,7 +4,7 @@ name: Release
 # CHANGELOG.md, with the single-file distribution and the example apps built for
 # Windows, macOS and Linux attached. Either push a tag like v1.2.0, or run this workflow
 # by hand with the version and the commit to release (it creates the tag). Running it
-# by hand for a version that is already released only adds or replaces the files.
+# by hand for a version that is already released refreshes its notes and replaces the files.
 on:
   push:
     tags: ['v*']
@@ -17,6 +17,10 @@ on:
         description: 'Commit or branch to release'
         required: true
         default: master
+      examples:
+        description: 'Build and attach the example apps'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -40,6 +44,8 @@ jobs:
           # that version's section: its heading ends with the version, or goes on with a colon
           awk -v v="· ${short}" 'index($0, "## ") == 1 { if (on) exit; i = index($0, v); if (i) { r = substr($0, i + length(v)); if (r == "" || substr(r, 1, 1) == ":") { on = 1; next } } } on' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "No section for ${short} in CHANGELOG.md"; exit 1; fi
+          # the changelog links to files beside it; on the release page those links need the whole address
+          sed -i -E "s#\]\((docs|examples|tests|include|src|tools|cmake)/#](https://github.com/${GITHUB_REPOSITORY}/blob/${tag}/\1/#g" notes.md
           echo "tag=${tag}" >> "$GITHUB_ENV"
           echo "title=CUI ${short}" >> "$GITHUB_ENV"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
@@ -55,7 +61,8 @@ jobs:
         run: |
           files=$(ls dist/cui.h dist/cui.c dist/cui_single.h 2>/dev/null || true)
           if gh release view "${tag}" > /dev/null 2>&1; then
-            # already released: keep its notes and its commit, replace the files
+            # already released: keep its commit, refresh the notes and replace the files
+            gh release edit "${tag}" --notes-file notes.md
             if [ -n "${files}" ]; then gh release upload "${tag}" ${files} --clobber; fi
           else
             gh release create "${tag}" --target "${sha}" --title "${title}" --notes-file notes.md ${files}
@@ -64,6 +71,7 @@ jobs:
   # The example apps, ready to run: one archive per system, attached to the release.
   examples:
     needs: release
+    if: github.event_name != 'workflow_dispatch' || inputs.examples
     strategy:
       fail-fast: false
       matrix:

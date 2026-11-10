@@ -2,6 +2,19 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
+## Unreleased
+
+### Changed
+
+- **Every component has a description.** Each section of the component docs now opens with one sentence that says what the component is and what it is for. The site shows it under the page title, on the cards that link to the page and in search results, where it used to show whatever sentence came first ("Weeks start on Monday." for the date picker).
+- **Site search reads the whole site.** It now searches the text of the guides, the options and struct fields of every component and the changelog, and shows the words around a match. It used to look at titles and summaries only, so "install", "find_package" or the name of an option found nothing.
+- A component page lists only its own functions, and no longer repeats its option names in a sentence above the options table.
+- Release notes link to the files they mention with full addresses, so the links work from the release page.
+
+### Fixed
+
+- The values of an enum on a component page's "Data and results" section showed as `[object HTMLElement]` (17 pages).
+
 ## 2026-11-09 · 1.3.1: first steps, a tutorial and ready-to-run examples
 
 A release for people starting out. Every step of the getting-started guide was followed as written, and what did not work is fixed.

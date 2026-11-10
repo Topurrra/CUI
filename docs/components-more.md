@@ -6,6 +6,8 @@ The second half of the library: richer actions and inputs, pickers, disclosure, 
 
 ### Split button
 
+A main action with a menu of related actions behind a chevron.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/split-button-dark.png"><img src="images/components/split-button.png" alt="Split button"></picture>
 
 ```c
@@ -22,6 +24,8 @@ Returns 0 for the main action, 1 + i for menu item i, -1 otherwise. Options: `va
 
 ### Toggle group
 
+A row of joined toggle buttons, each on or off, or exactly one on at a time.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toggle-group-dark.png"><img src="images/components/toggle-group.png" alt="Toggle group"></picture>
 
 ```c
@@ -37,6 +41,8 @@ Keyboard: Tab, or Left and Right, move between the toggles, and Enter or Space f
 
 ### Confirm button
 
+A button for destructive actions that asks for a second click before it fires.
+
 ```c
 if (cui_confirm_button(ui, "Delete project", .icon = CUI_ICON_TRASH_2)) delete_project();
 ```
@@ -44,6 +50,8 @@ if (cui_confirm_button(ui, "Delete project", .icon = CUI_ICON_TRASH_2)) delete_p
 The first click morphs the button into a red "Click to confirm" with a countdown line; the second click fires. It disarms after `timeout` seconds (3), on Esc, or when you click elsewhere. Options: `confirm_label`, `icon`, `variant`, `size`, `timeout`.
 
 ### Status button
+
+A button that shows the progress of the work it started: a spinner while busy, then a check or an error.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/morph-buttons-dark.png"><img src="images/components/morph-buttons.png" alt="Morphing buttons"></picture>
 
@@ -59,6 +67,8 @@ Keyboard: Tab focuses the button, and Enter or Space presses it.
 
 ### Reactions
 
+Reaction buttons with a count each, as under a message or a post.
+
 ```c
 static cui_reaction re[] = { { CUI_ICON_THUMBS_UP, 12, true }, { CUI_ICON_HEART, 4, false } };
 int changed = cui_reactions(ui, "reactions", re, 2);   /* index that toggled, or -1 */
@@ -70,14 +80,18 @@ Keyboard: Tab moves through the reactions, and Enter or Space toggles the focuse
 
 ### Speed dial
 
+A round floating button that fans out a few related actions.
+
 ```c
 static const cui_speed_action acts[] = { { CUI_ICON_FILE_TEXT, "New note" }, { CUI_ICON_IMAGE, "Upload image" } };
 int pick = cui_speed_dial(ui, "create", acts, 2, .tooltip = "Create");
 ```
 
-A round floating action button. Clicking fans the actions out with a stagger while the plus morphs into a close icon. Esc or a click elsewhere folds them. `placement` controls the direction (above and right aligned by default).
+Clicking fans the actions out with a stagger while the plus morphs into a close icon. Esc or a click elsewhere folds them. `placement` controls the direction (above and right aligned by default).
 
 ### Theme switcher and toggle
+
+Controls that switch the app between light, dark and the system theme.
 
 ```c
 static int mode = -1;                       /* -1 picks up the current theme */
@@ -91,6 +105,8 @@ Keyboard: in the switcher, Tab, or Left and Right, move between the choices. The
 
 ### User menu
 
+An avatar, a name and a detail line that open an account menu with a header.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/user-menu-dark.png"><img src="images/components/user-menu.png" alt="User menu"></picture>
 
 ```c
@@ -100,11 +116,13 @@ cui_user_menu(ui, "Maya Okafor", .detail = "maya@fieldwork.studio", .status = "o
 }
 ```
 
-An avatar, a name and a detail line that open an account menu with a header. Full width for sidebars; `.compact = true` shows just the avatar for headers. Options: `detail`, `status`, `avatar` (a texture), `compact`, `placement`, `width`.
+Full width for sidebars; `.compact = true` shows just the avatar for headers. Options: `detail`, `status`, `avatar` (a texture), `compact`, `placement`, `width`.
 
 Keyboard: Enter or Space on the avatar opens the menu. Up and Down move through its items, Enter chooses one, and Esc closes it.
 
 ### Swipe actions
+
+A row that slides sideways to reveal actions such as archive or delete.
 
 ```c
 static const cui_swipe_action done[] = { { CUI_ICON_CHECK, "Done", CUI_TONE_SUCCESS } };
@@ -122,6 +140,8 @@ Keyboard: none. Swiping is a pointer, touch and trackpad gesture, so give the sa
 
 ### Inline edit
 
+Text that turns into a field when clicked, for renaming things in place.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/inline-edit-dark.png"><img src="images/components/inline-edit.png" alt="Inline edit"></picture>
 
 ```c
@@ -133,6 +153,8 @@ Looks like text, with a pencil on hover. Click (or Enter when focused) to edit i
 
 ### Scrub field
 
+A number you change by dragging sideways on it, as in design and 3D tools.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/scrub-dark.png"><img src="images/components/scrub.png" alt="Scrub fields"></picture>
 
 ```c
@@ -143,6 +165,8 @@ cui_scrub(ui, "Opacity", &opacity, 0, 100, .suffix = "%");
 Drag sideways anywhere on the field to change the value; hold Shift for steps ten times finer. A click without dragging lets you type a number. Arrow keys step when focused. A hairline along the bottom shows where the value sits in its range. Options: `step` (range / 100), `format`, `suffix`, `icon` (instead of the label), `width`.
 
 ### Money field
+
+A field for an amount of money, with a currency symbol and grouped digits.
 
 ```c
 static double amount = 1249.5;
@@ -156,6 +180,8 @@ Keyboard: it edits like a text field. Left, Right, Home and End move the caret, 
 
 ### Prefix and suffix
 
+Fixed text before or after a field's value, such as `https://` or a unit.
+
 Every text field takes muted text before and after the value:
 
 ```c
@@ -166,6 +192,8 @@ cui_input(ui, "weight", weight, sizeof weight, .suffix = "kg");
 Keyboard: the field edits like any text field, with Left, Right, Home and End moving the caret.
 
 ### Shortcut recorder
+
+A field that records a key combination, for settings where people choose their own shortcuts.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/shortcut-recorder-dark.png"><img src="images/components/shortcut-recorder.png" alt="Shortcut recorder"></picture>
 
@@ -181,6 +209,8 @@ Click and press a combination. While recording, the field shows the modifiers yo
 
 ### Multi-select
 
+Picks several items from a list and shows them as chips in the field.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/multi-select-dark.png"><img src="images/components/multi-select.png" alt="Multi-select"></picture>
 
 ```c
@@ -192,6 +222,8 @@ cui_multi_select(ui, "langs", langs, 6, chosen, .label = "Languages", .searchabl
 The field shows chips (with remove buttons) for up to `max_chips` items and "+N" for the rest. The list keeps itself open while you tick items and has a select all / clear action. Up, Down and Space or Enter work in the list.
 
 ### Date range picker
+
+Picks a start and an end date, with presets such as the last 7 days.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/date-range-dark.png"><img src="images/components/date-range.png" alt="Date range picker"></picture>
 
@@ -207,6 +239,8 @@ Keyboard: Enter or Space on the field opens the two months and Esc closes them. 
 
 ### Time picker
 
+Picks a time of day from scrolling columns of hours and minutes.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/time-picker-dark.png"><img src="images/components/time-picker.png" alt="Time picker"></picture>
 
 ```c
@@ -221,6 +255,8 @@ Keyboard: Enter or Space on the field opens the list of times and Esc closes it.
 
 ### Wheel picker and time dial
 
+Touch-style pickers: drums of options you spin, and a clock face for setting a time.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/wheels-dark.png"><img src="images/components/wheels.png" alt="Wheels and dial"></picture>
 
 ```c
@@ -233,6 +269,8 @@ Wheels are drums of options: drag with momentum, scroll or use the arrow keys, a
 The time dial sets hours on two rings (1 to 12 outside, 13 to 00 inside), then switches to minutes when you let go. The hand springs the short way round. Click the hour or minute at the top to choose which one you set.
 
 ### Ruler and histogram sliders
+
+Two sliders that show context: a ruler that slides under a fixed marker, and a range slider drawn over the distribution of the data.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/ruler-histogram-dark.png"><img src="images/components/ruler-histogram.png" alt="Ruler and histogram"></picture>
 
@@ -247,6 +285,8 @@ Keyboard: the ruler takes Tab, and Left, Right, Up and Down move the value a ste
 
 ### Knob, fader and level meter
 
+A rotary knob, a vertical fader and a level meter: the controls of audio, synth and mixer panels.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/mixer-dark.png"><img src="images/components/mixer.png" alt="Knobs, faders and level meters"></picture>
 
 ```c
@@ -260,7 +300,7 @@ cui_fader(ui, "Vocals", &gain_db, -48, 6, .unit = "dB", .ticks = marks, .tick_co
 cui_level_meter(ui, "master", peaks, 2, .horizontal = true, .segmented = true, .scale = true);
 ```
 
-The controls of audio, synth and mixer panels. A knob turns by dragging up and down: 200 points cover the whole range, and holding Shift makes it ten times finer from wherever the pointer is. A ring shows the value against a 270 degree track; `bipolar` grows it from the middle for pan or EQ gain, and `log_scale` makes equal turns multiply the value, which is what frequency and time knobs need. The value and the label sit under the knob in a column as wide as the longest value, so a row of knobs never shifts while one turns.
+A knob turns by dragging up and down: 200 points cover the whole range, and holding Shift makes it ten times finer from wherever the pointer is. A ring shows the value against a 270 degree track; `bipolar` grows it from the middle for pan or EQ gain, and `log_scale` makes equal turns multiply the value, which is what frequency and time knobs need. The value and the label sit under the knob in a column as wide as the longest value, so a row of knobs never shifts while one turns.
 
 A fader is a track with a thumb: press the thumb to drag it from where it is, or press the track and the thumb jumps there first. `ticks` puts a labelled scale beside the track, and `meter` draws level bars right next to it on the fader's own dB scale, so a channel strip is a single call. Faders are vertical unless `horizontal` is set.
 
@@ -269,6 +309,8 @@ Both take `step`, `format` and `unit`, and both answer the same keys and gesture
 The level meter takes linear sample peaks, where 1.0 is 0 dBFS. Bars jump up to each new peak and fall back at `decay` dB per second (20 by default), the peak mark holds for `hold` seconds (1.5) and then falls, and a clip light at the loud end stays on after a peak reaches 0 dBFS until it is clicked. The colors run green to -18 dB, amber to -6 dB and red above. `scale` labels the dB marks that fit, `segmented` draws LED segments, and `min_db`, `max_db`, `length`, `thickness` and `horizontal` set the shape. Up to eight channels share one meter. Each control is a single painted node, so a mixer with dozens of strips costs little more than one.
 
 ### Emoji picker
+
+A searchable grid of every emoji in nine groups, with the recently used ones first.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/emoji-picker-dark.png"><img src="images/components/emoji-picker.png" alt="Emoji picker"></picture>
 
@@ -299,6 +341,8 @@ Emoji are drawn from a color emoji font. CUI reads the one the system has: Segoe
 
 ### Dropzone
 
+An area that takes files dropped from the desktop, and can open the system file dialog on a click.
+
 ```c
 int n = cui_dropzone(ui, "attachments", .description = "PNG, JPG or PDF, up to 25 MB", .accept = "png;jpg;pdf");
 if (n > 0) for (int i = 0; i < n; i++) attach(cui_dropped_file(ui, i));
@@ -313,6 +357,8 @@ Keyboard: Tab focuses the zone, and Enter or Space acts as a click (a negative c
 
 ### Avatar upload
 
+A profile picture you replace by dropping an image on it.
+
 ```c
 static cui_texture photo;
 if (cui_avatar_upload(ui, "photo", "Maya Okafor", &photo, 88) < 0) browse_for_photo();
@@ -323,6 +369,8 @@ Drop an image on the avatar to replace it (the previous texture is destroyed). H
 Keyboard: Tab focuses the avatar, and Enter or Space acts as a click (a negative value), which is where you open your file dialog.
 
 ### Signature pad
+
+A box to sign in with the pointer or a finger, with strokes you can read back.
 
 ```c
 cui_signature_pad(ui, "signature", .height = 180);
@@ -337,6 +385,8 @@ Keyboard: signing needs a pointer, a pen or a finger. The Clear button takes Tab
 ## Disclosure
 
 ### Hover card
+
+A preview card that opens when the pointer rests on a link, a name or an avatar.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hover-card-dark.png"><img src="images/components/hover-card.png" alt="Hover card"></picture>
 
@@ -354,6 +404,8 @@ Keyboard: the card opens on hover and takes no focus, so do not put anything in 
 
 ### Confirm popover
 
+A small question anchored to the button that opened it.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/confirm-popover-dark.png"><img src="images/components/confirm-popover.png" alt="Confirm popover"></picture>
 
 ```c
@@ -363,9 +415,11 @@ if (cui_confirm_popover(ui, "confirm-delete", .title = "Delete feature/grid?", .
     delete_branch();
 ```
 
-A small question anchored to the button that opened it. Focus moves to the confirm button, so Enter confirms and Esc cancels.
+Focus moves to the confirm button, so Enter confirms and Esc cancels.
 
 ### Expandable text and card
+
+Long text clamped to a few lines with a Show more link, and a card that opens to show its details.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/expandables-dark.png"><img src="images/components/expandables.png" alt="Expandable text and cards"></picture>
 
@@ -384,6 +438,8 @@ Keyboard: Tab focuses the "Show more" link or the card's header, and Enter or Sp
 
 ### Guided tour
 
+A spotlight on one control at a time, with a card beside it saying what the control does, for onboarding and "what's new".
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tour-dark.png"><img src="images/components/tour.png" alt="Guided tour"></picture>
 
 ```c
@@ -400,11 +456,13 @@ cui_button(ui, "Export");                  steps[1].target = cui_last_id(ui);
 if (step >= 0 && cui_tour(ui, "intro", steps, 3, &step) == CUI_TOUR_DONE) save_tour_seen();
 ```
 
-A spotlight on one control at a time, with a card beside it saying what the control does, for onboarding and "what's new". The window dims around a rounded hole over the step's `target`, and the hole glides from one control to the next. A step without a target puts its card in the middle of a fully dimmed window, which suits a welcome or a closing note. The card shows the step count, the `title` and `body`, progress dots, Back and Next (Done on the last step) and a close button; `placement` picks its side of the target and it flips to stay on screen.
+The window dims around a rounded hole over the step's `target`, and the hole glides from one control to the next. A step without a target puts its card in the middle of a fully dimmed window, which suits a welcome or a closing note. The card shows the step count, the `title` and `body`, progress dots, Back and Next (Done on the last step) and a close button; `placement` picks its side of the target and it flips to stay on screen.
 
 Call it after the controls it points at, so their positions are known, and keep calling it while `step` is 0 or more. It moves `step` itself and sets it to -1 when the tour ends, and returns what happened that frame: `CUI_TOUR_NEXT`, `CUI_TOUR_BACK`, `CUI_TOUR_DONE` or `CUI_TOUR_SKIPPED`. Right or Enter go to the next step, Left goes back and Esc ends the tour. The spotlighted control still takes the pointer, so people can try it as they read (`block_target` turns that off), while clicks anywhere else in the dark are swallowed. `width` sets the card, `padding` the room around the target, and `next_label`, `back_label`, `done_label` and `count_format` ("%d of %d") the text in another language.
 
 ### Table of contents
+
+A list of a page's sections that follows the reader and scrolls to a section when clicked.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toc-dark.png"><img src="images/components/toc.png" alt="Table of contents"></picture>
 
@@ -427,6 +485,8 @@ Keyboard: Tab moves through the entries, and Enter or Space jumps to the focused
 
 ### Banner and countdown
 
+A full-width announcement that can be dismissed, and a countdown to a moment in time.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/banner-countdown-dark.png"><img src="images/components/banner-countdown.png" alt="Banner and countdown"></picture>
 
 ```c
@@ -442,6 +502,8 @@ Keyboard: the banner's action and dismiss buttons take Tab, and Enter or Space p
 
 ### Onboarding checklist
 
+A card with a progress ring and steps; the first unfinished step opens to show its description and action button.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/checklist-dark.png"><img src="images/components/checklist.png" alt="Onboarding checklist"></picture>
 
 ```c
@@ -453,11 +515,13 @@ int act = cui_checklist(ui, "onboarding", steps, 2, .title = "Set up your worksp
 if (act >= 0) run_step(act);
 ```
 
-A card with a progress ring and steps; the first unfinished step opens to show its description and action button. Clicking a circle toggles `done`.
+Clicking a circle toggles `done`.
 
 Keyboard: Tab moves through the steps and their buttons, and Enter or Space opens the focused step or presses its button.
 
 ### Undo toast
+
+A toast with an Undo action and a visible timer, for actions that can be taken back.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/undo-toast-dark.png"><img src="images/components/undo-toast.png" alt="Undo toast"></picture>
 
@@ -472,6 +536,8 @@ Keyboard: the Undo button takes Tab, and Enter or Space presses it.
 ## Data
 
 ### Data grid and filter bar
+
+A grid for very large data with sticky headers, resizable and sortable columns and editable cells, and a bar of filters to go with it.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/data-grid-dark.png"><img src="images/components/data-grid.png" alt="Data grid and filter bar"></picture>
 
@@ -501,6 +567,8 @@ Only the rows in view are built, so the row count barely matters. Headers are st
 The filter bar keeps one bit mask per field in `selected`; each active field shows as a chip that opens its value list, "Filter" adds one and "Clear all" resets them. `cui_tree_cell` draws a disclosure chevron and indentation inside any table or grid cell for tree tables.
 
 ### Tree table and path bar
+
+A tree with columns, as in a file explorer or a debugger's variables, and a path bar for moving up through folders.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tree-table-dark.png"><img src="images/components/tree-table.png" alt="Tree table and path bar"></picture>
 
@@ -551,6 +619,8 @@ The path bar is a breadcrumb for file and scene paths, styled like `cui_breadcru
 
 ### File browser and picker
 
+A folder view with sorting and navigation, and the open and save dialogs built from it.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/file-browser-dark.png"><img src="images/components/file-browser.png" alt="File browser"></picture>
 
 ```c
@@ -574,6 +644,8 @@ A folder is read when you enter it or reload, not every frame, and only the rows
 
 ### Code block
 
+Read-only source code with syntax highlighting, optional line numbers and a copy button.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-block-dark.png"><img src="images/components/code-block.png" alt="Code block"></picture>
 
 ```c
@@ -586,17 +658,21 @@ Keyboard: the copy button takes Tab, and Enter or Space presses it. The code its
 
 ### JSON viewer
 
+JSON shown as a tree that folds, with a color for each type of value.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/json-view-dark.png"><img src="images/components/json-view.png" alt="JSON viewer"></picture>
 
 ```c
 if (!cui_json_view(ui, "response", body, .expand_depth = 1)) { /* not valid JSON: the view shows where it broke */ }
 ```
 
-A collapsible tree with typed colors. Collapsed objects and arrays show their size; click a chevron to fold or unfold.
+Collapsed objects and arrays show their size; click a chevron to fold or unfold.
 
 Keyboard: none yet. Folding and unfolding is done with the pointer.
 
 ### Markdown view
+
+Renders markdown text as native content: headings, lists, tables, code, task lists and links.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/markdown-dark.png"><img src="images/components/markdown.png" alt="Markdown view"></picture>
 
@@ -619,6 +695,8 @@ The view wraps to whatever width it gets: words wrap between fonts, a word wider
 Links are never opened for you. The result reports the URL of a link clicked or activated this frame (and the one under the pointer), and a link's URL also shows as its tooltip. A task box reports the byte offset of the character between its brackets, its line and the state it was toggled to; `cui_markdown_apply_task` writes that into your text, or you can edit it yourself. Tab moves through the links and task boxes; Enter opens the focused link and Space toggles a box. Text is not selectable, since CUI text has no selection yet; code blocks have their copy button.
 
 ### Code editor
+
+An editable code field with syntax highlighting, for shader editors, script consoles and config files.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-editor-dark.png"><img src="images/components/code-editor.png" alt="Code editor"></picture>
 
@@ -647,6 +725,8 @@ Mouse: click places the caret, Shift+click extends, drag selects (the view scrol
 
 ### Diff viewer
 
+Compares two versions of a text line by line.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/diff-view-dark.png"><img src="images/components/diff-view.png" alt="Diff viewer"></picture>
 
 ```c
@@ -661,7 +741,7 @@ if (cui_icon_button(ui, CUI_ICON_ARROW_DOWN, .tooltip = "Next change", .shortcut
 cui_textf(ui, "+%d -%d", r.added, r.removed);
 ```
 
-Compares two versions of a text line by line. Split mode puts the old text on the left and the new on the right, rows aligned with a quiet filler opposite added or removed lines; inline mode shows removed lines above the lines that replaced them. Below `split_min_width` (560 points by default) split shows inline, so the view reads on a phone, and `r.mode` says which mode is shown. Each side has its line numbers and a + or - sign, added lines are tinted with the success color and removed lines with the danger color, and the words that changed inside a replaced line get a stronger tint. With `.language` the code keeps its syntax colors. Lines longer than the view scroll sideways, both sides together.
+Split mode puts the old text on the left and the new on the right, rows aligned with a quiet filler opposite added or removed lines; inline mode shows removed lines above the lines that replaced them. Below `split_min_width` (560 points by default) split shows inline, so the view reads on a phone, and `r.mode` says which mode is shown. Each side has its line numbers and a + or - sign, added lines are tinted with the success color and removed lines with the danger color, and the words that changed inside a replaced line get a stronger tint. With `.language` the code keeps its syntax colors. Lines longer than the view scroll sideways, both sides together.
 
 Unchanged stretches keep `.context` lines (3) next to each change and fold the rest into a "42 unchanged lines" row that opens on a click (`.no_fold` shows everything). With the view focused, N or Alt+Down goes to the next change and P or Alt+Up to the previous one, E opens every fold and Shift+E folds them again, arrows and Page Up/Down scroll, and clicking a change selects it. `.current` is read and written, so buttons only have to change the number; the result also has the `+added -removed` summary, the change count and whether the texts were diffed again this frame.
 
@@ -672,6 +752,8 @@ The texts are copied and diffed only when one of them changes, and only the rows
 Panels for editors and developer tools.
 
 ### Property inspector
+
+A panel of named properties in folding groups, each edited with the control that fits its type.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/inspector-dark.png"><img src="images/components/inspector.png" alt="Property inspector"></picture>
 
@@ -695,11 +777,13 @@ if (cui_inspector_begin(ui, "props")) {
 }
 ```
 
-A panel of named properties in folding groups, each edited with the control that fits its type. Each row is a label on the left and an editor on the right, built from the library's own fields: number rows (`cui_prop_float`, `cui_prop_int`) are scrub fields, so dragging the field or its label sideways changes the value (Shift for fine steps), a click types a number and the arrow keys step it. `cui_prop_vec2`, `cui_prop_vec3` and `cui_prop_vec4` put compact X, Y, Z and W fields side by side, their letters tinted with the theme's tones. Text rows are text fields, bool rows switches (`.checkbox = true` for a checkbox), enum rows selects and color rows open the color picker. Every row returns true when its value changed. With `.min` and `.max` a number shows where it sits in its range; without them it is unbounded. The label column takes 38% of the width (or `.label_width`); drag the line between the columns to resize it. Below 380 points the labels move above their editors.
+Each row is a label on the left and an editor on the right, built from the library's own fields: number rows (`cui_prop_float`, `cui_prop_int`) are scrub fields, so dragging the field or its label sideways changes the value (Shift for fine steps), a click types a number and the arrow keys step it. `cui_prop_vec2`, `cui_prop_vec3` and `cui_prop_vec4` put compact X, Y, Z and W fields side by side, their letters tinted with the theme's tones. Text rows are text fields, bool rows switches (`.checkbox = true` for a checkbox), enum rows selects and color rows open the color picker. Every row returns true when its value changed. With `.min` and `.max` a number shows where it sits in its range; without them it is unbounded. The label column takes 38% of the width (or `.label_width`); drag the line between the columns to resize it. Below 380 points the labels move above their editors.
 
 Groups fold with a chevron and open and close with the disclosure spring; their rows are built only while open or closing, and groups end at the next group or at `cui_inspector_end`. Tab moves through the group headers and every editor in order; Enter, Space or the left and right arrows fold a focused group.
 
 ### Log console
+
+A log view for many thousands of lines, with level filters, search, follow and copy.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/log-console-dark.png"><img src="images/components/log-console.png" alt="Log console"></picture>
 
@@ -715,11 +799,13 @@ cui_log_append(&log, CUI_LOG_WARN, "Physics step took %.1f ms (budget %.1f ms)",
 cui_log_view(ui, "log", &log, .height = 320, .timestamps = true);
 ```
 
-A log view for many thousands of lines, with level filters, search, follow and copy. The app owns the storage: an array of line records and a byte buffer for the text, used as a ring. Appending never allocates; when either fills up the oldest lines are dropped, and a line longer than the whole text buffer is cut to fit. The view builds only the rows in sight, so a buffer of many thousands of lines scrolls as fast as a short one, and it keeps a small index of the lines that pass its filter (at most one entry per line slot, freed with the context).
+The app owns the storage: an array of line records and a byte buffer for the text, used as a ring. Appending never allocates; when either fills up the oldest lines are dropped, and a line longer than the whole text buffer is cut to fit. The view builds only the rows in sight, so a buffer of many thousands of lines scrolls as fast as a short one, and it keeps a small index of the lines that pass its filter (at most one entry per line slot, freed with the context).
 
 Each line shows its level as a quiet tag (warnings and errors also tint their row), an optional `HH:MM:SS.mmm` time and the text in the code font. The toolbar filters by level (warning and error counts appear on their toggles, which shorten to initials when the console is narrow), searches as you type (matches are marked and the field counts the lines found), and Follow keeps the newest line in view: scrolling up turns it off, coming back to the bottom turns it on. Copy takes the selected lines or, with no selection, every line shown; Clear empties the buffer. Click a line to select it, drag or Shift+click for a range. With the list focused, the arrows move through lines, Shift+arrows extend the selection, Page Up, Page Down and Home jump, End returns to following, Ctrl+A selects all, Ctrl+C copies and Esc clears the selection.
 
 ### Terminal
+
+Output over an input line, for build logs, a game console or a REPL.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/terminal-dark.png"><img src="images/components/terminal.png" alt="Terminal"></picture>
 
@@ -737,7 +823,7 @@ if (r.command) run_command(r.command);                       /* Enter: the line 
 if (r.interrupt) stop_child();                               /* Ctrl+C with nothing selected */
 ```
 
-Output over an input line, for build logs, a game console or a REPL. Like the log console, the app owns the storage, a byte ring and an array of line records, and nothing is allocated while writing: when either fills up, the oldest lines go.
+Like the log console, the app owns the storage, a byte ring and an array of line records, and nothing is allocated while writing: when either fills up, the oldest lines go.
 
 Output is read as it is written. `\n` starts a line, `\r` makes the next text start the line over (so progress bars redraw in place), tabs go to the next stop of 8, and backspace takes the last character. Color sequences (`ESC [ … m`: the 16 colors, 256 colors and 24-bit color, bold, dim, underline and inverse) are kept and drawn. `ESC [ K` after `\r` clears the line, `ESC [ 2 J` clears the screen, and other sequences (cursor moves, titles, links) are dropped, so the output of most command line tools reads cleanly. A sequence split across two writes still works. The 16 colors are tuned separately for light and dark mode, so every one of them reads on the panel. The block characters `▀ ▄ █ ▌ ▐ ░ ▒ ▓` and the eighth blocks are drawn as cells rather than taken from the font, so bars join without gaps.
 
@@ -746,6 +832,8 @@ Long lines wrap at the panel width. Each line keeps its count of characters, so 
 Drag over the output to select, and press Ctrl+C (Cmd+C on macOS) to copy it without the color codes. With nothing selected, Ctrl+C clears the input, prints `^C` and sets `interrupt`. Ctrl+L clears the screen, Up and Down walk back through the last 32 commands, and clicking the output puts the caret at the prompt. `.no_input = true` leaves just the output. `.size` sets the text size (13 by default) and a `.height` of -1 fills the parent.
 
 ### Hex viewer
+
+The bytes of a file or of memory in hex and ASCII, for binary tools, emulators and debuggers.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hex-viewer-dark.png"><img src="images/components/hex-viewer.png" alt="Hex viewer"></picture>
 
@@ -772,6 +860,8 @@ Hovering a byte marks it in both columns and lights its column in the header. Hi
 The view is read only unless you pass `.edit`, a writable buffer of the same size (usually the same memory as the data), which it shows instead. Typing hex digits then overwrites the byte at the cursor, high digit first (a block over the low digit shows the byte is half typed), and moves to the next byte; the result reports the bytes written that frame. Edits never change the size, and the ASCII column is not typed into.
 ### Flame graph
 
+A profiler timeline: time runs left to right and call depth top to bottom, so each span sits in the row of its depth, under its parent.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/flame-graph-dark.png"><img src="images/components/flame-graph.png" alt="Flame graph"></picture>
 
 ```c
@@ -787,12 +877,14 @@ if (r.selection_changed && selected >= 0)
     show_details(&spans[selected]);       /* name, duration, children... */
 ```
 
-A profiler timeline: time runs left to right and call depth top to bottom, so each span sits in the row of its depth, under its parent. A time ruler along the top picks its unit from the zoom (s, ms, µs or ns) and thins its ticks on a narrow panel; faint lines carry the ticks down through the rows. Spans take their color from the series palette, hashed from the name (or from `color_key` when you set one) so a function keeps its color across frames; the selected span gets the accent outline. Labels show inside spans that have room and are cut with an ellipsis, staying in the visible part of a span that runs off the edge. Spans thinner than a point are merged with their neighbours into a quiet gray run, so a capture zoomed out never turns into noise.
+A time ruler along the top picks its unit from the zoom (s, ms, µs or ns) and thins its ticks on a narrow panel; faint lines carry the ticks down through the rows. Spans take their color from the series palette, hashed from the name (or from `color_key` when you set one) so a function keeps its color across frames; the selected span gets the accent outline. Labels show inside spans that have room and are cut with an ellipsis, staying in the visible part of a span that runs off the edge. Spans thinner than a point are merged with their neighbours into a quiet gray run, so a capture zoomed out never turns into noise.
 
 The wheel zooms around the pointer, Shift+wheel or a sideways scroll pans, and dragging pans sideways and, for stacks deeper than the panel, up and down. Click a span to select it (empty space clears the selection); double-click it to zoom until it fills the view, or double-click empty space to fit everything. Hovering a span shows its name, its duration and its share of its parent (or of the view, for the top row). With the graph focused, Left and Right move to the previous or next span in the row, Up to the parent and Down to the first child, and the view follows the selection; Shift+Left and Right pan, + and - zoom, Enter or Space zooms to the selection, Home or F fits everything, and Esc fits everything or, when everything is already in view, clears the selection. Zooming to a span and fitting animate, and snap with reduced motion.
 
 You own the data: the spans need to be valid only during the call, and the graph writes the view and the selection you pass. Spans must be sorted by depth and then start (`cui_flame_sort` does it), and spans of one depth must not overlap, which holds for any call tree since a child lies within its parent. With that order every lookup is a binary search: the graph visits only the rows and spans in view and skips through dense regions a pixel at a time, so a capture of 100,000 spans pans and zooms as smoothly as a small one. `cui_flame_span_rect` returns where a span was drawn, to anchor a popover or a menu on it. An aggregated flame graph (identical stacks merged and sorted by total time) is not included; build the merged tree yourself and pass it as spans if you need one.
 ### Curve editor
+
+Keyframes on a plot, for easing, animation timing and response curves.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/curve-editor-dark.png"><img src="images/components/curve-editor.png" alt="Curve editor"></picture>
 
@@ -814,13 +906,15 @@ if (r.removed >= 0) remove_track_data(r.removed);
 float y = cui_curve_eval(ease, count, t);
 ```
 
-Keyframes on a plot, for easing, animation timing and response curves. You own the array of `cui_curve_key` (kept sorted by x) and its capacity; the editor edits it in place, moving keys, setting handles and modes, inserting and removing keys, and the result says what changed this frame (`added` and `removed` are indices, or -1) so data you keep beside each key can follow. Pass `.selected` to keep the selection yourself. The plot shows the range you give (`x_min` to `x_max`, `y_min` to `y_max`, 0 to 1 by default) on a quiet grid with labels that thin out on a narrow plot; leave room above or below the keys for curves that overshoot.
+You own the array of `cui_curve_key` (kept sorted by x) and its capacity; the editor edits it in place, moving keys, setting handles and modes, inserting and removing keys, and the result says what changed this frame (`added` and `removed` are indices, or -1) so data you keep beside each key can follow. Pass `.selected` to keep the selection yourself. The plot shows the range you give (`x_min` to `x_max`, `y_min` to `y_max`, 0 to 1 by default) on a quiet grid with labels that thin out on a narrow plot; leave room above or below the keys for curves that overshoot.
 
 A key's mode shapes the segment that leaves it. `CUI_CURVE_SMOOTH` computes the tangents (they never overshoot the keys, and they are flat at the ends and at peaks), `CUI_CURVE_FREE` uses the key's own handles (relative to the key in curve units, `in_dx` at most 0 and `out_dx` at least 0, shortened to the neighbouring key so the curve never folds back), `CUI_CURVE_LINEAR` runs straight to the next key and `CUI_CURVE_STEP` holds its value until the next key. Before the first key the curve keeps the first value, after the last key the last value. `cui_curve_eval` is the math the editor draws with, so the value an app reads at runtime is the one on screen.
 
 Drag a key to move it: x stays between its neighbours and both coordinates stay inside the range. The selected key shows its handles; dragging one turns a smooth key into a free one with the tangent it had. Hold Shift (or set `.snap`) to snap a drag to the grid. Double click empty space to add a key, placed on the curve when the click is near it; Delete or Backspace removes the selected key, never leaving fewer than two. Hovering the plot shows the value under the pointer in a tooltip, and hovering a key shows its coordinates. Keys are focusable: Tab moves through them, the arrows nudge the focused key by a hundredth of the range (Shift for a thousandth). The row under the plot sets the selected key's mode and its exact position, and removes it; on a narrow editor its fields stack instead of cutting their labels. `.show_playhead` draws a marker at `.playhead` with the curve's value there.
 
 ### Gradient editor
+
+A color ramp with its stops underneath, over a checkerboard so transparent stops read as transparent.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gradient-editor-dark.png"><img src="images/components/gradient-editor.png" alt="Gradient editor"></picture>
 
@@ -836,11 +930,13 @@ if (cui_gradient_editor(ui, "flame", flame, &count, 12, .selected = &selected).c
 cui_color c = cui_gradient_eval(flame, count, particle_age / lifetime);
 ```
 
-A color ramp with its stops underneath, over a checkerboard so transparent stops read as transparent. You own the array of `cui_gradient_stop` and its capacity; the editor edits it in place and keeps it sorted by position, and the result reports `added`, `removed` and `selected` like the curve editor. `cui_gradient_eval` interpolates each channel, alpha included, between the stops on either side of t, exactly as the ramp is drawn; the end colors continue past the first and last stop.
+You own the array of `cui_gradient_stop` and its capacity; the editor edits it in place and keeps it sorted by position, and the result reports `added`, `removed` and `selected` like the curve editor. `cui_gradient_eval` interpolates each channel, alpha included, between the stops on either side of t, exactly as the ramp is drawn; the end colors continue past the first and last stop.
 
 Drag a stop to move it; it may pass its neighbours, and the selection follows it. Click the ramp or the empty track to add a stop with the color found there (keep the button down to drag it straight away). Drag a stop well off the ramp, or press Delete, to remove it; there are never fewer than two. Double click a stop, or press Enter on a focused one, to open the color picker for it. The row under the ramp shows the selected stop's color (the same color picker, which leaves opacity alone), its location and its opacity as scrub fields, and a button to remove it; on a narrow editor the fields stack. Stops are focusable: Tab moves through them, Left and Right nudge by 1% (Shift for 0.1%).
 
 ### Timeline editor
+
+A dope sheet for animation, video and audio tools: tracks, a time ruler and keys you can move.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/timeline-editor-dark.png"><img src="images/components/timeline-editor.png" alt="Timeline editor"></picture>
 
@@ -888,6 +984,8 @@ Panels for the tools developers build: an HTTP client, an IDE, a CI dashboard, a
 
 ### Key-value editor
 
+Rows of key and value fields for HTTP headers, query parameters or environment variables.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/kv-editor-dark.png"><img src="images/components/kv-editor.png" alt="Key-value editor"></picture>
 
 ```c
@@ -898,11 +996,13 @@ if (cui_kv_editor(ui, "headers", headers, &count, 16))
     rebuild_request();
 ```
 
-Rows of key and value fields for HTTP headers, query parameters or environment variables. You own the array, and it is edited in place. The checkbox turns a pair on or off, typing in the empty row at the end adds a pair, and the x removes one. The lock marks a value as secret: it shows as dots, and the field's eye reveals it. A key used twice by enabled pairs, or one with a space in it, is marked under its field. Below 480 points each key sits above its value. Options: `key_placeholder`, `value_placeholder`, `no_toggles`, `no_secrets`, `read_only`, `width`.
+You own the array, and it is edited in place. The checkbox turns a pair on or off, typing in the empty row at the end adds a pair, and the x removes one. The lock marks a value as secret: it shows as dots, and the field's eye reveals it. A key used twice by enabled pairs, or one with a space in it, is marked under its field. Below 480 points each key sits above its value. Options: `key_placeholder`, `value_placeholder`, `no_toggles`, `no_secrets`, `read_only`, `width`.
 
 Keyboard: Tab moves through each row's checkbox, key, value, lock and remove button. The fields edit like any text field, and Enter or Space presses the focused checkbox or button.
 
 ### Problems panel
+
+Compiler and linter output grouped by file, with each file's count.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/problems-dark.png"><img src="images/components/problems.png" alt="Problems panel"></picture>
 
@@ -912,9 +1012,11 @@ if (r.activated >= 0)
     open_file_at(diags[r.activated].file, diags[r.activated].line, diags[r.activated].column);
 ```
 
-Compiler and linter output grouped by file, with each file's count. Toggles above it filter by severity and show the count of each, and the field filters by text in the message, file, source or code. A file's header folds its group. Up and Down move the selection, Left and Right fold and unfold (swapped in a right-to-left interface), and Enter or a double click reports `activated`. A hover shows the whole message and its position. Below 520 points the source and code are left out. Twenty thousand diagnostics take about a millisecond a frame.
+Toggles above it filter by severity and show the count of each, and the field filters by text in the message, file, source or code. A file's header folds its group. Up and Down move the selection, Left and Right fold and unfold (swapped in a right-to-left interface), and Enter or a double click reports `activated`. A hover shows the whole message and its position. Below 520 points the source and code are left out. Twenty thousand diagnostics take about a millisecond a frame.
 
 ### Pipeline
+
+A CI or CD run: each stage is a column of its jobs with their status and duration, and connectors run between the stages.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/pipeline-dark.png"><img src="images/components/pipeline.png" alt="Pipeline"></picture>
 
@@ -925,11 +1027,13 @@ cui_pipeline_result r = cui_pipeline(ui, "run", stages, 3, jobs, job_count, .sel
 if (r.clicked >= 0) show_log(&jobs[r.clicked]);
 ```
 
-A CI or CD run: each stage is a column of its jobs with their status and duration, and connectors run between the stages. A stage's header sums up its jobs: failed beats running, then pending; a failure with `allow_failure` shows a warning and does not fail the stage. Running jobs show a spinner. Below 560 points the stages stack top to bottom.
+A stage's header sums up its jobs: failed beats running, then pending; a failure with `allow_failure` shows a warning and does not fail the stage. Running jobs show a spinner. Below 560 points the stages stack top to bottom.
 
 Keyboard: Tab moves through the jobs, and Enter or Space clicks the focused one.
 
 ### Query builder
+
+A filter built from conditions joined by all or any, in groups that nest.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/query-builder-dark.png"><img src="images/components/query-builder.png" alt="Query builder"></picture>
 
@@ -948,6 +1052,8 @@ Keyboard: Tab moves through the controls of each rule. Left and Right switch bet
 
 ### Schedule picker
 
+A cron schedule edited through plain choices instead of the expression, with the next runs listed.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/schedule-picker-dark.png"><img src="images/components/schedule-picker.png" alt="Schedule picker"></picture>
 
 ```c
@@ -964,6 +1070,8 @@ Keyboard: Tab moves through the controls. Left and Right change the mode, Up and
 
 ### Keymap
 
+A keyboard with the shortcuts on it.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/keymap-dark.png"><img src="images/components/keymap.png" alt="Keymap"></picture>
 
 ```c
@@ -973,11 +1081,13 @@ cui_keymap_result r = cui_keymap(ui, "keys", bindings, binding_count,
 if (r.clicked) start_rebinding(r.clicked, mods);
 ```
 
-A keyboard with the shortcuts on it. Each bound key shows its action, and a bar in its category's color. Tabs above it pick the modifiers, and each tab shows how many shortcuts use them. A key bound twice is outlined in red, and the count of conflicts is shown and returned. A hover lists every binding on the key, and a click returns it. Labels shrink to fit a key and then are cut short. The navigation cluster drops out below 600 points, and the keyboard scales to the width it gets. `no_function_row` leaves out the function keys.
+Each bound key shows its action, and a bar in its category's color. Tabs above it pick the modifiers, and each tab shows how many shortcuts use them. A key bound twice is outlined in red, and the count of conflicts is shown and returned. A hover lists every binding on the key, and a click returns it. Labels shrink to fit a key and then are cut short. The navigation cluster drops out below 600 points, and the keyboard scales to the width it gets. `no_function_row` leaves out the function keys.
 
 Keyboard: Tab focuses the modifier tabs, and Left and Right move between them. The keys of the drawn keyboard are clicked with the pointer.
 
 ### Commit graph
+
+Version history with its branch lanes.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/commit-graph-dark.png"><img src="images/components/commit-graph.png" alt="Commit graph"></picture>
 
@@ -991,9 +1101,11 @@ static const cui_commit log[] = {
 cui_commit_graph(ui, "history", log, count, .selected = &selected, .height = 320);
 ```
 
-Version history with its branch lanes. Each commit's dot sits in its lane, curves join branches and merges, and a merge commit is drawn as a ring. Refs show as badges: local branches green, remote branches gray, and tags violet. The lanes are worked out once when the history changes, so fifty thousand commits take a few milliseconds to lay out and then cost nothing more. Up and Down move the selection, and Enter or a double click reports `activated`. Below 560 points the author and date are left out.
+Each commit's dot sits in its lane, curves join branches and merges, and a merge commit is drawn as a ring. Refs show as badges: local branches green, remote branches gray, and tags violet. The lanes are worked out once when the history changes, so fifty thousand commits take a few milliseconds to lay out and then cost nothing more. Up and Down move the selection, and Enter or a double click reports `activated`. Below 560 points the author and date are left out.
 
 ### Dependency graph
+
+Nodes and directed edges laid out in layers, for build targets, packages, services or call graphs.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/graph-view-dark.png"><img src="images/components/graph-view.png" alt="Dependency graph"></picture>
 
@@ -1003,9 +1115,11 @@ static const cui_graph_edge edges[] = { { 0, 1 }, { 1, 2 } };
 cui_graph_view(ui, "deps", nodes, 3, edges, 2, .selected = &selected, .height = 340);
 ```
 
-Nodes and directed edges laid out in layers, for build targets, packages, services or call graphs. Each edge points into a later layer. A cycle is broken for the layout but still drawn. An edge that skips layers is routed between the nodes, not through them, and the order within each layer is chosen to cross fewer edges. Hovering or selecting a node lights up what it depends on and what depends on it, and dims the rest. The wheel zooms around the pointer, dragging pans, a click selects, and a double click activates. With the graph focused, the arrows move along edges or to the neighbour in the same layer, + and - zoom, F fits, and Esc clears. `top_down` stacks the layers instead of placing them side by side. The layout runs once when the graph changes: 400 nodes with 900 edges take about 20 ms.
+Each edge points into a later layer. A cycle is broken for the layout but still drawn. An edge that skips layers is routed between the nodes, not through them, and the order within each layer is chosen to cross fewer edges. Hovering or selecting a node lights up what it depends on and what depends on it, and dims the rest. The wheel zooms around the pointer, dragging pans, a click selects, and a double click activates. With the graph focused, the arrows move along edges or to the neighbour in the same layer, + and - zoom, F fits, and Esc clears. `top_down` stacks the layers instead of placing them side by side. The layout runs once when the graph changes: 400 nodes with 900 edges take about 20 ms.
 
 ### Network waterfall
+
+HTTP requests as a table with a timing bar each.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/waterfall-dark.png"><img src="images/components/waterfall.png" alt="Network waterfall"></picture>
 
@@ -1014,9 +1128,11 @@ cui_waterfall_result r = cui_waterfall(ui, "network", requests, request_count,
                                        .selected = &selected, .dom_loaded = 0.395, .loaded = 0.68);
 ```
 
-HTTP requests as a table with a timing bar each. The bar shows its phases in order: a thin line while queued, then DNS, connect, TLS, waiting for the first byte, and download, all on one time scale. Lines mark DOMContentLoaded and load. The name column shows the last part of the path, and failed responses are shown in red. A hover on a bar breaks its time down, and a summary with a legend sits under the table. Up, Down, Home and End move the selection, Enter reports `activated`, and Esc clears. Below 600 points the method, type and size columns are left out. Thirty thousand requests take under two milliseconds a frame.
+The bar shows its phases in order: a thin line while queued, then DNS, connect, TLS, waiting for the first byte, and download, all on one time scale. Lines mark DOMContentLoaded and load. The name column shows the last part of the path, and failed responses are shown in red. A hover on a bar breaks its time down, and a summary with a legend sits under the table. Up, Down, Home and End move the selection, Enter reports `activated`, and Esc clears. Below 600 points the method, type and size columns are left out. Thirty thousand requests take under two milliseconds a frame.
 
 ### Trace viewer
+
+A tracing timeline in the manner of a performance panel.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/trace-view-dark.png"><img src="images/components/trace-view.png" alt="Trace viewer"></picture>
 
@@ -1029,9 +1145,11 @@ cui_trace_view(ui, "trace", tracks, 3, spans, span_count, &view, &selected,
                .markers = markers, .marker_count = marker_count);
 ```
 
-A tracing timeline in the manner of a performance panel. Each thread, process or service has a lane of nested spans, drawn like the flame graph and sharing its colors and ruler. Markers (vsync, a GC pause, a deploy) run across every lane, with their names in a strip under the ruler. The wheel zooms around the pointer, Shift+wheel pans, and over the lane names the wheel scrolls the lanes. Dragging pans, a click selects, and a double click zooms to a span. Shift+drag measures a range, which `view.mark_start` and `mark_end` hold and the ruler labels with its length. A click on a lane's name folds it to its top row, and `collapsed` keeps that in your track array. With the viewer focused, Left and Right step along the row, Up goes to the parent and Down to the first child. + and - zoom, Enter zooms to the selection, F fits, and Esc clears the measurement and then the selection. Only the rows and spans in view are visited, and spans thinner than a point merge into runs, so 200,000 spans take under a millisecond a frame. Below 560 points the lane names get a narrower column.
+Each thread, process or service has a lane of nested spans, drawn like the flame graph and sharing its colors and ruler. Markers (vsync, a GC pause, a deploy) run across every lane, with their names in a strip under the ruler. The wheel zooms around the pointer, Shift+wheel pans, and over the lane names the wheel scrolls the lanes. Dragging pans, a click selects, and a double click zooms to a span. Shift+drag measures a range, which `view.mark_start` and `mark_end` hold and the ruler labels with its length. A click on a lane's name folds it to its top row, and `collapsed` keeps that in your track array. With the viewer focused, Left and Right step along the row, Up goes to the parent and Down to the first child. + and - zoom, Enter zooms to the selection, F fits, and Esc clears the measurement and then the selection. Only the rows and spans in view are visited, and spans thinner than a point merge into runs, so 200,000 spans take under a millisecond a frame. Below 560 points the lane names get a narrower column.
 
 ### Regex tester
+
+A pattern, its flags and a test text, with every match and group highlighted.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/regex-tester-dark.png"><img src="images/components/regex-tester.png" alt="Regex tester"></picture>
 
@@ -1051,6 +1169,8 @@ Keyboard: Tab moves from the pattern to the flags and the text. Left and Right m
 
 ### Test explorer
 
+Test results as a tree of suites and tests, each with its status and time.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/test-explorer-dark.png"><img src="images/components/test-explorer.png" alt="Test explorer"></picture>
 
 ```c
@@ -1068,6 +1188,8 @@ Test results as a tree in tree order, each item with its depth. A suite shows a 
 
 ### Stack trace
 
+An exception with its call stack.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/stack-trace-dark.png"><img src="images/components/stack-trace.png" alt="Stack trace"></picture>
 
 ```c
@@ -1079,9 +1201,11 @@ static const cui_stack_frame frames[] = {
 cui_stack_trace(ui, "error", frames, 2, .title = "TypeError", .message = "Cannot read properties of undefined", .lang = "js");
 ```
 
-An exception with its call stack. The header shows the error's type and message, with a button that copies the whole trace as text. Each frame shows its function and its file, line and column. A run of library frames (`external`) folds into one row that unfolds on a click. A frame with `source` opens to show those lines, highlighted, with the frame's line marked. The first frame of your own code starts open. Frames are focusable, and Enter or Space opens one. On a phone only the file's name is shown.
+The header shows the error's type and message, with a button that copies the whole trace as text. Each frame shows its function and its file, line and column. A run of library frames (`external`) folds into one row that unfolds on a click. A frame with `source` opens to show those lines, highlighted, with the frame's line marked. The first frame of your own code starts open. Frames are focusable, and Enter or Space opens one. On a phone only the file's name is shown.
 
 ### HTTP request bar
+
+The method, the URL and Send, as in an API client.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/request-bar-dark.png"><img src="images/components/request-bar.png" alt="HTTP request bar"></picture>
 
@@ -1100,9 +1224,11 @@ if (r.cancel) cancel_request();
 cui_response_status(ui, status, seconds, bytes);
 ```
 
-The method, the URL and Send, as in an API client. Enter in the URL sends, and while `loading` the button cancels. On a phone the button keeps only its icon. `cui_response_status` shows a status badge (green 2xx, blue 3xx, amber 4xx, red 5xx, with the reason phrase), the time and the size. `cui_url_params` decodes a URL's query into key-value pairs. `cui_url_set_params` writes the enabled pairs back, percent-encoded, keeping the fragment, and leaves the URL alone when the result would not fit. Together they keep a parameters table in step with the URL. `cui_http_reason` and `cui_http_method_name` give the names.
+Enter in the URL sends, and while `loading` the button cancels. On a phone the button keeps only its icon. `cui_response_status` shows a status badge (green 2xx, blue 3xx, amber 4xx, red 5xx, with the reason phrase), the time and the size. `cui_url_params` decodes a URL's query into key-value pairs. `cui_url_set_params` writes the enabled pairs back, percent-encoded, keeping the fragment, and leaves the URL alone when the result would not fit. Together they keep a parameters table in step with the URL. `cui_http_reason` and `cui_http_method_name` give the names.
 
 ### Uptime bars
+
+A status page: each service's current state and a bar for each day of its history.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/uptime-dark.png"><img src="images/components/uptime.png" alt="Uptime bars"></picture>
 
@@ -1112,9 +1238,11 @@ const cui_uptime_service services[] = { { "API", api_days, 90 }, { "Website", we
 cui_uptime(ui, "status", services, 2, .last_day = today);
 ```
 
-A status page. Each service shows its state from its last day (operational, degraded or outage) and its uptime over the days with data. Below it is one bar per day, colored by availability: green from 99.9%, olive from 99%, amber from 95%, red below that, and gray without data. A hover lifts the bar and shows its date and uptime, and the result names the service and day under the pointer. On a narrow panel only the most recent days that fit are shown, newest on the right.
+Each service shows its state from its last day (operational, degraded or outage) and its uptime over the days with data. Below it is one bar per day, colored by availability: green from 99.9%, olive from 99%, amber from 95%, red below that, and gray without data. A hover lifts the bar and shows its date and uptime, and the result names the service and day under the pointer. On a narrow panel only the most recent days that fit are shown, newest on the right.
 
 ### Time histogram
+
+Event counts over time, stacked by series, as above a log search, with a legend that shows each series' total.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/time-histogram-dark.png"><img src="images/components/time-histogram.png" alt="Time histogram"></picture>
 
@@ -1125,11 +1253,13 @@ if (cui_time_histogram(ui, "volume", start, 900, 96, levels, 3, &from, &to).sele
     filter_logs(from, to);
 ```
 
-Event counts over time, stacked by series, as above a log search, with a legend that shows each series' total. Dragging across it selects a range of whole buckets, and a click clears it. A hover shows the bucket's times and its count in each series. The time labels pick their step from seconds to weeks to suit the width, and show dates once the span passes a day. Times are local, or UTC with `utc`.
+Dragging across it selects a range of whole buckets, and a click clears it. A hover shows the bucket's times and its count in each series. The time labels pick their step from seconds to weeks to suit the width, and show dates once the span passes a day. Times are local, or UTC with `utc`.
 
 Keyboard: none yet. The range is selected by dragging with the pointer.
 
 ### Coverage
+
+Test coverage as a tree built from the files' paths.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/coverage-dark.png"><img src="images/components/coverage.png" alt="Coverage"></picture>
 
@@ -1142,9 +1272,11 @@ cui_coverage_result r = cui_coverage(ui, "coverage", files, 2);
 if (r.activated >= 0) open_file(files[r.activated].path);
 ```
 
-Test coverage as a tree built from the files' paths. Each folder sums up what it holds, and a row for all files sits on top. Lines show as a bar and a percentage, with branches and functions beside them. They are colored red below `low` (50%), amber below `high` (80%) and green above. A click on a column's title sorts by it, and a second click reverses the order; folders stay above files. A click on a folder folds it. Up and Down move the selection, Left and Right fold and unfold a folder, and Enter folds a folder or, on a file, reports `activated`, as a double click does. A hover shows the counts behind the percentages. On a phone only the lines column is shown.
+Each folder sums up what it holds, and a row for all files sits on top. Lines show as a bar and a percentage, with branches and functions beside them. They are colored red below `low` (50%), amber below `high` (80%) and green above. A click on a column's title sorts by it, and a second click reverses the order; folders stay above files. A click on a folder folds it. Up and Down move the selection, Left and Right fold and unfold a folder, and Enter folds a folder or, on a file, reports `activated`, as a double click does. A hover shows the counts behind the percentages. On a phone only the lines column is shown.
 
 ### Blame
+
+Source with who last changed each line.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/blame-dark.png"><img src="images/components/blame.png" alt="Blame"></picture>
 
@@ -1154,11 +1286,13 @@ cui_blame_result r = cui_blame(ui, "blame", lines, line_commit, line_count, comm
 if (r.clicked >= 0) show_commit(&commits[r.clicked]);
 ```
 
-Source with who last changed each line. Consecutive lines from one commit share a gutter entry with the author, the age ("6 weeks ago") and the short hash. A bar at the edge shades newer changes stronger. A hover on the gutter marks every line of that commit and shows its summary, and a click reports the commit. The code is highlighted with `lang`, and block comments that started further up are tracked. Only the lines in view are built: 100,000 lines take a tenth of a millisecond a frame after the first. On a phone the gutter keeps the shade and the author's initials.
+Consecutive lines from one commit share a gutter entry with the author, the age ("6 weeks ago") and the short hash. A bar at the edge shades newer changes stronger. A hover on the gutter marks every line of that commit and shows its summary, and a click reports the commit. The code is highlighted with `lang`, and block comments that started further up are tracked. Only the lines in view are built: 100,000 lines take a tenth of a millisecond a frame after the first. On a phone the gutter keeps the shade and the author's initials.
 
 Keyboard: none yet. The list scrolls with the wheel, and a commit is clicked with the pointer.
 
 ### Feature flags
+
+Flags against environments, edited in place.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/feature-flags-dark.png"><img src="images/components/feature-flags.png" alt="Feature flags"></picture>
 
@@ -1171,11 +1305,13 @@ cui_feature_flags_result r = cui_feature_flags(ui, "flags", flags, 1, envs, 3);
 if (r.flag >= 0) save_flag(&flags[r.flag], r.env);
 ```
 
-Flags against environments, edited in place. Each environment has a switch, and while a flag is on it also shows the share of users it reaches. A click on the share opens a slider with presets, and a share under 100% shows in amber. A field filters by key or description. On a phone, or when the columns do not fit, one environment shows at a time, picked above the list. The result names the flag and the environment that changed this frame. With `height` the list scrolls.
+Each environment has a switch, and while a flag is on it also shows the share of users it reaches. A click on the share opens a slider with presets, and a share under 100% shows in amber. A field filters by key or description. On a phone, or when the columns do not fit, one environment shows at a time, picked above the list. The result names the flag and the environment that changed this frame. With `height` the list scrolls.
 
 Keyboard: Tab moves through the switches and the share buttons, and Enter or Space flips the focused switch or opens the share popover, which Esc closes.
 
 ### API explorer
+
+The endpoints of an API grouped by tag, each opening to show its parameters.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/api-explorer-dark.png"><img src="images/components/api-explorer.png" alt="API explorer"></picture>
 
@@ -1195,6 +1331,8 @@ Endpoints grouped by tag, in the order the tags first appear; a tag's header fol
 
 ### Chat
 
+Message bubbles for a conversation, with grouping, dividers and a typing indicator.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/chat-dark.png"><img src="images/components/chat.png" alt="Chat"></picture>
 
 ```c
@@ -1208,6 +1346,8 @@ cui_typing_indicator(ui, "Jonas");
 Grouped messages stack tightly with the avatar on the last bubble and tighter inner corners. Your own messages sit on the right in the primary color. The typing dots bounce in sequence. With `.markdown = true` a message renders its text with the markdown view, so an assistant's reply can carry lists, code and links.
 
 ### Comments
+
+A comment with its author, time, replies indented under it and a like button.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/comments-dark.png"><img src="images/components/comments.png" alt="Comments"></picture>
 
@@ -1224,6 +1364,8 @@ Keyboard: Tab moves through each comment's actions (like, reply and the rest), a
 
 ### Presence, counter and ticker
 
+Small live pieces: who is here now, a number that rolls when it changes, and a line of text that scrolls past.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/presence-ticker-dark.png"><img src="images/components/presence-ticker.png" alt="Presence, counter and ticker"></picture>
 
 ```c
@@ -1239,6 +1381,8 @@ Presence avatars overlap with colored rings and spread out under the pointer; id
 
 ### Carousel
 
+A strip of slides the user drags or steps through, one at a time.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/carousel-dark.png"><img src="images/components/carousel.png" alt="Carousel"></picture>
 
 ```c
@@ -1251,6 +1395,8 @@ cui_carousel(ui, "tour", 4, &slide, .height = 200, .auto_advance = 6) {
 Drag or flick between slides, scroll sideways, use the arrow buttons, the dots or the arrow keys. The track settles on a spring. `auto_advance` moves on every few seconds, except while hovered; `loop` wraps around.
 
 ### Image compare and card stack
+
+A divider that reveals one picture over another, and a stack of cards the user swipes through.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/compare-stack-dark.png"><img src="images/components/compare-stack.png" alt="Image compare and card stack"></picture>
 
@@ -1266,6 +1412,8 @@ int dir = cui_card_stack_end(ui);   /* -1 or 1 when the top card was thrown left
 Drag the divider, or focus it and use the arrow keys. Pass the pictures' `aspect` (width over height) and they are cropped to fill the box instead of stretched. The top card of the stack follows the pointer; past a third of its width, or with a fast flick, it flies off and the cards behind move up. Cards clip their content to a rectangle, so content that fills a card gives itself a radius of 25 (the card's 26, less its 1px border) and its corners line up.
 
 ### Image viewer and cropper
+
+A picture you can zoom and pan, and a crop tool with a frame you drag.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/image-viewer-dark.png"><img src="images/components/image-viewer.png" alt="Image viewer and cropper"></picture>
 
@@ -1284,6 +1432,8 @@ The cropper puts a crop rectangle over the fitted picture, in image pixels. Drag
 ## Planning
 
 ### Kanban board
+
+Columns of cards the user drags between stages.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/kanban-dark.png"><img src="images/components/kanban.png" alt="Kanban board"></picture>
 
@@ -1309,6 +1459,8 @@ Cards lift and follow the pointer when dragged; the column under the pointer lig
 
 ### Week calendar
 
+A week of timed events on a day grid, which can be moved and resized by dragging.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/week-calendar-dark.png"><img src="images/components/week-calendar.png" alt="Week calendar"></picture>
 
 ```c
@@ -1322,6 +1474,8 @@ int clicked = cui_week_calendar(ui, "week", monday, events, 2, .start_hour = 8, 
 Drag an event to move it (it snaps to 15 minutes and keeps its length) or pull its bottom edge to resize it; the calendar writes the new times into your array. Overlapping events share the day side by side. Today is circled and a line marks the current time. `read_only` turns editing off but keeps clicks. With the keyboard, Up and Down move a focused event by 15 minutes, Left and Right by a day, and Shift with Up or Down changes its end.
 
 ### Month calendar
+
+A month grid with the events of each day, for schedules and planners.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/month-calendar-dark.png"><img src="images/components/month-calendar.png" alt="Month calendar"></picture>
 
@@ -1337,13 +1491,15 @@ if (r.event >= 0) open_event(r.event);
 if (r.day_activated) new_event_on(day);
 ```
 
-A month of events. The header names the month, with Today and the previous and next month; the grid shows the weeks the month touches, Monday first (`first_weekday` picks another day), with today marked and the selected day tinted. All-day and multi-day events are bars that run across the days they cover and continue into the next week, sharing lanes so they never overlap; timed events are a colored dot, the time and the title, in time order under the bars of their day. When a day has more than its cell holds, its last line says "+N more" and opens a list of all its events. Event colors come from the theme's tones.
+The header names the month, with Today and the previous and next month; the grid shows the weeks the month touches, Monday first (`first_weekday` picks another day), with today marked and the selected day tinted. All-day and multi-day events are bars that run across the days they cover and continue into the next week, sharing lanes so they never overlap; timed events are a colored dot, the time and the title, in time order under the bars of their day. When a day has more than its cell holds, its last line says "+N more" and opens a list of all its events. Event colors come from the theme's tones.
 
 Clicking an event returns it in `r.event`, clicking a day selects it (`selected` is yours to read and set) and double-clicking a day sets `r.day_activated`, the place to add an event. With the grid focused, the arrows move the selected day and carry on into the next or previous month, Page Up and Page Down change month, Home goes to today, Space selects and Enter activates the day. `month_names` and `day_names` take names in another language, `hour12` writes 9:30a, `cell_height` sets the rows (104 by default) and `today` overrides the system date.
 
 On a narrow screen (under 520 points) the cells show the day number and up to three colored dots, and the selected day's events are listed under the grid with their times. The events of the weeks in view are laid out once a frame by sorting the timed ones, so a month with thousands of events still builds in about a millisecond.
 
 ### Gantt chart
+
+A task list on the left and a timeline that scrolls sideways, with months, day numbers and shaded weekends.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gantt-dark.png"><img src="images/components/gantt.png" alt="Gantt chart"></picture>
 
@@ -1357,9 +1513,11 @@ static cui_gantt_task tasks[] = {
 int clicked = cui_gantt(ui, "plan", tasks, 3, start_date, 28, .today = 10);
 ```
 
-A task list on the left and a timeline that scrolls sideways, with months, day numbers and shaded weekends. Drag a bar to reschedule it, or drag either end to change its length. The darker part of a bar is its progress. Dependencies draw as elbow arrows and milestones as diamonds. A focused bar moves a day with the arrow keys and changes its length with Shift and the arrows.
+Drag a bar to reschedule it, or drag either end to change its length. The darker part of a bar is its progress. Dependencies draw as elbow arrows and milestones as diamonds. A focused bar moves a day with the arrow keys and changes its length with Shift and the arrows.
 
 ### Node editor
+
+A canvas of nodes joined by curved links, for shader graphs, audio patching or visual scripting.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/node-editor-dark.png"><img src="images/components/node-editor.png" alt="Node editor"></picture>
 
@@ -1384,13 +1542,15 @@ if (cui_node_editor_begin(ui, "material", &view, .height = CUI_PX(480), .minimap
 }
 ```
 
-A canvas of nodes joined by curved links, for shader graphs, audio patching or visual scripting. You own the graph: node, pin and link ids are your integers, the editor moves the positions you pass and reports links made, links removed and nodes deleted, and you change your data. Scroll to zoom around the pointer (25% to 200%); pan with the middle button, or hold Space and drag. Click a node to select it, Shift or Ctrl click to add to the selection, drag on the empty canvas for a marquee, and drag a node to move it with the rest of the selection, which lifts while it moves. Drag from a pin to make a link: the wire follows the pointer, pins it can join show a ring, and it snaps to the nearest one. Pins of one `type` share a color from the series palette and only join their own type (0 joins anything); an input takes one link, so a new one replaces the old. Drag a link's input end off its pin to detach it, or click a wire and press Delete. With the keyboard, Tab moves through the nodes (focusing a node selects it), the arrow keys move the selection (Shift for single points), Delete or Backspace removes it, Ctrl+A selects every node, F frames them all, + and - zoom, 0 returns to 100% and Esc drops a wire or clears the selection. The editor draws its cards, labels, pins and wires at the zoom, so they stay sharp. Components in `cui_node_content` are laid out at 100% and scaled with the view: they work at any zoom, but their text is sharpest at 100% and below, and menus they open are placed for 100%. Links cannot be made from the keyboard.
+You own the graph: node, pin and link ids are your integers, the editor moves the positions you pass and reports links made, links removed and nodes deleted, and you change your data. Scroll to zoom around the pointer (25% to 200%); pan with the middle button, or hold Space and drag. Click a node to select it, Shift or Ctrl click to add to the selection, drag on the empty canvas for a marquee, and drag a node to move it with the rest of the selection, which lifts while it moves. Drag from a pin to make a link: the wire follows the pointer, pins it can join show a ring, and it snaps to the nearest one. Pins of one `type` share a color from the series palette and only join their own type (0 joins anything); an input takes one link, so a new one replaces the old. Drag a link's input end off its pin to detach it, or click a wire and press Delete. With the keyboard, Tab moves through the nodes (focusing a node selects it), the arrow keys move the selection (Shift for single points), Delete or Backspace removes it, Ctrl+A selects every node, F frames them all, + and - zoom, 0 returns to 100% and Esc drops a wire or clears the selection. The editor draws its cards, labels, pins and wires at the zoom, so they stay sharp. Components in `cui_node_content` are laid out at 100% and scaled with the view: they work at any zoom, but their text is sharpest at 100% and below, and menus they open are placed for 100%. Links cannot be made from the keyboard.
 
 ## More charts
 
 These follow the same rules as the [core charts](components.md#charts): a tooltip on hover, an intro animation, theme colors. Each returns the index of the mark that was clicked, or -1. Series colors come from a palette checked for color blindness in both modes: neighbouring series stay apart for protanopia and deuteranopia, and the palette rotates so the first series sits next to your accent. Charts that compare amounts on one scale (heatmaps, the treemap, the bar list) use shades of a single hue instead.
 
 ### Heatmap
+
+A grid of cells colored by value, for one category against another.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/heatmap-dark.png"><img src="images/components/heatmap.png" alt="Heatmap"></picture>
 
@@ -1403,6 +1563,8 @@ One hue, light to dark (dim to bright in dark mode), with a scale below. Column 
 
 ### Calendar heatmap
 
+A year of days as small squares colored by activity.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/calendar-heatmap-dark.png"><img src="images/components/calendar-heatmap.png" alt="Calendar heatmap"></picture>
 
 ```c
@@ -1412,6 +1574,8 @@ cui_calendar_heatmap(ui, "year", start, per_day, 364, .unit = "contributions");
 One square a day in five levels, weeks as columns starting on Monday, month labels where a month begins. The tooltip shows the date and the value; `unit` also adds a total under the grid.
 
 ### Treemap and radar
+
+A treemap shows the parts of a whole as rectangles sized by value. A radar chart compares items across several axes.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/treemap-radar-dark.png"><img src="images/components/treemap-radar.png" alt="Treemap and radar"></picture>
 
@@ -1427,6 +1591,8 @@ The treemap uses a squarified layout, so rectangles stay close to square; labels
 
 ### Funnel, split bar and waffle
 
+Three charts for shares: a funnel for the steps of a conversion, a single bar split into parts, and a waffle of 100 squares.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/funnel-split-dark.png"><img src="images/components/funnel-split.png" alt="Funnel, split bar and waffle"></picture>
 
 ```c
@@ -1440,6 +1606,8 @@ The funnel shows each stage's share of the first and, under it, the conversion f
 
 ### Sankey
 
+Flows between stages, drawn as ribbons whose width follows the amount.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/sankey-dark.png"><img src="images/components/sankey.png" alt="Sankey"></picture>
 
 ```c
@@ -1451,6 +1619,8 @@ cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300);
 Columns follow the links from the sources, and an outcome sits at the step it is reached from, so a drop off stays beside the step it left and no ribbon crosses a column of nodes. Color goes to the outcomes, the largest first, and each ribbon takes the color of where it ends; sources and steps stay neutral gray, so the eye follows where things end up. Hover a node to highlight its links, or a ribbon to see the flow and its share of the source. A cycle in the links does not hang the layout.
 
 ### Bar list and activity rings
+
+A ranked list with a bar behind each row, and concentric rings that fill toward a goal.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/bar-list-rings-dark.png"><img src="images/components/bar-list-rings.png" alt="Bar list and activity rings"></picture>
 
@@ -1464,6 +1634,8 @@ Bar list rows are keyed by their label: when the values change, the bars grow or
 
 ### Scatter and bubble
 
+Points on two axes, with an optional third value as the size of each bubble.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/scatter-dark.png"><img src="images/components/scatter.png" alt="Scatter"></picture>
 
 ```c
@@ -1475,6 +1647,8 @@ Leave `sizes` NULL for a scatter. With sizes, the area of a bubble follows its v
 
 ### Radial gauge
 
+One value on a dial, for dashboards: speed, load, temperature, a score against a goal.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gauges-dark.png"><img src="images/components/gauges.png" alt="Radial gauges"></picture>
 
 ```c
@@ -1485,9 +1659,11 @@ cui_radial_gauge(ui, "rps", rps, 0, 2500, .label = "Requests per second", .show_
 cui_radial_gauge(ui, "disk", disk_used, 0, 100, .unit = "%", .label = "Disk", .no_needle = true, .ticks = -1);
 ```
 
-One value on a dial, for dashboards: speed, load, temperature, a score against a goal. The arc sweeps 240 degrees (`sweep`, 90 to 300) between `min` and `max`, with labelled major ticks (`ticks` divisions, 5 by default, -1 for none) and four minor ticks between them. `bands` color stretches of the arc in the theme's tones, each running from the band before it (or `min`) up to its `to`. A needle points at the value and springs there with a little overshoot when the value changes (it snaps with reduced motion); `no_needle` fills a thick arc instead and puts the readout in the middle, in the color of the band the value is in. `show_target` adds a marker at `target`. The readout uses `format` (by default whole numbers, with large ones shortened to 1.8k) and `unit`, with `label` under it. `size` sets the width and the height follows the sweep.
+The arc sweeps 240 degrees (`sweep`, 90 to 300) between `min` and `max`, with labelled major ticks (`ticks` divisions, 5 by default, -1 for none) and four minor ticks between them. `bands` color stretches of the arc in the theme's tones, each running from the band before it (or `min`) up to its `to`. A needle points at the value and springs there with a little overshoot when the value changes (it snaps with reduced motion); `no_needle` fills a thick arc instead and puts the readout in the middle, in the color of the band the value is in. `show_target` adds a marker at `target`. The readout uses `format` (by default whole numbers, with large ones shortened to 1.8k) and `unit`, with `label` under it. `size` sets the width and the height follows the sweep.
 
 ### Candlestick chart
+
+Open, high, low and close per period, for prices.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/candlestick-dark.png"><img src="images/components/candlestick.png" alt="Candlestick chart"></picture>
 
@@ -1501,7 +1677,7 @@ int at = cui_candlestick(ui, "nrth", candles, count, .labels = dates, .overlays 
 if (at >= 0) show_period(at);
 ```
 
-Open, high, low and close per period, for prices. Candles that close higher are drawn in the success color and the rest in the danger color (`up` and `down` change them); `ohlc` draws OHLC bars instead of bodies. Volume bars sit in their own band under the prices whenever any candle has volume (`no_volume` hides them), `overlays` adds lines with one value per candle, such as moving averages, and a dashed line tags the last close on the price axis. The price axis is on the right and fits the candles in view as you pan, easing between ranges. Time labels come from `labels`, thinned to a spacing that reads.
+Candles that close higher are drawn in the success color and the rest in the danger color (`up` and `down` change them); `ohlc` draws OHLC bars instead of bodies. Volume bars sit in their own band under the prices whenever any candle has volume (`no_volume` hides them), `overlays` adds lines with one value per candle, such as moving averages, and a dashed line tags the last close on the price axis. The price axis is on the right and fits the candles in view as you pan, easing between ranges. Time labels come from `labels`, thinned to a spacing that reads.
 
 The wheel zooms around the pointer and dragging (or Shift+wheel, or a sideways scroll) pans. Hovering shows a crosshair with the price at the pointer and a tooltip with the candle's open, high, low, close, change from the previous close and volume; the call returns that candle. With the chart focused, Left and Right move the crosshair (Shift+Left and Shift+Right by ten), Home and End jump to the first and last candle, + and - zoom and 0 fits everything. While the newest candle is in view the chart follows new ones as you append them; pan back in time and it stays where you left it.
 
@@ -1512,6 +1688,8 @@ You own the candles; only the ones in view are read each frame. When zooming out
 Text effects, loaders and the playful pieces. With reduced motion, text effects show their final state at once.
 
 ### Text effects
+
+Animated text: a shimmer, a typewriter, words that rotate in place and text that reveals itself.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/text-effects-dark.png"><img src="images/components/text-effects.png" alt="Text effects"></picture>
 
@@ -1527,6 +1705,8 @@ The shimmer sweeps a soft highlight across muted text. The typewriter lays out t
 
 ### Rolling numbers
 
+A number whose changed digits roll into place.
+
 ```c
 char rev[32];
 snprintf(rev, sizeof rev, "$%s", grouped(revenue));   /* any formatted figure */
@@ -1538,6 +1718,8 @@ When the text changes, only the characters that differ roll: up into place when 
 Keyboard: the numbers only display. The buttons that change them in your app take Tab, Enter and Space as usual.
 
 ### Gradient text and spotlight cards
+
+Text filled with a gradient, and a card with a glow that follows the pointer.
 
 ![Gradient text and spotlight cards](images/showcase/hero-effects-dark.png)
 
@@ -1555,6 +1737,8 @@ Keyboard: these are surfaces and text. What you put inside a spotlight card take
 
 ### Loaders
 
+Animated indicators for work in progress, in five styles.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/loaders-dark.png"><img src="images/components/loaders.png" alt="Loaders"></picture>
 
 ```c
@@ -1563,6 +1747,8 @@ cui_loader(ui, .style = CUI_LOADER_PULSE, .size = 32, .color = CUI_COLOR_ACCENT)
 ```
 
 ### Dock
+
+A row of icons that grow under the pointer, as in a desktop dock.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dock-dark.png"><img src="images/components/dock.png" alt="Dock"></picture>
 
@@ -1579,6 +1765,8 @@ Icons grow as the pointer passes, with the item under it largest and its neighbo
 
 ### Control tiles
 
+Large toggle tiles for quick settings such as Wi-Fi or Do not disturb.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tiles-dark.png"><img src="images/components/tiles.png" alt="Control tiles"></picture>
 
 ```c
@@ -1591,6 +1779,8 @@ cui_control_tile(ui, "Dark appearance", &dark, .icon = CUI_ICON_SUN, .wide = tru
 Big toggles for quick settings, which fill their grid cell. They switch with a click or with Space and Enter. `detail` replaces the default On and Off line.
 
 ### Now playing, waveform and tab bar
+
+A media player card, an audio waveform to scrub through, and a bottom tab bar for phone layouts.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/player-dark.png"><img src="images/components/player.png" alt="Now playing, waveform and tab bar"></picture>
 
@@ -1615,6 +1805,8 @@ The pieces of an assistant: thinking, tools, plans, sources and the composer. Se
 
 ### Reasoning and tool calls
 
+A folding block for a model's reasoning, and a row for each tool it calls with its status.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/reasoning-tools-dark.png"><img src="images/components/reasoning-tools.png" alt="Reasoning and tool calls"></picture>
 
 ```c
@@ -1631,6 +1823,8 @@ While `thinking`, the reasoning header shimmers and counts up; when it ends, the
 Keyboard: Tab focuses a reasoning block's header or a tool call, and Enter or Space folds or unfolds it.
 
 ### Agent plan and status
+
+The steps an agent is working through, and a pill that says what it is doing now.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/agent-plan-dark.png"><img src="images/components/agent-plan.png" alt="Agent plan and status"></picture>
 
@@ -1650,6 +1844,8 @@ Keyboard: none yet. A step is clicked with the pointer; the status pill only dis
 
 ### Sources and citations
 
+Citations inside an answer and the list of sources they point to.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/sources-dark.png"><img src="images/components/sources.png" alt="Sources and citations"></picture>
 
 ```c
@@ -1663,6 +1859,8 @@ Citations show the source's domain and open a card with the title and snippet wh
 Keyboard: Tab moves through the sources and the citation marks, and Enter or Space opens the focused one.
 
 ### Composer and model picker
+
+The message box of a chat, with attachments, send and stop, and a menu for choosing the model.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/composer-dark.png"><img src="images/components/composer.png" alt="Composer"></picture>
 
@@ -1683,6 +1881,8 @@ The text area grows with its content up to `max_lines`, then scrolls. Enter send
 
 ### Suggestions, response actions and the context meter
 
+Prompt suggestions to start from, the actions under a response, and a ring that shows how full the context is.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/suggestions-dark.png"><img src="images/components/suggestions.png" alt="Suggestions, actions and context"></picture>
 
 ```c
@@ -1698,13 +1898,15 @@ Keyboard: Tab moves through the suggestions and the response actions, and Enter 
 
 ### Voice orb
 
+An animated orb for voice modes that shows listening, thinking and speaking.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-orb-dark.png"><img src="images/components/voice-orb.png" alt="Voice orb"></picture>
 
 ```c
 if (cui_voice_orb(ui, "voice", listening ? CUI_VOICE_LISTENING : CUI_VOICE_IDLE, mic_level)) toggle_listening();
 ```
 
-A living shape for voice modes. It breathes when idle, ripples with the level while listening, sends a ring of dots around while thinking and swells with the voice while speaking. It moves between states smoothly.
+It breathes when idle, ripples with the level while listening, sends a ring of dots around while thinking and swells with the voice while speaking. It moves between states smoothly.
 
 Keyboard: Tab focuses the orb, and Enter or Space clicks it.
 
@@ -1715,6 +1917,8 @@ The parts around a desktop window's content: a menu bar, a toolbar, document tab
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/app-chrome-dark.png"><img src="images/components/app-chrome.png" alt="Menu bar, toolbar, document tabs and status bar in one window"></picture>
 
 ### Menu bar
+
+The File, Edit, View row of a desktop app, with a menu under each title.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/menu-bar-dark.png"><img src="images/components/menu-bar.png" alt="Menu bar with the View menu open"></picture>
 
@@ -1736,6 +1940,8 @@ Each menu holds ordinary menu items, so shortcuts, separators, labels, icons, di
 
 ### Toolbar
 
+A row of small buttons, toggles and separators for an editor's most used commands.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/toolbar-dark.png"><img src="images/components/toolbar.png" alt="Toolbar, wide and collapsed into a more menu"></picture>
 
 ```c
@@ -1753,6 +1959,8 @@ Buttons are small ghost buttons; an icon only button needs a `tooltip`, which is
 
 ### Document tabs
 
+Closable tabs for open documents that can be dragged into a new order, as in an editor.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/document-tabs-dark.png"><img src="images/components/document-tabs.png" alt="Document tabs with an unsaved dot and a hovered close button"></picture>
 
 ```c
@@ -1769,6 +1977,8 @@ if (r.close >= 0 && confirm_close(r.close)) {
 A click selects a tab, the x or a middle click asks to close it, and dragging a tab sideways reorders the strip while the others make room. A tab with unsaved changes (`dirty`) shows a dot, which turns into the x under the pointer. The selected tab is filled with the surface color and opens into the content below. Too many tabs scroll sideways with a fade at the edge, and a newly selected tab scrolls into view. The component reports closes and moves and leaves your array alone, so you can ask before closing; tabs keep their state by title, so give two tabs with the same name a key (`"main.c##src"`). The selected tab is in the Tab order: Left and Right select, Home and End jump, Shift+Left and Shift+Right move it, Delete closes it. With `.shortcuts = true` Ctrl+Tab and Ctrl+Shift+Tab (or Ctrl+PageDown and Ctrl+PageUp) switch tabs and Ctrl+W (Cmd+W on macOS) closes the selected one from anywhere in the window. `.no_close` and `.no_reorder` turn those parts off.
 
 ### Status bar
+
+The thin bar at the bottom of a window for state, counts and background progress.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/status-bar-dark.png"><img src="images/components/status-bar.png" alt="Status bar with a branch, a message, progress and clickable items"></picture>
 
@@ -1788,6 +1998,8 @@ cui_status_bar(ui, "status") {
 Items run left to right and `cui_status_bar_spacer` sends the rest to the right edge. Texts and items are 12 point with tabular figures, so a counting position keeps its width; give an item whose label changes a fixed key (`"Ln 12, Col 4###pos"`) so it keeps its hover and focus. Items are in the Tab order and return true when clicked. `tone` colors a message's icon. The progress bar is 64 points wide (`.width`) and fills with the accent; `.indeterminate` slides a segment along it, which stays still with reduced motion.
 
 ### Docking
+
+Panels the user arranges by dragging: split, tabbed and resized, with a layout you can save and load.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/docking-dark.png"><img src="images/components/docking.png" alt="A dockspace with a scene tree, viewport, log and inspector; the Log tab is being dragged over the viewport, with drop targets and a preview of the right half"></picture>
 
