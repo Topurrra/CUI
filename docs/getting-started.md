@@ -245,6 +245,27 @@ CUI_SCREENSHOT=out.png CUI_SCREENSHOT_FRAMES=60 ./my_app
 
 For unit tests, skip the window entirely: create a context with the software renderer, feed input with `cui_input_*` and render into memory. `tests/test_main.c` shows the pattern.
 
+## Your app's name and icon on Linux
+
+Linux desktops show a window's name and icon (in the taskbar, the dock and Alt+Tab) by finding the app's `.desktop` file. Give the app an ID and name the file after it:
+
+```c
+cui_app_run(&(cui_app_desc){ .title = "Notes", .app_id = "org.example.Notes" }, frame, NULL);
+```
+
+```ini
+# ~/.local/share/applications/org.example.Notes.desktop, or /usr/share/applications/
+[Desktop Entry]
+Type=Application
+Name=Notes
+Exec=notes
+Icon=org.example.Notes
+```
+
+The icon goes in the icon theme under the same name, for example `~/.local/share/icons/hicolor/256x256/apps/org.example.Notes.png`. A Flatpak already names its desktop file and icon after its ID, so pass that ID.
+
+The ID becomes the window's `WM_CLASS` on X11, and its app ID on Wayland with the SDL2 backend or GLFW 3.4. Without an ID, the X11 backend sets `WM_CLASS` to the window title and `CUI`, so the desktop finds the right file only by chance.
+
 ## Run in the browser
 
 CUI compiles to WebAssembly with plain clang: no Emscripten and no downloads. The [live docs](https://yappologistic.github.io/CUI/) are built this way, and your app can be too, unchanged, as long as its `main` is `int main(void)` and hands its frame function to `cui_app_run` (as in the example above) instead of running its own loop. You need clang with the `wasm32` target, `wasm-ld`, `llvm-ar` and python3 (on Debian or Ubuntu: `sudo apt install clang lld llvm python3`).

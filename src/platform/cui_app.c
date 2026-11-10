@@ -27,6 +27,7 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     if (!d->title) d->title = "CUI";
     snprintf(app->title, sizeof app->title, "%s", d->title);
     d->title = app->title;
+    if (d->app_id && !d->app_id[0]) d->app_id = NULL;
     if (d->width <= 0) d->width = 1080;
     if (d->height <= 0) d->height = 720;
     if (d->min_width <= 0) d->min_width = 360;

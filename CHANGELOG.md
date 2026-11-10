@@ -20,6 +20,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **Complete programs on component pages.** A page's usage block is a fragment. 71 of the 147 pages now also have the example as a whole program, with its includes, a frame function and `main`, under "Complete program". The site build compiles each one and leaves out any that does not build.
 - `cui_app_quit`, `cui_app_set_title`, `cui_app_set_size`, `cui_app_size`, `cui_app_ui`, `cui_app_is_software` and `cui_app_native_window` take `NULL` for the app that is running, as `cui_app_file_dialog` already did. A `cui_app_run` callback had no way to close its window or change its title: now it is `cui_app_quit(NULL)`.
 - `tests/doc_programs.sh`, run on every push: it builds every complete program in the docs with warnings as errors.
+- `cui_app_desc.app_id` lets a Linux desktop show your app's name and icon for its window in the taskbar, the dock and Alt+Tab. Name your `.desktop` file after the ID (for example `org.example.Notes.desktop`). It sets `WM_CLASS` on X11, and the Wayland app ID with SDL2 or GLFW 3.4. Before this, every window of the X11 backend had the class `CUI`. See [Your app's name and icon on Linux](docs/getting-started.md#your-apps-name-and-icon-on-linux).
 
 ### Changed
 

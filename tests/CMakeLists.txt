@@ -16,6 +16,21 @@ add_test(NAME cui_screenshots COMMAND cui_screenshots ${CMAKE_CURRENT_BINARY_DIR
 if(CUI_WITH_APP)
     add_executable(cui_app_smoke app_smoke.c ../examples/gallery_ui.c ../examples/gallery_more.c)
     target_link_libraries(cui_app_smoke PRIVATE cui::cui)
+    # reads the window's WM_CLASS back, with any backend that runs on X11
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_package(X11 QUIET)
+        if(X11_FOUND)
+            target_compile_definitions(cui_app_smoke PRIVATE CUI_SMOKE_X11)
+            # asks SDL2 or GLFW which window system it picked
+            if(CUI_BACKEND STREQUAL "sdl2")
+                target_compile_definitions(cui_app_smoke PRIVATE CUI_SMOKE_SDL2)
+            elseif(CUI_BACKEND STREQUAL "glfw")
+                target_compile_definitions(cui_app_smoke PRIVATE CUI_SMOKE_GLFW)
+            endif()
+            target_include_directories(cui_app_smoke PRIVATE ${X11_INCLUDE_DIR})
+            target_link_libraries(cui_app_smoke PRIVATE ${X11_LIBRARIES})
+        endif()
+    endif()
 endif()
 
 add_executable(cui_bench bench.c ../examples/gallery_ui.c ../examples/gallery_more.c)

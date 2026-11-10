@@ -52,6 +52,14 @@ typedef struct cui_app_desc {
     cui_theme_mode theme;
     cui_accent accent;
     bool follow_system_theme;   /* use the OS light/dark setting where available */
+    /* Linux: the app's ID, which is the name of its .desktop file without
+     * ".desktop", e.g. "org.example.Notes". The desktop uses it to show the
+     * app's name and icon for the window (taskbar, dock, Alt+Tab) and to group
+     * its windows. Sets WM_CLASS on X11 and the app_id on Wayland (SDL2, and
+     * GLFW 3.4). Read when the window is created; ignored on Windows and
+     * macOS. Default: none (the X11 backend then sets WM_CLASS to the title
+     * and "CUI"). */
+    const char *app_id;
 } cui_app_desc;
 
 CUI_API cui_app *cui_app_create(const cui_app_desc *desc);
