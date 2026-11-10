@@ -1041,3 +1041,6 @@ body.reduce-motion .rel-card:hover .rel-go { transform: none; }
 .static th, .static td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
 .static pre { overflow-x: auto; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
 .brand-ver { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: -4px; }
+.program { margin-top: 14px; }
+.program > summary { cursor: pointer; font-weight: 500; font-size: 14px; padding: 6px 0; color: var(--text-2); }
+.program > summary:hover, .program[open] > summary { color: var(--fg); }

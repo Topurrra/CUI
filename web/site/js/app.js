@@ -1097,7 +1097,11 @@ function viewItem(id, sec) {
 
   const { usage, rest } = splitDoc(it);
   const docEl = (nodes) => { const d = h('div', { class: 'doc' }); d.append(...nodes); d.querySelectorAll('pre.code code').forEach((c) => { c.innerHTML = highlight(c.textContent); }); addCopy(d); return d; };
-  if (usage.length) section('usage', 'Usage', docEl(usage));
+  const program = it.program ? h('details', { class: 'program' }, h('summary', {}, 'Complete program'),
+    h('p', { class: 'opt-caption' }, 'The example above as a whole program: save it as ', h('code', {}, 'main.c'), ' and build it as in ', h('a', { href: '#/guide/getting-started' }, 'Getting started'), '.'),
+    docEl([h('pre', { class: 'code', 'data-lang': 'c' }, h('code', {}, it.program))])) : null;
+  if (usage.length) section('usage', 'Usage', docEl(usage), program);
+  else if (program) section('usage', 'Usage', program);
   if (rest.length) section('behavior', usage.length ? 'Behavior' : 'Overview', docEl(rest));
   if (it.keyboard?.length) section('keyboard', 'Keyboard', h('ul', { class: 'kbd-list' }, it.keyboard.map((k) => h('li', { html: k }))));
   else if (it.keyboard_note) section('keyboard', 'Keyboard', h('p', { class: 'kbd-note', html: it.keyboard_note }));
