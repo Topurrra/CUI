@@ -339,6 +339,8 @@ cui_id cui__position_id(cui_ctx *ui, uint32_t salt) {
     return cui__hash(key, sizeof key, salt);
 }
 
+/** Use the caller's ID for both input and visual state. Draw icon-only glyphs
+ * directly so a confirmation check can replace the old glyph immediately. */
 static bool cui__button_impl(cui_ctx *ui, cui_id id, const char *label, const char *icon_only, const cui_button_opts *o) {
     cui_button_opts d;
     memset(&d, 0, sizeof d);
@@ -437,6 +439,8 @@ bool cui__icon_button_id(cui_ctx *ui, cui_id id, const char *icon, const cui_but
     return cui__button_impl(ui, id, NULL, icon, o);
 }
 
+/** Include both the icon and tooltip in the ID so two buttons in the same
+ * scope can share either one and still be distinguishable. */
 bool cui_icon_button_ex(cui_ctx *ui, const char *icon, const cui_button_opts *o) {
     const char *tooltip = icon && o ? o->tooltip : NULL;
     cui_id id = cui_make_id(ui, tooltip ? tooltip : icon);

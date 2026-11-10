@@ -7108,6 +7108,8 @@ static void test_emoji_release(void) {
     CHECK(et_rgba_live == 0);
 }
 
+/** Share one software renderer across the test contexts and return a failing
+ * exit status to CTest if any check in the suite fails. */
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
