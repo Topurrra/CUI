@@ -4,6 +4,10 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ## Unreleased
 
+### Added
+
+- `cui_app_quit`, `cui_app_set_title`, `cui_app_set_size`, `cui_app_size`, `cui_app_ui`, `cui_app_is_software` and `cui_app_native_window` take `NULL` for the app that is running, as `cui_app_file_dialog` already did. A `cui_app_run` callback had no way to close its window or change its title: now it is `cui_app_quit(NULL)`.
+
 ### Changed
 
 - **Every component has a description.** Each section of the component docs now opens with one sentence that says what the component is and what it is for. The site shows it under the page title, on the cards that link to the page and in search results, where it used to show whatever sentence came first ("Weeks start on Monday." for the date picker).
