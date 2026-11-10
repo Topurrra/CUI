@@ -2193,6 +2193,8 @@ Series stack: each one fills its own band above the one before it, and negative,
 
 The result reports the sample under the pointer or the keyboard cursor (`hovered`, its `x` and the stacked `value`, or -1), and `clicked` with the exact `x` of a click. The readout beside the cursor shows the time and the value with `unit`; `no_readout` hides it.
 
+In a right-to-left interface the chart keeps time running left to right, like the other time-based components, and Right still moves later. Its labels and readout are drawn with the library's text, so Persian and Arabic labels are shaped when CUI is built with `CUI_TEXT_SHAPING` and a font that covers them is loaded ([Text in other languages](integration.md#text-in-other-languages)).
+
 Keyboard: Tab focuses the chart, Left and Right move the readout a sample (Shift: ten), Home and End jump to the first and last sample, Enter clicks at the cursor, and Esc hides the readout.
 
 ### Chart annotations
@@ -2234,7 +2236,7 @@ if (r.changed) recompute();
 
 You own the array and its count. The track edits them in place, keeps the times sorted and within `min` and `max`, and never adds past `capacity`; an array that arrives unsorted is sorted, with the selection kept on its event. A press on a dot takes it and a drag moves it, snapping to multiples of `step` from `min`; it may pass its neighbours, and the selection follows it to its new place in the array. A click on an empty spot of the track adds an event there and starts dragging it, and a double-click on a dot removes it. `no_add` and `no_remove` turn those off.
 
-The selected event is drawn in the accent color with its time under it, as is the one under the pointer. `selected` holds its index, or -1; leave it `NULL` and the track keeps the selection itself. The result says whether anything `changed` this frame, which index was `added` or `removed` (-1 otherwise), the selection, and whether a drag is in progress.
+The track keeps time running left to right in a right-to-left interface too, so it stays lined up with a chart above it and Right moves an event later in every language. The selected event is drawn in the accent color with its time under it, as is the one under the pointer. `selected` holds its index, or -1; leave it `NULL` and the track keeps the selection itself. The result says whether anything `changed` this frame, which index was `added` or `removed` (-1 otherwise), the selection, and whether a drag is in progress.
 
 Keyboard: Tab focuses the track. Left and Right move the selected event a step (Shift: ten steps), Up and Down select the previous and next event, Home and End the first and last, Enter adds an event a step after the selected one, Delete or Backspace removes it, and Esc clears the selection.
 
@@ -2251,7 +2253,7 @@ cui_readout(ui, "STILL IN YOU AT 23:00", mg, .unit = "MG", .detail = "UNDER THE 
 cui_readout(ui, "OVER THE LINE", "2", .unit = "CUPS", .size = CUI_SIZE_SM, .accent = true);
 ```
 
-The value is text you format, so the readout shows exactly what you pass, and its figures are tabular, so a changing number does not shift its neighbours. `size` sets the value at 17, 28 (the default) or 44 points; the unit follows at a little under half that size, sitting on the value's baseline. The label and the detail are small and muted. `accent` or a `tone` colors the value, `align` places the lines in a wider box, and `width` sets that box. Labels in capitals suit the look, but the readout shows the text as given.
+The value is text you format, so the readout shows exactly what you pass, and its figures are tabular, so a changing number does not shift its neighbours. The readout follows the reading direction: in a right-to-left interface its lines align to the right and the unit sits to the left of the value, where it is read after it. `size` sets the value at 17, 28 (the default) or 44 points; the unit follows at a little under half that size, sitting on the value's baseline. The label and the detail are small and muted. `accent` or a `tone` colors the value, `align` places the lines in a wider box, and `width` sets that box. Labels in capitals suit the look, but the readout shows the text as given.
 
 A readout only displays: it takes no focus and returns nothing.
 
@@ -2269,6 +2271,6 @@ cui_dot_display(ui, news_line, .width = CUI_FILL, .marquee = true);   /* scrolls
 
 Each glyph is five dots wide and seven high, with a column of space between glyphs, so a line of n characters is (6n - 1) times `pitch` wide (4 points by default) and seven times `pitch` high. Printable ASCII has glyphs in capitals and small letters, as do the degree sign and the middle dot; any other character shows as a box. The unlit dots are drawn dimly so the matrix reads as one grid; `no_dim` hides them.
 
-The lit dots take the foreground color, `color`, or the accent with `accent`. In a box narrower than the text the dots shrink until it fits. With `marquee` the text scrolls instead, and asks for frames only while it does; with reduced motion it shrinks rather than moves. The display keeps its characters left to right in every reading direction.
+The lit dots take the foreground color, `color`, or the accent with `accent`. In a box narrower than the text the dots shrink until it fits. With `marquee` the text scrolls instead, and asks for frames only while it does; with reduced motion it shrinks rather than moves. The glyphs run left to right in every reading direction, while `align` follows it: in a right-to-left interface the start is the right edge of the box.
 
 A dot-matrix display only displays: it takes no focus and returns nothing.

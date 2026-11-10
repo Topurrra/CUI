@@ -688,10 +688,13 @@ static void cui__paint_dot_display(cui_ctx *ui, cui_node *nd, void *data) {
     if (!scroll && cols * pitch > r.w) pitch = r.w / cols;   /* shrink to fit */
     float dot = pitch * 0.38f, dimr = pitch * 0.2f;
     float content = cols * pitch;
+    /* the glyphs run left to right in every language, but where they sit in a wider box
+     * follows the reading direction: start is the right edge in a right to left interface */
     float x0 = r.x;
     if (!scroll) {
+        bool right = p->align == CUI_TEXT_RIGHT || (p->align == CUI_TEXT_END && !nd->rtl) || (p->align == CUI_TEXT_START && nd->rtl);
         if (p->align == CUI_TEXT_CENTER) x0 = r.x + (r.w - content) * 0.5f;
-        else if (p->align == CUI_TEXT_END || p->align == CUI_TEXT_RIGHT) x0 = r.x + r.w - content;
+        else if (right) x0 = r.x + r.w - content;
     }
     float y0 = r.y + (r.h - 7 * pitch) * 0.5f;
     if (scroll) cui_push_clip(ui, r);
@@ -747,7 +750,6 @@ void cui_dot_display_ex(cui_ctx *ui, const char *text, const cui_dot_display_opt
     cui_node *n = &ui->nodes[nd];
     n->w = o->width.kind ? o->width : CUI_PX(cols * pitch);
     n->h = CUI_PX(7 * pitch);
-    n->direction = CUI_DIRECTION_LTR;
     if (o->marquee && ui->theme.motion > 0) {
         /* 24 dots a second, asking for frames only while the text is wider than its box */
         p->scroll = (float)(cui_time(ui) * 24.0 * pitch);

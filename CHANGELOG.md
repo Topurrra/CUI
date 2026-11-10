@@ -12,6 +12,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
   - **Event track** (`cui_event_track`): moments on a time axis as dots you drag, add with a click and remove with a double-click, snapped to a step, with full keyboard control. It lines up with a dot chart above it.
   - **Readout** (`cui_readout`): a label, a value with its unit on the value's baseline, and a line of context.
   - **Dot-matrix display** (`cui_dot_display`): text in a 5 by 7 dot font that shrinks to fit or scrolls.
+  - In a right-to-left interface the readout and the display's placement follow the reading direction, the chart and the track keep time running left to right, and Persian or Arabic labels are shaped with `CUI_TEXT_SHAPING`.
 - `cui_axis_units`: `CUI_AXIS_HOURS` labels an axis as times of day, with 30 reading 06:00 the next morning.
 - **Caffeine**, a new example ([`examples/caffeine.c`](examples/caffeine.c)) that puts the instruments on one screen: how much caffeine is still in you at bedtime, with cups you drag. It runs on the site and ships in the release downloads.
 - **Three new guides.** [Building an app](docs/apps.md) covers the window, when frames happen, what components return, work on other threads and shipping. [Recipes](docs/recipes.md) has six complete programs: a form that validates, a table sorted by its headers, a list with a detail pane, a long task on another thread, a clock, and settings that are remembered. [Questions](docs/faq.md) says what CUI is and is not, how it compares with other libraries, and what it cannot do.

@@ -638,6 +638,68 @@ static void test_rtl_and_phone(void) {
     cui_destroy(ui);
 }
 
+/* the side of a box where something is drawn: mean x of the bright pixels, as a share of the box */
+static float lit_side(image im, cui_rect r, int bg) {
+    double sx = 0; long n = 0;
+    for (int y = (int)r.y; y < (int)(r.y + r.h); y++)
+        for (int x = (int)r.x; x < (int)(r.x + r.w); x++) if (lum(im, x, y) > bg + 50) { sx += x; n++; }
+    return n ? (float)((sx / n - r.x) / r.w) : -1;
+}
+
+typedef struct { int sel; double t[3]; int n; float v[25]; cui_dot_chart_result r; } dir_case;
+static void build_dir(cui_ctx *ui, void *u) {
+    dir_case *c = u;
+    cui_box(ui, .id = "ro", .width = CUI_FILL) cui_readout(ui, "LABEL", "54", .unit = "MG", .width = CUI_FILL);
+    cui_box(ui, .id = "dd", .width = CUI_FILL) cui_dot_display(ui, "12:30", .pitch = 4, .width = CUI_FILL);
+    cui_box(ui, .id = "dde", .width = CUI_FILL) cui_dot_display(ui, "12:30", .pitch = 4, .width = CUI_FILL, .align = CUI_TEXT_END);
+    cui_dot_series s[1] = { { c->v, NULL, false } };
+    c->r = cui_dot_chart(ui, "chart", s, 1, 25, .x_min = 0, .x_max = 24, .height = 140);
+    cui_event_track(ui, "track", c->t, &c->n, 3, 0, 24, .step = 1, .selected = &c->sel);
+}
+
+/* the same screen left to right and right to left: text-like parts follow the reading
+ * direction, time axes do not, and the keys move along time either way */
+static void test_directions(void) {
+    printf("directions: readout and display placement follow the reading direction; chart and track keep time left to right\n");
+    for (int rtl = 0; rtl < 2; rtl++) {
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK,
+                                                 .direction = rtl ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR });
+        cui_set_viewport(ui, 600, 520, 1);
+        cui_set_reduced_motion(ui, true);
+        cui_input_mouse_leave(ui);
+        static dir_case c;
+        memset(&c, 0, sizeof c);
+        c.t[0] = 6; c.t[1] = 18; c.n = 2; c.sel = 0;
+        for (int i = 0; i < 25; i++) c.v[i] = 10;
+        run(ui, build_dir, &c, 3);
+        image im = render(ui);
+        cui_rect ro = cui_get_rect(ui, cui_make_id(ui, "ro")), dd = cui_get_rect(ui, cui_make_id(ui, "dd")), dde = cui_get_rect(ui, cui_make_id(ui, "dde"));
+        int bg = lum(im, 4, 4);
+        float side_ro = lit_side(im, ro, bg), side_dd = lit_side(im, dd, bg), side_dde = lit_side(im, dde, bg);
+        if (rtl) { CHECK(side_ro > 0.6f); CHECK(side_dd > 0.6f); CHECK(side_dde >= 0 && side_dde < 0.4f); }
+        else     { CHECK(side_ro >= 0 && side_ro < 0.4f); CHECK(side_dd >= 0 && side_dd < 0.4f); CHECK(side_dde > 0.6f); }
+        free(im.px);
+        /* time runs left to right in both: the left of the chart is the first sample */
+        cui_rect ch = cui_get_rect(ui, cui_make_id(ui, "chart")), tr = cui_get_rect(ui, cui_make_id(ui, "track"));
+        move(ui, build_dir, &c, ch.x + 3, ch.y + 40);
+        CHECK_EQ(c.r.hovered, 0);
+        move(ui, build_dir, &c, ch.x + ch.w - 34 - 3, ch.y + 40);
+        CHECK_EQ(c.r.hovered, 24);
+        /* Right on the chart moves the cursor later, and on the track moves the event later */
+        move(ui, build_dir, &c, 2, 515);
+        click(ui, build_dir, &c, ch.x + (ch.w - 34) * 0.5f, ch.y + 40);   /* focus the chart */
+        move(ui, build_dir, &c, 2, 515);
+        key(ui, build_dir, &c, CUI_KEY_RIGHT, 0);
+        CHECK_EQ(c.r.hovered, 13);
+        move(ui, build_dir, &c, tr.x + (tr.w - 34) * 6 / 24.0f, tr.y + 12);
+        press(ui, build_dir, &c); release(ui, build_dir, &c);              /* focus the track, select the event at 06 */
+        key(ui, build_dir, &c, CUI_KEY_RIGHT, 0);
+        CHECK_NEAR(c.t[0], 7, 1e-9);
+        CHECK_EQ(c.sel, 0);
+        cui_destroy(ui);
+    }
+}
+
 /* ------------------------------------------------------------------------ */
 /* images for the docs                                                      */
 
@@ -713,6 +775,7 @@ int main(int argc, char **argv) {
     test_readout();
     test_dot_display();
     test_rtl_and_phone();
+    test_directions();
     cui_sw_destroy(g_sw);
     if (argc > 1) { write_shot(argv[1], false); write_shot(argv[1], true); }
     printf("%d checks, %d failed\n", g_checks, g_failed);
