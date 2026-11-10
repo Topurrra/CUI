@@ -79,7 +79,8 @@ int cui_split_button_ex(cui_ctx *ui, const char *label, const char *const *items
     cui_id chev_id = ui->last_id;
     cui_pop_id(ui);
     cui__close(ui);
-    if (chev && p) cui__popup_set(ui, pid, !p->open);
+    bool key_activate = ui->focus == chev_id && ui->focus_visible && (cui_key_pressed(ui, CUI_KEY_ENTER) || cui_key_pressed(ui, CUI_KEY_SPACE));
+    if (chev && p && !(p->open && key_activate)) cui__popup_set(ui, pid, !p->open);   /* Enter picks the highlighted item. */
     if (p && !p->open && ui->focus == chev_id && ui->focus_visible && cui_key_pressed(ui, CUI_KEY_DOWN)) cui__popup_set(ui, pid, true);
     int result = main ? 0 : -1;
     if (cui__popup_begin(ui, pid, gid, CUI_PLACE_BOTTOM_END, 0, 6, 0, true)) {

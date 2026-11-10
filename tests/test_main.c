@@ -623,6 +623,27 @@ static void test_more_actions(void) {
     a.re[1] = (cui_reaction){ CUI_ICON_STAR, 1, true };
     a.al[0] = true;
     run(ui, build_actions, &a, 3);
+    /* With visible keyboard focus on the chevron, Enter belongs to the open menu. */
+    key(ui, build_actions, &a, CUI_KEY_TAB, 0);
+    key(ui, build_actions, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.split == 0);
+    a.split = -1;
+    key(ui, build_actions, &a, CUI_KEY_TAB, 0);
+    key(ui, build_actions, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_actions, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_actions, &a, CUI_KEY_DOWN, 0);
+    CHECK(a.split == -1);
+    key(ui, build_actions, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.split == 2);
+    a.split = -1;
+    key(ui, build_actions, &a, CUI_KEY_ENTER, 0);
+    key(ui, build_actions, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_actions, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.split == 1);
+    a.split = -1;
+    key(ui, build_actions, &a, CUI_KEY_SPACE, 0);
+    key(ui, build_actions, &a, CUI_KEY_ESCAPE, 0);
+    CHECK(a.split == -1);
     /* split: main part, then the menu by keyboard */
     cui_rect sr = rect_of(ui, a.split_id);
     click_at(ui, build_actions, &a, sr.x + 20, sr.y + sr.h / 2);

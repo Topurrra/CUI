@@ -37,6 +37,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- The split button's Enter key chooses the highlighted menu action when the chevron has keyboard focus. It previously closed the menu without choosing an action ([#25](https://github.com/yappologistic/CUI/issues/25)).
 - The copy button keeps keyboard focus while it shows the confirmation check, so Enter or Space can copy again without pressing Tab ([#23](https://github.com/yappologistic/CUI/issues/23)).
 - The single-file distribution failed to compile after `#include <windows.h>` with the Microsoft SDK, which defines `small` as a macro; two variables had that name ([#17](https://github.com/yappologistic/CUI/issues/17)). CI now compiles it with the macros a full `windows.h` defines.
 - The values of an enum on a component page's "Data and results" section showed as `[object HTMLElement]` (17 pages).
