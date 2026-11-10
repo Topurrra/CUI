@@ -112,7 +112,7 @@ Always give it a `tooltip`: it is the button's name.
 
 Returns true on the frame it is clicked, and never while `disabled` or `loading`. `shortcut` is only a hint shown after the tooltip: it does not bind the key, so check the key yourself with `cui_shortcut`. The button's identity comes from its tooltip and its icon. Two of them with the same icon and tooltip in one scope, such as a delete button on every row of a list, need an id scope each: `cui_push_id_int(ui, row)` before the row and `cui_pop_id(ui)` after it.
 
-When a button's icon changes (copy to check, play to pause), the old icon shrinks away while the new one scales in. Nothing to set up: change the icon you pass.
+A `cui_button` whose `.icon` changes (copy to check, play to pause) shrinks the old icon away while the new one scales in. An icon button is told apart by its tooltip and its icon together, so changing the icon of a `cui_icon_button` makes it a new button: the swap is not animated and keyboard focus does not stay on it.
 
 Keyboard: Tab focuses the button, and Enter or Space presses it.
 
@@ -293,7 +293,7 @@ cui_color_picker(ui, "brand", &brand);
 
 Returns true on a frame the color changes, which during a drag is every frame the pointer moves it. `brand` is your `cui_color`, four bytes of red, green, blue and alpha, and `CUI_RGB(0x7747ff)` builds an opaque one from a hex number. The field shows a swatch and the color as `#RRGGBB`. The panel that opens is 240 points wide and holds the square for saturation and brightness, the hue bar and eight preset swatches. There is no alpha control and no field to type a hex value into, and a color picked here is always opaque. A color you change from code shows in the swatch at once, and the panel picks it up the next time it opens.
 
-Keyboard: Enter or Space on the swatch opens the picker, Tab moves through its controls, and Esc closes it.
+Keyboard: Enter or Space on the swatch opens the picker and Esc closes it. Inside, the color is picked with the pointer: the square, the hue bar and the presets take no keyboard focus yet.
 
 ## Tabs
 
@@ -401,8 +401,8 @@ A short label that appears when the pointer rests on a control.
 ![Tooltip](images/components/tooltip.png)
 
 ```c
-cui_icon_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .shortcut = "Ctrl B");
-cui_badge(ui, "Beta");
+cui_icon_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .shortcut = "Ctrl B");   /* buttons take .tooltip */
+cui_link(ui, "What is beta?");
 cui_tooltip(ui, "Features in beta may change");   /* for the previous component */
 ```
 

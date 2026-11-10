@@ -114,7 +114,7 @@ Controls that switch the app between light, dark and the system theme.
 ```c
 static int mode = -1;                       /* -1 picks up the current theme */
 cui_theme_switcher(ui, &mode, true);        /* light, dark, system */
-cui_theme_toggle(ui);                       /* one icon button: sun and moon morph */
+cui_theme_toggle(ui);                       /* one icon button with a sun or a moon */
 ```
 
 Light and dark are applied for you. For "system" (mode 2), read the OS setting (for example with `cui_app_desc.follow_system_theme`) and call `cui_set_theme`.
@@ -294,7 +294,7 @@ Hour and minute columns (and AM / PM) that open scrolled to the current value. `
 
 Returns true on the frame a new hour, minute or half of the day is clicked. `hour` and `minute` are your two `int` variables: the picker reads them every frame and writes them while its list is open. `twelve_hour` changes only what is shown ("9:30 AM"), never what is stored. `minute_step` is the gap between the minutes offered and defaults to 5; a minute off the step still shows in the field, with no row marked. The list stays open after a click, so hour and minute can be set in one visit.
 
-Keyboard: Enter or Space on the field opens the list of times and Esc closes it. Inside, Tab moves through the times, and Enter or Space picks the focused one.
+Keyboard: Enter or Space on the field opens the list of times and Esc closes it. The times themselves are picked with the pointer; they take no keyboard focus yet.
 
 ### Wheel picker and time dial
 
@@ -433,7 +433,7 @@ Keyboard: signing needs a pointer, a pen or a finger. The Clear button takes Tab
 
 ### Hover card
 
-A preview card that opens when the pointer rests on a link, a name or an avatar.
+A preview card that opens when the pointer rests on a link, a button or another component that reacts to the pointer.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/hover-card-dark.png"><img src="images/components/hover-card.png" alt="Hover card"></picture>
 
@@ -576,7 +576,7 @@ Clicking a circle toggles `done`.
 
 Returns the index of the step whose action button was clicked this frame, or -1. You own the `cui_check_step` array, and the library writes one field in it: a click on a step's circle flips that step's `done`. The action button does not, so set `done` yourself when the step's work has finished. Each step is a title, a description, the label of its action button and `done`; a `NULL` description or action is left out. Only the first step that is not done is open, and only its button can be pressed. The header shows `title` ("Get started" when not set) and `description`, which defaults to a count such as "1 of 2 complete". The card fills the width of its container.
 
-Keyboard: Tab moves through the steps and their buttons, and Enter or Space opens the focused step or presses its button.
+Keyboard: Tab moves through the steps' circles and the open step's button. Enter or Space on a circle marks that step done or not done, and on the button presses it. The open step is always the first one not done.
 
 ### Undo toast
 
@@ -734,7 +734,7 @@ JSON shown as a tree that folds, with a color for each type of value.
 if (!cui_json_view(ui, "response", body, .expand_depth = 1)) { /* not valid JSON: the view shows where it broke */ }
 ```
 
-Collapsed objects and arrays show their size; click a chevron to fold or unfold.
+Collapsed objects and arrays show their size; click an object's or an array's row to fold or unfold it.
 
 Returns true when the text is valid JSON. When it is not, the call returns false and the view shows the reason with the line and column where parsing stopped. `body` is your string. It is parsed again on every frame and nothing of it is kept. The library remembers which objects and arrays are folded, under `id` and by their position in the document, so a document with a different shape should get a different `id`. `expand_depth` is the number of levels open at first (2), and applies only the first time an `id` shows valid JSON. A document of more than 4,096 values or 64 levels is reported as invalid.
 
@@ -1440,7 +1440,7 @@ cui_comment(ui, "c2", "Priya Nair", "Agreed, one more run.", .time = "1h", .dept
 
 Returns flags for what was clicked this frame: `CUI_COMMENT_LIKE`, `CUI_COMMENT_REPLY`, or 0. `likes` and `liked` point at your variables. With `liked` set, a click on the heart flips it and moves `likes` by one; without it the click is only reported. `likes` may be `NULL`, and a count of 0 is not shown. The reply button only reports: opening a field for the answer is up to you. `id` scopes the comment's buttons, so every comment needs its own, such as the id of its record. `time` is text you format yourself, and `edited` shows only when `time` is set. Each level of `depth` indents by 44 points.
 
-Keyboard: Tab moves through each comment's actions (like, reply and the rest), and Enter or Space presses the focused one.
+Keyboard: Tab moves through each comment's actions (like and reply), and Enter or Space presses the focused one.
 
 ### Presence, counter and ticker
 

@@ -28,6 +28,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 ### Fixed
 
 - The values of an enum on a component page's "Data and results" section showed as `[object HTMLElement]` (17 pages).
+- Eight component pages said things their component does not do: the icon button's icon swap (it animates on `cui_button`, not on `cui_icon_button`), a tooltip placed after a badge, a hover card on an avatar, Tab inside the time picker and the color picker, and the keys of the onboarding checklist, comments and JSON viewer. The pages now say what the code does, and the README lists the time picker and color picker among the parts that still need a pointer.
 
 ## 2026-11-09 · 1.3.1: first steps, a tutorial and ready-to-run examples
 

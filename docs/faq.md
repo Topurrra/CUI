@@ -30,7 +30,7 @@ Those keep a tree of widgets, and they are far more mature. They have screen rea
 ## What can it not do?
 
 - **Screen readers.** There is no accessibility tree. Blind users cannot use a CUI app.
-- **All of the keyboard.** Most components work from the keyboard and each page lists the keys. Eight components still need a pointer; the [README](../README.md#limitations) names them.
+- **All of the keyboard.** Most components work from the keyboard and each page lists the keys. Some still need a pointer, such as the rating and the reorderable list; the [README](../README.md#limitations) lists them.
 - **Complex scripts everywhere.** Arabic-script shaping and bidirectional text are an optional, experimental build option for static text, and editing such text is not supported. CJK needs a fallback font that you add.
 - **Inline input-method composition.** The text being composed shows in the system's window, not in the field.
 - **Native Wayland, Android and iOS.** On Wayland use the SDL2 or GLFW backend, or XWayland. There is no platform layer for phones.

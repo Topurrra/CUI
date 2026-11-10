@@ -310,7 +310,7 @@ To use CUI inside an engine with your own window and renderer, see [Integration]
 ## Limitations
 
 - **No screen reader support.** There is no accessibility tree yet. This rules CUI out for apps that must be accessible to blind users.
-- **The keyboard does not reach everything.** Most components work from the keyboard and each one's page lists its keys. Eight still need a pointer: the rating, the histogram slider's handles, swipe actions, the reorderable list, the JSON viewer, the agent plan's steps, blame and the time histogram.
+- **The keyboard does not reach everything.** Most components work from the keyboard and each one's page lists its keys. Some parts still need a pointer: the rating, the histogram slider's handles, swipe actions, the reorderable list, the JSON viewer, the agent plan's steps, blame, the time histogram, and the choices inside the open time picker and color picker.
 - **Complex scripts are partial.** Text is UTF-8 with kerning and font fallback, and layouts mirror for right-to-left languages. Arabic-script shaping and bidirectional text are an optional, experimental build option for static text ([details](docs/integration.md#optional-arabic-script-text-shaping)). CJK works once you add a fallback font.
 - **Input methods compose in the system's window.** Committed text arrives; the text being composed is not drawn inline.
 - **No native Wayland backend.** Use the SDL2 or GLFW backend, or XWayland.
