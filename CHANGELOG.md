@@ -6,7 +6,11 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- **Three new guides.** [Building an app](docs/apps.md) covers the window, when frames happen, what components return, work on other threads and shipping. [Recipes](docs/recipes.md) has six complete programs: a form that validates, a table sorted by its headers, a list with a detail pane, a long task on another thread, a clock, and settings that are remembered. [Questions](docs/faq.md) says what CUI is and is not, how it compares with other libraries, and what it cannot do.
+- **A function reference.** The site has a page that lists every public function of `cui.h`, `cui_app.h` and `cui_render.h` (496 of them) under the headers' own sections: its signature, the comment written beside it, and a link to the component page or guide that explains it. It has a filter, and site search finds a function by name.
+- **Complete programs on component pages.** A page's usage block is a fragment. 71 of the 147 pages now also have the example as a whole program, with its includes, a frame function and `main`, under "Complete program". The site build compiles each one and leaves out any that does not build.
 - `cui_app_quit`, `cui_app_set_title`, `cui_app_set_size`, `cui_app_size`, `cui_app_ui`, `cui_app_is_software` and `cui_app_native_window` take `NULL` for the app that is running, as `cui_app_file_dialog` already did. A `cui_app_run` callback had no way to close its window or change its title: now it is `cui_app_quit(NULL)`.
+- `tests/doc_programs.sh`, run on every push: it builds every complete program in the docs with warnings as errors.
 
 ### Changed
 
@@ -15,9 +19,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **Every page has its own address for search engines.** The site was one page as far as a search engine could tell, so nobody searching for "C date picker" could land on the date picker. The build now writes a page per component and per guide (`c/date-picker-and-calendar/`, `guide/tutorial/`) with its text, title and description, plus `sitemap.xml` and `robots.txt`. Opened in a browser, such a page becomes the live site at that page.
 - **Links to the site show a preview.** Every page carries a title, a description and an image for the cards that chat apps and social sites draw; a component's card shows the component.
 - The site shows the version it documents beside the name.
-- **A function reference.** The site has a page that lists every public function of `cui.h`, `cui_app.h` and `cui_render.h` (496 of them) under the headers' own sections: its signature, the comment written beside it, and a link to the component page or guide that explains it. It has a filter, and site search finds a function by name.
-- **Complete programs on component pages.** A page's usage block is a fragment. 71 of the 147 pages now also have the example as a whole program, with its includes, a frame function and `main`, under "Complete program". The site build compiles each one and leaves out any that does not build.
-- **More options are described.** Fields that mean the same everywhere (`width`, `icon`, `disabled`, `format` and others) now have a description on every options table, and a field whose type is an enum lists its values.
+- **Every option is described.** All 1,277 fields of the options and data structs on the component pages now have a description: comments added in `cui.h` for the 395 that had none (checked against the code), and a shared description for fields that mean the same everywhere, such as `width` or `disabled`. A field whose type is an enum lists its values.
 - **A new README.** It opens with what CUI is in plain words, says what it is not (it draws its own components and does not wrap the system's), compares it with the libraries people know, and lists the limitations in full, including the eight components that still need a pointer. It also says how the code is written and what tests it.
 - A component page lists only its own functions, and no longer repeats its option names in a sentence above the options table.
 - Release notes link to the files they mention with full addresses, so the links work from the release page.

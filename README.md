@@ -343,6 +343,8 @@ ctest --test-dir build --output-on-failure
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, build, the frame loop, your first screens |
 | [Tutorial](docs/tutorial.md) | Build a small, complete app step by step |
+| [Building an app](docs/apps.md) | The window, when frames happen, what components return, threads, shipping |
+| [Recipes](docs/recipes.md) | Complete programs: a form, a sorted table, a background task, saved settings |
 | [Layout](docs/layout.md) | Rows, columns, sizes, alignment, grids, scrolling, split views |
 | [Components](docs/components.md) and [more](docs/components-more.md) | Every component: what it is, usage, options, keyboard |
 | [Theming](docs/theming.md) | Tokens, light and dark, accents, fonts, motion |
@@ -352,6 +354,7 @@ ctest --test-dir build --output-on-failure
 | [Rendering](docs/rendering.md) | The vertex format and the reference shader |
 | [Performance](docs/performance.md) | How memory and speed are tested, and the results |
 | [Function reference](https://yappologistic.github.io/CUI/#/reference) | Every public function with its signature, on the site |
+| [Questions](docs/faq.md) | What CUI is and is not, how it compares, what it cannot do |
 | [How CUI is built](docs/architecture.md) | The code map and the outline every component follows |
 | [Design principles](docs/design.md) | The visual rules every component follows |
 

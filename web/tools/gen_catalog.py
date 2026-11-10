@@ -130,13 +130,21 @@ def doc_link(label, target, anchors):
         return f'<a href="#/c/{anchors[anchor]}">{label}</a>'
     doc = re.match(r"^(?:\.\./)?(?:docs/)?([\w-]+)\.md(?:#([\w-]+))?$", target)
     if doc and doc.group(1) in GUIDE_IDS:
-        return f'<a href="#/guide/{doc.group(1)}' + (f'/{doc.group(2)}' if doc.group(2) else '') + f'">{label}</a>'
+        if doc.group(2) and GUIDE_SECTIONS.get(doc.group(2), "").startswith(doc.group(1) + "/"):   # a section, or the section of a subsection
+            return f'<a href="#/guide/{GUIDE_SECTIONS[doc.group(2)]}">{label}</a>'
+        sec = re.sub(r"^\d+-", "", doc.group(2) or "")   # "## 7. Files and links" is the section files-and-links
+        return f'<a href="#/guide/{doc.group(1)}' + (f'/{sec}' if sec else '') + f'">{label}</a>'
     if doc and doc.group(1) in ("components", "components-more"):
         return f'<a href="#/components">{label}</a>'
-    repo = re.match(r"^\.\./([\w./-]+)$", target)   # a file or folder of the repository, from docs/
+    if target.startswith("#") and anchor in GUIDE_SECTIONS:   # a section of a guide, linked from inside it
+        return f'<a href="#/guide/{GUIDE_SECTIONS[anchor]}">{label}</a>'
+    repo = re.match(r"^\.\./([\w./-]+)(#[\w-]+)?$", target)   # a file or folder of the repository, from docs/
     if repo:
         kind = "blob" if "." in repo.group(1).rsplit("/", 1)[-1] else "tree"
-        return f'<a href="{REPO_URL}/{kind}/master/{repo.group(1)}" target="_blank" rel="noreferrer">{label}</a>'
+        return f'<a href="{REPO_URL}/{kind}/master/{repo.group(1)}{repo.group(2) or ""}" target="_blank" rel="noreferrer">{label}</a>'
+    if doc:   # a doc that is not a guide on the site, such as CONTRIBUTING.md or architecture.md
+        frag = f"#{doc.group(2)}" if doc.group(2) else ""
+        return f'<a href="{REPO_URL}/blob/master/docs/{doc.group(1)}.md{frag}" target="_blank" rel="noreferrer">{label}</a>'
     return f'<span class="doc-ref" title="{html.escape(target)}">{label}</span>'
 
 def inline(text, anchors):
@@ -165,8 +173,22 @@ def inline(text, anchors):
     return re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], "".join(out))
 
 # the guide: docs/*.md in reading order (components have their own pages)
-GUIDES = ["getting-started", "tutorial", "layout", "theming", "icons", "custom-components", "integration", "rendering", "performance", "design"]
+GUIDES = ["getting-started", "tutorial", "apps", "recipes", "layout", "theming", "icons", "custom-components", "integration", "rendering", "performance", "faq", "design"]
 GUIDE_IDS = set(GUIDES)
+# each guide's section anchors (as GitHub makes them from the "## " headings), for links within a guide
+def guide_sections():
+    out = {}
+    anchor_of = lambda t: re.sub(r"[^\w\- ]", "", t.strip().lower()).replace(" ", "-")
+    for gid in GUIDES:
+        sec = None
+        for ln in open(f"{ROOT}/docs/{gid}.md", encoding="utf-8"):
+            if ln.startswith("## "):
+                sec = re.sub(r"^\d+-", "", anchor_of(ln[3:]))
+                out.setdefault(anchor_of(ln[3:]), f"{gid}/{sec}")
+            elif ln.startswith("### ") and sec:   # a subsection: the site opens its section
+                out.setdefault(anchor_of(ln[4:]), f"{gid}/{sec}")
+    return out
+GUIDE_SECTIONS = guide_sections()
 
 IMG_RE = re.compile(r"images/((?:components|showcase)/)?([\w\-]+?)(?:-dark)?\.png")
 
