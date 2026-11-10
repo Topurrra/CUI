@@ -766,7 +766,9 @@ def main():
     covered = {n for it in items.values() for n in it["scenes"]} | {n for s in showcase for n in s["scenes"]} | set(accents)
     unlisted = [n for n in srcs if n not in covered]
 
+    version = re.search(r"project\(cui\s+VERSION\s+([\d.]+)", read("CMakeLists.txt")).group(1)
     catalog = {
+        "version": version,
         "categories": [{"id": c, "title": t, "items": cats[c]} for c, t in CATEGORIES if cats[c]],
         "items": items,
         "showcase": showcase,

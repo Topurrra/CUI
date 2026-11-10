@@ -519,6 +519,8 @@ $('#filter').addEventListener('keydown', (e) => {
 
 // ---------------------------------------------------------------- views
 const main = $('#main');
+// the release these docs describe, beside the name
+if (CAT.version) $('.brand').append(h('span', { class: 'brand-ver', title: `These docs describe CUI ${CAT.version}` }, CAT.version));
 function setNav(which) {
   const nav = $('#topnav');
   nav.querySelectorAll('a').forEach((a) => a.setAttribute('aria-current', a.dataset.nav === which ? 'page' : 'false'));
@@ -1352,7 +1354,8 @@ function route() {
   renderNav($('#filter').value);
   const it = kind === 'c' && CAT.items[decodeURIComponent(id.split('/')[0])];
   const gd = kind === 'guide' && CAT.guides.find((g) => g.id === (id || 'getting-started').split('/')[0]);
-  document.title = it ? `${it.title} · CUI` : gd ? `${gd.title} · CUI` : kind === 'components' ? 'Components · CUI' : kind === 'changelog' ? 'Changelog · CUI' : 'CUI';
+  document.title = it ? `${it.title} · CUI` : gd ? `${gd.title} · CUI` : kind === 'components' ? 'Components · CUI' : kind === 'changelog' ? 'Changelog · CUI' : kind === 'showcase' ? 'Showcase · CUI' : kind === 'apps' ? 'Apps · CUI'
+    : kind === 'app' && CAT.apps.find((a) => a.id === id) ? `${CAT.apps.find((a) => a.id === id).title} app · CUI` : kind && kind !== 'home' ? 'CUI' : 'CUI: native UI components for C';
 }
 let lastRoute = '';
 window.addEventListener('hashchange', () => {

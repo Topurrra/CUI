@@ -104,4 +104,6 @@ python3 "$HERE/tools/gen_catalog.py" "$ROOT" "$SITE/catalog.js"
 ln -sfn "../../assets/fonts" "$SITE/fonts"
 ln -sfn "../../docs/images" "$SITE/images"
 mkdir -p "$SITE/src" && ln -sfn "../../../examples" "$SITE/src/examples"
+# 5. a page of plain text per component and guide, for search engines and link previews
+python3 "$HERE/tools/gen_pages.py" "$SITE"
 echo "done: $SITE"
