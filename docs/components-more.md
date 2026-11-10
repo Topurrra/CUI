@@ -2166,3 +2166,109 @@ after the `dock1` version word comes one node: `h` (side by side) or `v` (stacke
 Keyboard: the selected tab of each strip is in the Tab order; Left and Right select along the strip, Home and End jump, Shift+Left and Shift+Right move the tab, and Delete closes it. With `.shortcuts = true`, Ctrl+Tab and Ctrl+Shift+Tab (or Ctrl+PageDown and PageUp) cycle the panels of the focused leaf, the one holding the keyboard focus or the last click, and Ctrl+W (Cmd+W on macOS) closes its selected panel. Esc cancels a drag.
 
 The layout uses the previous frame's size, so a panel that appears or reopens shows from the next frame (the dockspace asks for one). After `cui_dock_panel_begin`, `cui_last_rect` is the panel's tab, for a tooltip or a tour.
+
+## Instruments
+
+Components for an interface that reads like an instrument: values drawn as dots, labels in the monospaced font, hairlines and one accent. They work together, and [`examples/caffeine.c`](../examples/caffeine.c) puts all five on one screen: drag a cup along the time axis and the curve, the peak and the verdict follow.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/instruments-dark.png"><img src="images/components/instruments.png" alt="A caffeine chart drawn in dots, with peak and bedtime annotations, cups on a time axis under it, readouts and a dot-matrix verdict"></picture>
+
+### Dot-matrix chart
+
+A chart that draws values as a grid of dots, lit up to each column's value and dim above it, with a readout under the pointer.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dot-chart-dark.png"><img src="images/components/dot-chart.png" alt="A week of hourly requests as columns of dots, the last day in the accent color"></picture>
+
+```c
+static float last_week[168], today[168];   /* one value an hour, yours */
+cui_dot_series series[2] = { { last_week, "Last six days", false }, { today, "Today", true } };
+cui_dot_chart_result r = cui_dot_chart(ui, "requests", series, 2, 168, .x_min = 0, .x_max = 168, .x_step = 24,
+                                       .x_format = "%.0f h", .height = 220, .unit = "REQ/S");
+if (r.clicked) add_marker(r.x);              /* where the click landed, in x units */
+```
+
+Series stack: each one fills its own band above the one before it, and negative, infinite or NaN values count as 0. An `accent` series is drawn in the accent color while the others step back to two shades of grey, so it reads as the item being edited or the part that matters. Samples are spread evenly from `x_min` to `x_max` (0 to `count` - 1 when they are equal), and a column between two samples takes the value between them. The value range is 0 to a little above the largest stack unless `min` and `max` are set. `pitch` is the distance between dot centers (6 points by default); the dots never touch the plot's edges.
+
+`x_units = CUI_AXIS_HOURS` labels x as times of day, so 13.5 reads 13:30 and 30 reads 06:00 the next morning; otherwise `x_format` prints the labels. The chart keeps a gutter on its right for value labels, the same width as the event track's, so the two stacked at one width share their x positions.
+
+The result reports the sample under the pointer or the keyboard cursor (`hovered`, its `x` and the stacked `value`, or -1), and `clicked` with the exact `x` of a click. The readout beside the cursor shows the time and the value with `unit`; `no_readout` hides it.
+
+Keyboard: Tab focuses the chart, Left and Right move the readout a sample (Shift: ten), Home and End jump to the first and last sample, Enter clicks at the cursor, and Esc hides the readout.
+
+### Chart annotations
+
+Lines, thresholds and points drawn over a chart, each with a two-line label that moves out of the way of the others.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/chart-annotations-dark.png"><img src="images/components/chart-annotations.png" alt="Response times in dots with a dashed SLO line, deploy and rollback lines with labels, and a labelled peak"></picture>
+
+```c
+const cui_chart_annotation notes[] = {
+    { CUI_ANNOTATION_Y, 0, 300, "SLO", NULL, true },                   /* a dashed line at a value */
+    { CUI_ANNOTATION_X, 14.65, 0, "DEPLOY 4.12", "14:39", false },      /* a line at an x, labelled at its top */
+    { CUI_ANNOTATION_POINT, 14.7, 515, "PEAK 515 MS", NULL, false },   /* a dot at x, y */
+};
+cui_dot_chart(ui, "wait", series, 1, 61, .x_min = 14, .x_max = 15, .x_units = CUI_AXIS_HOURS,
+              .min = 0, .max = 600, .annotations = notes, .annotation_count = 3);
+cui_line_chart(ui, "sales", lines, 2, .annotations = notes, .annotation_count = 3);   /* x is the point's index */
+```
+
+The dot chart, the line chart and the bar chart take the same `annotations`. In the dot chart, x is in the chart's x units; in line and bar charts it is the point's index. The `label` is drawn in the foreground color and the `detail` under it in a muted one, both in the monospaced font, and `accent` draws the line and its label in the accent color.
+
+A vertical line's label sits at its top, right of the line. When it would cover a label placed before it, it tries the left of its line, then moves down a line at a time, and a label that ends up over the data gets the page's color behind it. Annotations earlier in the array choose their place first, so put the one that matters most first. The dot chart keeps room above the plot for labels; a threshold's label goes in the gutter on the right when it fits there and above its line when it does not. Annotations outside the range are skipped.
+
+Annotations only draw. To let people move a line, put an event track under the chart and draw its events as annotations.
+
+### Event track
+
+A time axis with moments on it as dots, which people drag, add with a click and remove with a double-click.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/event-track-dark.png"><img src="images/components/event-track.png" alt="Three doses on a time axis from 06 to 06, the selected one at 13:00 in the accent color"></picture>
+
+```c
+static double doses[8] = { 7.5, 13, 19.25 };   /* hours, yours */
+static int count = 3, selected = -1;
+cui_event_track_result r = cui_event_track(ui, "doses", doses, &count, 8, 6, 30, .step = 0.25,
+                                           .units = CUI_AXIS_HOURS, .label_step = 3, .selected = &selected);
+if (r.changed) recompute();
+```
+
+You own the array and its count. The track edits them in place, keeps the times sorted and within `min` and `max`, and never adds past `capacity`; an array that arrives unsorted is sorted, with the selection kept on its event. A press on a dot takes it and a drag moves it, snapping to multiples of `step` from `min`; it may pass its neighbours, and the selection follows it to its new place in the array. A click on an empty spot of the track adds an event there and starts dragging it, and a double-click on a dot removes it. `no_add` and `no_remove` turn those off.
+
+The selected event is drawn in the accent color with its time under it, as is the one under the pointer. `selected` holds its index, or -1; leave it `NULL` and the track keeps the selection itself. The result says whether anything `changed` this frame, which index was `added` or `removed` (-1 otherwise), the selection, and whether a drag is in progress.
+
+Keyboard: Tab focuses the track. Left and Right move the selected event a step (Shift: ten steps), Up and Down select the previous and next event, Home and End the first and last, Enter adds an event a step after the selected one, Delete or Backspace removes it, and Esc clears the selection.
+
+### Readout
+
+One figure as an instrument shows it: a small label, the value in the monospaced font with its unit, and a line of context.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/readouts-dark.png"><img src="images/components/readouts.png" alt="Four readouts in three sizes, one value in the accent color"></picture>
+
+```c
+char mg[16];
+snprintf(mg, sizeof mg, "%.0f", at_bedtime);
+cui_readout(ui, "STILL IN YOU AT 23:00", mg, .unit = "MG", .detail = "UNDER THE LINE BY 00:10", .size = CUI_SIZE_LG);
+cui_readout(ui, "OVER THE LINE", "2", .unit = "CUPS", .size = CUI_SIZE_SM, .accent = true);
+```
+
+The value is text you format, so the readout shows exactly what you pass, and its figures are tabular, so a changing number does not shift its neighbours. `size` sets the value at 17, 28 (the default) or 44 points; the unit follows at a little under half that size, sitting on the value's baseline. The label and the detail are small and muted. `accent` or a `tone` colors the value, `align` places the lines in a wider box, and `width` sets that box. Labels in capitals suit the look, but the readout shows the text as given.
+
+A readout only displays: it takes no focus and returns nothing.
+
+### Dot-matrix display
+
+Text drawn with a 5 by 7 dot font, for clocks, counters and status lines.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dot-display-dark.png"><img src="images/components/dot-display.png" alt="A clock, a status line and a temperature line in a dot-matrix font, with dim unlit dots"></picture>
+
+```c
+cui_dot_display(ui, "23:41:07", .pitch = 6);
+cui_dot_display(ui, "LAST CUP BY 10:45", .pitch = 3, .width = CUI_FILL);
+cui_dot_display(ui, news_line, .width = CUI_FILL, .marquee = true);   /* scrolls when it does not fit */
+```
+
+Each glyph is five dots wide and seven high, with a column of space between glyphs, so a line of n characters is (6n - 1) times `pitch` wide (4 points by default) and seven times `pitch` high. Printable ASCII has glyphs in capitals and small letters, as do the degree sign and the middle dot; any other character shows as a box. The unlit dots are drawn dimly so the matrix reads as one grid; `no_dim` hides them.
+
+The lit dots take the foreground color, `color`, or the accent with `accent`. In a box narrower than the text the dots shrink until it fits. With `marquee` the text scrolls instead, and asks for frames only while it does; with reduced motion it shrinks rather than moves. The display keeps its characters left to right in every reading direction.
+
+A dot-matrix display only displays: it takes no focus and returns nothing.

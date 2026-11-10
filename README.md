@@ -143,6 +143,7 @@ Linux needs the X11 development headers (`libx11-dev`). Windows and macOS need n
 | **Charts** | line, bar, donut, sparkline, gauge, candlestick, heatmap, treemap, radar, funnel, sankey, scatter |
 | **Planning** | kanban board, week and month calendars, gantt chart, node editor |
 | **Developer tools** | trace viewer, network waterfall, flame graph, dependency and commit graphs, CI pipeline, test explorer, regex tester, query builder |
+| **Instruments** | dot-matrix chart, chart annotations, event track on a time axis, readout, dot-matrix display |
 | **Conversation and AI** | chat, comments, composer, reasoning and tool calls, agent plan, sources and citations |
 | **Your own** | a canvas with a 2D drawing API, per-component state and spring animation |
 
@@ -243,6 +244,7 @@ Complete apps in [`examples/`](examples), each a single C file. They run in the 
 |---|---|
 | [`hello`](examples/hello.c) | The smallest app |
 | [`todo`](examples/todo.c) | The app the [tutorial](docs/tutorial.md) builds: a list, a filter, a dialog, saving to a file |
+| [`caffeine`](examples/caffeine.c) | The instruments together: a dot-matrix chart with annotations, cups you drag on a time axis, readouts and a dot-matrix verdict |
 | [`assistant`](examples/assistant.c) | AI assistant: reasoning, tool calls, sources, plan, composer with a model picker |
 | [`tracker`](examples/tracker.c) | Issue tracker: grouped list, custom status glyphs, detail pane, activity |
 | [`music`](examples/music.c) | Music player: cover art drawn on a canvas, track list, transport bar |

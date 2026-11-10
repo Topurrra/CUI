@@ -941,6 +941,24 @@ typedef struct cui_series {
     cui_color color;           /* default: series palette */
 } cui_series;
 
+/* A line, a threshold or a point drawn over a chart, with a two-line label: the label in
+ * the foreground color and a muted detail under it. Line and bar charts take them in
+ * cui_chart_opts, the dot chart in cui_dot_chart_opts. Labels that would overlap move
+ * to the other side of their line, then down. */
+typedef enum cui_annotation_kind {
+    CUI_ANNOTATION_X = 0,      /* a vertical line at `x`, labelled at its top */
+    CUI_ANNOTATION_Y,          /* a dashed horizontal line at the value `y`, labelled at its end */
+    CUI_ANNOTATION_POINT       /* a dot at `x`, `y`, labelled beside it */
+} cui_annotation_kind;
+typedef struct cui_chart_annotation {
+    cui_annotation_kind kind;
+    double x;                  /* in the chart's x units: the point's index for line and bar charts, x_min to x_max for the dot chart */
+    double y;                  /* a value, in the chart's value units */
+    const char *label;         /* first line, e.g. "PEAK 203 MG"; `NULL` for a line with no label */
+    const char *detail;        /* second line, muted, e.g. "13:06"; `NULL` for none */
+    bool accent;               /* the line, dot and label in the accent color */
+} cui_chart_annotation;
+
 typedef struct cui_chart_opts {
     int _;
     cui_size width;
@@ -954,6 +972,8 @@ typedef struct cui_chart_opts {
     bool smooth;               /* curved lines */
     const char *format;        /* value format for axis and tooltip, default "%.0f" */
     float min, max;            /* fixed y range when min != max */
+    const cui_chart_annotation *annotations;   /* lines and points drawn over the chart (line and bar charts) */
+    int annotation_count;      /* number of `annotations` */
 } cui_chart_opts;
 CUI_API void cui_line_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const cui_chart_opts *opts);
 CUI_API void cui_bar_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const cui_chart_opts *opts);
@@ -4071,6 +4091,131 @@ typedef struct cui_api_explorer_result {
 CUI_API cui_api_explorer_result cui_api_explorer_ex(cui_ctx *ui, const char *id, const cui_api_endpoint *endpoints, int count, const cui_api_explorer_opts *opts);
 
 /* ------------------------------------------------------------------------ */
+/* Instruments: dot-matrix chart, event track, readout, dot-matrix display   */
+/* ------------------------------------------------------------------------ */
+
+/* How an axis labels its values. */
+typedef enum cui_axis_units {
+    CUI_AXIS_NUMBER = 0,       /* numbers, printed with the axis format (default "%g") */
+    CUI_AXIS_HOURS             /* hours shown as a time of day: 12.25 is 12:15, and 30 is 06:00 the next day */
+} cui_axis_units;
+
+/* Dot-matrix chart: values drawn as a grid of dots, lit up to each column's value and dim
+ * above it. Several series stack, each in its own band, and an `accent` series is drawn in
+ * the accent color: the item being edited, or the part that matters. The pointer, or the
+ * arrow keys once it is focused, show a readout of the value under it, and a click returns
+ * where it landed, so an app can add something there.
+ *
+ *     static float caffeine[96];             // one value every 15 minutes, 06:00 to 06:00
+ *     cui_dot_series s[] = { { caffeine, "Caffeine" } };
+ *     cui_dot_chart_result r = cui_dot_chart(ui, "mg", s, 1, 96, .x_min = 6, .x_max = 30,
+ *                                            .x_units = CUI_AXIS_HOURS, .unit = "mg");
+ *
+ * Samples are spread evenly from x_min to x_max; a column between two samples uses the
+ * value between them. With a dot chart and an event track of the same width stacked, their
+ * x positions line up: both keep the same gutter on the right for the value labels. */
+typedef struct cui_dot_series {
+    const float *values;       /* `count` values, one per sample; negative values count as 0 */
+    const char *name;          /* names the series in the readout when there are several */
+    bool accent;               /* drawn in the accent color */
+} cui_dot_series;
+
+typedef struct cui_dot_chart_opts {
+    int _;
+    cui_size width;
+    float height;              /* the plot and its labels, default 200 */
+    double x_min, x_max;       /* what the first and last sample stand for; equal: 0 to count - 1 */
+    cui_axis_units x_units;
+    const char *x_format;      /* x labels with CUI_AXIS_NUMBER, default "%g" */
+    double x_step;             /* spacing of the x labels in x units; 0 picks one that fits */
+    float min, max;            /* value range when min != max; otherwise 0 to the largest stacked value */
+    const char *format;        /* values in the readout, default "%.0f" */
+    const char *unit;          /* after values in the readout, e.g. "MG" */
+    float pitch;               /* distance between dot centers in points, default 6 */
+    bool no_grid;              /* hides the dim dots of the empty grid */
+    bool no_axis;              /* hides the x labels, e.g. when an event track under the chart has them */
+    bool no_readout;           /* no value label under the pointer */
+    const cui_chart_annotation *annotations;   /* lines and points drawn over the dots */
+    int annotation_count;      /* number of `annotations` */
+} cui_dot_chart_opts;
+
+typedef struct cui_dot_chart_result {
+    int hovered;               /* the sample under the pointer or the keyboard cursor, or -1 */
+    double x;                  /* that sample's x, in x units */
+    float value;               /* the stacked value there */
+    bool clicked;              /* the plot was clicked, or Enter was pressed on it, this frame: `x` is where */
+} cui_dot_chart_result;
+CUI_API cui_dot_chart_result cui_dot_chart_ex(cui_ctx *ui, const char *id, const cui_dot_series *series, int series_count, int count, const cui_dot_chart_opts *opts);
+
+/* Event track: moments on a time axis, as dots you drag along it. A click on an empty
+ * spot adds an event there and a double-click on one removes it. You own the array: the
+ * track keeps it sorted, edits it in place and never grows it past `capacity`.
+ *
+ *     static double cups[8] = { 8, 11, 12.25 };   // hours
+ *     static int ncups = 3, sel = -1;
+ *     cui_event_track(ui, "cups", cups, &ncups, 8, 6, 30, .step = 0.25,
+ *                     .units = CUI_AXIS_HOURS, .selected = &sel);
+ *
+ * Keys, once it is focused: Left and Right move the selected event a step (Shift: ten),
+ * Up and Down select the previous and next event, Enter adds one a step after the selected
+ * one, Delete or Backspace removes it, and Esc clears the selection. */
+typedef struct cui_event_track_opts {
+    int _;
+    cui_size width;
+    double step;               /* events snap to multiples of this from `min`; 0 does not snap */
+    cui_axis_units units;
+    const char *format;        /* labels with CUI_AXIS_NUMBER, default "%g" */
+    double label_step;         /* spacing of the axis labels; 0 picks one that fits */
+    int *selected;             /* the selected event or -1, kept by you; `NULL` keeps it in the track */
+    bool no_add;               /* clicks and Enter do not add events */
+    bool no_remove;            /* double-clicks and Delete do not remove events */
+    bool no_axis;              /* hides the axis labels under the dots */
+} cui_event_track_opts;
+
+typedef struct cui_event_track_result {
+    bool changed;              /* an event was moved, added or removed this frame */
+    int added;                 /* index of the event added this frame, or -1 */
+    int removed;               /* index the removed event had, or -1 */
+    int selected;              /* the selected event after this frame, or -1 */
+    bool dragging;             /* an event is being dragged */
+} cui_event_track_result;
+CUI_API cui_event_track_result cui_event_track_ex(cui_ctx *ui, const char *id, double *times, int *count, int capacity,
+                                                  double min, double max, const cui_event_track_opts *opts);
+
+/* Readout: one figure as an instrument shows it. A small label, the value in the
+ * monospaced font with its unit, and a muted line of context under it.
+ *
+ *     cui_readout(ui, "STILL IN YOU AT 23:00", "54", .unit = "MG", .detail = "under the 50 MG line by 00:10");
+ */
+typedef struct cui_readout_opts {
+    int _;
+    const char *unit;          /* after the value, smaller and muted, e.g. "MG" */
+    const char *detail;        /* a muted line under the value; `NULL` for none */
+    cui_control_size size;     /* the value's size: CUI_SIZE_SM 17, CUI_SIZE_MD 28 (default), CUI_SIZE_LG 44 points */
+    cui_tone tone;             /* the value's color; 0 is the foreground */
+    bool accent;               /* the value in the accent color */
+    cui_text_align align;      /* default start */
+    cui_size width;            /* default fit */
+} cui_readout_opts;
+CUI_API void cui_readout_ex(cui_ctx *ui, const char *label, const char *value, const cui_readout_opts *opts);
+
+/* Dot-matrix display: text drawn with a 5 by 7 dot font, for clocks, counters and status
+ * lines. Printable ASCII, the degree sign and the middle dot have glyphs; anything else is
+ * a box. Unlit dots show dimly unless `no_dim` is set. In a box narrower than the text,
+ * the dots shrink to fit, or with `marquee` the text scrolls. */
+typedef struct cui_dot_display_opts {
+    int _;
+    float pitch;               /* distance between dot centers in points, default 4 */
+    cui_color color;           /* lit dots; unset: the foreground */
+    bool accent;               /* lit dots in the accent color */
+    bool no_dim;               /* hides the unlit dots */
+    bool marquee;              /* scrolls text that is wider than the box instead of shrinking it */
+    cui_text_align align;      /* where the text sits in a wider box, default start */
+    cui_size width;            /* default fit to the text */
+} cui_dot_display_opts;
+CUI_API void cui_dot_display_ex(cui_ctx *ui, const char *text, const cui_dot_display_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
 
@@ -4347,6 +4492,11 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_stack_trace(ui, id, frames, n, ...) cui_stack_trace_ex((ui), (id), (frames), (n), CUI__OPTS(cui_stack_trace_opts, __VA_ARGS__))
 #define cui_request_bar(ui, id, method, url, cap, ...) cui_request_bar_ex((ui), (id), (method), (url), (cap), CUI__OPTS(cui_request_bar_opts, __VA_ARGS__))
 #define cui_uptime(ui, id, services, n, ...) cui_uptime_ex((ui), (id), (services), (n), CUI__OPTS(cui_uptime_opts, __VA_ARGS__))
+#define cui_dot_chart(ui, id, series, nseries, count, ...) cui_dot_chart_ex((ui), (id), (series), (nseries), (count), CUI__OPTS(cui_dot_chart_opts, __VA_ARGS__))
+#define cui_event_track(ui, id, times, count, cap, min, max, ...) \
+    cui_event_track_ex((ui), (id), (times), (count), (cap), (min), (max), CUI__OPTS(cui_event_track_opts, __VA_ARGS__))
+#define cui_readout(ui, label, value, ...)  cui_readout_ex((ui), (label), (value), CUI__OPTS(cui_readout_opts, __VA_ARGS__))
+#define cui_dot_display(ui, text, ...)      cui_dot_display_ex((ui), (text), CUI__OPTS(cui_dot_display_opts, __VA_ARGS__))
 #define cui_time_histogram(ui, id, start, bucket, buckets, series, nseries, sel_start, sel_end, ...) \
     cui_time_histogram_ex((ui), (id), (start), (bucket), (buckets), (series), (nseries), (sel_start), (sel_end), CUI__OPTS(cui_time_histogram_opts, __VA_ARGS__))
 #define cui_coverage(ui, id, files, n, ...) cui_coverage_ex((ui), (id), (files), (n), CUI__OPTS(cui_coverage_opts, __VA_ARGS__))

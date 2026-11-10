@@ -290,7 +290,7 @@ CATEGORIES = [
     ("basics", "Basics"), ("actions", "Actions"), ("inputs", "Inputs"), ("selection", "Selection"),
     ("pickers", "Pickers"), ("navigation", "Navigation"), ("overlays", "Overlays"), ("feedback", "Feedback"),
     ("data", "Data display"), ("charts", "Charts"), ("planning", "Planning"), ("social", "Conversation and media"),
-    ("motion", "Motion"), ("ai", "AI interfaces"), ("devtools", "Developer tools"),
+    ("motion", "Motion"), ("ai", "AI interfaces"), ("devtools", "Developer tools"), ("instruments", "Instruments"),
 ]
 MAIN_CAT = {
     "Text": "basics", "Badge, avatar and keycap": "basics", "Card and metric": "basics", "Image": "basics",
@@ -312,7 +312,7 @@ MORE_CAT = {
     "Feedback": "feedback", "Data": "data", "Code": "data", "Conversation": "social", "Media": "social",
     "Planning": "planning", "More charts": "charts", "Motion": "motion", "AI interfaces": "ai",
     "App chrome": "navigation",
-    "Tool panels": "data", "Developer tools": "devtools",
+    "Tool panels": "data", "Developer tools": "devtools", "Instruments": "instruments",
 }
 ITEM_CAT = {"Table of contents": "navigation"}
 # sections whose docs have no screenshot: the scene that shows them
@@ -354,6 +354,7 @@ APPS = [
     ("tracker", "Tracker", "Orbit: an issue tracker with boards and filters.", "examples/tracker.c"),
     ("assistant", "Assistant", "Muse: an AI assistant with reasoning, tools and attachments.", "examples/assistant.c"),
     ("todo", "To do", "The app the tutorial builds: a list you add to, tick off, filter and clear, in about 130 lines.", "examples/todo.c"),
+    ("caffeine", "Caffeine", "How much caffeine is still in you at bedtime: drag the cups, and the dot chart, the peak and the verdict follow.", "examples/caffeine.c"),
 ]
 
 # ---------------------------------------------------------------- options (from the header)
@@ -459,6 +460,9 @@ def fill_docs(fields):
 CORE_TYPES = {"cui_ctx", "cui_rect", "cui_vec2", "cui_color", "cui_size", "cui_corners", "cui_box", "cui_texture",
               "cui_font", "cui_id", "cui_date", "cui_key_combo"}
 
+# structs a page is about that no function of the page takes directly
+EXTRA_TYPES = {"chart-annotations": ["cui_chart_annotation"]}
+
 def item_types(it, owners):
     """The structs an item's own functions take (data) and return (results), with the
     enums their fields use: what a caller has to fill in and read back."""
@@ -479,6 +483,7 @@ def item_types(it, owners):
         out.append({"struct": st, "role": role, "fn": [fn], "line": DATA_STRUCTS[st]["line"],
                     "fields": [{"name": f["name"], "type": f["type"], "doc": f["doc"]} for f in fields], "enums": enums})
     nested = []
+    for st in EXTRA_TYPES.get(it["id"], []): add(st, "data", st)
     for a in it["apis"]:
         if it["id"] not in owners.get(a, set()): continue
         for c in [a, a + "_ex", a + "_begin", a + "_begin_ex"]:
@@ -658,7 +663,7 @@ DISPLAY_ONLY = {
     "progress-meter-spinner-and-skeleton", "timeline-and-progress-ring", "charts", "heatmap",
     "calendar-heatmap", "treemap-and-radar", "funnel-split-bar-and-waffle", "sankey",
     "bar-list-and-activity-rings", "scatter-and-bubble", "radial-gauge", "presence-counter-and-ticker",
-    "text-effects", "loaders", "chat", "uptime-bars"
+    "text-effects", "loaders", "chat", "uptime-bars", "readout", "dot-matrix-display", "chart-annotations"
 }
 
 def keyboard_lines(body_html):
@@ -779,14 +784,15 @@ SCENE_GLOBALS = [
 ]
 def scene_program(title, sc):
     src = sc["source"].strip()
-    m = re.match(r"SCENE\(\w+\)\s*\{\n", src)
+    m = re.search(r"^SCENE\(\w+\)\s*\{\n", src, re.M)   # after any comment that leads the scene
     if not m or re.search(r"^(?:static|SCENE)\b", src[m.end():], re.M): return None   # more than the one scene body
     body = src[m.end():src.rindex("}")].rstrip()
     body = re.sub(r"\bUPTO\(([^()]*)\)", r".width = CUI_FILL, .max_width = \1", body)
     body = re.sub(r"\bFLEX\(([^(),]*),\s*([^()]*)\)", r".width = CUI_FILL, .min_width = \1, .max_width = \2", body)
     used = lambda *names: any(re.search(rf"\b{n}\s*\(", body) for n in names)
     inc = ["#include <cui/cui.h>", "#include <cui/cui_app.h>"]
-    if used("sinf", "cosf", "sqrtf", "fabsf", "powf", "floorf", "fmodf", "sin", "cos"): inc.append("#include <math.h>")
+    if used("sinf", "cosf", "sqrtf", "fabsf", "powf", "floorf", "fmodf", "sin", "cos", "expf", "exp", "logf", "log", "roundf", "lround", "fminf", "fmaxf"):
+        inc.append("#include <math.h>")
     if used("snprintf", "sprintf", "printf"): inc.append("#include <stdio.h>")
     if used("rand", "abs", "malloc", "free", "atoi"): inc.append("#include <stdlib.h>")
     if used("strlen", "strcmp", "strcpy", "strncpy", "memcpy", "memset", "strstr", "memmove"): inc.append("#include <string.h>")

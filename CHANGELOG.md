@@ -6,6 +6,14 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- **Instruments**, five components for interfaces that read like an instrument: values as dots, labels in the monospaced font, hairlines and one accent. See [Instruments](docs/components-more.md#instruments) and the gallery's new *Instruments* page.
+  - **Dot-matrix chart** (`cui_dot_chart`): values as a grid of dots, lit up to each column's value and dim above it. Series stack, an accent series stands out, the pointer or the arrow keys show a readout, and a click returns where it landed.
+  - **Chart annotations** (`cui_chart_annotation`): vertical lines, dashed thresholds and labelled points over the dot chart, the line chart and the bar chart. Labels that would overlap move to the other side of their line, then down.
+  - **Event track** (`cui_event_track`): moments on a time axis as dots you drag, add with a click and remove with a double-click, snapped to a step, with full keyboard control. It lines up with a dot chart above it.
+  - **Readout** (`cui_readout`): a label, a value with its unit on the value's baseline, and a line of context.
+  - **Dot-matrix display** (`cui_dot_display`): text in a 5 by 7 dot font that shrinks to fit or scrolls.
+- `cui_axis_units`: `CUI_AXIS_HOURS` labels an axis as times of day, with 30 reading 06:00 the next morning.
+- **Caffeine**, a new example ([`examples/caffeine.c`](examples/caffeine.c)) that puts the instruments on one screen: how much caffeine is still in you at bedtime, with cups you drag. It runs on the site and ships in the release downloads.
 - **Three new guides.** [Building an app](docs/apps.md) covers the window, when frames happen, what components return, work on other threads and shipping. [Recipes](docs/recipes.md) has six complete programs: a form that validates, a table sorted by its headers, a list with a detail pane, a long task on another thread, a clock, and settings that are remembered. [Questions](docs/faq.md) says what CUI is and is not, how it compares with other libraries, and what it cannot do.
 - **A function reference.** The site has a page that lists every public function of `cui.h`, `cui_app.h` and `cui_render.h` (496 of them) under the headers' own sections: its signature, the comment written beside it, and a link to the component page or guide that explains it. It has a filter, and site search finds a function by name.
 - **Complete programs on component pages.** A page's usage block is a fragment. 71 of the 147 pages now also have the example as a whole program, with its includes, a frame function and `main`, under "Complete program". The site build compiles each one and leaves out any that does not build.
