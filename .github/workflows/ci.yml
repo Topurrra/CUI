@@ -89,6 +89,12 @@ jobs:
           ${{ matrix.cc }} $W -Idist -c dist/impl.c -o dist/impl.o
           ${{ matrix.cc }} $W -Idist -DCUI_NO_APP -DCUI_NO_DEFAULT_FONTS -DCUI_NO_STB_IMAGE -c dist/cui.c -o dist/core.o
           ${{ matrix.cc }} $W -Idist -DCUI_TEXT_SHAPING -c dist/cui.c -o dist/shaping.o
+      - name: Build it after the macros a full windows.h defines
+        # a user's #include <windows.h> before cui_single.h turns words like `small` into macros (issue #17)
+        run: |
+          W="-std=c99 -O1 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers -include tests/windows_sdk_words.h"
+          ${{ matrix.cc }} $W -Idist -c dist/impl.c -o dist/impl-win.o
+          ${{ matrix.cc }} $W -Idist -DCUI_TEXT_SHAPING -c dist/cui.c -o dist/shaping-win.o
 
   first-steps:
     name: First steps, as the guide gives them
