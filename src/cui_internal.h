@@ -658,6 +658,7 @@ void cui__color_picker_open(cui_ctx *ui, cui_id id, cui_color value);   /* opens
 typedef struct { int highlight; int item_count; int prev_item_count; bool keyboard; } cui__menu_nav;
 typedef struct { cui_color bg, bg_hover, bg_press, fg, border, border_hover; } cui__btn_colors;
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected);
+bool cui__icon_button_id(cui_ctx *ui, cui_id id, const char *icon, const cui_button_opts *o);
 /* Edge for controls their label already identifies (outline buttons, chips,
  * groups). Fields, checkboxes and radios keep BORDER_STRONG (3:1): their edge
  * is the only thing that marks them. */

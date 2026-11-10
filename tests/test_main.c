@@ -392,6 +392,36 @@ static void key(cui_ctx *ui, build_fn fn, void *u, cui_key k, int mods) {
     run(ui, fn, u, 1);
 }
 
+static void build_copy_button(cui_ctx *ui, void *u) {
+    bool *clicked = u;
+    *clicked = cui_copy_button(ui, "copy", "Copy this text");
+}
+
+static void test_copy_button_focus(void) {
+    printf("copy button: keyboard activation through confirmation\n");
+    cui_ctx *ui = new_ctx();
+    bool clicked = false;
+    run(ui, build_copy_button, &clicked, 1);
+    key(ui, build_copy_button, &clicked, CUI_KEY_TAB, 0);
+    g_clip[0] = '\0';
+    key(ui, build_copy_button, &clicked, CUI_KEY_ENTER, 0);
+    CHECK(clicked);
+    CHECK(strcmp(g_clip, "Copy this text") == 0);
+
+    run(ui, build_copy_button, &clicked, 1);   /* show the check mark */
+    g_clip[0] = '\0';
+    key(ui, build_copy_button, &clicked, CUI_KEY_ENTER, 0);
+    CHECK(clicked);
+    CHECK(strcmp(g_clip, "Copy this text") == 0);
+
+    run(ui, build_copy_button, &clicked, 120);   /* let the confirmation expire */
+    g_clip[0] = '\0';
+    key(ui, build_copy_button, &clicked, CUI_KEY_SPACE, 0);
+    CHECK(clicked);
+    CHECK(strcmp(g_clip, "Copy this text") == 0);
+    cui_destroy(ui);
+}
+
 /* A click focuses without a ring; the next key shows the ring and acts on
  * that control, unless an open popup above it owns the keyboard. */
 typedef struct { int clicks, sel; cui_id button, select; } ck_ctx;
@@ -7091,6 +7121,7 @@ int main(void) {
     test_button_click();
     test_click_then_keys();
     test_keyboard_nav();
+    test_copy_button_focus();
     test_toggles_and_slider();
     test_text_input();
     test_textarea_and_clear();

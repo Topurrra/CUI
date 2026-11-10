@@ -445,7 +445,8 @@ bool cui_copy_button(cui_ctx *ui, const char *id_str, const char *text) {
     memset(&bo, 0, sizeof bo);
     bo.tooltip = recent ? "Copied" : "Copy";
     cui_push_id(ui, id_str);
-    bool clicked = cui_icon_button_ex(ui, recent ? CUI_ICON_CHECK : CUI_ICON_COPY, &bo);
+    /* Keep focus on the same button when the icon and tooltip change. */
+    bool clicked = cui__icon_button_id(ui, cui_make_id(ui, "#copy-button"), recent ? CUI_ICON_CHECK : CUI_ICON_COPY, &bo);
     cui_pop_id(ui);
     if (recent) {
         /* the check is green while it confirms */

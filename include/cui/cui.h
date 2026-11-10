@@ -1078,7 +1078,8 @@ CUI_API bool cui_otp_input(cui_ctx *ui, const char *id, char *code, int length);
 CUI_API void cui_button_group_begin(cui_ctx *ui);
 CUI_API void cui_button_group_end(cui_ctx *ui);
 
-/* Icon button that copies text to the clipboard and confirms with a check. */
+/* Icon button that copies text to the clipboard and confirms with a check.
+ * Keyboard focus stays on the button when the check appears or disappears. */
 CUI_API bool cui_copy_button(cui_ctx *ui, const char *id, const char *text);
 
 /* Hold to confirm: a destructive action that fills while held and fires when
