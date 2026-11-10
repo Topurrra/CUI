@@ -1603,8 +1603,9 @@ static void page_instruments(cui_ctx *ui) {
         if (total > peak) { peak = total; peak_at = at; }
     }
     for (int c = 0; c < count; c++) bed += instrument_dose(23 - cups[c]);
-    char peak_text[32], peak_time[16], bed_text[32], big[16];
+    char peak_text[32], peak_mg[16], peak_time[16], bed_text[32], big[16];
     snprintf(peak_text, sizeof peak_text, "PEAK %.0f MG", peak);
+    snprintf(peak_mg, sizeof peak_mg, "%.0f", peak);
     snprintf(peak_time, sizeof peak_time, "%02d:%02d", (int)peak_at, (int)lround((peak_at - (int)peak_at) * 60) % 60);
     snprintf(bed_text, sizeof bed_text, "%.0f MG STILL IN YOU", bed);
     snprintf(big, sizeof big, "%.0f", bed);
@@ -1612,7 +1613,7 @@ static void page_instruments(cui_ctx *ui) {
     section(ui, "Readouts", "A label, a value with its unit, and a line of context, in the monospaced font.");
     cui_row(ui, .gap = 40, .wrap = true, .align = CUI_ALIGN_END) {
         cui_readout(ui, "AT BED", big, .unit = "MG", .size = CUI_SIZE_LG, .accent = bed > 50, .detail = bed > 50 ? "OVER THE 50 MG LINE" : "UNDER THE 50 MG LINE");
-        cui_readout(ui, "PEAK", peak_text + 5, .detail = peak_time);
+        cui_readout(ui, "PEAK", peak_mg, .unit = "MG", .detail = peak_time);
         cui_readout(ui, "CUPS", count == 1 ? "1" : count == 2 ? "2" : count == 3 ? "3" : count == 4 ? "4" : "5+", .size = CUI_SIZE_SM, .detail = "95 MG EACH");
     }
     section(ui, "Dot-matrix chart and event track", "Drag a cup along the axis, click the chart to add one, double-click a cup to remove it.");
