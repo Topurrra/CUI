@@ -468,7 +468,7 @@ function codeView(source, file, line) {
 const order = CAT.categories.flatMap((c) => c.items);
 function sidebarMode() {
   const k = (location.hash.match(/^#\/?([^/?]*)/) || [])[1] || '';
-  return k === 'guide' ? 'guide' : (k === 'c' || k === 'components') ? 'components' : null;
+  return (k === 'guide' || k === 'reference') ? 'guide' : (k === 'c' || k === 'components') ? 'components' : null;
 }
 function renderGuideNav(q) {
   const nav = $('#nav');
@@ -485,6 +485,7 @@ function renderGuideNav(q) {
           .map((x) => h('a', { href: `#/guide/${g.id}/${x.id}`, 'aria-current': g.id === gid && x.id === sec ? 'page' : null }, h('span', { class: 'label' }, x.title)))) : null])));
   }
   out.push(h('div', { class: 'nav-section' }, h('div', { class: 'nav-title' }, 'Reference'),
+    h('a', { href: '#/reference', 'aria-current': /^#\/reference/.test(location.hash) ? 'page' : null }, h('span', { class: 'label' }, 'All functions')),
     h('a', { href: '#/components' }, h('span', { class: 'label' }, 'All components'))));
   nav.replaceChildren(...(out.length ? out : [h('div', { class: 'empty' }, `Nothing matches “${q}”.`)]));
 }
@@ -1299,6 +1300,48 @@ function viewMissing() {
 }
 
 // the changelog: CHANGELOG.md, one section per release, newest first
+// every public function, from the headers: a signature, the header's comment, and the page that explains it
+function viewReference(target) {
+  setNav('guide');
+  const ref = CAT.reference || [];
+  const count = ref.reduce((n, s) => n + s.fns.length, 0);
+  const filter = h('input', { class: 'ref-filter', type: 'search', placeholder: `Filter ${count} functions`, 'aria-label': 'Filter the functions', autocomplete: 'off' });
+  const body = h('article', { class: 'doc guide reference' }, ref.map((s) => h('section', { id: `s-${s.id}`, class: 'ref-sec' },
+    h('h2', {}, s.title),
+    s.fns.map((f) => h('div', { class: 'ref-fn', id: `f-${f.name}`, 'data-name': f.name },
+      h('pre', { class: 'code ref-sig', 'data-lang': 'c' }, h('code', { html: highlight(f.sig) })),
+      h('div', { class: 'ref-meta' },
+        f.doc ? h('span', { class: 'ref-doc', html: f.doc }) : null,
+        f.page ? h('a', { href: `#/c/${f.page}` }, CAT.items[f.page].title) : s.guide ? h('a', { href: `#/guide/${s.guide}` }, `${CAT.guides.find((g) => g.id === s.guide).title} guide`) : null,
+        ghLink(s.header, f.line, h('code', {}, `${s.header.split('/').pop()}:${f.line}`))))))));
+  const none = h('p', { class: 'empty', hidden: true }, 'No function matches.');
+  filter.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase(); let any = false;
+    body.querySelectorAll('.ref-sec').forEach((sec) => {
+      let shown = 0;
+      sec.querySelectorAll('.ref-fn').forEach((el) => { const on = !q || el.dataset.name.includes(q) || el.textContent.toLowerCase().includes(q); el.hidden = !on; shown += on; });
+      sec.hidden = !shown; any = any || shown > 0;
+    });
+    none.hidden = any;
+  });
+  const toc = h('nav', { class: 'toc', 'aria-label': 'Sections' }, h('div', { class: 'toc-title' }, 'Sections'),
+    ref.map((s) => h('a', { href: `#/reference/${s.id}`, 'data-sec': s.id }, s.title)));
+  const page = h('div', { class: 'page guide-page' },
+    h('div', { class: 'guide-main' },
+      h('h1', {}, 'Function reference'),
+      h('p', { class: 'lede' }, `Every public function of CUI ${CAT.version || ''}, in the order of the headers. A name ending in "..." takes named options: see its component's page for them.`),
+      filter, none, body),
+    toc);
+  if (target) setTimeout(() => refScroll(target, false));
+  return page;
+}
+function refScroll(target, smooth) {
+  const el = document.getElementById(`f-${target}`) || document.getElementById(`s-${target}`);
+  if (!el) return false;
+  window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - 84, behavior: smooth && !prefs.reducedMotion ? 'smooth' : 'auto' });
+  if (el.classList.contains('ref-fn')) { el.classList.add('ref-hit'); setTimeout(() => el.classList.remove('ref-hit'), 1600); }
+  return true;
+}
 function viewChangelog(sec) {
   setNav('changelog');
   const cl = CAT.changelog || { lede: '', releases: [] };
@@ -1346,6 +1389,7 @@ function route() {
   else if (kind === 'accents') view = viewAccents();
   else if (kind === 'apps') view = viewApps();
   else if (kind === 'changelog') view = viewChangelog(id ? decodeURIComponent(id) : '');
+  else if (kind === 'reference') view = viewReference(id ? decodeURIComponent(id) : '');
   else if (kind === 'app') view = viewApp(decodeURIComponent(id));
   else view = viewMissing();
   document.body.classList.toggle('app-mode', kind === 'app');
@@ -1358,7 +1402,7 @@ function route() {
   renderNav($('#filter').value);
   const it = kind === 'c' && CAT.items[decodeURIComponent(id.split('/')[0])];
   const gd = kind === 'guide' && CAT.guides.find((g) => g.id === (id || 'getting-started').split('/')[0]);
-  document.title = it ? `${it.title} · CUI` : gd ? `${gd.title} · CUI` : kind === 'components' ? 'Components · CUI' : kind === 'changelog' ? 'Changelog · CUI' : kind === 'showcase' ? 'Showcase · CUI' : kind === 'apps' ? 'Apps · CUI'
+  document.title = it ? `${it.title} · CUI` : gd ? `${gd.title} · CUI` : kind === 'components' ? 'Components · CUI' : kind === 'changelog' ? 'Changelog · CUI' : kind === 'showcase' ? 'Showcase · CUI' : kind === 'apps' ? 'Apps · CUI' : kind === 'reference' ? 'Function reference · CUI'
     : kind === 'app' && CAT.apps.find((a) => a.id === id) ? `${CAT.apps.find((a) => a.id === id).title} app · CUI` : kind && kind !== 'home' ? 'CUI' : 'CUI: native UI components for C';
 }
 let lastRoute = '';
@@ -1368,6 +1412,8 @@ window.addEventListener('hashchange', () => {
     const el = document.getElementById(`s-${m[2]}`);
     if (el) { window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - 72, behavior: prefs.reducedMotion ? 'auto' : 'smooth' }); lastRoute = location.hash; renderNav($('#filter').value); return; }
   }
+  const rm = location.hash.match(/^#\/reference\/(.+)$/);
+  if (rm && /^#\/reference/.test(lastRoute) && refScroll(decodeURIComponent(rm[1]), true)) { lastRoute = location.hash; return; }
   const lm = location.hash.match(/^#\/changelog\/(.+)$/);
   if (lm && /^#\/changelog/.test(lastRoute)) {
     const el = document.getElementById(`s-${decodeURIComponent(lm[1])}`);
@@ -1439,6 +1485,7 @@ function buildSearch() {
       `${it.summary} ${it.apis.join(' ')} ${it.scenes.join(' ')}`, `${plainText(it.html)} ${plainText(it.keyboard.join(' '))} ${plainText(it.keyboard_note)} ${optText(it)}`); }),
     ...CAT.showcase.map((x) => E('#/showcase', x.title, x.summary, 'Showcase', `${x.summary} ${x.id}`, '')),
     ...CAT.apps.map((a) => E(`#/app/${a.id}`, `${a.title} app`, a.summary, 'Apps', `${a.summary} app`, '')),
+    ...(CAT.reference || []).flatMap((s) => s.fns.map((f) => E(`#/reference/${f.name}`, f.name, plainText(f.doc) || f.sig, 'Function', f.sig, plainText(f.doc), true))),
     ...CAT.changelog.releases.map((r) => E(`#/changelog/${r.id}`, `Changelog: ${r.title}`, r.date, 'Changelog', '', plainText(r.html), true)),
   ];
 }

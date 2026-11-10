@@ -351,6 +351,7 @@ ctest --test-dir build --output-on-failure
 | [Integration](docs/integration.md) | Your own window, input and renderer; C++; binary size |
 | [Rendering](docs/rendering.md) | The vertex format and the reference shader |
 | [Performance](docs/performance.md) | How memory and speed are tested, and the results |
+| [Function reference](https://yappologistic.github.io/CUI/#/reference) | Every public function with its signature, on the site |
 | [How CUI is built](docs/architecture.md) | The code map and the outline every component follows |
 | [Design principles](docs/design.md) | The visual rules every component follows |
 

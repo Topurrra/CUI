@@ -105,6 +105,14 @@ urls.append(page("showcase/", "#/showcase", "Showcase · CUI", "Larger compositi
 body = "<h1>Apps</h1><p>Complete apps from the examples folder, running live in the browser.</p><ul>" + "".join(f'<li>{esc(a["title"])}: {esc(a["summary"])}</li>' for a in C["apps"]) + "</ul>"
 urls.append(page("apps/", "#/apps", "Apps · CUI", "Complete example apps built with CUI, running live in the browser: mail, notes, a tracker, a music player and more.", body))
 
+ref = C.get("reference", [])
+if ref:
+    body = (f'<h1>Function reference</h1><p>Every public function of CUI {esc(C.get("version", ""))}, in the order of the headers.</p>'
+            + "".join(f'<h2 id="{s["id"]}">{esc(s["title"])}</h2>' + "".join(
+                f'<p><code>{esc(f["sig"])}</code>' + (f'<br>{f["doc"]}' if f["doc"] else "")
+                + (f' <a href="#/c/{f["page"]}">{esc(C["items"][f["page"]]["title"])}</a>' if f["page"] else "") + "</p>" for f in s["fns"]) for s in ref))
+    urls.append(page("reference/", "#/reference", "Function reference · CUI", f'Every public function of CUI: {sum(len(s["fns"]) for s in ref)} signatures from cui.h, cui_app.h and cui_render.h, each linked to the page that explains it.', body))
+
 urls.insert(0, URL)   # the home page is index.html itself
 
 with open(f"{SITE}/sitemap.xml", "w") as f:

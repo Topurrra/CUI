@@ -665,6 +665,81 @@ def keyboard_lines(body_html):
             if s and s not in out: out.append(s)
     return out, note
 
+# ---------------------------------------------------------------- the function reference
+REF_HEADERS = ["include/cui/cui.h", "include/cui/cui_app.h", "include/cui/cui_render.h"]
+
+def reference(fn_struct, owners, items):
+    """Every public function in the headers, in header order under the header's own section
+    titles: its signature, the comment written beside it, and the page that explains it."""
+    declared = set()
+    for rel in REF_HEADERS: declared |= set(re.findall(r"CUI_API\b[^;(]*?\b(cui_\w+)\s*\(", strip_comments(read(rel))))
+    macros = set()
+    for rel in REF_HEADERS: macros |= set(re.findall(r"^\s*#define\s+(cui_\w+)\(", read(rel), re.M))
+    out = []
+    for rel in REF_HEADERS:
+        lines = read(rel).split("\n")
+        sec = {"title": {"cui.h": "Setup", "cui_app.h": "The app window", "cui_render.h": "Renderers"}[rel.split("/")[-1]], "header": rel, "fns": []}
+        i = 0
+        while i < len(lines):
+            ln = lines[i]
+            banner = re.match(r"/\* -{20,} \*/$", ln.strip())
+            title = None
+            if banner and i + 2 < len(lines) and re.match(r"/\* -{20,} \*/$", lines[i + 2].strip()):
+                title = comment_text(lines[i + 1]); i += 2
+            else:
+                sub = re.match(r"/\* -{3,} (.+?) -{3,} \*/$", ln.strip())
+                if sub: title = sub.group(1)
+            if title:
+                if sec["fns"]: out.append(sec)
+                sec = {"title": title, "header": rel, "fns": []}
+                i += 1; continue
+            if ln.startswith("CUI_API"):
+                start = i; decl = ln
+                while ";" not in strip_comments(decl) and i + 1 < len(lines): i += 1; decl += " " + lines[i].strip()
+                code = strip_comments(decl); code = re.sub(r"\s+", " ", code[:code.index(";")]).replace("CUI_API ", "").strip()
+                code = re.sub(r"\s*CUI_\w+\([^)]*\)\s*$", "", code)      # a printf-format attribute after the parameters
+                m = re.search(r"\b(cui_\w+)\s*\(", code)
+                if m:
+                    name = m.group(1)
+                    doc = " ".join(comment_text(c) for c in re.findall(r"/\*.*?\*/", decl[decl.index(";"):], re.S))
+                    if not doc:   # the comment block directly above
+                        k, above = start - 1, []
+                        while k >= 0 and lines[k].strip() and (lines[k].strip().startswith(("/*", "*", "//")) or lines[k].strip().endswith("*/")) and not re.match(r"/\* -{3,}", lines[k].strip()):
+                            above.insert(0, lines[k]); k -= 1
+                            if above[0].strip().startswith("/*"): break
+                        if above and above[0].strip().startswith(("/*", "//")): doc = comment_text("\n".join(above))
+                    call, sig = name, code
+                    # the name people call: the named-argument macro over an _ex function, or the
+                    # block macro over a _begin_ex one (cui_dialog(ui, ...) { children })
+                    block = False
+                    for suffix in ("_begin_ex", "_begin", "_ex"):
+                        short = name[:-len(suffix)] if name.endswith(suffix) else None
+                        if short and short in macros and short not in declared:
+                            call, block = short, suffix != "_ex"
+                            sig = re.sub(rf"\b{name}\b", short, re.sub(r",?\s*const cui_\w+ \*\s*opts\s*\)$", ", ...)", code))
+                            sig = sig.replace("(, ...)", "(...)")
+                            if block: sig = sig[sig.index(short):] + " { ... }"
+                            break
+                    if not block: sig += ";"
+                    users = [it["id"] for it in items.values() if call in it["apis"]]
+                    page = next((i_ for i_ in sorted(owners.get(call, ())) if i_ in items), None) or (users[0] if len(users) == 1 else None)
+                    if fn_struct.get(call) in LAYOUT_STRUCTS: page = None    # the layout guide explains these
+                    sec["fns"].append({"name": call, "sig": sig, "doc": comment_html(doc), "line": start + 1,
+                                       "opts": fn_struct.get(call) if call != name else None, "page": page})
+            i += 1
+        if sec["fns"]: out.append(sec)
+    # the guide that explains a section whose functions have no component page
+    guide_of = {"Layout": "layout", "Theme": "theming", "Fonts": "theming", "Custom drawing": "custom-components", "Identity": "getting-started",
+                "Context and frame": "integration", "Input (called by the platform layer)": "integration", "Draw data (consumed by renderers)": "rendering",
+                "software renderer": "integration", "OpenGL renderer": "integration", "The app window": "getting-started"}
+    used = set()
+    for sct in out:
+        sct["guide"] = guide_of.get(sct["title"])
+        base = slug(sct["title"]); sid = base; k = 2
+        while sid in used: sid = f"{base}-{k}"; k += 1
+        used.add(sid); sct["id"] = sid
+    return out
+
 # ---------------------------------------------------------------- complete programs
 # A page's Usage block is a fragment. Where the scene that draws the page's live example
 # stands on its own, the page also gets it as a whole program: includes, a frame function
@@ -879,8 +954,10 @@ def main():
     unlisted = [n for n in srcs if n not in covered]
 
     version = re.search(r"project\(cui\s+VERSION\s+([\d.]+)", read("CMakeLists.txt")).group(1)
+    ref = reference(fn_struct, owners, items)
     catalog = {
         "version": version,
+        "reference": ref,
         "categories": [{"id": c, "title": t, "items": cats[c]} for c, t in CATEGORIES if cats[c]],
         "items": items,
         "showcase": showcase,
@@ -905,6 +982,9 @@ def main():
     n_key = sum(1 for it in items.values() if it["keyboard"])
     print(f"  options tables: {n_opt} components ({sum(len(it['options']) for it in items.values())} tables); "
           f"keyboard lists: {n_key}; header: {len(structs)} options structs, {len(fn_struct)} functions")
+    nfn = sum(len(x["fns"]) for x in ref)
+    print(f"  reference: {nfn} functions in {len(ref)} sections, {sum(1 for x in ref for f in x['fns'] if f['doc'])} with a description, "
+          f"{sum(1 for x in ref for f in x['fns'] if f['page'])} linked to a page")
     missing = [it["title"] for it in items.values() if not it["scenes"]]
     if missing: print("  no live scene:", ", ".join(missing))
 

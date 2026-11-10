@@ -1044,3 +1044,12 @@ body.reduce-motion .rel-card:hover .rel-go { transform: none; }
 .program { margin-top: 14px; }
 .program > summary { cursor: pointer; font-weight: 500; font-size: 14px; padding: 6px 0; color: var(--text-2); }
 .program > summary:hover, .program[open] > summary { color: var(--fg); }
+
+/* the function reference */
+.ref-filter { width: 100%; max-width: 420px; margin: 4px 0 20px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--fg); font: inherit; font-size: 14px; }
+.ref-fn { padding: 12px 0 12px; border-bottom: 1px solid var(--border); scroll-margin-top: 84px; }
+.doc.reference .ref-fn pre.code.ref-sig { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.doc.reference .ref-fn pre.code.ref-sig code { white-space: pre-wrap; }
+.ref-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 13px; color: var(--text-2); }
+.ref-meta .ref-doc { flex: 1 1 100%; color: var(--fg); font-size: 14px; }
+.ref-hit { background: var(--surface-muted); box-shadow: -12px 0 0 var(--surface-muted), 12px 0 0 var(--surface-muted); }
