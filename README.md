@@ -110,7 +110,7 @@ With CMake (GCC, Clang, MSVC and MinGW are tested):
 include(FetchContent)
 FetchContent_Declare(cui
     GIT_REPOSITORY https://github.com/yappologistic/CUI.git
-    GIT_TAG v1.3.1)
+    GIT_TAG v1.4.0)
 FetchContent_MakeAvailable(cui)
 target_link_libraries(my_app PRIVATE cui::cui)
 cui_app_target(my_app)   # no console window on Windows, and only the code your app uses

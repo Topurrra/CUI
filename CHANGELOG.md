@@ -2,7 +2,9 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
-## Unreleased
+## 2026-11-11 · 1.4: instruments
+
+Five components that read like an instrument, a new example that puts them together, three guides and a reference of every function. Linux desktops can now match a window to its app, and fixes cover the single file after `windows.h` and the keyboard in three components.
 
 ### Added
 
