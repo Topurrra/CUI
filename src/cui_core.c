@@ -280,6 +280,15 @@ void cui_set_platform(cui_ctx *ui, const cui_platform_iface *p) {
     if (p) ui->platform = *p; else memset(&ui->platform, 0, sizeof ui->platform);
 }
 
+void cui_set_clipboard_text(cui_ctx *ui, const char *text) {
+    if (text && ui->platform.set_clipboard) ui->platform.set_clipboard(ui->platform.user, text);
+}
+
+const char *cui_get_clipboard_text(cui_ctx *ui) {
+    const char *s = ui->platform.get_clipboard ? ui->platform.get_clipboard(ui->platform.user) : NULL;
+    return s ? s : "";
+}
+
 void cui_set_viewport(cui_ctx *ui, float w, float h, float scale) {
     if (scale <= 0) scale = 1;
     if (w != ui->vw || h != ui->vh || scale != ui->scale) ui->settle_frames = CUI_MAX(ui->settle_frames, 2);

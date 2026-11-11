@@ -4,6 +4,10 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ## Unreleased
 
+### Added
+
+- `cui_set_clipboard_text` and `cui_get_clipboard_text`: copy from a menu item or a status bar ("Copy path") and read the clipboard for a Paste item, through the same platform hooks the copy button and text fields use ([#32](https://github.com/yappologistic/CUI/issues/32)).
+
 ### Fixed
 
 - macOS: Quit from the app menu (Cmd-Q), the Dock or AppleScript ended the process from inside the event loop, so nothing after `cui_app_run` ran: no cleanup, no saving, and libraries that check their resources at exit could crash. It now ends `cui_app_run` (or makes `cui_app_frame` return false) as closing the window does, at once even when the app is idle ([#29](https://github.com/yappologistic/CUI/issues/29)).

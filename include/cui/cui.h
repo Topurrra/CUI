@@ -286,6 +286,12 @@ typedef struct cui_platform_iface {
 } cui_platform_iface;
 CUI_API void cui_set_platform(cui_ctx *ui, const cui_platform_iface *platform);
 CUI_API cui_cursor cui_get_cursor(cui_ctx *ui);
+/* The system clipboard, for a menu or status bar item that copies or pastes ("Copy path").
+ * They go through the platform's clipboard hooks, as the copy button and text fields do:
+ * without a hook, setting does nothing and getting returns "". The returned text stays
+ * valid until the next call. */
+CUI_API void cui_set_clipboard_text(cui_ctx *ui, const char *text);
+CUI_API const char *cui_get_clipboard_text(cui_ctx *ui);
 
 /* Queries, useful for app level shortcuts. */
 CUI_API bool cui_key_pressed(cui_ctx *ui, cui_key key);          /* pressed this frame (with repeat) */

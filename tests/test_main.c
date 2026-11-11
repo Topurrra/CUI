@@ -422,6 +422,26 @@ static void test_copy_button_focus(void) {
     cui_destroy(ui);
 }
 
+/* cui_set_clipboard_text / cui_get_clipboard_text: the platform hooks, for menu items
+ * that copy or paste (issue #32) */
+static void test_clipboard_api(void) {
+    printf("clipboard: set and get through the platform hooks\n");
+    cui_ctx *ui = new_ctx();
+    g_clip[0] = '\0';
+    cui_set_clipboard_text(ui, "/home/ada/notes.txt");
+    CHECK(strcmp(g_clip, "/home/ada/notes.txt") == 0);
+    CHECK(strcmp(cui_get_clipboard_text(ui), "/home/ada/notes.txt") == 0);
+    cui_set_clipboard_text(ui, NULL);                 /* NULL leaves the clipboard alone */
+    CHECK(strcmp(g_clip, "/home/ada/notes.txt") == 0);
+    cui_destroy(ui);
+    /* no platform hooks: nothing happens, and getting gives an empty string */
+    cui_ctx *bare = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
+    cui_set_clipboard_text(bare, "ignored");
+    CHECK(cui_get_clipboard_text(bare) != NULL && cui_get_clipboard_text(bare)[0] == '\0');
+    CHECK(strcmp(g_clip, "/home/ada/notes.txt") == 0);
+    cui_destroy(bare);
+}
+
 /* Nav items: the group's highlight follows the selected item, and goes away
  * when no item of the group is selected (issue #35). */
 typedef struct { int sel; bool click; cui_id item[3]; } nav_ctx;
@@ -7228,6 +7248,7 @@ int main(void) {
     test_keyboard_nav();
     test_copy_button_focus();
     test_nav_highlight();
+    test_clipboard_api();
     test_toggles_and_slider();
     test_text_input();
     test_textarea_and_clear();
