@@ -205,6 +205,19 @@ static float cui__rubber(float d) {
     return s * 22.0f * (1.0f - expf(-a / 70.0f));
 }
 
+/** Point toward the selected endpoint when both thumbs occupy the same spot. */
+static void cui__draw_range_thumb_direction(cui_ctx *ui, cui_rect thumb, bool left, float alpha) {
+    if (alpha <= 0.01f) return;
+    float x = thumb.x + thumb.w * 0.5f, y = thumb.y + thumb.h * 0.5f;
+    float dir = left ? -1.0f : 1.0f;
+    cui_rect badge = { x - 5.5f, y - 5.5f, 11, 11 };
+    cui_draw_rect(ui, badge, CUI_CORNERS(5.5f), cui_alpha(CUI_C(ui, BACKGROUND), alpha));
+    cui_color ink = cui_alpha(CUI_C(ui, FOREGROUND), alpha);
+    cui_vec2 tip = { x + dir * 2, y };
+    cui_draw_line(ui, (cui_vec2){ x - dir, y - 3 }, tip, 1.5f, ink);
+    cui_draw_line(ui, tip, (cui_vec2){ x - dir, y + 3 }, 1.5f, ink);
+}
+
 /** Paint the ring over both thumbs so it remains visible where they meet. */
 static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
     cui__slider_paint *p = data;
@@ -250,6 +263,8 @@ static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
         if (k == (p->focus_low ? 1 : 0)) focused_thumb = tr;
     }
     cui__draw_focus_ring(ui, focused_thumb, CUI_CORNERS(focused_thumb.w * 0.5f), p->focus);
+    if (p->range && fabsf(positions[0] - positions[1]) < 0.5f)
+        cui__draw_range_thumb_direction(ui, focused_thumb, p->focus_low != n->rtl, p->focus);
 #undef CUI__MIRROR
 }
 
@@ -373,7 +388,7 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
         float mt = cui__clampf((mx - x0) / (x1 - x0), 0, 1);
         if (ui->mpressed[0]) st->grabbed = fabsf(mt - ta) < fabsf(mt - tb) ? 0 : 1;
         if (st->grabbed == 0) ta = CUI_MIN(mt, tb); else tb = CUI_MAX(mt, ta);
-    } else if (r.focused) {
+    } else if (r.keyboard_focused) {
         if (cui_key_pressed(ui, CUI_KEY_SPACE)) st->grabbed = 1 - st->grabbed;
         float thumb = cui__slider_keys(ui, st->grabbed == 0 ? ta : tb, 0.01f, st->rtl);
         if (st->grabbed == 0) ta = CUI_MIN(thumb, tb);

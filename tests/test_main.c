@@ -907,10 +907,14 @@ static void build_range_keyboard(cui_ctx *ui, void *user) {
     cui_slider(ui, "Other", &r->other, 0, 100);
 }
 
-/** Exercise both thumbs and leave the range slider with an ordinary Tab. */
+/** Exercise both thumbs and show which one is selected when they overlap. */
 static void test_range_slider_keyboard(void) {
     printf("range slider: keyboard adjustment of both thumbs\n");
     cui_ctx *ui = new_ctx();
+    enum { width = 320, height = 150, stride = width * 4 };
+    unsigned char lower[height * stride], upper[height * stride];
+    cui_set_viewport(ui, width, height, 1);
+    cui_input_mouse_leave(ui);
     range_keyboard_ctx r = { 20, 75, 40 };
     run(ui, build_range_keyboard, &r, 1);
     int unfocused_vertices = cui_get_draw_data(ui)->vertex_count;
@@ -921,7 +925,10 @@ static void test_range_slider_keyboard(void) {
     CHECK_NEAR(r.hi, 75, 0.01);
     key(ui, build_range_keyboard, &r, CUI_KEY_END, 0);
     CHECK_NEAR(r.lo, 75, 0.01);
+    cui_sw_render(g_sw, cui_get_draw_data(ui), lower, width, height, stride, CUI_SW_RGBA);
     key(ui, build_range_keyboard, &r, CUI_KEY_SPACE, 0);
+    cui_sw_render(g_sw, cui_get_draw_data(ui), upper, width, height, stride, CUI_SW_RGBA);
+    CHECK(memcmp(lower, upper, sizeof lower) != 0);
     key(ui, build_range_keyboard, &r, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
     CHECK_NEAR(r.lo, 75, 0.01);
     CHECK_NEAR(r.hi, 85, 0.01);
@@ -1025,6 +1032,40 @@ static void test_stepper_width_isolation(void) {
         if (memcmp(alone + y * stride, pair + y * stride, left_column) != 0) same = false;
     }
     CHECK(same);
+}
+
+typedef struct { float lo, hi; bool chosen; } range_menu_ctx;
+
+/** Attach the menu to the track so the range can retain focus underneath it. */
+static void build_range_menu(cui_ctx *ui, void *user) {
+    range_menu_ctx *r = user;
+    cui_range_slider(ui, "Range", &r->lo, &r->hi, 0, 100);
+    cui_context_menu(ui, "range-menu") {
+        if (cui_menu_item(ui, "First")) r->chosen = true;
+        cui_menu_item(ui, "Second");
+    }
+}
+
+/** A context menu uses the arrow keys even when its anchor keeps focus. */
+static void test_range_slider_context_menu(void) {
+    printf("range slider: a context menu owns its arrow keys\n");
+    cui_ctx *ui = new_ctx();
+    range_menu_ctx r = { 20, 75, false };
+    run(ui, build_range_menu, &r, 1);
+    key(ui, build_range_menu, &r, CUI_KEY_TAB, 0);
+    cui_vec2 track = center(cui_last_rect(ui));
+    cui_input_mouse_move(ui, track.x, track.y);
+    cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, true);
+    run(ui, build_range_menu, &r, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, false);
+    cui_input_mouse_leave(ui);
+    run(ui, build_range_menu, &r, 1);
+    key(ui, build_range_menu, &r, CUI_KEY_DOWN, 0);
+    key(ui, build_range_menu, &r, CUI_KEY_ENTER, 0);
+    CHECK(r.chosen);
+    CHECK_NEAR(r.lo, 20, 0.01);
+    CHECK_NEAR(r.hi, 75, 0.01);
+    cui_destroy(ui);
 }
 
 static void test_more_inputs(void) {
@@ -7609,6 +7650,7 @@ int main(void) {
     test_toggle_group_arrows();
     test_more_inputs();
     test_range_slider_keyboard();
+    test_range_slider_context_menu();
     test_swipe();
     test_date_math();
     test_strings();

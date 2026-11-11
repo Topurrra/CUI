@@ -390,6 +390,7 @@ typedef struct cui_hit {
 typedef struct cui_interact {
     bool hovered, pressed, clicked, right_clicked, double_clicked, focused, active, released, keyboard_activate;
     bool focus_visible;
+    bool keyboard_focused;    /* focused with no popup above this layer */
 } cui_interact;
 
 enum { CUI_IF_FOCUSABLE = 1, CUI_IF_DRAG = 2, CUI_IF_KEEP_FOCUS = 4, CUI_IF_TEXT = 8 };
