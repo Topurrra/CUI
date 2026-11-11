@@ -867,6 +867,7 @@ void cui_nav_section(cui_ctx *ui, const char *title) {
 /* Breadcrumb, pagination, stepper                                          */
 /* ------------------------------------------------------------------------ */
 
+/** Only ancestors take keyboard focus. The last label describes the current page. */
 int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
     int clicked = -1;
     int row = cui__node_new(ui, 0);
@@ -885,6 +886,7 @@ int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
             ui->nodes[t].id = id;
             ui->nodes[t].line_height = 1.3f;
             cui__mark_interactive(ui, t, CUI_IF_FOCUSABLE);
+            cui__focus_ring(ui, t, r.focus_visible ? 1.0f : 0.0f);
             if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
             if (r.clicked) clicked = k;
             cui__icon_node(ui, CUI_ICON_CHEVRON_RIGHT, 14, CUI_C(ui, TEXT_MUTED));
@@ -894,6 +896,7 @@ int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count) {
     return clicked;
 }
 
+/** Selection marks the current page, while the ring marks the next key target. */
 static bool cui__page_button(cui_ctx *ui, cui_id id, const char *text, bool selected) {
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     float hv_v = cui__hover_fade(ui, id, r.hovered, CUI__T_HOVER), *hv = &hv_v;
@@ -905,6 +908,7 @@ static bool cui__page_button(cui_ctx *ui, cui_id id, const char *text, bool sele
     n->radius = CUI_CORNERS(CUI__R_CONTROL(ui, 32));
     n->bg = selected ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), *hv);
     cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
+    cui__focus_ring(ui, i, r.focus_visible ? 1.0f : 0.0f);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__open(ui, i);
     int t = cui__text_node(ui, text, -1, selected ? CUI_FONT_MEDIUM : CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body),

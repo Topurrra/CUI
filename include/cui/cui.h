@@ -698,8 +698,10 @@ typedef struct cui_nav_opts {
 CUI_API bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *opts);
 CUI_API void cui_nav_section(cui_ctx *ui, const char *title);
 
-CUI_API int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count);   /* returns clicked index or -1 */
-CUI_API bool cui_pagination(cui_ctx *ui, const char *id, int *page, int page_count);  /* page is 0 based */
+/* Ancestor links show keyboard focus. Returns the activated index or -1. */
+CUI_API int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count);
+/* Page buttons show keyboard focus. The current page is zero-based. */
+CUI_API bool cui_pagination(cui_ctx *ui, const char *id, int *page, int page_count);
 CUI_API void cui_stepper(cui_ctx *ui, const char *const *steps, int count, int current);
 
 /* ------------------------------------------------------------------------ */

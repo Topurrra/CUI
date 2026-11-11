@@ -11,6 +11,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- Breadcrumb links and numbered page buttons show a focus ring when reached by keyboard.
 - The range slider supports adjusting either thumb with the keyboard and shows which thumb has focus.
 - Each arrow press in a toggle group moves focus by one item.
 - The first tooltip waits for a full hover, and an idle window shows it at the requested wakeup.
