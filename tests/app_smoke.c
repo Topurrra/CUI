@@ -206,12 +206,20 @@ int main(int argc, char **argv) {
 #ifdef CUI_SMOKE_X11
     app_id_ok = smoke_app_id_ok(app);
 #endif
+#ifdef CUI_SMOKE_X11
+    /* An X server resets when its last client disconnects, and a window opened during the reset
+     * fails. Xvfb does this by default, so hold a connection while the next test's app starts. */
+    Display *keep = XOpenDisplay(NULL);
+#endif
     cui_app_destroy(app);
     /* a continuous app runs at the display's rate, not as fast as the machine can draw */
     double fps = t1 > t0 ? 39.0 / (t1 - t0) : 0;
     bool paced = fps > 0 && fps < 250;
     printf("animation: %.0f frames per second%s\n", fps, paced ? "" : " (not paced)");
     bool theme_ok = smoke_follow_theme();
+#ifdef CUI_SMOKE_X11
+    if (keep) XCloseDisplay(keep);
+#endif
     bool quit_ok = true;
 #ifdef __APPLE__
     quit_ok = smoke_quit_menu();
