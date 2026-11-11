@@ -941,14 +941,28 @@ static void test_range_slider_keyboard(void) {
 
 typedef struct { int ancestor, page; } navigation_focus_ctx;
 
+/** Leave space around both rows for the focus rings. */
 static void build_navigation_focus(cui_ctx *ui, void *user) {
     navigation_focus_ctx *n = user;
     const char *path[] = { "Home", "Projects", "Settings" };
-    n->ancestor = cui_breadcrumb(ui, path, 3);
-    cui_pagination(ui, "pages", &n->page, 3);
+    cui_column(ui, .pad = 12, .gap = 12) {
+        n->ancestor = cui_breadcrumb(ui, path, 3);
+        cui_pagination(ui, "pages", &n->page, 3);
+    }
 }
 
-/** Render the exact links that Tab focuses and Enter can activate. */
+/** Compare only the pixels above the middle of the expected focus target. */
+static bool focus_strip_changed(const unsigned char *a, const unsigned char *b, int stride, int height, cui_vec2 top) {
+    int x = (int)top.x - 4;
+    int y0 = (int)top.y - 4;
+    if (x < 0 || x + 8 > stride / 4 || y0 < 0 || y0 + 7 > height) return false;
+    for (int y = y0; y < y0 + 7; y++) {
+        if (memcmp(a + y * stride + x * 4, b + y * stride + x * 4, 8 * 4) != 0) return true;
+    }
+    return false;
+}
+
+/** The ring appears over each keyboard target and clears when focus moves. */
 static void test_navigation_focus_visible(void) {
     printf("breadcrumb and pagination: visible keyboard focus\n");
     enum { width = 400, height = 120, stride = width * 4 };
@@ -958,15 +972,22 @@ static void test_navigation_focus_visible(void) {
     cui_set_viewport(ui, width, height, 1);
     cui_input_mouse_leave(ui);
     run(ui, build_navigation_focus, &n, 1);
+    cui_rect home = cui_get_rect(ui, cui_make_id(ui, "Home"));
+    cui_rect next = cui_last_rect(ui);
+    cui_vec2 home_top = { home.x + home.w / 2, home.y };
+    /* Page two sits in the middle of the three numbered buttons and two arrows. */
+    cui_vec2 page_top = { (home.x + next.x + next.w) / 2, next.y };
     cui_sw_render(g_sw, cui_get_draw_data(ui), initial, width, height, stride, CUI_SW_RGBA);
     key(ui, build_navigation_focus, &n, CUI_KEY_TAB, 0);
     cui_sw_render(g_sw, cui_get_draw_data(ui), focused, width, height, stride, CUI_SW_RGBA);
-    CHECK(memcmp(initial, focused, sizeof initial) != 0);
+    CHECK(focus_strip_changed(initial, focused, stride, height, home_top));
+    CHECK(!focus_strip_changed(initial, focused, stride, height, page_top));
     key(ui, build_navigation_focus, &n, CUI_KEY_ENTER, 0);
     CHECK(n.ancestor == 0);
     for (int i = 0; i < 3; i++) key(ui, build_navigation_focus, &n, CUI_KEY_TAB, 0);
     cui_sw_render(g_sw, cui_get_draw_data(ui), focused, width, height, stride, CUI_SW_RGBA);
-    CHECK(memcmp(initial, focused, sizeof initial) != 0);
+    CHECK(!focus_strip_changed(initial, focused, stride, height, home_top));
+    CHECK(focus_strip_changed(initial, focused, stride, height, page_top));
     key(ui, build_navigation_focus, &n, CUI_KEY_ENTER, 0);
     CHECK(n.page == 1);
     cui_destroy(ui);
