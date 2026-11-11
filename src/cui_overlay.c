@@ -428,6 +428,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 typedef struct { char text[256]; cui_id anchor, shown; cui_spring t, ox, oy; double last_shown; bool visible, passive; } cui__tooltip_state;
 static cui__tooltip_state *cui__tooltip_get(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
+/** Hover starts cold until a tooltip has actually appeared. */
 void cui_tooltip(cui_ctx *ui, const char *text) {
     cui_id anchor = ui->last_id;
     if (!anchor || !text) return;
@@ -438,7 +439,7 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
             ui->tooltip_id = anchor;
             ui->hover_start = ui->time;
         }
-        bool warm = ui->time - tt->last_shown < 0.4;
+        bool warm = tt->last_shown > 0 && ui->time - tt->last_shown < 0.4;
         float delay = warm ? 0.0f : 0.55f;
         if (ui->time - ui->hover_start >= delay) {
             snprintf(tt->text, sizeof tt->text, "%s", text);
@@ -453,7 +454,7 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
     }
 }
 
-/* Like cui_tooltip, for a rect that is not interactive (a truncated label). A
+/** Like cui_tooltip, for a rect that is not interactive (a truncated label). A
  * widget's own tooltip wins if both ask in the same frame. */
 void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
     cui__tooltip_state *tt = cui__tooltip_get(ui);
@@ -463,7 +464,7 @@ void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
      * open above that rect owns the pointer, so its label stays quiet */
     if (ui->hot_layer != ui->current_layer) return;
     if (ui->tooltip_id != anchor) { ui->tooltip_id = anchor; ui->hover_start = ui->time; }
-    bool warm = ui->time - tt->last_shown < 0.4;
+    bool warm = tt->last_shown > 0 && ui->time - tt->last_shown < 0.4;
     float delay = warm ? 0.0f : 0.7f;
     if (ui->time - ui->hover_start >= delay) {
         snprintf(tt->text, sizeof tt->text, "%s", text);

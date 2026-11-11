@@ -410,6 +410,8 @@ Appears after a short delay. Moving on to a neighbour while it is open, it glide
 
 `cui_tooltip` returns nothing and takes no `id`: call it on every frame, right after the component it belongs to. That component must be one that reacts to the pointer, such as a button, a link or a hoverable card. Plain text, a badge and an avatar do not, so a tooltip placed after one of them attaches to whatever interactive component came before. The delay is 0.55 seconds, and none when another tooltip was showing less than 0.4 seconds ago. The text is copied, up to 255 bytes. For a card with its own layout, use a hover card.
 
+The hover delay is measured in elapsed time, including when the app sleeps between frames.
+
 Keyboard: a tooltip takes no focus. It belongs to the control before it, which keeps its own keys.
 
 ## Dialog

@@ -2944,6 +2944,35 @@ static void test_number_roll(void) {
     cui_destroy(ui);
 }
 
+/** Drive the hover with explicit frame intervals so the wake can be tested. */
+static int paint_hover_tooltip(cui_ctx *ui, float elapsed, bool show_hint) {
+    cui_begin_frame(ui, elapsed);
+    cui_button(ui, "Anchor");
+    if (show_hint) cui_tooltip(ui, "Tooltip");
+    cui_end_frame(ui);
+    return cui_get_draw_data(ui)->vertex_count;
+}
+
+/** A cold hover waits for its deadline and appears on the requested wake. */
+static void test_tooltip_hover_delay(void) {
+    printf("tooltip: cold hover and idle wake\n");
+    for (int idle = 0; idle < 2; idle++) {
+        cui_ctx *ui = new_ctx();
+        cui_input_mouse_leave(ui);
+        if (idle) paint_hover_tooltip(ui, 0.25f, true);
+        paint_hover_tooltip(ui, idle ? 0.25f : 0.01f, true);
+        cui_vec2 pos = center(cui_last_rect(ui));
+        cui_input_mouse_move(ui, pos.x, pos.y);
+        int without_hint = paint_hover_tooltip(ui, 0.01f, false);
+        int hovered = paint_hover_tooltip(ui, 0, true);
+        CHECK(hovered == without_hint);
+        float wake = cui_next_wakeup(ui);
+        CHECK(wake > 0.5f && wake < 0.6f);
+        if (wake > 0) CHECK(paint_hover_tooltip(ui, wake, true) > hovered);
+        cui_destroy(ui);
+    }
+}
+
 static void test_truncated_tooltip(void) {
     printf("text: a truncated label shows its whole text on hover, and its row still clicks\n");
     cui_ctx *ui = new_ctx();
@@ -7446,6 +7475,7 @@ int main(void) {
     test_scroll_fade();
     test_pretty_wrap();
     test_truncated_tooltip();
+    test_tooltip_hover_delay();
     test_truncated_tooltip_covered();
     test_number_roll();
     test_stress();
