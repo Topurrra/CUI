@@ -740,6 +740,27 @@ static void build_actions(cui_ctx *ui, void *u) {
     }
 }
 
+static void build_toggle_group_arrows(cui_ctx *ui, void *user) {
+    const char *labels[] = { "First", "Second", "Third", "Fourth" };
+    cui_toggle_group(ui, "formats", labels, 4, user);
+}
+
+/** Each arrow event moves one slot before Enter or Space changes a toggle. */
+static void test_toggle_group_arrows(void) {
+    printf("toggle group: one step per arrow press\n");
+    cui_ctx *ui = new_ctx();
+    bool values[4] = { false };
+    run(ui, build_toggle_group_arrows, values, 1);
+    key(ui, build_toggle_group_arrows, values, CUI_KEY_TAB, 0);
+    key(ui, build_toggle_group_arrows, values, CUI_KEY_RIGHT, 0);
+    key(ui, build_toggle_group_arrows, values, CUI_KEY_ENTER, 0);
+    CHECK(!values[0] && values[1] && !values[2] && !values[3]);
+    key(ui, build_toggle_group_arrows, values, CUI_KEY_LEFT, 0);
+    key(ui, build_toggle_group_arrows, values, CUI_KEY_SPACE, 0);
+    CHECK(values[0] && values[1] && !values[2] && !values[3]);
+    cui_destroy(ui);
+}
+
 static void test_more_actions(void) {
     printf("actions: split button, toggle group, confirm, status, reactions, speed dial\n");
     cui_ctx *ui = new_ctx();
@@ -7422,6 +7443,7 @@ int main(void) {
     test_disabled_password_reveal();
     test_textarea_and_clear();
     test_more_actions();
+    test_toggle_group_arrows();
     test_more_inputs();
     test_swipe();
     test_date_math();

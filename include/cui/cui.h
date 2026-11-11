@@ -1145,7 +1145,8 @@ CUI_API int cui_split_button_ex(cui_ctx *ui, const char *label, const char *cons
 
 /* Toggle group: a row of toggles (bold, italic...). values[i] is toggled
  * when item i is clicked; with exclusive set exactly one stays on. Labels
- * become tooltips when icon_only is set. Returns true when a value changed. */
+ * become tooltips when icon_only is set. Left and Right move focus one item.
+ * Returns true when a value changed. */
 typedef struct cui_toggle_group_opts {
     int _;
     const char *const *icons;

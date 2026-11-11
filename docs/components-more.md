@@ -43,7 +43,7 @@ Each item flips its own `bool`. With `.exclusive = true` exactly one stays on, l
 
 Returns true on the frame an item is clicked. `format` is your array with one `bool` for each item: the group reads it every frame and writes the item that was clicked, or all of them when `exclusive` is set. Exclusive mode acts on clicks only, so start with one value already true; a click on the item that is on leaves it on. At most 32 items are shown. `icon_only` hides a label only where that item has an icon. For a choice held in one `int`, use the segmented control.
 
-Keyboard: Tab, or Left and Right, move between the toggles, and Enter or Space flips the focused one.
+Keyboard: Tab moves through the toggles. Each Left or Right press moves focus one item. Enter or Space flips the focused toggle.
 
 ### Confirm button
 

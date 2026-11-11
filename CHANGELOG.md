@@ -11,6 +11,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- Each arrow press in a toggle group moves focus by one item.
 - The first tooltip waits for a full hover, and an idle window shows it at the requested wakeup.
 - Timed toasts expire on schedule after idle, and their actions stop accepting input once dismissal begins.
 - A disabled password field's reveal button ignores clicks and is skipped by Tab.
