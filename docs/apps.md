@@ -26,7 +26,7 @@ while (cui_app_frame(app)) {
 cui_app_destroy(app);
 ```
 
-`cui_app_frame` shows the previous frame, waits until there is something to do, and starts the next one. It returns false once the window is closed. The callback form also gives smooth live resizing on Windows and macOS: the content keeps redrawing while the user drags the window's edge.
+`cui_app_frame` shows the previous frame, waits until there is something to do, and starts the next one. It returns false once the window is closed, or on macOS when the app is quit from its menu, with Cmd-Q, from the Dock or by AppleScript, so the code after the loop always runs. The callback form also gives smooth live resizing on Windows and macOS: the content keeps redrawing while the user drags the window's edge.
 
 `cui_app_desc` sets up the window. Every field is optional:
 

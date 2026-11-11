@@ -16,6 +16,9 @@ add_test(NAME cui_screenshots COMMAND cui_screenshots ${CMAKE_CURRENT_BINARY_DIR
 if(CUI_WITH_APP)
     add_executable(cui_app_smoke app_smoke.c ../examples/gallery_ui.c ../examples/gallery_more.c)
     target_link_libraries(cui_app_smoke PRIVATE cui::cui)
+    if(APPLE)
+        target_link_libraries(cui_app_smoke PRIVATE objc)   # sends terminate: as the Dock does
+    endif()
     # reads the window's WM_CLASS back, with any backend that runs on X11
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         find_package(X11 QUIET)

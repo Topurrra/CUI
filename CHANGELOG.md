@@ -2,6 +2,13 @@
 
 What changed in CUI, newest first. Every component mentioned here runs live in the docs.
 
+## Unreleased
+
+### Fixed
+
+- macOS: Quit from the app menu (Cmd-Q), the Dock or AppleScript ended the process from inside the event loop, so nothing after `cui_app_run` ran: no cleanup, no saving, and libraries that check their resources at exit could crash. It now ends `cui_app_run` (or makes `cui_app_frame` return false) as closing the window does, at once even when the app is idle ([#29](https://github.com/yappologistic/CUI/issues/29)).
+- Nav items: when no item of a group was selected, the highlight stayed on the item selected before, and the next selection glided over from there. The highlight now goes away, and the next selection appears in place ([#35](https://github.com/yappologistic/CUI/issues/35)).
+
 ## 2026-11-11 · 1.4: instruments
 
 Five components that read like an instrument, a new example that puts them together, three guides and a reference of every function. Linux desktops can now match a window to its app, and fixes cover the single file after `windows.h` and the keyboard in three components.
