@@ -98,7 +98,7 @@ The window layer for your system is picked by the preprocessor. Before the imple
 | `CUI_WITH_APP` | `ON` | Build the window layer. Turn off to use only the core in your engine |
 | `CUI_DEFAULT_FONTS` | `ON` | Embed Inter, Geist and Lucide (about 180 KB) |
 | `CUI_STB_IMAGE` | `ON` | PNG and JPEG loading for `cui_image_load` |
-| `CUI_BUILD_SHARED` | `OFF` | Build a shared library |
+| `CUI_BUILD_SHARED` | `OFF` | Build a shared library. Its name carries the minor version (`libcui.so.1.4`), because option structs grow between minor versions: rebuild your app against the new headers when you move to a new minor version |
 | `CUI_BUILD_EXAMPLES`, `CUI_BUILD_TESTS` | `ON` at top level | |
 
 Cross compiling for Windows from Linux works with the included toolchain file:

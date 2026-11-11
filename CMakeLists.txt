@@ -204,7 +204,9 @@ elseif(CUI_BACKEND STREQUAL "glfw")
     target_link_libraries(cui PUBLIC glfw)
 endif()
 
-set_target_properties(cui PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+# A minor release adds fields to option and description structs, which changes their size, so a
+# shared library is only compatible within one minor version: libcui.so.1.3, libcui.so.1.4...
+set_target_properties(cui PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
 
 if(CUI_BUILD_EXAMPLES AND CUI_WITH_APP)
     add_subdirectory(examples)

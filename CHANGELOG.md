@@ -34,6 +34,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **A new README.** It opens with what CUI is in plain words, says what it is not (it draws its own components and does not wrap the system's), compares it with the libraries people know, and lists the limitations in full, including the eight components that still need a pointer. It also says how the code is written and what tests it.
 - A component page lists only its own functions, and no longer repeats its option names in a sentence above the options table.
 - Release notes link to the files they mention with full addresses, so the links work from the release page.
+- **The shared library's name carries the minor version** (`libcui.so.1.4` instead of `libcui.so.1`). Option and description structs gain fields in minor releases, and an app built against older headers passes the library a smaller struct than it reads. With the old name, an app built against 1.3 could load a newer library and read garbage past the end of `cui_app_desc` (the new `app_id`). Now each minor version is its own library, and an app keeps the one it was built against. Rebuild against the new headers to move to a new minor version. Static builds and the single-file version are not affected.
 
 ### Fixed
 
