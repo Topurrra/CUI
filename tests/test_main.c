@@ -993,21 +993,27 @@ static void test_navigation_focus_visible(void) {
     cui_destroy(ui);
 }
 
-typedef struct { int page; cui_size width; } unnamed_pager_ctx;
+typedef struct { int page; cui_size width; float sibling_width; } unnamed_pager_ctx;
 
+/** Put the pager in a padded box with an optional sibling competing for space. */
 static void build_unnamed_pager(cui_ctx *ui, void *user) {
     unnamed_pager_ctx *p = user;
-    cui_box(ui, .width = p->width, .pad = 24) {
-        cui_pagination(ui, "pages", &p->page, 12);
+    cui_row(ui, .width = CUI_FILL) {
+        if (p->sibling_width > 0) {
+            cui_box(ui, .width = CUI_PX(p->sibling_width)) cui_text(ui, "Sibling");
+        }
+        cui_box(ui, .width = p->width, .pad = 24) {
+            cui_pagination(ui, "pages", &p->page, 12);
+        }
     }
 }
 
-/** A constrained pager fits, while an unconstrained pager keeps its pages. */
+/** A fixed box constrains the pager and a content-sized box can grow again. */
 static void test_pagination_unnamed_width(void) {
     printf("pagination: stays inside an unnamed padded parent\n");
     cui_ctx *ui = new_ctx();
     cui_set_viewport(ui, 360, 160, 1);
-    unnamed_pager_ctx p = { 5, CUI_PX(328) };
+    unnamed_pager_ctx p = { 5, CUI_PX(328), 0 };
     run(ui, build_unnamed_pager, &p, 3);
     cui_rect next = cui_last_rect(ui);
     CHECK(next.w > 0 && next.x + next.w <= 304.5f);
@@ -1015,9 +1021,24 @@ static void test_pagination_unnamed_width(void) {
 
     ui = new_ctx();
     p.width = CUI_FIT;
+    cui_set_viewport(ui, 300, 160, 1);
+    run(ui, build_unnamed_pager, &p, 3);
+    next = cui_last_rect(ui);
+    float compact_edge = next.x + next.w;
+    CHECK(compact_edge <= 276.5f);
+    cui_set_viewport(ui, 650, 160, 1);
     run(ui, build_unnamed_pager, &p, 3);
     next = cui_last_rect(ui);
     CHECK(next.x + next.w > 304.5f);
+    p.sibling_width = 350;
+    run(ui, build_unnamed_pager, &p, 3);
+    next = cui_last_rect(ui);
+    CHECK_NEAR(next.x + next.w, p.sibling_width + compact_edge, 0.5);
+    p.sibling_width = 0;
+    cui_set_viewport(ui, 300, 160, 1);
+    run(ui, build_unnamed_pager, &p, 3);
+    next = cui_last_rect(ui);
+    CHECK_NEAR(next.x + next.w, compact_edge, 0.5);
     cui_destroy(ui);
 }
 

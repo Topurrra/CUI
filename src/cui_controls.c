@@ -937,11 +937,38 @@ static bool cui__page_button(cui_ctx *ui, cui_id id, const char *text, bool sele
 enum { CUI__PAGER_WIDE_WIDTH = 2 * 36 + 7 * 32 + 8 * 2 };
 typedef struct { float available; bool measured; } cui__pager_width;
 
-/** Read the parent's inner width after layout, even when the parent has no ID. */
+/** A fit box can grow up to the space its parent offers after sibling allocation. */
+static float cui__pager_inner_width(cui_ctx *ui, const cui_node *box) {
+    float width = box->rect.w;
+    if (box->w.kind == CUI_SIZE_FIT && box->parent >= 0 && !(box->flags & (CUI_NF_FLOATING | CUI_NF_ABSOLUTE))) {
+        const cui_node *parent = &ui->nodes[box->parent];
+        if (parent->dir != CUI_GRID && !(parent->flags & CUI_NF_SCROLL_X)) {
+            float inner = cui__pager_inner_width(ui, parent);
+            width = inner;
+            if (parent->dir == CUI_ROW && !(parent->flags & CUI_NF_ROW_WRAP)) {
+                width -= parent->gap * (float)(parent->child_count - 1);
+                for (int c = parent->first; c >= 0; c = ui->nodes[c].next) {
+                    const cui_node *sibling = &ui->nodes[c];
+                    if (sibling == box) continue;
+                    float reserved = sibling->rect.w;
+                    if (sibling->w.kind == CUI_SIZE_PERCENT)
+                        reserved = cui__clampf(inner * sibling->w.value / 100.0f, sibling->min_w, sibling->max_w);
+                    else if (sibling->w.kind == CUI_SIZE_GROW)
+                        reserved = CUI_MIN(reserved, CUI_MAX(sibling->minc_w, sibling->min_w));
+                    width -= reserved;
+                }
+            }
+            width = cui__clampf(width, box->min_w, box->max_w);
+        }
+    }
+    return CUI_MAX(0, width - box->pad[1] - box->pad[3]);
+}
+
+/** Keep compactness independent of the width already chosen by the pager. */
 static void cui__measure_pager_width(cui_ctx *ui, cui_node *row, void *data) {
     cui__pager_width *width = data;
     const cui_node *parent = &ui->nodes[row->parent];
-    float available = parent->rect.w - parent->pad[1] - parent->pad[3];
+    float available = cui__pager_inner_width(ui, parent);
     if ((available < CUI__PAGER_WIDE_WIDTH) != (width->available < CUI__PAGER_WIDE_WIDTH))
         ui->animating = true;
     width->available = available;
