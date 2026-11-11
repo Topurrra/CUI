@@ -86,7 +86,9 @@ jobs:
           ref: ${{ needs.release.outputs.sha }}
       - name: Install dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update -q && sudo apt-get install -y -q libx11-dev
+        timeout-minutes: 15
+        # older commits predate the script: install the plain way then
+        run: if [ -f .github/apt-install.sh ]; then sh .github/apt-install.sh libx11-dev; else sudo apt-get update -q && sudo apt-get install -y -q libx11-dev; fi
       - name: Build the examples
         shell: bash
         run: |

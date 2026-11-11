@@ -25,9 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install clang and LLVM tools
+        timeout-minutes: 15
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q clang lld llvm
+          sh .github/apt-install.sh clang lld llvm
           # wasm-ld and llvm-ar live in the versioned LLVM folder
           echo "$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -1)" >> "$GITHUB_PATH"
       - name: Build
