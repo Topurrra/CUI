@@ -790,7 +790,8 @@ typedef struct cui_dialog_opts {
     bool no_close_button;      /* hides the x in the corner (Esc and a click outside still close it unless `persistent`) */
     bool persistent;           /* clicking outside or Esc does not close */
 } cui_dialog_opts;
-/* Modal dialog. Shown while *open is true; closing sets it to false. */
+/* Modal dialog. Shown while *open is true; closing sets it to false.
+ * Escape leaves a focused text field before it can dismiss the dialog. */
 CUI_API bool cui_dialog_begin(cui_ctx *ui, const char *title, bool *open, const cui_dialog_opts *opts);
 CUI_API void cui_dialog_end(cui_ctx *ui);
 /* A right-aligned row for dialog actions. */

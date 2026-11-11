@@ -499,6 +499,7 @@ static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *r
     }
 }
 
+/** Report focus loss in the same frame so a second Escape can reach a dialog. */
 static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *e, char *buf, size_t cap,
                                         bool multiline, bool password, bool read_only, cui_rect area,
                                         cui_font font, float size, float line_h, cui_interact r) {
@@ -546,7 +547,13 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
     if ((!multiline || c.prim) && cui_key_pressed(ui, CUI_KEY_ENTER)) res.submitted = true;
     if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         if (e->cursor != e->anchor) e->anchor = e->cursor;
-        else { ui->focus = 0; res.blurred = true; }
+        else {
+            ui->focus = 0;
+            ui->edit = NULL;
+            e->had_focus = false;
+            res.focused = false;
+            res.blurred = true;
+        }
     }
     if (c.edited) res.changed = true;
     if (c.edited || c.moved) ui->caret_time = ui->time;

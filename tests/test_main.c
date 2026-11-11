@@ -1769,6 +1769,29 @@ static void test_dialog(void) {
     cui_destroy(ui);
 }
 
+typedef struct { bool open; char text[32]; } dialog_edit_ctx;
+
+static void build_dialog_edit(cui_ctx *ui, void *user) {
+    dialog_edit_ctx *d = user;
+    cui_dialog(ui, "Edit profile", &d->open) {
+        cui_input(ui, "Name", d->text, sizeof d->text, .autofocus = true);
+    }
+}
+
+/** Consecutive Escapes first leave the field, then dismiss its dialog. */
+static void test_dialog_escape_after_edit(void) {
+    printf("dialog: Escape after an active editor\n");
+    cui_ctx *ui = new_ctx();
+    dialog_edit_ctx d = { true, "Example" };
+    run(ui, build_dialog_edit, &d, 1);
+    CHECK(cui_wants_keyboard(ui));
+    key(ui, build_dialog_edit, &d, CUI_KEY_ESCAPE, 0);
+    CHECK(d.open && !cui_wants_keyboard(ui));
+    key(ui, build_dialog_edit, &d, CUI_KEY_ESCAPE, 0);
+    CHECK(!d.open);
+    cui_destroy(ui);
+}
+
 typedef struct { int chosen; cui_id trigger; } menu_ctx;
 static void build_menu(cui_ctx *ui, void *u) {
     menu_ctx *m = u;
@@ -7313,6 +7336,7 @@ int main(void) {
     test_ai();
     test_text_capacity();
     test_dialog();
+    test_dialog_escape_after_edit();
     test_menu();
     test_focus_trap();
     test_extras();

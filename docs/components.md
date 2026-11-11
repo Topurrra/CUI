@@ -430,6 +430,8 @@ cui_dialog(ui, "Edit profile", &open, .description = "Changes are visible to you
 
 Modal: the scrim blocks everything behind it. Esc, the close button or a click on the scrim close it, unless `persistent`. Options: `description`, `width` (440), `no_close_button`, `persistent`. Opens with a fade and a scale from 0.96, closes faster than it opens.
 
+Escape first clears a text selection or leaves the focused editor. Once focus leaves the editor, the next Escape can close the dialog.
+
 ## Sheet
 
 A panel that slides in from an edge.
