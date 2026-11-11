@@ -134,6 +134,15 @@ void cui_app_set_title(cui_app *app, const char *title) {
 
 void cui_app_set_size(cui_app *app, int w, int h) { app = cui__app_or_current(app); if (app) cui__plat_set_size(app, w, h); }
 
+void cui_app_follow_system_theme(cui_app *app, bool follow) {
+    app = cui__app_or_current(app);
+    if (!app) return;
+    app->desc.follow_system_theme = follow;    /* the backends read it when the OS setting changes */
+    if (!follow) return;
+    int dark = cui__plat_system_dark();
+    if (dark >= 0) cui_set_theme(app->ui, dark ? CUI_THEME_DARK : CUI_THEME_LIGHT);
+}
+
 cui_vec2 cui_app_size(cui_app *app) {
     float w, h, s;
     int fw, fh;

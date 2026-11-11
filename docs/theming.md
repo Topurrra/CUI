@@ -16,6 +16,8 @@ cui_app_create(&(cui_app_desc){ .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_GR
 cui_app_create(&(cui_app_desc){ .follow_system_theme = true });   /* Windows and macOS */
 ```
 
+A theme switcher with Light, Dark and System changes this while the app runs. `cui_app_follow_system_theme(NULL, false)` stops following, so the `cui_set_theme` you call next lasts; `cui_app_follow_system_theme(NULL, true)` applies the system's setting at once and follows it again. `NULL` is the running app, as in a `cui_app_run` callback.
+
 | Neutral, light | Green, dark |
 |---|---|
 | ![](images/overview-light.png) | ![](images/overview-green-dark.png) |

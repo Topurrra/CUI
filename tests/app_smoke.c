@@ -128,6 +128,37 @@ static bool smoke_quit_menu(void) {
 }
 #endif
 
+/* cui_app_follow_system_theme (issue #34): stopping keeps a cui_set_theme from being
+ * undone by the OS setting, starting goes back to the OS setting at once. */
+static bool smoke_follow_theme(void) {
+    cui_app *app = cui_app_create(&(cui_app_desc){ .title = "CUI theme test", .width = 400, .height = 300,
+                                                   .continuous = true, .follow_system_theme = true });
+    if (!app) return false;
+    cui_ctx *ui = cui_app_ui(app);
+    cui_theme_mode os = cui_get_theme_mode(ui);          /* the OS setting, or light when unknown */
+    cui_theme_mode other = os == CUI_THEME_DARK ? CUI_THEME_LIGHT : CUI_THEME_DARK;
+    int frame = 0;
+    cui_theme_mode kept = os, back = os;
+    while (cui_app_frame(app) && frame < 40) {
+        if (frame == 2) { cui_app_follow_system_theme(NULL, false); cui_set_theme(ui, other); }   /* NULL: the running app */
+        if (frame == 20) kept = cui_get_theme_mode(ui);
+        if (frame == 21) cui_app_follow_system_theme(app, true);
+        if (frame == 22) back = cui_get_theme_mode(ui);
+        cui_text(ui, "theme");
+        frame++;
+    }
+    cui_app_destroy(app);
+    bool stop_ok = kept == other;
+#if defined(_WIN32) || defined(__APPLE__)
+    bool start_ok = back == os;                            /* these platforms always report a setting */
+#else
+    bool start_ok = back == os || back == other;           /* X11 may not know the setting (Xvfb) */
+#endif
+    printf("follow system theme: stop keeps the app's theme %s, start returns to the OS setting %s\n",
+           stop_ok ? "ok" : "FAILED", start_ok ? (back == os ? "ok" : "(OS setting unknown here)") : "FAILED");
+    return stop_ok && start_ok;
+}
+
 int main(int argc, char **argv) {
     const char *out = argc > 1 ? argv[1] : "app_smoke.png";
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -180,9 +211,10 @@ int main(int argc, char **argv) {
     double fps = t1 > t0 ? 39.0 / (t1 - t0) : 0;
     bool paced = fps > 0 && fps < 250;
     printf("animation: %.0f frames per second%s\n", fps, paced ? "" : " (not paced)");
+    bool theme_ok = smoke_follow_theme();
     bool quit_ok = true;
 #ifdef __APPLE__
     quit_ok = smoke_quit_menu();
 #endif
-    return (ok && switched && paced && null_ok && app_id_ok && quit_ok) ? 0 : 1;
+    return (ok && switched && paced && null_ok && app_id_ok && theme_ok && quit_ok) ? 0 : 1;
 }

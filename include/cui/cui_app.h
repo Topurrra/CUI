@@ -82,6 +82,11 @@ CUI_API void cui_app_set_title(cui_app *app, const char *title);
 /* The window's size in logical points (the same units as cui_app_desc.width). */
 CUI_API void cui_app_set_size(cui_app *app, int width, int height);
 CUI_API cui_vec2 cui_app_size(cui_app *app);
+/* Starts or stops following the OS light/dark setting, as cui_app_desc.follow_system_theme
+ * does at creation, for a theme switcher with Light, Dark and System. Starting applies the
+ * OS setting at once, where the platform reports one. Stopping keeps the current theme, so
+ * a cui_set_theme after it lasts. Later OS changes are followed on Windows and macOS. */
+CUI_API void cui_app_follow_system_theme(cui_app *app, bool follow);
 /* True when the software renderer is drawing (no usable OpenGL, or it was asked for). */
 CUI_API bool cui_app_is_software(cui_app *app);
 /* HWND, NSWindow*, X11 Window (cast to uintptr_t), SDL_Window* or GLFWwindow*. */
