@@ -763,7 +763,7 @@ static void build_toggle_group_arrows(cui_ctx *ui, void *user) {
     cui_toggle_group(ui, "formats", labels, 4, user);
 }
 
-/** Each arrow event moves one slot before Enter or Space changes a toggle. */
+/** Move one slot per arrow and preserve focus given by a later mouse press. */
 static void test_toggle_group_arrows(void) {
     printf("toggle group: one step per arrow press\n");
     cui_ctx *ui = new_ctx();
@@ -776,6 +776,19 @@ static void test_toggle_group_arrows(void) {
     key(ui, build_toggle_group_arrows, values, CUI_KEY_LEFT, 0);
     key(ui, build_toggle_group_arrows, values, CUI_KEY_SPACE, 0);
     CHECK(values[0] && values[1] && !values[2] && !values[3]);
+
+    memset(values, 0, sizeof values);
+    cui_rect group = cui_last_rect(ui);
+    cui_input_mouse_move(ui, group.x + group.w - 12, group.y + group.h / 2);
+    cui_input_key(ui, CUI_KEY_RIGHT, true, 0);
+    cui_input_key(ui, CUI_KEY_RIGHT, false, 0);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_toggle_group_arrows, values, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_toggle_group_arrows, values, 1);
+    CHECK(values[3]);
+    key(ui, build_toggle_group_arrows, values, CUI_KEY_ENTER, 0);
+    CHECK(!values[0] && !values[1] && !values[2] && !values[3]);
     cui_destroy(ui);
 }
 
