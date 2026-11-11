@@ -622,7 +622,7 @@ typedef struct cui_input_opts {
     const char *icon;          /* leading icon */
     const char *hint;          /* helper text below */
     const char *error;         /* error text below (red) */
-    bool password;             /* shows dots instead of the text, with an eye button that reveals it */
+    bool password;             /* shows dots and a reveal button that honors disabled */
     bool disabled;
     bool clearable;            /* x button when not empty */
     bool autofocus;

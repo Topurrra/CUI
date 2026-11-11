@@ -548,6 +548,51 @@ static void type(cui_ctx *ui, build_fn fn, void *u, const char *s) {
     run(ui, fn, u, 1);
 }
 
+typedef struct { char text[16]; bool disabled, next_clicked; } password_reveal_ctx;
+
+static void build_password_reveal(cui_ctx *ui, void *user) {
+    password_reveal_ctx *p = user;
+    cui_input(ui, "Password", p->text, sizeof p->text, .password = true, .disabled = p->disabled);
+    p->next_clicked = cui_button(ui, "Next");
+}
+
+/** Sample the text pixels separately from the reveal button and its tooltip. */
+static uint64_t password_text_pixels(cui_ctx *ui) {
+    enum { width = 320, height = 100, stride = width * 4 };
+    unsigned char pixels[height * stride];
+    cui_sw_render(g_sw, cui_get_draw_data(ui), pixels, width, height, stride, CUI_SW_RGBA);
+    uint64_t hash = 0;
+    for (int y = 4; y < 32; y++) {
+        for (int x = 12; x < 120; x++) {
+            for (int channel = 0; channel < 3; channel++) hash = hash * 31 + pixels[y * stride + 4 * x + channel];
+        }
+    }
+    return hash;
+}
+
+/** A disabled eye ignores clicks and leaves the next button first in tab order. */
+static void test_disabled_password_reveal(void) {
+    printf("password field: a disabled reveal button cannot unmask text\n");
+    for (int disabled = 0; disabled < 2; disabled++) {
+        cui_ctx *ui = new_ctx();
+        cui_set_viewport(ui, 320, 100, 1);
+        password_reveal_ctx p = { "sample", disabled != 0, false };
+        run(ui, build_password_reveal, &p, 2);
+        uint64_t masked = password_text_pixels(ui);
+        click_at(ui, build_password_reveal, &p, 301, 16);
+        run(ui, build_password_reveal, &p, 1);
+        CHECK((password_text_pixels(ui) == masked) == p.disabled);
+        cui_destroy(ui);
+    }
+    cui_ctx *ui = new_ctx();
+    password_reveal_ctx p = { "sample", true, false };
+    run(ui, build_password_reveal, &p, 1);
+    key(ui, build_password_reveal, &p, CUI_KEY_TAB, 0);
+    key(ui, build_password_reveal, &p, CUI_KEY_ENTER, 0);
+    CHECK(p.next_clicked);
+    cui_destroy(ui);
+}
+
 static void test_text_input(void) {
     printf("text input: typing, editing, selection, clipboard, undo\n");
     cui_ctx *ui = new_ctx();
@@ -7295,6 +7340,7 @@ int main(void) {
     test_clipboard_api();
     test_toggles_and_slider();
     test_text_input();
+    test_disabled_password_reveal();
     test_textarea_and_clear();
     test_more_actions();
     test_more_inputs();

@@ -208,7 +208,7 @@ You own the buffer; CUI never writes past `cap`. Returns flags: `CUI_CHANGED`, `
 |---|---|
 | `label`, `placeholder`, `hint`, `error` | |
 | `icon` | Leading icon |
-| `password` | Masks the text and adds a show/hide button |
+| `password` | Masks the text and adds a show/hide button that honors `disabled` |
 | `clearable` | Adds a clear button when not empty (always on for `cui_search`). Hidden for `read_only` fields; `Ctrl+Z` restores the cleared text |
 | `autofocus`, `read_only`, `disabled`, `size`, `width` | |
 

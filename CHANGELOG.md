@@ -11,6 +11,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- A disabled password field's reveal button ignores clicks and is skipped by Tab.
 - After Escape leaves a text field in a dialog, the next Escape can close the dialog.
 - A confirmation popover opened with Enter waits for a separate activation.
 - macOS: Quit from the app menu (Cmd-Q), the Dock or AppleScript ended the process from inside the event loop, so nothing after `cui_app_run` ran: no cleanup, no saving, and libraries that check their resources at exit could crash. It now ends `cui_app_run` (or makes `cui_app_frame` return false) as closing the window does, at once even when the app is idle ([#29](https://github.com/yappologistic/CUI/issues/29)).
