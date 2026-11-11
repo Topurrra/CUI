@@ -422,6 +422,68 @@ static void test_copy_button_focus(void) {
     cui_destroy(ui);
 }
 
+/* Nav items: the group's highlight follows the selected item, and goes away
+ * when no item of the group is selected (issue #35). */
+typedef struct { int sel; bool click; cui_id item[3]; } nav_ctx;
+static void build_nav(cui_ctx *ui, void *u) {
+    nav_ctx *n = u;
+    static const char *const names[] = { "Inbox", "Projects", "Calendar" };
+    cui_column(ui, .pad = 20, .gap = 4, .width = CUI_PX(240)) {
+        for (int k = 0; k < 3; k++) {
+            /* as apps write it: the selection changes when the item reports a click */
+            if (cui_nav_item(ui, names[k], .selected = n->sel == k) && n->click) n->sel = k;
+            n->item[k] = cui_last_id(ui);
+        }
+    }
+}
+/* is the row's left edge painted (the highlight) rather than the background? */
+static bool nav_lit(cui_ctx *ui, cui_id id) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    int w = dd->width_px, h = dd->height_px;
+    unsigned char *px = malloc((size_t)w * h * 4);
+    cui_sw_render(g_sw, dd, px, w, h, w * 4, CUI_SW_RGBA);
+    cui_rect r = rect_of(ui, id);
+    int x = (int)(r.x + 4), y = (int)(r.y + r.h / 2), bx = 600, by = 500;
+    const unsigned char *a = px + ((size_t)y * w + x) * 4, *b = px + ((size_t)by * w + bx) * 4;
+    bool lit = abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]) > 6;
+    free(px);
+    return lit;
+}
+static void test_nav_highlight(void) {
+    printf("nav items: highlight follows the selection, and leaves with it\n");
+    cui_ctx *ui = new_ctx();
+    cui_input_mouse_move(ui, 790, 590);   /* away from the items: no hover */
+    nav_ctx n = { .sel = 0 };
+    run(ui, build_nav, &n, 4);
+    CHECK(nav_lit(ui, n.item[0]) && !nav_lit(ui, n.item[1]) && !nav_lit(ui, n.item[2]));
+    n.sel = -1;                            /* a page that is not in the sidebar */
+    run(ui, build_nav, &n, 4);
+    CHECK(!nav_lit(ui, n.item[0]) && !nav_lit(ui, n.item[1]) && !nav_lit(ui, n.item[2]));
+    n.sel = 2;                             /* back in the sidebar, on another item */
+    run(ui, build_nav, &n, 4);
+    CHECK(!nav_lit(ui, n.item[0]) && !nav_lit(ui, n.item[1]) && nav_lit(ui, n.item[2]));
+    n.sel = 1;                             /* moving between items still works */
+    run(ui, build_nav, &n, 4);
+    CHECK(!nav_lit(ui, n.item[0]) && nav_lit(ui, n.item[1]) && !nav_lit(ui, n.item[2]));
+    cui_destroy(ui);
+    /* with motion: clicking an item above the selected one glides the highlight over the
+     * item between. The click frame has none selected, which must not reset the glide. */
+    ui = new_ctx();
+    cui_set_reduced_motion(ui, false);
+    nav_ctx c = { .sel = 2, .click = true };
+    run(ui, build_nav, &c, 60);
+    cui_rect r0 = rect_of(ui, c.item[0]);
+    click_at(ui, build_nav, &c, r0.x + r0.w / 2, r0.y + r0.h / 2);
+    cui_input_mouse_move(ui, 790, 590);
+    bool passed_middle = false;
+    for (int f = 0; f < 30 && !passed_middle; f++) { run(ui, build_nav, &c, 1); passed_middle = nav_lit(ui, c.item[1]); }
+    CHECK(c.sel == 0);
+    CHECK(passed_middle);
+    run(ui, build_nav, &c, 60);
+    CHECK(nav_lit(ui, c.item[0]) && !nav_lit(ui, c.item[1]) && !nav_lit(ui, c.item[2]));
+    cui_destroy(ui);
+}
+
 /* A click focuses without a ring; the next key shows the ring and acts on
  * that control, unless an open popup above it owns the keyboard. */
 typedef struct { int clicks, sel; cui_id button, select; } ck_ctx;
@@ -7165,6 +7227,7 @@ int main(void) {
     test_click_then_keys();
     test_keyboard_nav();
     test_copy_button_focus();
+    test_nav_highlight();
     test_toggles_and_slider();
     test_text_input();
     test_textarea_and_clear();

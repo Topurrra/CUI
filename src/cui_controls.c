@@ -727,6 +727,8 @@ typedef struct {
     int first_node;
     float target_dy, target_h;
     bool has_target, init;
+    bool has_selected;     /* an item of the group was selected in the frame being built */
+    uint8_t unselected;    /* frames in a row that ended with no item selected */
     cui_spring y, h;
 } cui__nav_group;
 
@@ -747,9 +749,17 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
     cui__spring(ui, &st->press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
     bool first = g->frame != ui->frame;
     if (first) {
+        /* no item selected for two frames in a row: drop the highlight, so the next
+         * selection appears in place instead of gliding from the item selected before.
+         * One frame is not enough: clicking an item above the selected one leaves a frame
+         * with none selected (the click is seen after the old item is drawn unselected). */
+        g->unselected = g->has_selected ? 0 : (uint8_t)(g->unselected < 255 ? g->unselected + 1 : 255);
+        if (g->unselected >= 2) g->has_target = g->init = false;
+        g->has_selected = false;
         g->frame = ui->frame;
         g->first_id = id;
     }
+    if (o->selected) g->has_selected = true;
     if (o->selected && cui__has_prev_rect(ui, id) && cui__has_prev_rect(ui, g->first_id)) {
         cui_rect me = cui__prev_rect(ui, id), f0 = cui__prev_rect(ui, g->first_id);
         g->target_dy = me.y - f0.y;
