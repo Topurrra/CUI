@@ -1098,6 +1098,27 @@ static void build_disclosure(cui_ctx *ui, void *u) {
     }
 }
 
+/** Build the question in the same frame as its keyboard-activated trigger. */
+static void build_confirm_keyboard(cui_ctx *ui, void *user) {
+    bool *confirmed = user;
+    if (cui_button(ui, "Delete item")) cui_popover_open(ui, "delete");
+    *confirmed = cui_confirm_popover(ui, "delete", .title = "Delete this item?", .danger = true);
+}
+
+/** The key that opens the question must not answer it in the same frame. */
+static void test_confirm_popover_keyboard(void) {
+    printf("confirmation popover: a separate Enter confirms\n");
+    cui_ctx *ui = new_ctx();
+    bool confirmed = false;
+    run(ui, build_confirm_keyboard, &confirmed, 1);
+    key(ui, build_confirm_keyboard, &confirmed, CUI_KEY_TAB, 0);
+    key(ui, build_confirm_keyboard, &confirmed, CUI_KEY_ENTER, 0);
+    CHECK(cui_popover_is_open(ui, "delete") && !confirmed);
+    key(ui, build_confirm_keyboard, &confirmed, CUI_KEY_ENTER, 0);
+    CHECK(confirmed && !cui_popover_is_open(ui, "delete"));
+    cui_destroy(ui);
+}
+
 static void test_disclosure(void) {
     printf("disclosure: hover card, confirm popover, expandables, toc, banner, checklist\n");
     cui_ctx *ui = new_ctx();
@@ -7259,6 +7280,7 @@ int main(void) {
     test_strings();
     test_pickers();
     test_disclosure();
+    test_confirm_popover_keyboard();
     test_checklist();
     test_data_grid();
     test_tree_table();

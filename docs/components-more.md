@@ -468,6 +468,8 @@ Focus moves to the confirm button, so Enter confirms and Esc cancels.
 
 Returns true once, on the frame the question is confirmed, and closes itself. The cancel button and a click outside close it too. You keep no state: the popover stays closed until `cui_popover_open(ui, id)` is called with the same `id` in the same id scope. It anchors to the previous component, so call `cui_confirm_popover` on every frame right after the button, not inside the button's `if`. `title` and `description` wrap in a panel 290 points wide. `confirm_label` and `cancel_label` default to "Confirm" and "Cancel", and `danger` gives the confirm button the danger color. A confirm button asks with a second click and no text, and a dialog blocks the whole window.
 
+Press Enter again to confirm a question opened with Enter.
+
 ### Expandable text and card
 
 Long text clamped to a few lines with a Show more link, and a card that opens to show its details.

@@ -2419,7 +2419,8 @@ CUI_API bool cui_hover_card_begin(cui_ctx *ui, const char *id, const cui_hover_c
 CUI_API void cui_hover_card_end(cui_ctx *ui);
 
 /* Confirm popover: a small question anchored to the previous component.
- * Open it with cui_popover_open(ui, id). Returns true when confirmed. */
+ * Open it with cui_popover_open(ui, id). A new Enter press can confirm it.
+ * Returns true when confirmed. */
 typedef struct cui_confirm_popover_opts {
     int _;
     const char *title;            /* the question, in medium weight at the top, e.g. "Delete this file?" */
