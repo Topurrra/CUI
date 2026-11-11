@@ -934,6 +934,34 @@ static void test_navigation_focus_visible(void) {
     cui_destroy(ui);
 }
 
+typedef struct { int page; cui_size width; } unnamed_pager_ctx;
+
+static void build_unnamed_pager(cui_ctx *ui, void *user) {
+    unnamed_pager_ctx *p = user;
+    cui_box(ui, .width = p->width, .pad = 24) {
+        cui_pagination(ui, "pages", &p->page, 12);
+    }
+}
+
+/** A constrained pager fits, while an unconstrained pager keeps its pages. */
+static void test_pagination_unnamed_width(void) {
+    printf("pagination: stays inside an unnamed padded parent\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 360, 160, 1);
+    unnamed_pager_ctx p = { 5, CUI_PX(328) };
+    run(ui, build_unnamed_pager, &p, 3);
+    cui_rect next = cui_last_rect(ui);
+    CHECK(next.w > 0 && next.x + next.w <= 304.5f);
+    cui_destroy(ui);
+
+    ui = new_ctx();
+    p.width = CUI_FIT;
+    run(ui, build_unnamed_pager, &p, 3);
+    next = cui_last_rect(ui);
+    CHECK(next.x + next.w > 304.5f);
+    cui_destroy(ui);
+}
+
 static void test_more_inputs(void) {
     printf("inputs: inline edit, scrub, money, shortcut recorder\n");
     cui_ctx *ui = new_ctx();
@@ -7386,6 +7414,7 @@ static void inc_update(void *u, cui_texture t, int x, int y, int w, int h, const
 static void inc_destroy(void *u, cui_texture t) {
     (void)u;
     cui_renderer_iface a = cui_sw_iface(inc_a), b = cui_sw_iface(inc_b);
+    test_pagination_unnamed_width();
     test_navigation_focus_visible();
     a.texture_destroy(a.user, t);
     b.texture_destroy(b.user, t);

@@ -919,23 +919,41 @@ static bool cui__page_button(cui_ctx *ui, cui_id id, const char *text, bool sele
     return r.clicked;
 }
 
+enum { CUI__PAGER_WIDE_WIDTH = 2 * 36 + 7 * 32 + 8 * 2 };
+typedef struct { float available; bool measured; } cui__pager_width;
+
+/** Read the parent's inner width after layout, even when the parent has no ID. */
+static void cui__measure_pager_width(cui_ctx *ui, cui_node *row, void *data) {
+    cui__pager_width *width = data;
+    const cui_node *parent = &ui->nodes[row->parent];
+    float available = parent->rect.w - parent->pad[1] - parent->pad[3];
+    if ((available < CUI__PAGER_WIDE_WIDTH) != (width->available < CUI__PAGER_WIDE_WIDTH))
+        ui->animating = true;
+    width->available = available;
+    width->measured = true;
+}
+
+/** Choose how many page buttons fit the container's measured content width. */
 bool cui_pagination(cui_ctx *ui, const char *id_str, int *page, int page_count) {
     if (page_count < 1) page_count = 1;
     int old = *page;
     cui_push_id(ui, id_str);
     int row = cui__node_new(ui, 0);
     ui->nodes[row].dir = CUI_ROW; ui->nodes[row].gap = 2; ui->nodes[row].self_align = CUI__ALIGN_NOSTRETCH;
+    bool compact = false;
+    if (page_count > 7 && ui->nodes[row].parent >= 0) {
+        cui__pager_width *width = cui_state(ui, cui_make_id(ui, "#pager-width"), sizeof *width);
+        if (!width->measured) width->available = cui_viewport_size(ui).x - 32;
+        compact = width->available < CUI__PAGER_WIDE_WIDTH;
+        ui->nodes[row].paint = cui__measure_pager_width;
+        ui->nodes[row].paint_data = width;
+    }
     cui__open(ui, row);
     cui_button_opts bo;
     memset(&bo, 0, sizeof bo);
     bo.size = CUI_SIZE_MD; bo.tooltip = "Previous page"; bo.disabled = *page <= 0;
     if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_LEFT, &bo)) (*page)--;
     int pages[9], n = 0;
-    /* in a narrow parent (a phone) the pager keeps first, current and last: five slots, not seven */
-    cui_node *par = row > 0 ? &ui->nodes[ui->nodes[row].parent] : NULL;
-    cui_rect ppr = par && par->id ? cui__prev_rect(ui, par->id) : (cui_rect){ 0, 0, 0, 0 };
-    float pavail = ppr.w > 0 ? ppr.w - (par ? par->pad[1] + par->pad[3] : 0) : cui_viewport_size(ui).x - 32;
-    bool compact = page_count > 7 && pavail < 2 * 36 + 7 * 32 + 8 * 2;
     if (page_count <= 7) { for (int k = 0; k < page_count; k++) pages[n++] = k; }
     else if (compact) {
         pages[n++] = 0;
