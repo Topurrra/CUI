@@ -1589,7 +1589,27 @@ static void test_tree_table(void) {
     key(ui, build_pbar, &p, CUI_KEY_DOWN, 0);
     key(ui, build_pbar, &p, CUI_KEY_ENTER, 0);
     CHECK(p.clicked >= 0 && p.clicked < 7);   /* a collapsed segment, chosen in the menu */
+    /* by keyboard alone: Tab past the first segment to "...", open it with Enter or Space,
+     * and Enter on the highlighted item picks it instead of closing the menu */
+    int first_hidden = p.clicked;
     cui_destroy(ui);
+    cui_key openers[] = { CUI_KEY_ENTER, CUI_KEY_SPACE };
+    for (int o = 0; o < 2; o++) {
+        ui = new_ctx();
+        cui_set_viewport(ui, 320, 400, 1);
+        memset(&p, 0, sizeof p);
+        p.segs = segs; p.count = 8; p.clicked = -1; p.menu_seg = -1;
+        run(ui, build_pbar, &p, 4);
+        key(ui, build_pbar, &p, CUI_KEY_TAB, 0);
+        key(ui, build_pbar, &p, CUI_KEY_TAB, 0);
+        key(ui, build_pbar, &p, openers[o], 0);
+        run(ui, build_pbar, &p, 20);
+        CHECK(p.clicked == -1);
+        key(ui, build_pbar, &p, CUI_KEY_DOWN, 0);
+        key(ui, build_pbar, &p, CUI_KEY_ENTER, 0);
+        CHECK(p.clicked == first_hidden);
+        cui_destroy(ui);
+    }
 }
 
 static void test_text_capacity(void) {

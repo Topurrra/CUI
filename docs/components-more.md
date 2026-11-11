@@ -683,6 +683,8 @@ When the table is narrower than its columns, columns with a `priority` hide, the
 
 The path bar is a breadcrumb for file and scene paths, styled like `cui_breadcrumb`. Every segment except the last is a button that reports `clicked`; the last one is where you are. When the bar is too narrow, middle segments collapse into a "..." menu, starting after the first. If there is still not enough room, the first goes too, and the current segment is cut short last. With `.menus`, the chevron after a segment opens a menu that you fill between `cui_path_bar_menu_begin` and `cui_path_bar_menu_end` with that segment's children, which are the siblings of the next segment. To type a path, click the empty part of the bar or the current segment, or press Ctrl+L when no text field has the keyboard. The bar becomes a text field holding the whole path (`.text`, or the segments joined by "/"), all selected. Enter reports `submitted`; Esc or clicking away puts the segments back. `.no_edit` turns typing off.
 
+Keyboard: Tab stops on each segment and on "...", and Enter or Space presses the focused one. In the "..." menu, Up and Down move the highlight, Enter chooses the segment and Esc closes the menu.
+
 ### File browser and picker
 
 A folder view with sorting and navigation, and the open and save dialogs built from it.
