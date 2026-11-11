@@ -163,7 +163,9 @@ cui_range_slider(ui, "Price", &lo, &hi, 0, 500);
 
 Drag past either end and the track stretches like rubber, then springs back on release. Clicking the track glides the thumb to the spot. Options: `step`, `show_value`, `format`, `disabled`, `width`. Keyboard: arrows step (Shift for 10 steps), Home and End.
 
-Both return true on a frame the value changes. `volume` is your `float`. The slider writes it while it is dragged and keeps it between the minimum and the maximum, so a value set outside the range is pulled back in. `format` is a `printf` format for one `double` and defaults to "%.0f". The label is also the identity: two sliders with the same label in one scope need a key, as in `"Volume##left"`. `cui_range_slider` takes two floats and no options; its thumbs cannot cross and are moved with the pointer only.
+Both return true on a frame the value changes. `volume` is your `float`. The slider writes it while it is dragged and keeps it between the minimum and the maximum, so a value set outside the range is pulled back in. `format` is a `printf` format for one `double` and defaults to "%.0f". The label is also the identity: two sliders with the same label in one scope need a key, as in `"Volume##left"`. `cui_range_slider` takes two floats and no options. Its thumbs cannot cross.
+
+Tab focuses the range slider. Space switches the focused thumb. An arrow moves it by one percent of the range, or ten percent with Shift. Home and End move it as far as it can go without crossing the other thumb.
 
 ## Chips and rating
 

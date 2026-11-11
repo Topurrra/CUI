@@ -868,6 +868,39 @@ static void build_more_inputs(cui_ctx *ui, void *u) {
     }
 }
 
+typedef struct { float lo, hi, other; } range_keyboard_ctx;
+
+static void build_range_keyboard(cui_ctx *ui, void *user) {
+    range_keyboard_ctx *r = user;
+    cui_range_slider(ui, "Range", &r->lo, &r->hi, 0, 100);
+    cui_slider(ui, "Other", &r->other, 0, 100);
+}
+
+/** Exercise both thumbs and leave the range slider with an ordinary Tab. */
+static void test_range_slider_keyboard(void) {
+    printf("range slider: keyboard adjustment of both thumbs\n");
+    cui_ctx *ui = new_ctx();
+    range_keyboard_ctx r = { 20, 75, 40 };
+    run(ui, build_range_keyboard, &r, 1);
+    int unfocused_vertices = cui_get_draw_data(ui)->vertex_count;
+    key(ui, build_range_keyboard, &r, CUI_KEY_TAB, 0);
+    CHECK(cui_get_draw_data(ui)->vertex_count > unfocused_vertices);
+    key(ui, build_range_keyboard, &r, CUI_KEY_RIGHT, 0);
+    CHECK_NEAR(r.lo, 21, 0.01);
+    CHECK_NEAR(r.hi, 75, 0.01);
+    key(ui, build_range_keyboard, &r, CUI_KEY_END, 0);
+    CHECK_NEAR(r.lo, 75, 0.01);
+    key(ui, build_range_keyboard, &r, CUI_KEY_SPACE, 0);
+    key(ui, build_range_keyboard, &r, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    CHECK_NEAR(r.lo, 75, 0.01);
+    CHECK_NEAR(r.hi, 85, 0.01);
+    key(ui, build_range_keyboard, &r, CUI_KEY_TAB, 0);
+    key(ui, build_range_keyboard, &r, CUI_KEY_RIGHT, 0);
+    CHECK_NEAR(r.other, 41, 0.01);
+    CHECK_NEAR(r.hi, 85, 0.01);
+    cui_destroy(ui);
+}
+
 static void test_more_inputs(void) {
     printf("inputs: inline edit, scrub, money, shortcut recorder\n");
     cui_ctx *ui = new_ctx();
@@ -7445,6 +7478,7 @@ int main(void) {
     test_more_actions();
     test_toggle_group_arrows();
     test_more_inputs();
+    test_range_slider_keyboard();
     test_swipe();
     test_date_math();
     test_strings();

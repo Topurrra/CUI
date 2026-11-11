@@ -192,7 +192,11 @@ typedef struct {
     bool rtl;   /* the direction the track was laid out in last frame (set when painted) */
 } cui__slider_state;
 
-typedef struct { float t, over, hover, active, focus; bool disabled; float lo_t; bool range; bool *rtl_out; } cui__slider_paint;
+typedef struct {
+    float t, over, hover, active, focus, lo_t;
+    bool disabled, range, focus_low;
+    bool *rtl_out;
+} cui__slider_paint;
 
 static float cui__rubber(float d) {
     /* stretch that grows fast at first then saturates, like rubber */
@@ -201,6 +205,7 @@ static float cui__rubber(float d) {
     return s * 22.0f * (1.0f - expf(-a / 70.0f));
 }
 
+/** Paint the ring over both thumbs so it remains visible where they meet. */
 static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
     cui__slider_paint *p = data;
     cui_rect r = n->rect;
@@ -233,6 +238,7 @@ static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_rect(ui, fill, CUI_CORNERS(th * 0.5f), CUI_C(ui, CONTROL_ON));
     float positions[2] = { tpos, fstart };
     int thumbs = p->range ? 2 : 1;
+    cui_rect focused_thumb = { 0 };
     for (int k = 0; k < thumbs; k++) {
         float ts = thumb * (1.0f + 0.08f * p->hover - 0.06f * p->active);
         cui_rect tr = { positions[k] - ts * 0.5f, cy - ts * 0.5f, ts, ts };
@@ -241,8 +247,9 @@ static void cui__paint_slider(cui_ctx *ui, cui_node *n, void *data) {
         cui_draw_shadow(ui, tr, CUI_CORNERS(ts * 0.5f), 2, 0, o1, cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 90 : 38));
         cui_draw_shadow(ui, tr, CUI_CORNERS(ts * 0.5f), 6, 0, o2, cui__rgba(0, 0, 0, ui->mode == CUI_THEME_DARK ? 50 : 16));
         cui_draw_rect_border(ui, tr, CUI_CORNERS(ts * 0.5f), CUI_C(ui, CONTROL_THUMB), cui__rgba(0, 0, 0, 22), 0.5f);
-        if (k == 0) cui__draw_focus_ring(ui, tr, CUI_CORNERS(ts * 0.5f), p->focus);
+        if (k == (p->focus_low ? 1 : 0)) focused_thumb = tr;
     }
+    cui__draw_focus_ring(ui, focused_thumb, CUI_CORNERS(focused_thumb.w * 0.5f), p->focus);
 #undef CUI__MIRROR
 }
 
@@ -260,6 +267,18 @@ static void cui__slider_header(cui_ctx *ui, const char *label, const char *value
     cui__close(ui);
 }
 
+/** Apply the same keyboard increments and reading direction to every thumb. */
+static float cui__slider_keys(cui_ctx *ui, float t, float step, bool rtl) {
+    cui_key less = rtl ? CUI_KEY_RIGHT : CUI_KEY_LEFT, more = rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT;
+    if (ui->mods & CUI_MOD_SHIFT) step *= 10;
+    if (cui_key_pressed(ui, less) || cui_key_pressed(ui, CUI_KEY_DOWN)) t -= step;
+    if (cui_key_pressed(ui, more) || cui_key_pressed(ui, CUI_KEY_UP)) t += step;
+    if (cui_key_pressed(ui, CUI_KEY_HOME)) t = 0;
+    if (cui_key_pressed(ui, CUI_KEY_END)) t = 1;
+    return cui__clampf(t, 0, 1);
+}
+
+/** A single-thumb slider uses a caller-supplied step or one percent of its range. */
 bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_slider_opts *o) {
     cui_slider_opts d;
     memset(&d, 0, sizeof d);
@@ -298,12 +317,7 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     /* keyboard */
     if (r.focused) {
         float step = o->step > 0 ? o->step / (max - min) : 0.01f;
-        cui_key less = st->rtl ? CUI_KEY_RIGHT : CUI_KEY_LEFT, more = st->rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT;
-        if (cui_key_pressed(ui, less) || cui_key_pressed(ui, CUI_KEY_DOWN)) t -= step * ((ui->mods & CUI_MOD_SHIFT) ? 10 : 1);
-        if (cui_key_pressed(ui, more) || cui_key_pressed(ui, CUI_KEY_UP)) t += step * ((ui->mods & CUI_MOD_SHIFT) ? 10 : 1);
-        if (cui_key_pressed(ui, CUI_KEY_HOME)) t = 0;
-        if (cui_key_pressed(ui, CUI_KEY_END)) t = 1;
-        t = cui__clampf(t, 0, 1);
+        t = cui__slider_keys(ui, t, step, st->rtl);
     }
     float v = min + t * (max - min);
     if (o->step > 0) v = min + roundf((v - min) / o->step) * o->step;
@@ -340,8 +354,9 @@ bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, floa
     return *value != old;
 }
 
-typedef struct { int grabbed; cui_spring a, b; float hover; bool init; bool rtl; } cui__range_state;
+typedef struct { int grabbed; cui_spring a, b; float hover, focus; bool init; bool rtl; } cui__range_state;
 
+/** The range has one Tab stop. Space switches the thumb moved by the slider keys. */
 bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, float min, float max) {
     if (max <= min) max = min + 1;
     cui_id id = cui_make_id(ui, label ? label : "range");
@@ -358,12 +373,18 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
         float mt = cui__clampf((mx - x0) / (x1 - x0), 0, 1);
         if (ui->mpressed[0]) st->grabbed = fabsf(mt - ta) < fabsf(mt - tb) ? 0 : 1;
         if (st->grabbed == 0) ta = CUI_MIN(mt, tb); else tb = CUI_MAX(mt, ta);
+    } else if (r.focused) {
+        if (cui_key_pressed(ui, CUI_KEY_SPACE)) st->grabbed = 1 - st->grabbed;
+        float thumb = cui__slider_keys(ui, st->grabbed == 0 ? ta : tb, 0.01f, st->rtl);
+        if (st->grabbed == 0) ta = CUI_MIN(thumb, tb);
+        else tb = CUI_MAX(thumb, ta);
     }
     *lo = min + ta * (max - min);
     *hi = min + tb * (max - min);
     cui__spring(ui, &st->a, ta, 0.22f, 0);
     cui__spring(ui, &st->b, tb, 0.22f, 0);
     cui__tween(ui, &st->hover, (r.hovered || r.active) ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     int col = cui__node_new(ui, id);
     ui->nodes[col].gap = 6;
     ui->nodes[col].w = CUI_FILL;
@@ -375,6 +396,7 @@ bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, floa
     cui__mark_interactive(ui, tr, CUI_IF_FOCUSABLE);
     cui__slider_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->t = st->b.x; p->lo_t = st->a.x; p->range = true; p->hover = st->hover;
+    p->focus = st->focus; p->focus_low = st->grabbed == 0;
     p->rtl_out = &st->rtl;
     ui->nodes[tr].paint = cui__paint_slider;
     ui->nodes[tr].paint_data = p;

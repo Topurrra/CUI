@@ -604,6 +604,8 @@ typedef struct cui_slider_opts {
 } cui_slider_opts;
 /* Elastic slider: the track stretches like rubber when dragged past its ends. */
 CUI_API bool cui_slider_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_slider_opts *opts);
+/* Range slider with two non-crossing thumbs. Tab focuses the range, Space
+ * selects the other thumb, and the slider keys adjust the focused thumb. */
 CUI_API bool cui_range_slider(cui_ctx *ui, const char *label, float *lo, float *hi, float min, float max);
 CUI_API bool cui_rating(cui_ctx *ui, const char *id, int *value, int max);
 
