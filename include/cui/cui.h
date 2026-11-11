@@ -697,6 +697,7 @@ typedef struct cui_nav_opts {
 } cui_nav_opts;
 CUI_API bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *opts);
 CUI_API void cui_nav_section(cui_ctx *ui, const char *title);
+/* Process steps that collapse labels to fit the width of their own row. */
 
 /* Ancestor links show keyboard focus. Returns the activated index or -1. */
 CUI_API int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count);

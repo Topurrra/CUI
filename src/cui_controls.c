@@ -1011,11 +1011,24 @@ static void cui__paint_step(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
+/** Key the measurement by its layout slot, including anonymous ancestors.
+ * Sibling reflow changes descendant counts, so use only sibling positions. */
+static cui_id cui__stepper_layout_id(cui_ctx *ui) {
+    cui_id id = cui_make_id(ui, "#stepper");
+    for (int depth = ui->parent_depth - 1; depth >= 0; depth--) {
+        const cui_node *parent = &ui->nodes[ui->parents[depth]];
+        id = cui__hash(&parent->child_count, sizeof parent->child_count, id);
+        if (parent->id) return cui__hash(&parent->id, sizeof parent->id, id);
+    }
+    return id;
+}
+
+/** Each stepper adapts to its own width, even when captions repeat elsewhere. */
 void cui_stepper(cui_ctx *ui, const char *const *steps, int count, int current) {
     /* narrower than every label needs (a phone), only the current step keeps its label;
        the others show their circle, so nothing is cut to "Ac..." */
-    cui_id sid = count > 0 && steps[0] ? cui_make_id(ui, steps[0]) ^ 0x57E9u : 0;
-    cui_rect pr = sid ? cui__prev_rect(ui, sid) : (cui_rect){ 0, 0, 0, 0 };
+    cui_id sid = cui__stepper_layout_id(ui);
+    cui_rect pr = cui__prev_rect(ui, sid);
     float need = 0, fs = cui__fs(ui, ui->theme.text_body);
     for (int k = 0; k < count; k++)
         need += 32 + cui__text_width(ui, k == current ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, steps[k] ? steps[k] : "", -1, false) + (k < count - 1 ? 36 : 0);

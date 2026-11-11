@@ -11,6 +11,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- Steppers with repeated captions adapt independently to the width of their own rows.
 - Pagination uses its parent's inner width to choose the compact layout, including in unnamed boxes.
 - Breadcrumb links and numbered page buttons show a focus ring when reached by keyboard.
 - The range slider supports adjusting either thumb with the keyboard and shows which thumb has focus.

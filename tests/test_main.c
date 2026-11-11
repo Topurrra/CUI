@@ -962,6 +962,40 @@ static void test_pagination_unnamed_width(void) {
     cui_destroy(ui);
 }
 
+/** Render the narrow stepper with and without an unrelated, wider sibling. */
+static void render_stepper_pair(bool sibling, unsigned char *pixels) {
+    enum { width = 950, height = 80 };
+    const char *steps[] = { "Account", "Workspace", "Invite team", "Done" };
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, width, height, 1);
+    for (int frame = 0; frame < 3; frame++) {
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        cui_row(ui, .gap = 16, .pad = 8) {
+            cui_box(ui, .width = CUI_PX(280)) cui_stepper(ui, steps, 4, 1);
+            if (sibling) {
+                cui_box(ui, .width = CUI_PX(620)) cui_stepper(ui, steps, 4, 1);
+            }
+        }
+        cui_end_frame(ui);
+    }
+    cui_sw_render(g_sw, cui_get_draw_data(ui), pixels, width, height, width * 4, CUI_SW_RGBA);
+    cui_destroy(ui);
+}
+
+/** The wide stepper must not change the narrow one's rendered captions. */
+static void test_stepper_width_isolation(void) {
+    printf("stepper: duplicate captions do not share measured width\n");
+    enum { height = 80, stride = 950 * 4, left_column = 288 * 4 };
+    unsigned char alone[height * stride], pair[height * stride];
+    render_stepper_pair(false, alone);
+    render_stepper_pair(true, pair);
+    bool same = true;
+    for (int y = 0; y < height; y++) {
+        if (memcmp(alone + y * stride, pair + y * stride, left_column) != 0) same = false;
+    }
+    CHECK(same);
+}
+
 static void test_more_inputs(void) {
     printf("inputs: inline edit, scrub, money, shortcut recorder\n");
     cui_ctx *ui = new_ctx();
@@ -7414,6 +7448,7 @@ static void inc_update(void *u, cui_texture t, int x, int y, int w, int h, const
 static void inc_destroy(void *u, cui_texture t) {
     (void)u;
     cui_renderer_iface a = cui_sw_iface(inc_a), b = cui_sw_iface(inc_b);
+    test_stepper_width_isolation();
     test_pagination_unnamed_width();
     test_navigation_focus_visible();
     a.texture_destroy(a.user, t);
