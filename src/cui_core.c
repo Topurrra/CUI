@@ -735,12 +735,12 @@ float cui_animate_spring(cui_ctx *ui, cui_id id, float target, float duration, f
 /* Frame                                                                    */
 /* ------------------------------------------------------------------------ */
 
+/** Advance timers by elapsed time and cap only the animation step after idle. */
 void cui_begin_frame(cui_ctx *ui, float dt) {
     if (ui->in_frame) cui_end_frame(ui);
-    if (dt < 0) dt = 0;
-    if (dt > 0.25f) dt = 0.25f;
+    if (!isfinite(dt) || dt < 0) dt = 0;
     ui->in_frame = true;
-    ui->dt = dt;
+    ui->dt = CUI_MIN(dt, 0.25f);
     ui->time += dt;
     ui->frame++;
     ui->animating = false;

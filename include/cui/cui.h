@@ -197,7 +197,8 @@ CUI_API void cui_set_viewport(cui_ctx *ui, float width, float height, float scal
 CUI_API cui_vec2 cui_viewport_size(cui_ctx *ui);
 CUI_API float cui_dpi_scale(cui_ctx *ui);
 
-/* dt is the time since the previous frame in seconds. */
+/* dt is the elapsed time since the previous frame in seconds.
+ * Timers use the full interval. Animation steps are capped after idle. */
 CUI_API void cui_begin_frame(cui_ctx *ui, float dt);
 CUI_API void cui_end_frame(cui_ctx *ui);
 
@@ -817,7 +818,7 @@ typedef struct cui_toast_opts {
     bool show_timer;           /* a draining line shows how long the action stays (undo) */
 } cui_toast_opts;
 /* Queue a toast. Returns a handle; cui_toast_action_clicked(handle) tells
- * whether its action button was pressed. */
+ * whether its action button was pressed before the toast started closing. */
 CUI_API int cui_toast_ex(cui_ctx *ui, const char *title, const cui_toast_opts *opts);
 CUI_API bool cui_toast_action_clicked(cui_ctx *ui, int handle);
 CUI_API void cui_toast_dismiss(cui_ctx *ui, int handle);

@@ -11,6 +11,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- Timed toasts expire on schedule after idle, and their actions stop accepting input once dismissal begins.
 - A disabled password field's reveal button ignores clicks and is skipped by Tab.
 - After Escape leaves a text field in a dialog, the next Escape can close the dialog.
 - A confirmation popover opened with Enter waits for a separate activation.

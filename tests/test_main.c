@@ -1916,6 +1916,56 @@ static void build_extras(cui_ctx *ui, void *u) {
     }
 }
 
+static void advance_toast(cui_ctx *ui, float elapsed) {
+    cui_begin_frame(ui, elapsed);
+    cui_end_frame(ui);
+}
+
+/** Timed toasts expire after an idle wake and stop accepting input on exit. */
+static void test_toast_deadline(void) {
+    printf("toast: idle deadline and expired action\n");
+    cui_ctx *ui = new_ctx();
+    cui_input_mouse_leave(ui);
+    cui_begin_frame(ui, 0);
+    cui_toast(ui, "Idle notice", .duration = 1.2f);
+    cui_end_frame(ui);
+    float wake = cui_next_wakeup(ui);
+    CHECK(wake >= 1.2f && wake < 1.3f);
+    advance_toast(ui, wake);
+    CHECK(cui_next_wakeup(ui) < 0);
+    cui_destroy(ui);
+
+    ui = new_ctx();
+    cui_begin_frame(ui, 0);
+    cui_toast(ui, "Pause on hover", .duration = 1.2f);
+    cui_end_frame(ui);
+    cui_input_mouse_move(ui, 700, 550);
+    advance_toast(ui, 0.1f);
+    advance_toast(ui, 2.0f);
+    CHECK(cui_next_wakeup(ui) < 0);
+    cui_input_mouse_leave(ui);
+    advance_toast(ui, 0);
+    wake = cui_next_wakeup(ui);
+    CHECK(wake > 1.0f && wake < 1.3f);
+    cui_destroy(ui);
+
+    ui = new_ctx();
+    cui_input_mouse_leave(ui);
+    cui_set_reduced_motion(ui, false);
+    cui_begin_frame(ui, 0);
+    int handle = cui_toast(ui, "Message archived", .duration = 1.0f, .action = "Undo");
+    cui_end_frame(ui);
+    cui_input_key(ui, CUI_KEY_TAB, true, 0);
+    cui_input_key(ui, CUI_KEY_TAB, false, 0);
+    advance_toast(ui, 0.01f);
+    for (int i = 0; i < 49; i++) advance_toast(ui, 0.02f);
+    cui_input_key(ui, CUI_KEY_ENTER, true, 0);
+    cui_input_key(ui, CUI_KEY_ENTER, false, 0);
+    advance_toast(ui, 0.02f);
+    CHECK(!cui_toast_action_clicked(ui, handle));
+    cui_destroy(ui);
+}
+
 static void test_extras(void) {
     printf("extras: tag input, one time code, hold to confirm\n");
     cui_ctx *ui = new_ctx();
@@ -7386,6 +7436,7 @@ int main(void) {
     test_menu();
     test_focus_trap();
     test_extras();
+    test_toast_deadline();
     test_reorder();
     test_chrome();
     test_dock();

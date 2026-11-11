@@ -415,6 +415,7 @@ typedef struct cui_popup {
 } cui_popup;
 
 typedef struct cui_toast_item {
+    double last_tick;
     int handle;
     char title[128];
     char desc[256];

@@ -463,7 +463,7 @@ if (cui_toast_action_clicked(ui, t)) undo();
 
 Toasts stack in the bottom right corner. Older toasts tuck behind the newest one; hovering expands the stack and pauses the timers. Drag a toast right to dismiss it: a fling or a long drag carries its speed off the screen, a short one springs back, and dragging left meets rubbery resistance. Options: `description`, `tone`, `duration` (seconds, default 4, negative to keep), `action`. Use toasts for background events; for the result of a button press, change the button instead.
 
-Keyboard: a toast's action button takes Tab, and Enter or Space presses it. Toasts never take the focus by themselves.
+Tab reaches a visible toast's action button, and Enter or Space activates it until dismissal begins. Toasts never take focus by themselves.
 
 ## Command palette
 
