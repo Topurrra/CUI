@@ -1639,6 +1639,155 @@ static void page_instruments(cui_ctx *ui) {
     cui_dot_display(ui, bed > 50 ? "OVER THE LINE AT BEDTIME" : "UNDER THE LINE AT BEDTIME", .pitch = 3, .accent = bed > 50);
 }
 
+/* ---- canvas and bars ------------------------------------------------------- */
+
+/* a picture for the result card, made here: a sky, a low sun and soft hills */
+static cui_texture canvas_picture(cui_ctx *ui) {
+    static cui_ctx *made_for;
+    static cui_texture tex;
+    if (made_for == ui && tex) return tex;
+    enum { W = 288, H = 360 };
+    static unsigned char px[W * H * 4];
+    static const float hills[3][4] = { { 0.18f, 1.04f, 0.54f, 0.26f }, { 0.92f, 1.08f, 0.53f, 0.26f }, { 0.5f, 1.18f, 0.64f, 0.28f } };
+    static const float tint[3][3] = { { 238, 143, 120 }, { 184, 96, 106 }, { 122, 63, 82 } };
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            float acc[3] = { 0, 0, 0 };
+            for (int s = 0; s < 4; s++) {   /* four samples a pixel, for smooth edges */
+                float fx = x + 0.25f + 0.5f * (s & 1), fy = y + 0.25f + 0.5f * (s >> 1), v = fy / H, c[3];
+                float k = v < 0.48f ? v / 0.48f : (v - 0.48f) / 0.52f;
+                if (v < 0.48f) { c[0] = 118 + 67 * k; c[1] = 169 + 43 * k; c[2] = 236 + 10 * k; }
+                else { c[0] = 185 + 57 * k; c[1] = 212 + 5 * k; c[2] = 246 - 43 * k; }
+                float dx = fx - W * 0.66f, dy = fy - H * 0.32f, d = sqrtf(dx * dx + dy * dy) / W;
+                float sun = d < 0.08f ? 1 : d < 0.24f ? 0.55f * (1 - (d - 0.09f) / 0.15f) : 0;
+                if (sun > 1) sun = 1;
+                c[0] += (255 - c[0]) * sun; c[1] += (247 - c[1]) * sun; c[2] += (236 - c[2]) * sun;
+                for (int h = 0; h < 3; h++) {
+                    float ex = (fx / W - hills[h][0]) / hills[h][2], ey = (v - hills[h][1]) / hills[h][3];
+                    if (ex * ex + ey * ey < 1) { c[0] = tint[h][0]; c[1] = tint[h][1]; c[2] = tint[h][2]; }
+                }
+                for (int i = 0; i < 3; i++) acc[i] += c[i] * 0.25f;
+            }
+            unsigned char *p = &px[(y * W + x) * 4];
+            p[0] = (unsigned char)acc[0]; p[1] = (unsigned char)acc[1]; p[2] = (unsigned char)acc[2]; p[3] = 255;
+        }
+    tex = cui_image_create(ui, W, H, px);
+    made_for = ui;
+    return tex;
+}
+
+static void page_canvas(cui_ctx *ui) {
+    section(ui, "Grouped toolbar", "Raised groups in one pill, an inset set of modes and a primary action. Narrow the window and the end folds into the \xe2\x80\x9cmore\xe2\x80\x9d menu.");
+    static bool numbers = true, bold, italic;
+    static int mode;
+    static const char *const modes[] = { CUI_ICON_MOVE, CUI_ICON_SQUARE_PEN, CUI_ICON_TYPE };
+    static const char *const mode_names[] = { "Move", "Draw", "Text" };
+    cui_toolbar(ui, "canvas-tools", .style = CUI_TOOLBAR_GROUPED) {
+        cui_toolbar_group(ui) {
+            cui_toolbar_button(ui, CUI_ICON_UNDO_2, .tooltip = "Undo", .shortcut = "Ctrl Z");
+            cui_toolbar_button(ui, CUI_ICON_REDO_2, .tooltip = "Redo", .shortcut = "Ctrl Shift Z");
+        }
+        cui_toolbar_group(ui) {
+            cui_toolbar_button(ui, NULL, .label = "123", .tooltip = "Numbers", .toggle = &numbers);
+            cui_toolbar_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .toggle = &bold);
+            cui_toolbar_button(ui, CUI_ICON_ITALIC, .tooltip = "Italic", .toggle = &italic);
+            cui_toolbar_radio(ui, "mode", modes, 3, &mode, .labels = mode_names);
+        }
+        cui_toolbar_primary(ui, CUI_ICON_SPARKLES, .tooltip = "Generate");
+    }
+
+    section(ui, "Format bar", "Color, bold, underline, link, the text style (each previewed at its size), alignment and lists. Delete asks first.");
+    static cui_text_format fmt = { CUI_TONE_ROSE, true, false, false, 0, 44, CUI_FORMAT_ALIGN_LEFT, CUI_FORMAT_LIST_NONE };
+    static int deleted;
+    int fr = cui_format_bar(ui, "format", &fmt);
+    if (fr & CUI_FORMAT_DELETE) deleted++;
+    if (fr & CUI_FORMAT_LINK) fmt.link = !fmt.link;
+    char note[64];
+    if (deleted) snprintf(note, sizeof note, "Deleted %d time%s.", deleted, deleted == 1 ? "" : "s");
+    cui_muted(ui, deleted ? note : "The bar edits one struct; the app applies it to the selection.");
+
+    section(ui, "Live cursors and canvas controls", "Three people on one canvas: their pointers glide to where they move, one talks, one has a node selected. The rail zooms in steps; click the percentage to reset.");
+    static cui_node_view view = { 10, 6, 1 };
+    static float nodes[3][2] = { { 36, 64 }, { 36, 206 }, { 330, 124 } };
+    static bool grid = true, layers;
+    cui_live_user people[3] = {
+        { .name = "Paul", .tone = CUI_TONE_WARNING, .speaking = true },
+        { .name = "Kate", .tone = CUI_TONE_INFO, .says = "Bumping steps to 40?" },
+        { .name = "Mario", .tone = CUI_TONE_ROSE },
+    };
+    /* the app would send positions from the network; here each person picks a new spot every couple of seconds */
+    double now = cui_time(ui);
+    for (int k = 0; k < 3; k++) {
+        unsigned step = (unsigned)(now / (1.6 + 0.4 * k)), h = step * 2654435761u + (unsigned)k * 40503u;
+        people[k].x = 60 + (float)(h % 420);
+        people[k].y = 60 + (float)((h >> 12) % 220);
+        if (k == 1) people[k].says = (step % 3) ? "Bumping steps to 40?" : NULL;
+    }
+    cui_request_wakeup(ui, 0.4f);
+    cui_canvas_toggle toggles[] = { { CUI_ICON_EYE, "Show grid", &grid }, { CUI_ICON_LAYERS, "Layers", &layers } };
+    cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL, .height = CUI_PX(360), .radius = 14, .clip = true) {
+        if (cui_node_editor_begin(ui, "canvas-graph", &view, .height = CUI_PX(360), .no_grid = !grid)) {
+            static const char *titles[3] = { "Positive", "Negative", "Generate" };
+            static const char *bodies[3] = { "A black bear, minimalist style, soft gradients", "No text, no people", "Steps 30 \xc2\xb7 dpm++ 2M" };
+            for (int i = 0; i < 3; i++) {
+                cui_node_begin(ui, i, &nodes[i][0], &nodes[i][1], titles[i], .width = 184);
+                if (i < 2) cui_node_output(ui, i + 1, i == 0 ? "Prompt" : "Avoid", .type = 1);
+                else { cui_node_input(ui, 3, "Prompt", .type = 1); cui_node_input(ui, 4, "Avoid", .type = 1); }
+                cui_node_content(ui) { cui_text(ui, bodies[i], .size = 12, .color = CUI_COLOR_TEXT_SECONDARY); }
+                cui_node_end(ui);
+                if (i == 2) cui_selection_ring(ui, cui_color_of(ui, CUI_COLOR_WARNING), .name = "Paul");
+            }
+            cui_node_link(ui, 1, 1, 3);
+            cui_node_link(ui, 2, 2, 4);
+            cui_node_editor_end(ui);
+        }
+        cui_rect bounds = { nodes[0][0], nodes[0][1], nodes[2][0] + 184 - nodes[0][0], 290 };
+        cui_canvas_controls(ui, "canvas-zoom", &view, .content = bounds, .toggles = toggles, .toggle_count = 2);
+        cui_live_cursors(ui, "canvas-people", people, 3, .view = &view);
+        cui_box(ui, .pad = 12) { cui_presence_pill(ui, "canvas-here", people, 3); }
+    }
+
+    section(ui, "Result card and selection bar", "A picture with its status and caption, and its actions in a floating toolbar. Tick files and a bar slides up; Esc clears.");
+    static bool saved;
+    static int scale = 1, type;
+    static const char *const scales[] = { "1x", "2x", "4x" }, *const types[] = { "PNG", "JPG", "WEBP" };
+    static bool picked[5] = { true, true, true, false, false };
+    static const char *names[] = { "hero-dark.png", "hero-light.png", "social-card.png", "icon-512.png", "thumb@2x.png" };
+    static const char *sizes[] = { "2.4 MB", "2.3 MB", "812 KB", "96 KB", "140 KB" };
+    static const cui_selection_action acts[] = { { CUI_ICON_MOVE, "Move" }, { CUI_ICON_COPY, "Copy" }, { CUI_ICON_TRASH_2, "Delete", CUI_TONE_DANGER } };
+    cui_row(ui, .gap = 28, .wrap = true, .align = CUI_ALIGN_START, .width = CUI_FILL, .pad_bottom = 60) {
+        cui_column(ui, .gap = 10, .align = CUI_ALIGN_CENTER, .min_width = 360) {   /* room for the whole action bar */
+            cui_result_card(ui, "canvas-result", canvas_picture(ui), "Final result", .caption = "Minimal illustration, soft gradients and smooth shapes against a clear sky",
+                            .badge = "Done in 4.2 s", .image_w = 288, .image_h = 360, .width = CUI_PX(290));
+            cui_toolbar(ui, "canvas-result-actions", .style = CUI_TOOLBAR_FLOATING) {
+                cui_toolbar_button(ui, CUI_ICON_MAXIMIZE_2, .tooltip = "Expand");
+                cui_toolbar_button(ui, CUI_ICON_BOOKMARK, .tooltip = "Save", .toggle = &saved, .tone = CUI_TONE_WARNING);
+                cui_toolbar_button(ui, CUI_ICON_COPY, .tooltip = "Copy");
+                cui_toolbar_button(ui, CUI_ICON_PANEL_LEFT, .tooltip = "Compare");
+                cui_toolbar_separator(ui);
+                cui_toolbar_cycle(ui, "scale", scales, 3, &scale, .tooltip = "Scale");
+                cui_toolbar_cycle(ui, "type", types, 3, &type, .tooltip = "Format");
+                cui_toolbar_separator(ui);
+                cui_toolbar_button(ui, CUI_ICON_DOWNLOAD, .tooltip = "Download");
+            }
+        }
+        cui_column(ui, .id = "canvas-files", .width = CUI_FILL, .min_width = 280, .max_width = 520, .pad = 4, .gap = 2, .bg = CUI_COLOR_SURFACE, .border = 1, .radius = 14) {
+            for (int k = 0; k < 5; k++) {
+                cui_push_id_int(ui, k);
+                cui_row(ui, .width = CUI_FILL, .height = CUI_PX(44), .pad_x = 10, .gap = 12, .align = CUI_ALIGN_CENTER, .radius = 10,
+                        .bg = picked[k] ? CUI_COLOR_ACCENT_SUBTLE : (cui_color){ 0 }) {
+                    cui_checkbox(ui, "##pick", &picked[k]);
+                    cui_icon(ui, CUI_ICON_IMAGE, 15, cui_color_of(ui, CUI_COLOR_TEXT_MUTED));
+                    cui_box(ui, .width = CUI_FILL) { cui_label(ui, names[k]); }
+                    cui_text(ui, sizes[k], .size = 12, .color = CUI_COLOR_TEXT_MUTED, .tabular = true);
+                }
+                cui_pop_id(ui);
+            }
+        }
+        cui_selection_bar(ui, "canvas-bulk", 0, acts, 3, .selected = picked, .item_count = 5, .anchor = cui_make_id(ui, "canvas-files"));
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -1662,6 +1811,7 @@ static const more_page pages[] = {
     { "Developer tools", CUI_ICON_SQUARE_TERMINAL, page_devtools },
     { "More developer tools", CUI_ICON_BUG, page_devtools2 },
     { "Instruments", CUI_ICON_CHART_LINE, page_instruments },
+    { "Canvas and bars", CUI_ICON_LAYERS, page_canvas },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

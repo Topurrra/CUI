@@ -3943,6 +3943,185 @@ static void scene_dev2_api(cui_ctx *ui, int f) {
     frame_wrap(ui, body_api);
 }
 
+/* ---- canvas and bars: grouped toolbar, format bar, live cursors, canvas controls, result card, selection bar ---- */
+static bool cb_num = true, cb_bold, cb_italic;
+static int cb_mode;
+static void cb_grouped(cui_ctx *ui, const char *id) {
+    static const char *const modes[] = { CUI_ICON_MOVE, CUI_ICON_SQUARE_PEN, CUI_ICON_TYPE };
+    static const char *const mode_names[] = { "Move", "Draw", "Text" };
+    cui_toolbar(ui, id, .style = CUI_TOOLBAR_GROUPED) {
+        cui_toolbar_group(ui) {
+            cui_toolbar_button(ui, CUI_ICON_UNDO_2, .tooltip = "Undo", .shortcut = "Ctrl Z");
+            cui_toolbar_button(ui, CUI_ICON_REDO_2, .tooltip = "Redo", .shortcut = "Ctrl Shift Z");
+        }
+        cui_toolbar_group(ui) {
+            cui_toolbar_button(ui, NULL, .label = "123", .tooltip = "Numbers", .toggle = &cb_num);
+            cui_toolbar_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .toggle = &cb_bold);
+            cui_toolbar_button(ui, CUI_ICON_ITALIC, .tooltip = "Italic", .toggle = &cb_italic);
+            cui_toolbar_radio(ui, "mode", modes, 3, &cb_mode, .labels = mode_names);
+        }
+        cui_toolbar_primary(ui, CUI_ICON_SPARKLES, .tooltip = "Generate");
+    }
+}
+SCENE(grouped_toolbar) {
+    cui_column(ui, .gap = 20, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+        cb_grouped(ui, "grouped");
+        cui_box(ui, .width = CUI_FILL, .max_width = 300, .align = CUI_ALIGN_CENTER) { cb_grouped(ui, "narrow"); }
+    }
+}
+
+static cui_text_format cb_fmt;
+static void body_format_bar(cui_ctx *ui) {
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_START) { cui_format_bar(ui, "fmt", &cb_fmt); }
+}
+/* the style menu, open */
+static void scene_format_bar(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int t = -f - 1;
+        if (t == 0) cb_fmt = (cui_text_format){ CUI_TONE_ROSE, true, false, false, 0, 44, CUI_FORMAT_ALIGN_LEFT, CUI_FORMAT_LIST_NONE };
+        cui_rect r = cui_get_rect(ui, nested_id(ui, "fmt", "#style"));
+        if (t == 4) move_to(ui, r, 0.5f, 0.5f);
+        if (t == 5) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (t == 6) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (t == 7) cui_input_mouse_leave(ui);
+        return;
+    }
+    frame_wrap(ui, body_format_bar);
+}
+
+/* a small prompt graph with three people on it; the cursors are pinned so the picture holds still */
+enum { CB_POS = 1, CB_NEG, CB_GEN_POS, CB_GEN_NEG };
+static cui_node_view cb_view = { 10, 6, 1 };
+static float cb_nodes[3][2] = { { 36, 64 }, { 36, 206 }, { 330, 124 } };
+static bool cb_grid = true;
+static void cb_canvas(cui_ctx *ui, const char *id, bool people, cui_node_view *view, float height) {
+    static const cui_live_user users[] = {
+        { .name = "Paul", .tone = CUI_TONE_WARNING, .x = 118, .y = 172, .speaking = true },
+        { .name = "Kate", .tone = CUI_TONE_INFO, .x = 432, .y = 156, .says = "Bumping steps to 40?" },
+        { .name = "Mario", .tone = CUI_TONE_ROSE, .x = 192, .y = 248 },
+    };
+    cui_canvas_toggle toggles[] = { { CUI_ICON_EYE, "Show grid", &cb_grid }, { CUI_ICON_LAYERS, "Layers", NULL } };
+    cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL, .height = CUI_PX(height), .radius = 14, .clip = true) {
+        if (cui_node_editor_begin(ui, id, view, .height = CUI_PX(height), .no_grid = !cb_grid)) {
+            static const char *titles[3] = { "Positive", "Negative", "Generate" };
+            static const char *bodies[3] = { "A black bear, minimalist style, soft gradients", "No text, no people", "Steps 30 \xc2\xb7 dpm++ 2M" };
+            for (int i = 0; i < 3; i++) {
+                cui_node_begin(ui, i, &cb_nodes[i][0], &cb_nodes[i][1], titles[i], .width = 184);
+                if (i < 2) cui_node_output(ui, i == 0 ? CB_POS : CB_NEG, i == 0 ? "Prompt" : "Avoid", .type = 1);
+                else { cui_node_input(ui, CB_GEN_POS, "Prompt", .type = 1); cui_node_input(ui, CB_GEN_NEG, "Avoid", .type = 1); }
+                cui_node_content(ui) { cui_text(ui, bodies[i], .size = 12, .color = CUI_COLOR_TEXT_SECONDARY); }
+                cui_node_end(ui);
+                if (people && i == 2) cui_selection_ring(ui, CUI_COLOR_WARNING, .name = "Paul");
+            }
+            cui_node_link(ui, 1, CB_POS, CB_GEN_POS);
+            cui_node_link(ui, 2, CB_NEG, CB_GEN_NEG);
+            cui_node_editor_end(ui);
+        }
+        cui_rect bounds = { cb_nodes[0][0], cb_nodes[0][1], cb_nodes[2][0] + 184 - cb_nodes[0][0], 290 };
+        cui_canvas_controls(ui, "zoom", view, .content = bounds, .toggles = toggles, .toggle_count = 2);
+        if (people) {
+            cui_live_cursors(ui, "people", users, 3, .view = view);
+            cui_box(ui, .pad = 12) { cui_presence_pill(ui, "here", users, 3); }
+        }
+    }
+}
+SCENE(live_cursors) { cb_canvas(ui, "prompt", true, &cb_view, 360); }
+
+static cui_node_view cb_view2;
+static void body_canvas_controls(cui_ctx *ui) { cb_canvas(ui, "zoomed", false, &cb_view2, 320); }
+/* one step out from the rail */
+static void scene_canvas_controls(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int t = -f - 1;
+        if (t == 0) cb_view2 = (cui_node_view){ 10, 6, 1 };   /* the light and dark renders each start at 100% */
+        cui_rect r = cui_get_rect(ui, nested_id(ui, "zoom", "#zoom"));
+        if (t == 4) cui_input_mouse_move(ui, r.x + r.w * 0.5f, r.y + r.h + 20);
+        if (t == 5) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (t == 6) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (t == 7) cui_input_mouse_leave(ui);
+        return;
+    }
+    frame_wrap(ui, body_canvas_controls);
+}
+
+/* a picture made here: a sky, a low sun and soft hills */
+static cui_texture cb_result_image(cui_ctx *ui) {
+    static cui_ctx *made_for;
+    static cui_texture tex;
+    if (made_for == ui && tex) return tex;
+    enum { W = 288, H = 360 };
+    static unsigned char px[W * H * 4];
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            float acc[3] = { 0, 0, 0 };
+            for (int s = 0; s < 4; s++) {   /* four samples a pixel, for smooth edges */
+            float fx = x + 0.25f + 0.5f * (s & 1), fy = y + 0.25f + 0.5f * (s >> 1);
+            float v = fy / H, r, g, b;
+            if (v < 0.48f) { float k = v / 0.48f; r = 118 + (185 - 118) * k; g = 169 + (212 - 169) * k; b = 236 + (246 - 236) * k; }
+            else { float k = (v - 0.48f) / 0.52f; r = 185 + (242 - 185) * k; g = 212 + (217 - 212) * k; b = 246 + (203 - 246) * k; }
+            float dx = fx - W * 0.66f, dy = fy - H * 0.32f, d = sqrtf(dx * dx + dy * dy) / W;
+            float sun = d < 0.08f ? 1 : d < 0.24f ? 0.55f * (1 - (d - 0.09f) / 0.15f) : 0;
+            if (sun > 0) { sun = sun > 1 ? 1 : sun; r += (255 - r) * sun; g += (247 - g) * sun; b += (236 - b) * sun; }
+            static const float hills[3][6] = { { 0.18f, 1.04f, 1.30f, 0.62f, 0.42f, 0 }, { 0.92f, 1.08f, 1.20f, 0.58f, 0.44f, 1 }, { 0.5f, 1.18f, 1.6f, 0.70f, 0.40f, 2 } };
+            static const float hc[3][3] = { { 238, 143, 120 }, { 184, 96, 106 }, { 122, 63, 82 } };
+            for (int h = 0; h < 3; h++) {
+                float ex = (fx / W - hills[h][0]) / (hills[h][2] * 0.5f * hills[h][4] * 2), ey = (v - hills[h][1]) / (hills[h][3] * 0.5f * hills[h][4] * 2);
+                if (ex * ex + ey * ey < 1) { r = hc[h][0]; g = hc[h][1]; b = hc[h][2]; }
+            }
+            acc[0] += r * 0.25f; acc[1] += g * 0.25f; acc[2] += b * 0.25f;
+            }
+            unsigned char *p = &px[(y * W + x) * 4];
+            p[0] = (unsigned char)acc[0]; p[1] = (unsigned char)acc[1]; p[2] = (unsigned char)acc[2]; p[3] = 255;
+        }
+    tex = cui_image_create(ui, W, H, px);
+    made_for = ui;
+    return tex;
+}
+static bool cb_saved;
+static int cb_scale = 1, cb_type;
+static void cb_result(cui_ctx *ui) {
+    static const char *const scales[] = { "1x", "2x", "4x" }, *const types[] = { "PNG", "JPG", "WEBP" };
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+        cui_result_card(ui, "result", cb_result_image(ui), "Final result", .caption = "Minimal illustration, soft gradients and smooth shapes against a clear sky",
+                        .badge = "Done in 4.2 s", .image_w = 288, .image_h = 360, .width = CUI_PX(290));
+        cui_toolbar(ui, "result-actions", .style = CUI_TOOLBAR_FLOATING) {
+            cui_toolbar_button(ui, CUI_ICON_MAXIMIZE_2, .tooltip = "Expand");
+            cui_toolbar_button(ui, CUI_ICON_BOOKMARK, .tooltip = "Save", .toggle = &cb_saved, .tone = CUI_TONE_WARNING);
+            cui_toolbar_button(ui, CUI_ICON_COPY, .tooltip = "Copy");
+            cui_toolbar_button(ui, CUI_ICON_PANEL_LEFT, .tooltip = "Compare");
+            cui_toolbar_separator(ui);
+            cui_toolbar_cycle(ui, "scale", scales, 3, &cb_scale, .tooltip = "Scale");
+            cui_toolbar_cycle(ui, "type", types, 3, &cb_type, .tooltip = "Format");
+            cui_toolbar_separator(ui);
+            cui_toolbar_button(ui, CUI_ICON_DOWNLOAD, .tooltip = "Download");
+        }
+    }
+}
+SCENE(result_card) { cui_column(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) { cb_result(ui); } }
+
+static bool cb_picked[5] = { true, true, true, false, false };
+static void cb_files(cui_ctx *ui) {
+    static const char *names[] = { "hero-dark.png", "hero-light.png", "social-card.png", "icon-512.png", "thumb@2x.png" };
+    static const char *sizes[] = { "2.4 MB", "2.3 MB", "812 KB", "96 KB", "140 KB" };
+    static const cui_selection_action acts[] = { { CUI_ICON_MOVE, "Move" }, { CUI_ICON_COPY, "Copy" }, { CUI_ICON_TRASH_2, "Delete", CUI_TONE_DANGER } };
+    cui_column(ui, .id = "files", .width = CUI_FILL, .max_width = 520, .pad = 4, .gap = 2, .bg = CUI_COLOR_SURFACE, .border = 1, .radius = 14) {
+        for (int k = 0; k < 5; k++) {
+            cui_push_id_int(ui, k);
+            cui_row(ui, .width = CUI_FILL, .height = CUI_PX(44), .pad_x = 10, .gap = 12, .align = CUI_ALIGN_CENTER, .radius = 10,
+                    .bg = cb_picked[k] ? CUI_COLOR_ACCENT_SUBTLE : (cui_color){ 0 }) {
+                cui_checkbox(ui, "##pick", &cb_picked[k]);
+                cui_icon(ui, CUI_ICON_IMAGE, 15, cui_color_of(ui, CUI_COLOR_TEXT_MUTED));
+                cui_box(ui, .width = CUI_FILL) { cui_label(ui, names[k]); }
+                cui_text(ui, sizes[k], .size = 12, .color = CUI_COLOR_TEXT_MUTED, .tabular = true);
+            }
+            cui_pop_id(ui);
+        }
+    }
+    int a = cui_selection_bar(ui, "bulk", 0, acts, 3, .selected = cb_picked, .item_count = 5, .anchor = cui_make_id(ui, "files"));
+    if (a == 2) for (int k = 0; k < 5; k++) cb_picked[k] = false;
+}
+SCENE(selection_bar) { cui_column(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER, .pad_bottom = 56) { cb_files(ui); } }
+
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     static const scene scenes[] = {
@@ -4025,6 +4204,9 @@ int main(int argc, char **argv) {
         { "dot-chart", scene_dot_chart, 900, 280, true, false, CUI_ACCENT_BLUE }, { "chart-annotations", scene_chart_annotations, 860, 300, true, false, CUI_ACCENT_BLUE },
         { "event-track", scene_event_track, 760, 130, true, false, CUI_ACCENT_BLUE }, { "readouts", scene_readouts, 860, 160, true, false, CUI_ACCENT_BLUE },
         { "dot-display", scene_dot_display, 420, 200, true, false, CUI_ACCENT_BLUE },
+        { "grouped-toolbar", scene_grouped_toolbar, 620, 220, true }, { "format-bar", scene_format_bar, 640, 330, true, false, CUI_ACCENT_GREEN },
+        { "live-cursors", scene_live_cursors, 760, 416, true }, { "canvas-controls", scene_canvas_controls, 760, 376, true },
+        { "result-card", scene_result_card, 440, 560, true }, { "selection-bar", scene_selection_bar, 600, 400, true, false, CUI_ACCENT_GREEN },
         { "tw-studio", scene_tw_studio, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-audio", scene_tw_audio, 960, 540, true, false, CUI_ACCENT_NEUTRAL },
         { "tw-markets", scene_tw_markets, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-calendar", scene_tw_calendar, 1200, 675, true, false, CUI_ACCENT_NEUTRAL },
     };

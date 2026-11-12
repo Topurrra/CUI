@@ -674,6 +674,9 @@ void cui__icon_swap(cui_ctx *ui, cui_id state_id, const char *icon, float size, 
 cui_id cui__position_id(cui_ctx *ui, uint32_t salt);       /* stable id from the parent and child index */
 void cui__chevron_node(cui_ctx *ui, float angle, float size, cui_color color);   /* 0 points down */
 int cui__initials(const char *name, char *out);   /* up to two initials of a name, for avatars; out holds 16 bytes */
+/* Room for a custom item of width w in the toolbar being built (cui_chrome.c); false when it does not
+ * fit and the caller should leave it out. Without a toolbar there is always room. */
+bool cui__toolbar_reserve(cui_ctx *ui, float w);
 int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *trailing_icon_default);
 int cui__edit_lines(cui_ctx *ui, cui_font f, float size, const char *buf, int len, float width, cui_text_layout_line **out);   /* wrapped lines of an edit buffer */
 void cui__label_text(cui_ctx *ui, const char *label, cui_font font, float size, cui_color color);

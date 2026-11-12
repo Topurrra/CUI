@@ -778,6 +778,8 @@ typedef struct cui_menu_item_opts {
     bool danger;
     bool disabled;
     bool checked;              /* a check mark at the right edge of the item */
+    cui_font font;             /* the label's font, default CUI_FONT_BODY: a style menu shows each style in its own */
+    float text_size;           /* the label's size in points, default the body size; the item grows to fit it */
 } cui_menu_item_opts;
 CUI_API bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *opts);
 CUI_API void cui_menu_separator(cui_ctx *ui);
@@ -2850,8 +2852,30 @@ CUI_API void cui_menu_bar_menu_end(cui_ctx *ui);
 /* Toolbar: a row of compact icon buttons, toggles, separators and small text
  * buttons. Icon only buttons show their tooltip as their name. Items that do
  * not fit collapse, from the end, into a "more" menu; an item chosen there
- * returns true on the next frame. */
-typedef struct cui_toolbar_opts { int _; bool no_border; } cui_toolbar_opts;
+ * returns true on the next frame. Tab moves through the items.
+ *
+ * The grouped style puts groups of items on raised wells inside one muted
+ * pill, with an optional inset radio set and a filled primary action at the
+ * end; the floating style is one bordered pill for bars that sit over
+ * content (a format bar, the actions under an image). Both are as wide as
+ * their items and measure the room their parent gives them for the overflow.
+ *
+ *     cui_toolbar(ui, "edit", .style = CUI_TOOLBAR_GROUPED) {
+ *         cui_toolbar_group(ui) { cui_toolbar_button(ui, CUI_ICON_UNDO_2, .tooltip = "Undo"); ... }
+ *         cui_toolbar_group(ui) { ...; cui_toolbar_radio(ui, "mode", icons, 3, &mode, .labels = names); }
+ *         if (cui_toolbar_primary(ui, CUI_ICON_SPARKLES, .tooltip = "Generate")) generate();
+ *     }
+ */
+typedef enum cui_toolbar_style {
+    CUI_TOOLBAR_PLAIN = 0,     /* a strip as wide as its parent, with a hairline under it */
+    CUI_TOOLBAR_GROUPED,       /* raised groups inside one muted pill */
+    CUI_TOOLBAR_FLOATING       /* one bordered surface pill */
+} cui_toolbar_style;
+typedef struct cui_toolbar_opts {
+    int _;
+    bool no_border;            /* plain style: no hairline under the strip */
+    cui_toolbar_style style;
+} cui_toolbar_opts;
 CUI_API void cui_toolbar_begin(cui_ctx *ui, const char *id, const cui_toolbar_opts *opts);
 CUI_API void cui_toolbar_end(cui_ctx *ui);
 typedef struct cui_tool_opts {
@@ -2861,10 +2885,31 @@ typedef struct cui_tool_opts {
     const char *shortcut;      /* shown in the tooltip, e.g. "Ctrl B" */
     bool *toggle;              /* toggle button: flipped on click, shown pressed while true */
     bool disabled;
+    cui_tone tone;             /* icon and label color: always on a plain button (CUI_TONE_DANGER for delete), only while on for a toggle */
+    bool flyout;               /* the corner mark that says the button opens more options (cui_flyout_mark) */
 } cui_tool_opts;
 CUI_API bool cui_toolbar_button_ex(cui_ctx *ui, const char *icon, const cui_tool_opts *opts);
 CUI_API void cui_toolbar_separator(cui_ctx *ui);
 CUI_API void cui_toolbar_spacer(cui_ctx *ui);   /* pushes the following items to the right */
+/* A group of items: a raised well in the grouped style, set apart by separators in the others. */
+CUI_API void cui_toolbar_group_begin(cui_ctx *ui);
+CUI_API void cui_toolbar_group_end(cui_ctx *ui);
+/* An inset set of icons of which one is on, like a segmented control. Left and
+ * Right move the choice. Returns true when *index changed. In the overflow menu
+ * each icon is an item named by its label. */
+typedef struct cui_toolbar_radio_opts {
+    int _;
+    const char *const *labels; /* a name for each icon, for the overflow menu; `NULL` leaves them unnamed */
+} cui_toolbar_radio_opts;
+CUI_API bool cui_toolbar_radio_ex(cui_ctx *ui, const char *id, const char *const *icons, int count, int *index, const cui_toolbar_radio_opts *opts);
+/* The main action at the end of a grouped toolbar: a larger button filled with the text color. */
+CUI_API bool cui_toolbar_primary_ex(cui_ctx *ui, const char *icon, const cui_tool_opts *opts);
+/* A small picker that steps through its choices on each click ("1x", "2x", "4x").
+ * Returns true when *index changed. */
+CUI_API bool cui_toolbar_cycle_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_tool_opts *opts);
+/* A small triangle in the corner of the previous component (at the end side) that
+ * says it opens a flyout or a menu. Any button can take it. */
+CUI_API void cui_flyout_mark(cui_ctx *ui);
 
 /* Status bar: a thin bar along the bottom of a window, with a hairline on
  * top and no fill of its own (put it in a box with the background you want).
@@ -4234,6 +4279,191 @@ typedef struct cui_dot_display_opts {
 CUI_API void cui_dot_display_ex(cui_ctx *ui, const char *text, const cui_dot_display_opts *opts);
 
 /* ------------------------------------------------------------------------ */
+/* Canvas and bars: format bar, live cursors, canvas controls, result card,  */
+/* selection bar                                                            */
+/* ------------------------------------------------------------------------ */
+
+/* Format bar: a floating bar that edits the format of a text selection. A
+ * color swatch opens a grid of colors; bold and underline toggle; link
+ * reports a click; the size readout follows the text style, chosen from a
+ * menu that shows each style at its own size; alignment and list open small
+ * flyouts (a corner mark says so); delete asks first, in a small tip with a
+ * Delete button. You pass one struct with the format and the bar edits it:
+ *
+ *     static cui_text_format f = { .style = 0, .size = 44 };
+ *     int r = cui_format_bar(ui, "fmt", &f);
+ *     if (r & CUI_FORMAT_CHANGED) apply(&f);
+ *     if (r & CUI_FORMAT_DELETE) delete_selection();
+ *
+ * It is a floating toolbar, so Tab moves through its items and what does not
+ * fit goes into the toolbar's "more" menu. */
+typedef enum cui_format_align {
+    CUI_FORMAT_ALIGN_LEFT = 0, CUI_FORMAT_ALIGN_CENTER, CUI_FORMAT_ALIGN_RIGHT, CUI_FORMAT_ALIGN_JUSTIFY
+} cui_format_align;
+typedef enum cui_format_list {
+    CUI_FORMAT_LIST_NONE = 0, CUI_FORMAT_LIST_BULLETS, CUI_FORMAT_LIST_NUMBERS, CUI_FORMAT_LIST_CHECKS
+} cui_format_list;
+typedef struct cui_text_format {
+    cui_tone color;            /* the text color, as a tone so it follows the theme; CUI_TONE_NEUTRAL is the text color */
+    bool bold, underline;
+    bool link;                 /* the selection is a link: the link button shows pressed */
+    int style;                 /* index into the styles (default: 0 Header, 1 Title, 2 Subtitle, 3 Normal text) */
+    float size;                /* the size readout, in your units; set from the style when the style changes */
+    cui_format_align align;
+    cui_format_list list;
+} cui_text_format;
+/* One text style of the style menu. */
+typedef struct cui_text_style {
+    const char *name;          /* "Header" */
+    float size;                /* the size it sets in your document, shown in the readout, e.g. 44 */
+    float preview_size;        /* the size of its name in the menu, in points */
+    cui_font font;             /* the font of its name in the menu */
+} cui_text_style;
+typedef struct cui_format_bar_opts {
+    int _;
+    const cui_text_style *styles;  /* `NULL`: Header, Title, Subtitle and Normal text */
+    int style_count;
+    const cui_tone *colors;        /* the color grid; `NULL`: eight tones, the text color first */
+    int color_count;
+    const char *footer;            /* a muted line under the styles, default "Text options"; "" leaves it out */
+    const char *footer_keys;       /* keycaps beside it, default "Ctrl Alt 0" ("" for none); a hint, the shortcut is yours */
+    const char *delete_question;   /* default "Delete this text?" */
+    bool no_delete;                /* leaves out the delete button */
+    bool no_more;                  /* leaves out the "..." button */
+} cui_format_bar_opts;
+enum {
+    CUI_FORMAT_CHANGED = 1,        /* a field of the format changed */
+    CUI_FORMAT_LINK = 2,           /* the link button was clicked */
+    CUI_FORMAT_DELETE = 4,         /* delete was confirmed */
+    CUI_FORMAT_MORE = 8            /* the "..." button was clicked */
+};
+/* Returns CUI_FORMAT_* flags. */
+CUI_API int cui_format_bar_ex(cui_ctx *ui, const char *id, cui_text_format *format, const cui_format_bar_opts *opts);
+
+/* Live cursors: other people's pointers over the previous component (a canvas,
+ * a document, a node editor), each an arrow in their color with a name flag
+ * and an optional chat bubble. You pass where each pointer is whenever it
+ * changes; the cursors glide there, at the same speed at any frame rate.
+ * Positions are points from the component's top-left corner, or canvas
+ * points under `view` (the node editor's pan and zoom). Cursors only draw:
+ * they take no input and no focus.
+ *
+ *     cui_node_editor_end(ui);
+ *     cui_live_cursors(ui, "cursors", people, 3, .view = &view); */
+typedef struct cui_live_user {
+    const char *name;          /* on the flag, and the identity that keeps a cursor gliding: keep it stable */
+    cui_color color;           /* the cursor, flag and avatar; unset: `tone` */
+    cui_tone tone;             /* the color as a tone of the theme when `color` is unset; 0: a tone chosen from the name */
+    float x, y;                /* where the pointer is */
+    const char *says;          /* a chat bubble under the flag; `NULL` for none */
+    bool speaking;             /* presence pill: a ring and moving level bars on this person */
+    bool away;                 /* the pointer is hidden (it left the canvas); still in the presence pill */
+    cui_texture avatar;        /* presence pill: a picture instead of the initials */
+} cui_live_user;
+typedef struct cui_live_cursors_opts {
+    int _;
+    const cui_node_view *view; /* positions are canvas points under this pan and zoom; `NULL`: points in the component */
+    bool no_glide;             /* jump to each new position */
+} cui_live_cursors_opts;
+CUI_API void cui_live_cursors_ex(cui_ctx *ui, const char *id, const cui_live_user *users, int count, const cui_live_cursors_opts *opts);
+/* Presence pill: who is here, as overlapping avatars in their colors. Whoever is
+ * speaking gets a ring, and the pill shows moving level bars and their name. */
+typedef struct cui_presence_pill_opts {
+    int _;
+    float size;                /* avatar size, default 26 */
+    int max_visible;           /* default 5; the rest become "+n" */
+} cui_presence_pill_opts;
+CUI_API void cui_presence_pill_ex(cui_ctx *ui, const char *id, const cui_live_user *users, int count, const cui_presence_pill_opts *opts);
+/* Selection ring: a ring in someone's color around the previous component, for
+ * "this item is selected by Kate", with an optional name flag on its corner. */
+typedef struct cui_selection_ring_opts {
+    int _;
+    const char *name;          /* a small flag at the top end corner; `NULL` for none */
+    float radius;              /* the ring's corner radius; 0 follows the component's corners */
+} cui_selection_ring_opts;
+CUI_API void cui_selection_ring_ex(cui_ctx *ui, cui_color color, const cui_selection_ring_opts *opts);
+
+/* Canvas controls: a floating rail of zoom controls over the previous component,
+ * at its end edge: zoom in, the zoom as a percentage (a click resets it to 100%),
+ * zoom out, fit, and toggles of your own (grid, layers). It drives a pan and
+ * zoom view, the same struct as the node editor's, so it works with a node
+ * editor as it is; zooming keeps the middle of the component in place and
+ * eases there. Zoom steps through presets (25% to 400% unless you pass your
+ * own). Tab moves through the buttons.
+ *
+ *     static cui_node_view view;
+ *     static bool grid = true;
+ *     cui_canvas_toggle t[] = { { CUI_ICON_GRID_3X3, "Grid", &grid } };
+ *     cui_node_editor_end(ui);
+ *     cui_canvas_controls(ui, "zoom", &view, .content = bounds, .toggles = t, .toggle_count = 1); */
+typedef struct cui_canvas_toggle {
+    const char *icon;
+    const char *label;         /* the tooltip */
+    bool *on;                  /* flipped on click, shown pressed while true */
+} cui_canvas_toggle;
+typedef struct cui_canvas_controls_opts {
+    int _;
+    const float *steps;        /* zoom presets, ascending; `NULL`: 0.25 0.33 0.5 0.67 0.8 1 1.25 1.5 2 3 4 */
+    int step_count;
+    cui_rect content;          /* the content's bounds in canvas points, for fit; empty: fit is only reported */
+    const cui_canvas_toggle *toggles;
+    int toggle_count;
+    bool no_fit;               /* leaves out the fit button */
+    bool start_side;           /* the rail sits at the start edge (left, or right in a right-to-left interface) */
+} cui_canvas_controls_opts;
+enum {
+    CUI_CANVAS_ZOOMED = 1,     /* the zoom changed (in, out, reset or fit) */
+    CUI_CANVAS_FIT = 2,        /* fit was clicked */
+    CUI_CANVAS_TOGGLED = 4     /* a toggle flipped */
+};
+/* Returns CUI_CANVAS_* flags. */
+CUI_API int cui_canvas_controls_ex(cui_ctx *ui, const char *id, cui_node_view *view, const cui_canvas_controls_opts *opts);
+
+/* Result card: a picture with rounded corners, an optional status chip in the
+ * top corner, and a title and caption on a soft fade at the bottom, for a
+ * render, an export or a generated image. Put its actions under it in a
+ * floating toolbar (cui_toolbar with CUI_TOOLBAR_FLOATING, cycle pickers for
+ * choices like 2x or PNG). The picture fills the card and is cropped to it.
+ * The card is focusable; a click, Enter or Space returns true (open it large). */
+typedef struct cui_result_card_opts {
+    int _;
+    const char *caption;       /* under the title, wraps */
+    const char *badge;         /* the status chip, e.g. "Done in 4.2 s"; `NULL` for none */
+    cui_tone badge_tone;       /* the chip's dot, default success */
+    int image_w, image_h;      /* the picture's size in pixels, to crop it without stretching; 0: stretched */
+    cui_size width;            /* default fill, up to 320 */
+    float aspect;              /* height over width, default 1.25 */
+} cui_result_card_opts;
+CUI_API bool cui_result_card_ex(cui_ctx *ui, const char *id, cui_texture image, const char *title, const cui_result_card_opts *opts);
+
+/* Selection bar: a floating bar that slides up under the previous component
+ * (a list, a table, a grid) while something in it is selected: "3 selected"
+ * with a clear button, then labeled actions. Esc clears the selection too.
+ * Give it the count, or your array of flags in `selected` and it counts and
+ * clears them itself.
+ *
+ *     static const cui_selection_action acts[] = { { CUI_ICON_MOVE, "Move" }, { CUI_ICON_TRASH_2, "Delete", CUI_TONE_DANGER } };
+ *     int a = cui_selection_bar(ui, "bulk", 0, acts, 2, .selected = picked, .item_count = n);
+ *     if (a == 1) delete_picked(); */
+typedef struct cui_selection_action {
+    const char *icon;
+    const char *label;
+    cui_tone tone;             /* CUI_TONE_DANGER for a destructive action */
+} cui_selection_action;
+typedef struct cui_selection_bar_opts {
+    int _;
+    bool *selected;            /* your flags, one per item: counted, and cleared by the clear button and Esc */
+    int item_count;            /* how many flags `selected` holds */
+    const char *count_format;  /* default "%d selected" */
+    cui_id anchor;             /* the component it sits under; 0: the previous component */
+    bool no_escape;            /* Esc does not clear */
+} cui_selection_bar_opts;
+enum { CUI_SELECTION_NONE = -1, CUI_SELECTION_CLEARED = -2 };
+/* Returns the action picked, CUI_SELECTION_CLEARED when the clear button or Esc
+ * cleared the selection, or CUI_SELECTION_NONE. */
+CUI_API int cui_selection_bar_ex(cui_ctx *ui, const char *id, int count, const cui_selection_action *actions, int action_count, const cui_selection_bar_opts *opts);
+
+/* ------------------------------------------------------------------------ */
 /* Custom drawing                                                           */
 /* ------------------------------------------------------------------------ */
 
@@ -4472,6 +4702,10 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_menu_bar_menu(ui, label, ...)   CUI__SCOPE_IF(cui_menu_bar_menu_begin((ui), (label), CUI__OPTS(cui_menu_bar_menu_opts, __VA_ARGS__)), cui_menu_bar_menu_end(ui))
 #define cui_toolbar(ui, id, ...)            CUI__SCOPE(cui_toolbar_begin((ui), (id), CUI__OPTS(cui_toolbar_opts, __VA_ARGS__)), cui_toolbar_end(ui))
 #define cui_toolbar_button(ui, icon, ...)   cui_toolbar_button_ex((ui), (icon), CUI__OPTS(cui_tool_opts, __VA_ARGS__))
+#define cui_toolbar_group(ui)               CUI__SCOPE(cui_toolbar_group_begin(ui), cui_toolbar_group_end(ui))
+#define cui_toolbar_radio(ui, id, icons, n, index, ...) cui_toolbar_radio_ex((ui), (id), (icons), (n), (index), CUI__OPTS(cui_toolbar_radio_opts, __VA_ARGS__))
+#define cui_toolbar_primary(ui, icon, ...)  cui_toolbar_primary_ex((ui), (icon), CUI__OPTS(cui_tool_opts, __VA_ARGS__))
+#define cui_toolbar_cycle(ui, id, items, n, index, ...) cui_toolbar_cycle_ex((ui), (id), (items), (n), (index), CUI__OPTS(cui_tool_opts, __VA_ARGS__))
 #define cui_status_bar(ui, id, ...)         CUI__SCOPE(cui_status_bar_begin((ui), (id), CUI__OPTS(cui_status_bar_opts, __VA_ARGS__)), cui_status_bar_end(ui))
 #define cui_status_bar_text(ui, text, ...)  cui_status_bar_text_ex((ui), (text), CUI__OPTS(cui_status_item_opts, __VA_ARGS__))
 #define cui_status_bar_item(ui, label, ...) cui_status_bar_item_ex((ui), (label), CUI__OPTS(cui_status_item_opts, __VA_ARGS__))
@@ -4527,6 +4761,14 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 /* curve and gradient editors */
 #define cui_curve_editor(ui, id, keys, count, cap, ...) cui_curve_editor_ex((ui), (id), (keys), (count), (cap), CUI__OPTS(cui_curve_opts, __VA_ARGS__))
 #define cui_gradient_editor(ui, id, stops, count, cap, ...) cui_gradient_editor_ex((ui), (id), (stops), (count), (cap), CUI__OPTS(cui_gradient_opts, __VA_ARGS__))
+/* canvas and bars */
+#define cui_format_bar(ui, id, format, ...) cui_format_bar_ex((ui), (id), (format), CUI__OPTS(cui_format_bar_opts, __VA_ARGS__))
+#define cui_live_cursors(ui, id, users, n, ...) cui_live_cursors_ex((ui), (id), (users), (n), CUI__OPTS(cui_live_cursors_opts, __VA_ARGS__))
+#define cui_presence_pill(ui, id, users, n, ...) cui_presence_pill_ex((ui), (id), (users), (n), CUI__OPTS(cui_presence_pill_opts, __VA_ARGS__))
+#define cui_selection_ring(ui, color, ...)  cui_selection_ring_ex((ui), (color), CUI__OPTS(cui_selection_ring_opts, __VA_ARGS__))
+#define cui_canvas_controls(ui, id, view, ...) cui_canvas_controls_ex((ui), (id), (view), CUI__OPTS(cui_canvas_controls_opts, __VA_ARGS__))
+#define cui_result_card(ui, id, image, title, ...) cui_result_card_ex((ui), (id), (image), (title), CUI__OPTS(cui_result_card_opts, __VA_ARGS__))
+#define cui_selection_bar(ui, id, count, actions, n, ...) cui_selection_bar_ex((ui), (id), (count), (actions), (n), CUI__OPTS(cui_selection_bar_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 
 #ifdef __cplusplus

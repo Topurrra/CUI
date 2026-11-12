@@ -2278,3 +2278,167 @@ Each glyph is five dots wide and seven high, with a column of space between glyp
 The lit dots take the foreground color, `color`, or the accent with `accent`. In a box narrower than the text the dots shrink until it fits. With `marquee` the text scrolls instead, and asks for frames only while it does; with reduced motion it shrinks rather than moves. The glyphs run left to right in every reading direction, while `align` follows it: in a right-to-left interface the start is the right edge of the box.
 
 A dot-matrix display only displays: it takes no focus and returns nothing.
+
+## Canvas and bars
+
+Pieces for editors with a canvas: bars that float over the content, other people's pointers, zoom controls, a picture with its actions, and a bar for what is selected. The gallery page *Canvas and bars* shows them together.
+
+### Grouped toolbar
+
+A toolbar whose items sit in raised groups inside one pill, with an inset set of modes and a filled primary action at the end.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/grouped-toolbar-dark.png"><img src="images/components/grouped-toolbar.png" alt="A pill holding undo and redo in one raised group, 123, bold and italic with three inset mode icons in another, and a filled sparkles button; under it the same toolbar narrowed, its end folded into a more button"></picture>
+
+```c
+static bool numbers = true, bold, italic;
+static int mode;
+static const char *const modes[] = { CUI_ICON_MOVE, CUI_ICON_SQUARE_PEN, CUI_ICON_TYPE };
+static const char *const names[] = { "Move", "Draw", "Text" };
+cui_toolbar(ui, "tools", .style = CUI_TOOLBAR_GROUPED) {
+    cui_toolbar_group(ui) {
+        cui_toolbar_button(ui, CUI_ICON_UNDO_2, .tooltip = "Undo", .shortcut = "Ctrl Z");
+        cui_toolbar_button(ui, CUI_ICON_REDO_2, .tooltip = "Redo");
+    }
+    cui_toolbar_group(ui) {
+        cui_toolbar_button(ui, NULL, .label = "123", .tooltip = "Numbers", .toggle = &numbers);
+        cui_toolbar_button(ui, CUI_ICON_BOLD, .tooltip = "Bold", .toggle = &bold);
+        cui_toolbar_radio(ui, "mode", modes, 3, &mode, .labels = names);
+    }
+    if (cui_toolbar_primary(ui, CUI_ICON_SPARKLES, .tooltip = "Generate")) generate();
+}
+```
+
+It is the [toolbar](#toolbar) with `style = CUI_TOOLBAR_GROUPED`, so its buttons, toggles, separators and overflow work as they do there. `cui_toolbar_group` puts the items between its begin and end on a raised well; in the plain and floating styles a group is set apart by separators instead. `cui_toolbar_radio` is a set of icons of which one is on, drawn like a segmented control inset in the group; it returns true when `*index` changed, and `labels` name the icons in the overflow menu. `cui_toolbar_primary` is a larger button filled with the text color, for the one action the bar exists for; it takes the same options as a toolbar button.
+
+The style `CUI_TOOLBAR_FLOATING` is one bordered pill, for a bar that sits over content (the [format bar](#format-bar) and the actions under a [result card](#result-card) are built on it). Its separators run the full height of the bar. Both styles are as wide as their items rather than as wide as the parent; they measure the room the parent gives them, and items that do not fit fold, from the end, into the "more" menu, where a radio set becomes one checked item per icon.
+
+Two pieces work in every style: `cui_toolbar_cycle` is a small picker that steps through its choices on each click (`"1x"`, `"2x"`, `"4x"`), and `.flyout = true` on a button, or `cui_flyout_mark` after any button, adds a small triangle in its end-side corner that says it opens more options. `.tone` colors a button's icon: always for a plain button (`CUI_TONE_DANGER` for delete), only while on for a toggle. In a right-to-left interface the groups, the radio set and the corner marks mirror.
+
+Keyboard: Tab moves through the items as in any toolbar, and Enter or Space presses the focused one. In a radio set Left and Right move the choice. On the "more" button Down opens the menu.
+
+### Format bar
+
+A floating bar that edits the format of a text selection: color, bold, underline, link, the text style, alignment, lists and delete.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/format-bar-dark.png"><img src="images/components/format-bar.png" alt="A format bar with a pink swatch, bold on, underline, link, the size 44 and Header with its menu open below, showing Header, Title, Subtitle and Normal text at their sizes and a Text options line with keycaps"></picture>
+
+```c
+static cui_text_format f = { .color = CUI_TONE_ROSE, .bold = true, .style = 0, .size = 44 };
+int r = cui_format_bar(ui, "format", &f);
+if (r & CUI_FORMAT_CHANGED) apply_to_selection(&f);
+if (r & CUI_FORMAT_LINK) edit_link();
+if (r & CUI_FORMAT_DELETE) delete_selection();
+```
+
+You pass one `cui_text_format` and the bar edits it in place; the result has `CUI_FORMAT_CHANGED` on the frame any field changed. The color swatch opens a grid of colors given as tones, so a color follows the theme and the accent; `CUI_TONE_NEUTRAL` is the text color, and `colors` replaces the grid. Bold and underline are toggles. Link only reports a click (`CUI_FORMAT_LINK`) and shows pressed while `link` is set, since what a link edit looks like is yours. The size readout shows `size`.
+
+The style menu shows each style's name at its own size and font, with a check on the current one and a muted footer with keycaps (`footer`, `footer_keys`; the keys are a hint, the shortcut is yours). Choosing a style sets `style` and copies the style's `size`. `styles` replaces the four defaults: Header, Title, Subtitle and Normal text at 44, 56, 28 and 16. The alignment button opens a row of the four alignments and shows the current one; the list button opens bulleted, numbered and checklist, and picking the current kind again turns the list off. Both carry the corner mark of a button with a flyout. Delete asks first, in a small tip in the text color with a Delete button (`delete_question` changes its text); only that second step returns `CUI_FORMAT_DELETE`. The "..." button returns `CUI_FORMAT_MORE`. `no_delete` and `no_more` leave those out.
+
+The bar is a [floating toolbar](#grouped-toolbar), so at a phone's width its end folds into the toolbar's "more" menu; picked from there, alignment and list step to the next choice, and delete, already a second step, deletes. In a right-to-left interface the groups and the corner marks mirror.
+
+Keyboard: Tab moves through the bar's controls, and Enter or Space presses the focused one. Down or Enter on the color swatch, the style, alignment or list opens it: the arrows move through the colors (Up and Down by a row) or the alignments, Up and Down through the styles and lists, Enter picks and Esc closes, and focus returns to the button. On delete, Enter opens the question with focus on its Delete button, a second Enter deletes and Esc cancels.
+
+### Live cursors
+
+Other people's pointers over a canvas, each an arrow in their color with a name flag and an optional chat bubble, gliding to each new position; with a presence pill and a selection ring.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/live-cursors-dark.png"><img src="images/components/live-cursors.png" alt="A node graph with three pointers named Paul, Kate and Mario, Kate saying Bumping steps to 40, the Generate node ringed in Paul's color with his name, a presence pill with three avatars and level bars by Paul, and a zoom rail on the right"></picture>
+
+```c
+static cui_live_user people[3] = {
+    { .name = "Paul", .tone = CUI_TONE_WARNING, .speaking = true },
+    { .name = "Kate", .tone = CUI_TONE_INFO, .says = "Bumping steps to 40?" },
+    { .name = "Mario", .tone = CUI_TONE_ROSE },
+};
+/* when a position arrives from the network: people[k].x = x; people[k].y = y; */
+if (cui_node_editor_begin(ui, "graph", &view)) {
+    /* ...nodes; after the selected one: */
+    cui_selection_ring(ui, cui_color_of(ui, CUI_COLOR_WARNING), .name = "Paul");
+    cui_node_editor_end(ui);
+}
+cui_live_cursors(ui, "people", people, 3, .view = &view);
+cui_presence_pill(ui, "here", people, 3);
+```
+
+`cui_live_cursors` draws over the previous component, clipped to it. Each `x`, `y` is in points from that component's top-left corner, or in canvas points under `view` (the node editor's pan and zoom), so the cursors stay on what people point at while you pan. Set a new position whenever one arrives; the cursor glides there with a spring, at the same speed at any frame rate, and jumps with `no_glide` or under reduced motion. A person's `name` is also what keeps their cursor gliding from frame to frame, so keep it stable. `away` fades the pointer out. The color is `color`, or a `tone` of the theme, or a tone chosen from the name; the flag's text is light or dark, whichever reads on it.
+
+`cui_presence_pill` takes the same array: overlapping avatars in each person's color (or their `avatar` picture), up to `max_visible` and then "+n". Whoever is `speaking` gets a ring, and the pill adds moving level bars and their name; the bars ask for frames only while someone speaks and stand still under reduced motion. `cui_selection_ring` draws a ring in someone's color around the previous component, with an optional name flag on its end-side corner, for "Paul has this selected"; after `cui_node_end` the previous component is that node's card.
+
+Cursors keep the canvas's own left-to-right coordinates in a right-to-left interface, while the pill and the ring's flag follow the reading direction.
+
+Keyboard: none. Cursors, the pill and the ring only draw and take no focus.
+
+### Canvas controls
+
+A floating rail of zoom controls over a canvas: zoom in, the zoom as a percentage that resets to 100%, zoom out, fit, and toggles of your own.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/canvas-controls-dark.png"><img src="images/components/canvas-controls.png" alt="A node graph at 80% with a vertical rail at its right edge: plus, 80%, minus, fit, an eye toggle that is on and a layers toggle"></picture>
+
+```c
+static cui_node_view view;          /* the node editor's pan and zoom */
+static bool grid = true, layers;
+cui_canvas_toggle toggles[] = { { CUI_ICON_EYE, "Show grid", &grid }, { CUI_ICON_LAYERS, "Layers", &layers } };
+if (cui_node_editor_begin(ui, "graph", &view, .no_grid = !grid)) { /* ... */ cui_node_editor_end(ui); }
+int r = cui_canvas_controls(ui, "zoom", &view, .content = graph_bounds, .toggles = toggles, .toggle_count = 2);
+```
+
+The rail floats over the previous component, centered at its end edge (`start_side` moves it to the start edge; in a right-to-left interface the end is the left). It drives a `cui_node_view`, the same struct the [node editor](#node-editor) pans and zooms, so the two share one view: the wheel in the editor and the rail's buttons change the same zoom, and the rail follows a zoom changed elsewhere. Any canvas of your own can use the struct too: `x` and `y` are where the canvas origin sits from the component's corner, and `zoom` is its scale (0 means 1).
+
+Zoom in and out step through presets, 25% to 400% unless `steps` gives your own, and stop at the ends. A click on the percentage resets to 100%. Fit scales `content` (in canvas points) to fill nine tenths of the component and centers it; with no `content` it only reports `CUI_CANVAS_FIT` so you can fit yourself. Zooming keeps the canvas point at the middle where it is and eases there in about a quarter of a second, or jumps under reduced motion. Toggles flip their `bool` and show pressed while on. The result has `CUI_CANVAS_ZOOMED`, `CUI_CANVAS_FIT` and `CUI_CANVAS_TOGGLED` on the frame each happened.
+
+The [image viewer](#image-viewer-and-cropper) keeps its own zoom, with buttons in its corner, and the [dependency graph](#dependency-graph) keeps its zoom inside the component, so the rail is for the node editor and canvases of your own.
+
+Keyboard: Tab moves through the rail's buttons, and Enter or Space presses the focused one.
+
+### Result card
+
+A picture with rounded corners, a status chip, and a title and caption on a fade at the bottom, with its actions in a floating toolbar under it.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/result-card-dark.png"><img src="images/components/result-card.png" alt="A card with a sky, a low sun and hills, a Done in 4.2 s chip at the top and Final result with a caption at the bottom, above a bar of expand, bookmark, copy and compare buttons, 2x and PNG pickers and download"></picture>
+
+```c
+static const char *const scales[] = { "1x", "2x", "4x" }, *const types[] = { "PNG", "JPG", "WEBP" };
+static int scale = 1, type;
+static bool saved;
+if (cui_result_card(ui, "render", tex, "Final result", .caption = prompt, .badge = "Done in 4.2 s",
+                    .image_w = 1024, .image_h = 1280, .width = CUI_PX(290)))
+    open_large(tex);
+cui_toolbar(ui, "render-actions", .style = CUI_TOOLBAR_FLOATING) {
+    cui_toolbar_button(ui, CUI_ICON_MAXIMIZE_2, .tooltip = "Expand");
+    cui_toolbar_button(ui, CUI_ICON_BOOKMARK, .tooltip = "Save", .toggle = &saved, .tone = CUI_TONE_WARNING);
+    cui_toolbar_button(ui, CUI_ICON_COPY, .tooltip = "Copy");
+    cui_toolbar_separator(ui);
+    cui_toolbar_cycle(ui, "scale", scales, 3, &scale, .tooltip = "Scale");
+    cui_toolbar_cycle(ui, "type", types, 3, &type, .tooltip = "Format");
+    cui_toolbar_separator(ui);
+    if (cui_toolbar_button(ui, CUI_ICON_DOWNLOAD, .tooltip = "Download")) download(scale, type);
+}
+```
+
+The picture fills the card and is cropped to it, centered, when you give its size in `image_w` and `image_h`; without them it is stretched. The card is `width` wide (by default the width it gets, up to 320) and `aspect` times as tall (1.25 by default). The fade and the text on it stay dark and light in both themes, since they sit on the picture rather than on the page. `badge` puts a chip with a dot in the top corner; `badge_tone` colors the dot (success by default). With no texture the card shows a muted surface. The card is focusable and returns true when it is clicked or activated, to open the picture large.
+
+The actions are a [floating toolbar](#grouped-toolbar), so they keep the toolbar's keyboard model and fold into its "more" menu when the space is narrow; the cycle pickers step through their choices.
+
+Keyboard: Tab focuses the card, and Enter or Space opens it. In the actions, Tab moves through the buttons and Enter or Space presses the focused one.
+
+### Selection bar
+
+A floating bar that slides up under a list while something in it is selected, with the count, a clear button and labeled actions.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/selection-bar-dark.png"><img src="images/components/selection-bar.png" alt="A list of five image files with checkboxes, three ticked and tinted, and under it a bar reading 3 selected with a clear button, Move, Copy and a red Delete"></picture>
+
+```c
+static bool picked[5];
+static const cui_selection_action actions[] = {
+    { CUI_ICON_MOVE, "Move" }, { CUI_ICON_COPY, "Copy" }, { CUI_ICON_TRASH_2, "Delete", CUI_TONE_DANGER },
+};
+cui_column(ui, .id = "files") { /* rows with cui_checkbox(ui, "##pick", &picked[k]) */ }
+int a = cui_selection_bar(ui, "bulk", 0, actions, 3, .selected = picked, .item_count = 5, .anchor = cui_make_id(ui, "files"));
+if (a == 2) delete_picked();
+```
+
+The bar appears while the count is above zero and slides away when it drops to zero. Give it your array of flags in `selected` (with `item_count`) and it counts them and clears them itself; or pass `count` from your own model (a table's or a data grid's selection) and clear it when the bar returns `CUI_SELECTION_CLEARED`. It returns the index of an action on the frame it is picked, `CUI_SELECTION_CLEARED` when the clear button or Esc cleared the selection, and `CUI_SELECTION_NONE` otherwise; an action leaves the selection as it is. `count_format` changes "%d selected", and a `tone` colors an action (`CUI_TONE_DANGER` for delete).
+
+The bar floats under the component it belongs to: `anchor`, or the previous component. It sits over the page, below popovers and dialogs, and an open popover takes Esc before it does; `no_escape` leaves Esc alone. In a right-to-left interface its parts mirror.
+
+Keyboard: Esc clears the selection while the bar shows. Tab reaches the clear button and the actions after the list's own controls, and Enter or Space presses the focused one.
