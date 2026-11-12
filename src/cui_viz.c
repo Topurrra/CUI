@@ -1686,93 +1686,126 @@ int cui_scatter_chart_ex(cui_ctx *ui, const char *id_str, const cui_scatter_seri
 /* Radial gauge                                                             */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_spring needle; bool init; } cui__rg_state;
+typedef struct { cui_spring fill; bool init; } cui__rg_state;
 typedef struct {
     float t, lo, hi, a0, sweep, R, target_t;
-    int ticks, nband;
-    bool needle, target;
-    const char *value, *unit, *label, *format;
+    int nband;
+    cui_gauge_style style;
+    bool ends, target;
+    const char *value, *unit, *label, *detail, *status, *format;
     cui_gauge_band *bands;
-    cui_color fill;
+    cui_color fill, status_c;
 } cui__rg_paint;
 
-static void cui__paint_radial_gauge(cui_ctx *ui, cui_node *n, void *data) {
-    cui__rg_paint *p = data;
-    cui_rect r = n->rect;
-    float R = p->R;
-    cui_vec2 c = { r.x + r.w * 0.5f, r.y + 4 + R };
-    float th = p->needle ? CUI_MAX(3.0f, R * 0.075f) : CUI_MAX(6.0f, R * 0.17f), ar = R - th * 0.5f;
-    float a0 = p->a0, a1 = a0 + p->sweep, span = p->hi - p->lo;
-    /* the track: plain, or in band colors */
+/* the color of the band a fraction of the range falls in, or `none` past the last band */
+static cui_color cui__rg_band_at(cui_ctx *ui, const cui__rg_paint *p, float f, cui_color none) {
+    for (int k = 0; k < p->nband; k++)
+        if (f <= (p->bands[k].to - p->lo) / (p->hi - p->lo) + 1e-4f) return cui__tone_color(ui, p->bands[k].tone);
+    return none;
+}
+
+/* The readout every style shares: the value as the hero with its unit, the label under it,
+ * then the band's name as a tinted chip. `cy` is the value's middle. */
+static void cui__rg_readout(cui_ctx *ui, const cui__rg_paint *p, float cx, float cy, float vf) {
+    float uf = CUI_MAX(cui__fs(ui, ui->theme.text_sm), vf * 0.4f), lf = cui__fs(ui, ui->theme.text_sm);
+    float vw = cui__text_width(ui, CUI_FONT_DISPLAY, vf, p->value, -1, true);
+    float uw = p->unit ? cui__text_width(ui, CUI_FONT_BODY, uf, p->unit, -1, false) + 3 : 0;
+    float vh = cui__font_line_height(ui, CUI_FONT_DISPLAY, vf), vx = cx - (vw + uw) * 0.5f;
+    cui__draw_text_line(ui, CUI_FONT_DISPLAY, vf, vx, cy - vh * 0.5f, CUI_C(ui, FOREGROUND), p->value, -1, true);
+    if (p->unit) {
+        float uh = cui__font_line_height(ui, CUI_FONT_BODY, uf);
+        cui__draw_text_line(ui, CUI_FONT_BODY, uf, vx + vw + 3, cy + vh * 0.5f - uh - vh * 0.1f, CUI_C(ui, TEXT_MUTED), p->unit, -1, false);
+    }
+    float y = cy + vh * 0.5f + 8;
+    if (p->label) {
+        cui__draw_text_at(ui, CUI_FONT_BODY, lf, cx, y, CUI__AT_CENTER, CUI_C(ui, TEXT_SECONDARY), p->label, false);
+        y += cui__font_line_height(ui, CUI_FONT_BODY, lf) * 0.5f + 12;
+    }
+    if (p->status) {
+        float fs = cui__fs(ui, ui->theme.text_xs), w = cui__text_width(ui, CUI_FONT_MEDIUM, fs, p->status, -1, false) + 16, h = 20;
+        cui_draw_rect(ui, (cui_rect){ cx - w * 0.5f, y, w, h }, CUI_CORNERS(6), cui_alpha(p->status_c, ui->mode == CUI_THEME_DARK ? 0.14f : 0.12f));
+        cui__draw_text_at(ui, CUI_FONT_MEDIUM, fs, cx, y + h * 0.5f, CUI__AT_CENTER, p->status_c, p->status, false);
+    }
+}
+
+/* segments: short radial strokes, lit in their band's tone up to the value, the rest a track */
+static void cui__rg_paint_segments(cui_ctx *ui, const cui__rg_paint *p, cui_vec2 c) {
+    float R = p->R, rs = R - 9, half = CUI_MAX(4.0f, R * 0.075f), w = CUI_MAX(2.5f, R * 0.044f);
+    int n = CUI_CLAMP((int)roundf(rs * p->sweep / 12.0f), 12, 60);
     cui_color track = cui__viz_empty(ui);
-    if (p->nband > 0) {
-        float from = 0;
-        for (int k = 0; k < p->nband; k++) {
-            float to = cui__clampf((p->bands[k].to - p->lo) / span, 0, 1);
-            if (to > from) {
-                cui_color bc = cui__tone_color(ui, p->bands[k].tone);
-                if (!p->needle) bc = cui_mix(track, bc, 0.35f);
-                cui_draw_arc(ui, c, ar, a0 + p->sweep * from, a0 + p->sweep * to + (k < p->nband - 1 ? 0.01f : 0), th, bc);
-            }
-            from = CUI_MAX(from, to);
-        }
-        if (from < 1) cui_draw_arc(ui, c, ar, a0 + p->sweep * from, a1, th, track);
-    } else cui_draw_arc(ui, c, ar, a0, a1, th, track);
-    float av = a0 + p->sweep * cui__clampf(p->t, 0, 1);
-    if (!p->needle && p->t > 0.001f) {
+    for (int i = 0; i < n; i++) {
+        float f = (i + 0.5f) / (float)n, a = p->a0 + p->sweep * f;
+        bool on = f <= p->t;
+        cui_color col = !on ? track : p->nband ? cui__rg_band_at(ui, p, f, p->fill) : p->fill;
+        cui_vec2 d = { cosf(a), sinf(a) };
+        cui_vec2 e0 = { c.x + d.x * (rs - half), c.y + d.y * (rs - half) }, e1 = { c.x + d.x * (rs + half), c.y + d.y * (rs + half) };
+        cui_draw_line(ui, e0, e1, w, col);
+        cui_draw_circle(ui, e0, w * 0.5f, col);   /* round caps */
+        cui_draw_circle(ui, e1, w * 0.5f, col);
+    }
+}
+
+/* arc: a track and a value arc with round caps, min and max under the ends, an optional target */
+static void cui__rg_paint_arc(cui_ctx *ui, const cui__rg_paint *p, cui_vec2 c) {
+    float R = p->R, th = CUI_MAX(5.0f, R * 0.085f), ar = R - 14;
+    float a0 = p->a0, a1 = a0 + p->sweep, av = a0 + p->sweep * cui__clampf(p->t, 0, 1);
+    cui_color track = cui__viz_empty(ui);
+    cui_draw_arc(ui, c, ar, a0, a1, th, track);
+    cui_draw_circle(ui, (cui_vec2){ c.x + cosf(a1) * ar, c.y + sinf(a1) * ar }, th * 0.5f, track);
+    cui_draw_circle(ui, (cui_vec2){ c.x + cosf(a0) * ar, c.y + sinf(a0) * ar }, th * 0.5f, p->t > 0.001f ? p->fill : track);
+    if (p->t > 0.001f) {
+        cui_draw_arc(ui, c, ar, a0, av, th, p->fill);
+        cui_draw_circle(ui, (cui_vec2){ c.x + cosf(av) * ar, c.y + sinf(av) * ar }, th * 0.5f, p->fill);
+    }
+    float fs = cui__fs(ui, ui->theme.text_xs);
+    if (p->ends) {
+        cui__draw_text_at(ui, CUI_FONT_BODY, fs, c.x + cosf(a0) * ar, c.y + sinf(a0) * ar + th * 0.5f + 12, CUI__AT_CENTER, CUI_C(ui, TEXT_MUTED),
+                          cui__fmt_value(ui, p->format, p->lo), true);
+        cui__draw_text_at(ui, CUI_FONT_BODY, fs, c.x + cosf(a1) * ar, c.y + sinf(a1) * ar + th * 0.5f + 12, CUI__AT_CENTER, CUI_C(ui, TEXT_MUTED),
+                          cui__fmt_value(ui, p->format, p->hi), true);
+    }
+    if (p->target) {
+        /* a short stroke across the arc in the warning tone, its value just outside */
+        float a = a0 + p->sweep * cui__clampf(p->target_t, 0, 1);
+        cui_vec2 d = { cosf(a), sinf(a) };
+        cui_color tc = CUI_C(ui, WARNING);
+        float r0 = ar - th * 0.5f - 4, r1 = ar + th * 0.5f + 4;
+        cui_draw_line(ui, (cui_vec2){ c.x + d.x * (r0 - 1), c.y + d.y * (r0 - 1) }, (cui_vec2){ c.x + d.x * (r1 + 1), c.y + d.y * (r1 + 1) }, 4.5f, CUI_C(ui, SURFACE));
+        cui_draw_line(ui, (cui_vec2){ c.x + d.x * r0, c.y + d.y * r0 }, (cui_vec2){ c.x + d.x * r1, c.y + d.y * r1 }, 2.5f, tc);
+        float lr = r1 + 13;
+        cui__draw_text_at(ui, CUI_FONT_MEDIUM, fs, c.x + d.x * lr, c.y + d.y * lr, CUI__AT_CENTER, tc, cui__fmt_value(ui, p->format, p->lo + (p->hi - p->lo) * p->target_t), true);
+    }
+}
+
+/* ring: a slim full turn from the top, round caps on the value */
+static void cui__rg_paint_ring(cui_ctx *ui, const cui__rg_paint *p, cui_vec2 c) {
+    float th = CUI_MAX(4.0f, p->R * 0.1f), ar = p->R - th * 0.5f, a0 = -CUI_PI * 0.5f;
+    float av = a0 + 2 * CUI_PI * cui__clampf(p->t, 0, 1);
+    cui_draw_arc(ui, c, ar, 0, 2 * CUI_PI, th, cui__viz_empty(ui));
+    if (p->t > 0.001f) {
         cui_draw_arc(ui, c, ar, a0, av, th, p->fill);
         cui_draw_circle(ui, (cui_vec2){ c.x + cosf(a0) * ar, c.y + sinf(a0) * ar }, th * 0.5f, p->fill);
         cui_draw_circle(ui, (cui_vec2){ c.x + cosf(av) * ar, c.y + sinf(av) * ar }, th * 0.5f, p->fill);
     }
-    /* ticks: labelled majors inside the arc, four minors between them */
-    float fs = cui__fs(ui, ui->theme.text_xs);
-    if (p->ticks > 0) {
-        int minor = 5, n = p->ticks * minor;
-        float ri = R - th - 3;
-        for (int k = 0; k <= n; k++) {
-            float a = a0 + p->sweep * (float)k / (float)n;
-            bool major = k % minor == 0;
-            float len = major ? 7 : 3.5f;
-            cui_vec2 d = { cosf(a), sinf(a) };
-            cui_draw_line(ui, (cui_vec2){ c.x + d.x * ri, c.y + d.y * ri }, (cui_vec2){ c.x + d.x * (ri - len), c.y + d.y * (ri - len) },
-                          major ? 1.4f : 1, major ? CUI_C(ui, BORDER_STRONG) : CUI_C(ui, BORDER));
-            if (major && R >= 60) {
-                const char *s = cui__fmt_value(ui, p->format, p->lo + span * (float)k / (float)n);
-                float lr = ri - len - 10;
-                cui__draw_text_at(ui, CUI_FONT_BODY, fs, c.x + d.x * lr, c.y + d.y * lr, CUI__AT_CENTER, CUI_C(ui, TEXT_MUTED), s, true);
-            }
-        }
+}
+
+static void cui__paint_radial_gauge(cui_ctx *ui, cui_node *n, void *data) {
+    cui__rg_paint *p = data;
+    cui_rect r = n->rect;
+    cui_vec2 c = { r.x + r.w * 0.5f, r.y + 4 + p->R };
+    float lf = cui__fs(ui, ui->theme.text_sm);
+    if (p->style == CUI_GAUGE_RING) {
+        cui__rg_paint_ring(ui, p, c);
+        float vf = cui__fs(ui, CUI_MAX(18.0f, p->R * 0.47f));
+        cui__rg_readout(ui, p, c.x, c.y - (p->label ? 8 : 0), vf);
+        if (p->detail) cui__draw_text_at(ui, CUI_FONT_BODY, lf, c.x, c.y + p->R + 18, CUI__AT_CENTER, CUI_C(ui, TEXT_MUTED), p->detail, false);
+        return;
     }
-    if (p->target) {
-        float a = a0 + p->sweep * cui__clampf(p->target_t, 0, 1);
-        cui_vec2 d = { cosf(a), sinf(a) };
-        cui_draw_line(ui, (cui_vec2){ c.x + d.x * (R - th - 3), c.y + d.y * (R - th - 3) }, (cui_vec2){ c.x + d.x * (R + 3), c.y + d.y * (R + 3) }, 2.5f, CUI_C(ui, SURFACE));
-        cui_draw_line(ui, (cui_vec2){ c.x + d.x * (R - th - 2), c.y + d.y * (R - th - 2) }, (cui_vec2){ c.x + d.x * (R + 2), c.y + d.y * (R + 2) }, 1.5f, CUI_C(ui, FOREGROUND));
-    }
-    /* the readout: under the hub with a needle, in the middle without */
-    float vf = cui__fs(ui, R >= 70 ? 26 : 18), uf = cui__fs(ui, ui->theme.text_sm);
-    float vw = cui__text_width(ui, CUI_FONT_DISPLAY, vf, p->value, -1, true);
-    float uw = p->unit ? cui__text_width(ui, CUI_FONT_MEDIUM, uf, p->unit, -1, false) + 3 : 0;
-    float vy = p->needle ? c.y + R * 0.42f : c.y - (p->label ? 6 : 0);
-    float vx = c.x - (vw + uw) * 0.5f;
-    float vh = cui__font_line_height(ui, CUI_FONT_DISPLAY, vf);
-    cui__draw_text_line(ui, CUI_FONT_DISPLAY, vf, vx, vy - vh * 0.5f, CUI_C(ui, FOREGROUND), p->value, -1, true);
-    if (p->unit) {
-        float uh = cui__font_line_height(ui, CUI_FONT_MEDIUM, uf);
-        cui__draw_text_line(ui, CUI_FONT_MEDIUM, uf, vx + vw + 3, vy + vh * 0.5f - uh - vh * 0.08f, CUI_C(ui, TEXT_SECONDARY), p->unit, -1, false);
-    }
-    if (p->label) cui__draw_text_at(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), c.x, vy + vh * 0.5f + 10, CUI__AT_CENTER, CUI_C(ui, TEXT_SECONDARY), p->label, false);
-    if (p->needle) {
-        cui_vec2 d = { cosf(av), sinf(av) }, nn = { -d.y, d.x };
-        float tip = R - th - 5, base = 3.2f;
-        cui_color col = CUI_C(ui, FOREGROUND);
-        cui_cvert v[3] = { { c.x + d.x * tip, c.y + d.y * tip, col }, { c.x + nn.x * base - d.x * 10, c.y + nn.y * base - d.y * 10, col },
-                           { c.x - nn.x * base - d.x * 10, c.y - nn.y * base - d.y * 10, col } };
-        static const uint32_t idx[3] = { 0, 1, 2 };
-        cui__draw_triangles(ui, v, 3, idx, 3);
-        cui_draw_circle(ui, c, 6.5f, col);
-        cui_draw_circle(ui, c, 2.5f, CUI_C(ui, SURFACE));
-    }
+    if (p->style == CUI_GAUGE_SEGMENTS) cui__rg_paint_segments(ui, p, c);
+    else cui__rg_paint_arc(ui, p, c);
+    float vf = cui__fs(ui, CUI_MAX(18.0f, p->R * 0.4f));
+    cui__rg_readout(ui, p, c.x, c.y - 4, vf);
+    if (p->detail) cui__draw_text_at(ui, CUI_FONT_BODY, lf, c.x, r.y + r.h - 10, CUI__AT_CENTER, CUI_C(ui, TEXT_MUTED), p->detail, false);
 }
 
 void cui_radial_gauge_ex(cui_ctx *ui, const char *id_str, float value, float min, float max, const cui_radial_gauge_opts *o) {
@@ -1783,29 +1816,48 @@ void cui_radial_gauge_ex(cui_ctx *ui, const char *id_str, float value, float min
     cui_id id = cui_make_id(ui, id_str ? id_str : "gauge");
     cui__rg_state *st = cui_state(ui, id, sizeof *st);
     float t = value == value ? cui__clampf((value - min) / (max - min), 0, 1) : 0;
-    if (!st->init) { st->needle.x = 0; st->init = true; }
-    cui__spring(ui, &st->needle, t, 0.55f, 0.16f);   /* a little overshoot, like a real needle */
+    if (!st->init) { st->fill.x = 0; st->init = true; }
+    cui__spring(ui, &st->fill, t, 0.55f, 0.0f);
     float size = o->size > 0 ? o->size : 200;
-    float sweep = (o->sweep > 0 ? CUI_CLAMP(o->sweep, 90, 300) : 240) * CUI_PI / 180.0f;
+    float sweep = (o->sweep > 0 ? CUI_CLAMP(o->sweep, 90, 300) : 270) * CUI_PI / 180.0f;
     float a0 = CUI_PI * 0.5f + (2 * CUI_PI - sweep) * 0.5f;
     float R = size * 0.5f - 4;
     cui__rg_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
-    p->t = st->needle.x; p->lo = min; p->hi = max; p->a0 = a0; p->sweep = sweep; p->R = R;
-    p->needle = !o->no_needle;
-    p->ticks = o->ticks < 0 ? 0 : o->ticks > 0 ? CUI_MIN(o->ticks, 20) : 5;
+    p->t = st->fill.x; p->lo = min; p->hi = max; p->a0 = a0; p->sweep = sweep; p->R = R;
+    p->nband = o->bands ? CUI_CLAMP(o->band_count, 0, 16) : 0;
+    if (p->nband) { p->bands = cui__frame_alloc(ui, sizeof(cui_gauge_band) * (size_t)p->nband); memcpy(p->bands, o->bands, sizeof(cui_gauge_band) * (size_t)p->nband); }
+    p->style = o->style == CUI_GAUGE_AUTO ? (p->nband ? CUI_GAUGE_SEGMENTS : CUI_GAUGE_ARC) : o->style;
+    if (p->style > CUI_GAUGE_RING) p->style = CUI_GAUGE_ARC;
+    p->ends = p->style == CUI_GAUGE_ARC && o->ticks >= 0;
     p->format = o->format ? cui__frame_strdup(ui, o->format, -1) : NULL;
     p->value = cui__fmt_value(ui, o->format, value);
     p->unit = o->unit && *o->unit ? cui__frame_strdup(ui, o->unit, -1) : NULL;
     p->label = o->label && *o->label ? cui__frame_strdup(ui, o->label, -1) : NULL;
-    p->target = o->show_target; p->target_t = (o->target - min) / (max - min);
-    p->nband = o->bands ? CUI_CLAMP(o->band_count, 0, 16) : 0;
-    if (p->nband) { p->bands = cui__frame_alloc(ui, sizeof(cui_gauge_band) * (size_t)p->nband); memcpy(p->bands, o->bands, sizeof(cui_gauge_band) * (size_t)p->nband); }
-    p->fill = cui__viz_base(ui, (cui_color){ 0 });
-    for (int k = 0; k < p->nband; k++) if (value <= p->bands[k].to || k == p->nband - 1) { p->fill = cui__tone_color(ui, p->bands[k].tone); break; }
-    /* tall enough for the arc's lower ends and the readout under the hub */
-    float below = CUI_MAX(R * sinf(a0) + 6, p->needle ? R * 0.42f + 22 + (p->label ? 22 : 0) : 16 + (p->label ? 20 : 0));
-    float h = 4 + R + below;
+    p->detail = o->detail && *o->detail ? cui__frame_strdup(ui, o->detail, -1) : NULL;
+    p->target = o->show_target && p->style == CUI_GAUGE_ARC; p->target_t = (o->target - min) / (max - min);
+    /* the value's color: the caller's, else the band it is in, else the accent (the ring takes the first series color) */
+    p->fill = p->style == CUI_GAUGE_RING ? CUI_C(ui, SERIES_1) : cui__emphasis(ui);
+    for (int k = 0; k < p->nband; k++)
+        if (value <= p->bands[k].to || k == p->nband - 1) {
+            p->fill = cui__tone_color(ui, p->bands[k].tone);
+            if (p->style == CUI_GAUGE_SEGMENTS && p->bands[k].name && *p->bands[k].name) {
+                p->status = cui__frame_strdup(ui, p->bands[k].name, -1);
+                p->status_c = p->fill;
+            }
+            break;
+        }
+    if (cui__color_set(o->color)) p->fill = cui_color_of(ui, o->color);
+    /* tall enough for the arc's lower ends with their labels, and for the readout */
+    float vf = cui__fs(ui, CUI_MAX(18.0f, R * 0.4f)), vh = cui__font_line_height(ui, CUI_FONT_DISPLAY, vf);
+    float lh = cui__font_line_height(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm));
+    float h;
+    if (p->style == CUI_GAUGE_RING) h = 4 + 2 * R + 4 + (p->detail ? 26 : 0);
+    else {
+        float ends = R * sinf(a0) + (p->ends ? 24 : 6);
+        float read = -4 + vh * 0.5f + 8 + (p->label ? lh * 0.5f + 12 : 0) + (p->status ? 24 : (p->label ? -4 : 0));
+        h = 4 + R + CUI_MAX(ends, read) + (p->detail ? 22 : 0);
+    }
     int node = cui__viz_node(ui, id, CUI_PX(size), CUI_PX(ceilf(h)), cui__paint_radial_gauge, p, false);
     ui->nodes[node].self_align = CUI__ALIGN_NOSTRETCH;
 }

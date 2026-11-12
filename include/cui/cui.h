@@ -1971,27 +1971,47 @@ typedef struct cui_scatter_opts {
 } cui_scatter_opts;
 CUI_API int cui_scatter_chart_ex(cui_ctx *ui, const char *id, const cui_scatter_series *series, int count, const cui_scatter_opts *opts);
 
-/* Radial gauge: one value on a dial with colored bands, labelled ticks, a
- * needle and a target marker, for dashboards (speed, load, temperature, a
- * score against a goal). The needle springs to new values.
+/* Radial gauge: one value as a large number on an arc, for dashboards (load, speed,
+ * temperature, a score against a goal). Three styles:
+ *   CUI_GAUGE_SEGMENTS  a ring of short segments, lit in each band's tone up to the value,
+ *                       with the current band's name as a chip under the label
+ *   CUI_GAUGE_ARC       a track and a value arc with round caps, min and max at the ends,
+ *                       and a marker at `target`
+ *   CUI_GAUGE_RING      a slim full ring from the top, with `detail` under it
+ * CUI_GAUGE_AUTO (the default) picks the segments when `bands` are given and the arc
+ * otherwise. The arc fills to new values with a spring.
  *
- *     static const cui_gauge_band bands[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+ *     static const cui_gauge_band bands[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING, "Elevated" }, { 100, CUI_TONE_DANGER, "High" } };
  *     cui_radial_gauge(ui, "cpu", load, 0, 100, .unit = "%", .label = "CPU load", .bands = bands, .band_count = 3);
+ *     cui_radial_gauge(ui, "disk", 38, 0, 100, .unit = "%", .label = "Disk", .style = CUI_GAUGE_RING, .detail = "190 of 500 GB");
  */
-typedef struct cui_gauge_band { float to; cui_tone tone; } cui_gauge_band;   /* from the band before (or min) up to `to` */
+typedef struct cui_gauge_band {
+    float to;                  /* the band runs from the band before (or min) up to here */
+    cui_tone tone;             /* its color */
+    const char *name;          /* shown as a chip while the value is in this band (segments style); `NULL` for none */
+} cui_gauge_band;
+typedef enum cui_gauge_style {
+    CUI_GAUGE_AUTO = 0,        /* segments with `bands`, the arc without */
+    CUI_GAUGE_ARC,             /* a track and a value arc with round caps, min and max at its ends */
+    CUI_GAUGE_SEGMENTS,        /* short segments lit up to the value, in the band colors */
+    CUI_GAUGE_RING             /* a slim full ring starting at the top */
+} cui_gauge_style;
 typedef struct cui_radial_gauge_opts {
     int _;
     const char *label;         /* under the value */
-    const char *format;        /* the value and the tick labels, default "%.0f" */
-    const char *unit;          /* after the value, smaller */
+    const char *format;        /* the value, the ends and the target, default whole numbers with large ones shortened (1.8k) */
+    const char *unit;          /* after the value, smaller and muted */
     float size;                /* width, default 200; the height follows the sweep */
-    float sweep;               /* degrees of arc, default 240 (90 to 300) */
+    float sweep;               /* degrees of arc, default 270 (90 to 300); the ring is always a full turn */
     const cui_gauge_band *bands;   /* colored stretches of the arc, each from the one before up to its `to`; at most 16 */
     int band_count;            /* number of `bands` */
-    int ticks;                 /* labelled divisions, default 5; -1 hides the ticks */
+    int ticks;                 /* -1 hides the min and max labels at the ends of the arc */
     float target;              /* a marker on the arc, when show_target is set */
-    bool show_target;          /* draws the marker at `target` */
-    bool no_needle;            /* a thick arc filled to the value instead of a needle */
+    bool show_target;          /* draws the marker at `target`, labelled with its value (arc style) */
+    bool no_needle;            /* kept for older code; no style has a needle */
+    cui_gauge_style style;     /* CUI_GAUGE_AUTO picks segments with `bands`, else the arc */
+    const char *detail;        /* a muted line under the gauge, e.g. "190 of 500 GB"; `NULL` for none */
+    cui_color color;           /* the value's color; unset: the band the value is in, else the accent (the ring: the first series color) */
 } cui_radial_gauge_opts;
 CUI_API void cui_radial_gauge_ex(cui_ctx *ui, const char *id, float value, float min, float max, const cui_radial_gauge_opts *opts);
 

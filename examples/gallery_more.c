@@ -891,11 +891,11 @@ static void page_viz(cui_ctx *ui) {
         cui_card(ui, .pad = 18, .width = CUI_FILL) {
             cui_scatter_chart(ui, "scatter", ss, 2, .height = 300, .x_label = "Nodes", .y_label = "Frame time (ms)", .y_format = "%.2f");
         }
-        static const cui_gauge_band bands[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+        static const cui_gauge_band bands[] = { { 60, CUI_TONE_SUCCESS, "Normal" }, { 85, CUI_TONE_WARNING, "Busy" }, { 100, CUI_TONE_DANGER, "Overloaded" } };
         cui_card(ui, .pad = 18, .width = CUI_FILL, .dir = CUI_ROW, .wrap = true, .gap = 24, .align = CUI_ALIGN_CENTER) {
             cui_radial_gauge(ui, "cpu", 64, 0, 100, .unit = "%", .label = "CPU", .bands = bands, .band_count = 3, .size = 180);
             cui_radial_gauge(ui, "temp", 71, 20, 100, .unit = "C", .label = "GPU temperature", .show_target = true, .target = 85, .size = 180);
-            cui_radial_gauge(ui, "mem", 0.62f * 32, 0, 32, .format = "%.1f", .unit = "GB", .label = "Memory", .no_needle = true, .ticks = -1, .size = 150);
+            cui_radial_gauge(ui, "mem", 0.62f * 32, 0, 32, .format = "%.1f", .unit = "GB", .label = "Memory", .style = CUI_GAUGE_RING, .detail = "of 32 GB", .size = 150);
         }
         enum { NC = 2000 };
         static cui_candle candles[NC];

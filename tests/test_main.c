@@ -3103,6 +3103,59 @@ static void test_series_palette(void) {
         }
 }
 
+/* radial gauge styles: AUTO picks segments with bands and the arc without; each style is
+ * told apart by its pixels: segments break up along the arc, the arc is one stroke with a
+ * gap at the bottom, the ring closes there */
+typedef struct { cui_gauge_style style; bool bands; } gauge_case;
+static void build_gauge_case(cui_ctx *ui, void *u) {
+    const gauge_case *g = u;
+    static const cui_gauge_band b[] = { { 50, CUI_TONE_SUCCESS, "Ok" }, { 100, CUI_TONE_DANGER, "Hot" } };
+    cui_radial_gauge(ui, "g", 80, 0, 100, .size = 200, .style = g->style, .bands = g->bands ? b : NULL, .band_count = g->bands ? 2 : 0);
+}
+static bool gauge_ink(const unsigned char *px, int w, float x, float y, const unsigned char *bg) {
+    const unsigned char *q = px + ((int)y * w + (int)x) * 4;
+    return abs(q[0] - bg[0]) + abs(q[1] - bg[1]) + abs(q[2] - bg[2]) > 12;
+}
+/* breaks: ink and gap changes along the lit part of the arc; *bottom: ink under the middle */
+static void gauge_probe(gauge_case g, int *breaks, bool *bottom) {
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
+    cui_set_viewport(ui, 240, 280, 1);
+    run(ui, build_gauge_case, &g, 90);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "g"));
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = calloc((size_t)dd->width_px * dd->height_px, 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    unsigned char bg[3] = { px[(dd->height_px - 2) * dd->width_px * 4], px[(dd->height_px - 2) * dd->width_px * 4 + 1], px[(dd->height_px - 2) * dd->width_px * 4 + 2] };
+    float R = 96, cx = r.x + r.w * 0.5f, cy = r.y + 4 + R, a0 = 3.14159265f * 0.75f, sweep = 3.14159265f * 1.5f;
+    int changes = 0;
+    bool prev = false;
+    for (int i = 0; i <= 400; i++) {
+        float a = a0 + sweep * (0.05f + 0.7f * (float)i / 400.0f);
+        bool ink = gauge_ink(px, dd->width_px, cx + cosf(a) * 84, cy + sinf(a) * 84, bg);
+        if (i > 0 && ink != prev) changes++;
+        prev = ink;
+    }
+    *breaks = changes;
+    *bottom = gauge_ink(px, dd->width_px, cx, cy + 90, bg);
+    free(px);
+    cui_destroy(ui);
+}
+
+static void test_radial_gauge_styles(void) {
+    printf("radial gauge: the style follows the options\n");
+    int breaks; bool bottom;
+    gauge_probe((gauge_case){ CUI_GAUGE_AUTO, false }, &breaks, &bottom);
+    CHECK(breaks == 0 && !bottom);              /* no bands: the arc */
+    gauge_probe((gauge_case){ CUI_GAUGE_AUTO, true }, &breaks, &bottom);
+    CHECK(breaks >= 10 && !bottom);             /* bands: the segments */
+    gauge_probe((gauge_case){ CUI_GAUGE_SEGMENTS, false }, &breaks, &bottom);
+    CHECK(breaks >= 10);
+    gauge_probe((gauge_case){ CUI_GAUGE_ARC, true }, &breaks, &bottom);
+    CHECK(breaks == 0 && !bottom);              /* asked for the arc, bands only color it */
+    gauge_probe((gauge_case){ CUI_GAUGE_RING, false }, &breaks, &bottom);
+    CHECK(breaks == 0 && bottom);               /* the ring closes under the value */
+}
+
 /* draw data and renderer ------------------------------------------------ */
 
 static void build_rect(cui_ctx *ui, void *u) {
@@ -7772,6 +7825,7 @@ int main(void) {
     test_virtual_list();
     test_theme();
     test_series_palette();
+    test_radial_gauge_styles();
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();

@@ -1745,19 +1745,25 @@ Leave `sizes` NULL for a scatter. With sizes, the area of a bubble follows its v
 
 ### Radial gauge
 
-One value on a dial, for dashboards: speed, load, temperature, a score against a goal.
+One value on an arc, for dashboards: load, speed, temperature, a score against a goal. The number is the hero; the arc around it says how full.
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gauges-dark.png"><img src="images/components/gauges.png" alt="Radial gauges"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gauges-dark.png"><img src="images/components/gauges.png" alt="Radial gauges: a segmented arc, a clean arc with a target, and a slim ring"></picture>
 
 ```c
-static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS, "Normal" }, { 85, CUI_TONE_WARNING, "Elevated" }, { 100, CUI_TONE_DANGER, "High" } };
 
-cui_radial_gauge(ui, "cpu", cpu_load, 0, 100, .unit = "%", .label = "CPU load", .bands = load, .band_count = 3);
-cui_radial_gauge(ui, "rps", rps, 0, 2500, .label = "Requests per second", .show_target = true, .target = 2000);
-cui_radial_gauge(ui, "disk", disk_used, 0, 100, .unit = "%", .label = "Disk", .no_needle = true, .ticks = -1);
+cui_radial_gauge(ui, "cpu", cpu_load, 0, 100, .unit = "%", .label = "CPU load", .bands = load, .band_count = 3);   /* segments */
+cui_radial_gauge(ui, "rps", rps, 0, 2500, .label = "Requests / s", .show_target = true, .target = 2000);              /* arc */
+cui_radial_gauge(ui, "disk", disk_used, 0, 100, .unit = "%", .label = "Disk", .style = CUI_GAUGE_RING, .detail = "190 of 500 GB");
 ```
 
-The arc sweeps 240 degrees (`sweep`, 90 to 300) between `min` and `max`, with labelled major ticks (`ticks` divisions, 5 by default, -1 for none) and four minor ticks between them. `bands` color stretches of the arc in the theme's tones, each running from the band before it (or `min`) up to its `to`. A needle points at the value and springs there with a little overshoot when the value changes (it snaps with reduced motion); `no_needle` fills a thick arc instead and puts the readout in the middle, in the color of the band the value is in. `show_target` adds a marker at `target`. The readout uses `format` (by default whole numbers, with large ones shortened to 1.8k) and `unit`, with `label` under it. `size` sets the width and the height follows the sweep.
+Three styles, set with `style`:
+
+- `CUI_GAUGE_SEGMENTS`: a ring of short segments. Those up to the value light in the tone of the band they fall in, and the rest stay a quiet track, so the zone colors show only as far as the value reaches. The band the value is in shows its `name` as a tinted chip under the label.
+- `CUI_GAUGE_ARC`: a track and a value arc with round caps, with `min` and `max` under its ends (`ticks = -1` hides them). `show_target` crosses the arc at `target` with a short stroke in the warning tone, labelled with its value.
+- `CUI_GAUGE_RING`: a slim full ring from the top, for a share of a whole, with `detail` under it.
+
+`CUI_GAUGE_AUTO`, the default, picks the segments when you pass `bands` and the arc otherwise, so code written before the styles keeps a sensible look. `no_needle` is still accepted and does nothing, since no style has a needle. The arc and the segments sweep 270 degrees (`sweep`, 90 to 300) between `min` and `max`; the ring is always a full turn. The value's color is `color` when set, else the tone of the band the value is in, else the accent (the first series color for the ring). The arc fills to a new value with a spring, and snaps with reduced motion. The readout uses `format` (by default whole numbers, with large ones shortened to 1.8k) and `unit`, with `label` under it; `detail` adds a muted line under any style. `size` sets the width and the height follows the sweep.
 
 ### Candlestick chart
 

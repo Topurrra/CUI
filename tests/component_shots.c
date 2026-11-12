@@ -2187,11 +2187,11 @@ SCENE(emoji_picker) {
     }
 }
 SCENE(gauges) {
-    static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS }, { 85, CUI_TONE_WARNING }, { 100, CUI_TONE_DANGER } };
+    static const cui_gauge_band load[] = { { 60, CUI_TONE_SUCCESS, "Normal" }, { 85, CUI_TONE_WARNING, "Elevated" }, { 100, CUI_TONE_DANGER, "High" } };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .width = CUI_FILL, .wrap = true) {
         cui_radial_gauge(ui, "cpu", 72, 0, 100, .unit = "%", .label = "CPU load", .bands = load, .band_count = 3);
-        cui_radial_gauge(ui, "rps", 1840, 0, 2500, .label = "Requests per second", .show_target = true, .target = 2000, .ticks = 5);
-        cui_radial_gauge(ui, "disk", 38, 0, 100, .unit = "%", .label = "Disk", .no_needle = true, .size = 160, .ticks = -1);
+        cui_radial_gauge(ui, "rps", 1840, 0, 2500, .label = "Requests / s", .show_target = true, .target = 2000);
+        cui_radial_gauge(ui, "disk", 38, 0, 100, .unit = "%", .label = "Disk", .style = CUI_GAUGE_RING, .detail = "190 of 500 GB", .size = 150);
     }
 }
 /* a price history for the candlestick demo: a seeded random walk with a trend and some volatility clusters */
