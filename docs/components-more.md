@@ -1653,7 +1653,7 @@ float traffic[7 * 24];   /* values[row * cols + col] */
 cui_heatmap(ui, "traffic", traffic, 7, 24, .row_labels = weekdays, .col_labels = hours, .format = "%.0f req");
 ```
 
-One hue, light to dark (dim to bright in dark mode), with a scale below. Column labels skip themselves when they would collide; pass NULL for the ones you do not want. `min` and `max` fix the range; `cell` fixes the size, otherwise the cells fit the width.
+Each cell falls into one of five steps: the empty surface for values at the bottom of the range, then four even mixes toward the accent (a gray ramp under the neutral accent, or toward `color` when you set one). Under the grid sit the value range and a Less to More key of the five steps. Cells are at most 28 points with 5 point gaps (3 under 20 points, 2 on a phone). Hovering a cell rings it, lights its row label and its column label when it has one, and shows a tooltip. Column labels skip themselves when they would collide; pass NULL for the ones you do not want. `min` and `max` fix the range; `cell` fixes the size, otherwise the cells fit the width.
 
 ### Calendar heatmap
 
@@ -1667,7 +1667,7 @@ cui_date start = { 2025, 11, 11 };           /* year, month, day */
 cui_calendar_heatmap(ui, "year", start, per_day, 364, .unit = "contributions");
 ```
 
-One square a day in five levels, weeks as columns starting on Monday, month labels where a month begins. The tooltip shows the date and the value; `unit` also adds a total under the grid.
+One square a day in the same five steps as the heatmap, from the empty surface to the accent (or `color`), weeks as columns starting on Monday, month labels where a month begins, and a Less to More key. Hovering a day rings it, lights its weekday and month labels and shows the date and the value; `unit` also adds a total under the grid.
 
 Returns the index of the day that was clicked, or -1. `per_day` is your array of `days` floats, only read. A value of 0 or less leaves the square empty, and the rest fall into four levels by their share of the largest value, so one extreme day dims all the others. In a container too narrow for the whole range, only the most recent weeks that fit are drawn, and the returned index then counts from the first day drawn.
 

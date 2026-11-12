@@ -13,6 +13,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 - **A calmer series palette.** The six chart colors keep their order (blue, orange, aqua, violet, yellow, magenta), so neighbours stay apart under color blindness, but now share one lightness and about one chroma in each mode. No series shouts over another or over the rest of the interface, and the light colors keep 4.2:1 or more on white.
 - **Bar, donut and line charts** step back so the data leads: faint dashed gridlines over a solid zero line, smaller muted axis labels, slimmer bars with a small gap inside a group, and on hover a soft band behind the column with a compact chip of its values. The donut ring is thinner, its segments are parted by real gaps, and each legend row has a thin bar showing its share.
+- **Heatmap and calendar heatmap** count in five steps from the empty surface up to the accent (a gray ramp under the neutral accent), so zero reads as empty and the steps read at a glance. Heatmap cells are smaller with real gaps, a Less to More key replaces the gradient scale, and hovering a cell rings it and lights its row and column labels.
 
 ### Fixed
 

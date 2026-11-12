@@ -1849,15 +1849,15 @@ CUI_API void cui_ticker_ex(cui_ctx *ui, const char *id, const cui_ticker_item *i
  * and returns the index of the mark that was clicked, or -1. Colors default
  * to the series palette; numbers use `format` (printf, default compact). */
 
-/* Heatmap: a rows x cols matrix (values[row * cols + col]) on one hue,
- * light to dark, with a scale below. */
+/* Heatmap: a rows x cols matrix (values[row * cols + col]) in five steps from
+ * the empty surface to the accent, with the range and a Less / More key below. */
 typedef struct cui_heatmap_opts {
     int _;
     const char *const *row_labels;   /* one label per row, left of the grid; `NULL` for none */
     const char *const *col_labels;   /* one label per column, under the grid; labels that would overlap are skipped */
     float cell;                /* cell size, default fits the width */
     float min, max;            /* value range, default the data's */
-    cui_color color;           /* hue of the scale, default the accent */
+    cui_color color;           /* the top step, default the accent; the steps mix toward it from the empty surface */
     const char *format;
     cui_size width;
 } cui_heatmap_opts;
@@ -1868,7 +1868,7 @@ CUI_API int cui_heatmap_ex(cui_ctx *ui, const char *id, const float *values, int
 typedef struct cui_calendar_heatmap_opts {
     int _;
     float cell;                /* size of a day's square in points, default 11 */
-    cui_color color;
+    cui_color color;           /* the top step, default the accent */
     const char *format;
     const char *unit;
 } cui_calendar_heatmap_opts;

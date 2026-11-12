@@ -153,6 +153,50 @@ static const char *cui__pct(cui_ctx *ui, float part, float total) {
 /* Heatmap                                                                  */
 /* ------------------------------------------------------------------------ */
 
+/* Both heatmaps count in five steps: the empty surface, then four even mixes (in OKLab)
+ * toward the base, the theme accent unless the caller picks a color. Steps read faster
+ * than a continuous ramp, and zero looks empty rather than faintly on. Under the neutral
+ * accent the steps are a gray ramp up to its gray, a step softer than the text color. */
+#define CUI__HEAT_STEPS 5
+static cui_color cui__heat_base(cui_ctx *ui, cui_color c) {
+    return cui__color_set(c) ? cui_color_of(ui, c) : CUI_C(ui, ACCENT);
+}
+
+static cui_color cui__heat_step(cui_ctx *ui, cui_color base, int level) {
+    static const float t[CUI__HEAT_STEPS] = { 0, 0.27f, 0.52f, 0.76f, 1.0f };
+    return cui_mix(cui__viz_empty(ui), base, t[CUI_CLAMP(level, 0, CUI__HEAT_STEPS - 1)]);
+}
+
+/* t is the value's place in its range, 0 to 1; only the bottom few percent count as empty */
+static int cui__heat_level(float t) {
+    if (!(t >= 0.05f)) return 0;
+    return CUI_CLAMP(1 + (int)floorf(t * 4 - 0.0001f), 1, 4);
+}
+
+static float cui__heat_radius(float cell) { return cui__clampf(cell * 0.22f, 2, 6); }
+
+/* The step key, right-aligned to `right`: "Less", a square per step, "More". Returns its
+ * left edge, or `right` when it was not drawn because it would cross `min_x`. */
+static float cui__heat_key(cui_ctx *ui, cui_color base, float right, float y, float sz, float min_x, bool words) {
+    float fs = cui__fs(ui, ui->theme.text_xs), pitch = sz + 4, rad = cui__heat_radius(sz) * 0.8f;
+    float more_w = cui__text_width(ui, CUI_FONT_BODY, fs, "More", -1, false), less_w = cui__text_width(ui, CUI_FONT_BODY, fs, "Less", -1, false);
+    float w = CUI__HEAT_STEPS * pitch - 4 + (words ? more_w + less_w + 16 : 0);
+    if (right - w < min_x) return right;
+    float x = right;
+    if (words) { x -= more_w; cui__draw_text_at(ui, CUI_FONT_BODY, fs, x, y + sz * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), "More", false); x -= 8; }
+    for (int lv = CUI__HEAT_STEPS - 1; lv >= 0; lv--) { x -= sz; cui_draw_rect(ui, (cui_rect){ x, y, sz, sz }, CUI_CORNERS(rad), cui__heat_step(ui, base, lv)); x -= 4; }
+    x += 4;
+    if (words) { x -= 8; cui__draw_text_at(ui, CUI_FONT_BODY, fs, x, y + sz * 0.5f, CUI__AT_RIGHT, CUI_C(ui, TEXT_MUTED), "Less", false); x -= less_w; }
+    return x;
+}
+
+/* the hovered cell's ring, a little outside it */
+static void cui__heat_ring(cui_ctx *ui, cui_rect c, float rad, float alpha) {
+    float o = c.w >= 18 ? 2.5f : 1.5f;
+    cui_draw_rect_border(ui, (cui_rect){ c.x - o, c.y - o, c.w + 2 * o, c.h + 2 * o }, CUI_CORNERS(rad + o), cui__rgba(0, 0, 0, 0),
+                         cui_alpha(CUI_C(ui, FOREGROUND), alpha), c.w >= 18 ? 1.75f : 1.5f);
+}
+
 typedef struct { float lw, cell, gap, gx, gy, grid_h; } cui__hm_geo;
 
 static cui__hm_geo cui__hm_layout(cui_ctx *ui, cui_rect r, int rows, int cols, const cui_heatmap_opts *o) {
@@ -161,13 +205,19 @@ static cui__hm_geo cui__hm_layout(cui_ctx *ui, cui_rect r, int rows, int cols, c
     g.lw = 0;
     if (o->row_labels)
         for (int i = 0; i < rows; i++) g.lw = CUI_MAX(g.lw, cui__text_width(ui, CUI_FONT_BODY, fs, o->row_labels[i] ? o->row_labels[i] : "", -1, false) + 12);
-    g.gap = 3;
     float avail = (r.w > 0 ? r.w : 480) - g.lw;
-    g.cell = o->cell > 0 ? o->cell : cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)CUI_MAX(1, cols), 12, 56);
+    int nc = CUI_MAX(1, cols);
+    /* modest cells with real gaps between them, so they read as a field and not as buttons */
+    g.gap = 5;
+    g.cell = o->cell > 0 ? o->cell : cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)nc, 12, 28);
+    if (g.cell < 20) {
+        g.gap = 3;
+        if (o->cell <= 0) g.cell = cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)nc, 12, 28);
+    }
     if (o->cell <= 0 && r.w > 0 && g.lw + cols * (g.cell + g.gap) - g.gap > r.w + 0.5f) {
         /* a narrow container: tighter gaps and smaller cells rather than spilling out */
         g.gap = 2;
-        g.cell = cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)CUI_MAX(1, cols), 6, 12);
+        g.cell = cui__clampf((avail - g.gap * (float)(cols - 1)) / (float)nc, 6, 12);
     }
     g.gx = r.x + g.lw; g.gy = r.y;
     g.grid_h = rows * (g.cell + g.gap) - g.gap;
@@ -184,24 +234,29 @@ static void cui__paint_heatmap(cui_ctx *ui, cui_node *n, void *data) {
     cui__hm_paint *p = data;
     cui__hm_geo g = cui__hm_layout(ui, n->rect, p->rows, p->cols, &p->o);
     float fs = cui__fs(ui, ui->theme.text_xs);
-    float rad = g.cell >= 18 ? 4 : 2.5f;
+    float rad = cui__heat_radius(g.cell);
+    bool on = p->hover >= 0 && p->tip.alpha > 0.5f;
+    int hi_row = on ? p->hover / p->cols : -1, hi_col = on ? p->hover % p->cols : -1;
     /* small cells (a phone): every other row label, so they do not run into each other */
     int every = (int)ceilf(cui__font_line_height(ui, CUI_FONT_BODY, fs) / (g.cell + g.gap));
     if (every < 1) every = 1;
     for (int i = 0; i < p->rows; i++) {
-        if (p->o.row_labels && p->o.row_labels[i] && i % every == 0)
-            cui__draw_text_at(ui, CUI_FONT_BODY, fs, g.gx - 10, g.gy + i * (g.cell + g.gap) + g.cell * 0.5f, CUI__AT_RIGHT, CUI_C(ui, TEXT_SECONDARY), p->o.row_labels[i], false);
+        if (p->o.row_labels && p->o.row_labels[i] && (i % every == 0 || i == hi_row)) {
+            /* the hovered row's label speaks up, the rest stay muted */
+            bool hl = i == hi_row;
+            cui__draw_text_at(ui, hl ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, g.gx - 10, g.gy + i * (g.cell + g.gap) + g.cell * 0.5f, CUI__AT_RIGHT,
+                              hl ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), p->o.row_labels[i], false);
+        }
         for (int j = 0; j < p->cols; j++) {
             float t = (p->v[i * p->cols + j] - p->lo) / (p->hi - p->lo);
             float a = cui__clampf(p->intro * 1.8f - (float)j / (float)p->cols * 0.8f, 0, 1);
             cui_rect c = { g.gx + j * (g.cell + g.gap), g.gy + i * (g.cell + g.gap), g.cell, g.cell };
-            cui_draw_rect(ui, c, CUI_CORNERS(rad), cui_mix(cui__viz_empty(ui), cui__viz_seq(ui, p->base, t), a));
+            cui_draw_rect(ui, c, CUI_CORNERS(rad), cui_mix(cui__viz_empty(ui), cui__heat_step(ui, p->base, cui__heat_level(t)), a));
         }
     }
     if (p->hover >= 0 && p->tip.alpha > 0.01f) {
         int i = p->hover / p->cols, j = p->hover % p->cols;
-        cui_rect c = { g.gx + j * (g.cell + g.gap) - 1.5f, g.gy + i * (g.cell + g.gap) - 1.5f, g.cell + 3, g.cell + 3 };
-        cui_draw_rect_border(ui, c, CUI_CORNERS(rad + 1.5f), cui__rgba(0, 0, 0, 0), cui_alpha(CUI_C(ui, FOREGROUND), p->tip.alpha), 1.5f);
+        cui__heat_ring(ui, (cui_rect){ g.gx + j * (g.cell + g.gap), g.gy + i * (g.cell + g.gap), g.cell, g.cell }, rad, p->tip.alpha);
     }
     float by = g.gy + g.grid_h;
     if (p->o.col_labels) {
@@ -209,26 +264,23 @@ static void cui__paint_heatmap(cui_ctx *ui, cui_node *n, void *data) {
         for (int j = 0; j < p->cols; j++) {
             const char *s = p->o.col_labels[j];
             if (!s) continue;
-            float cx = g.gx + j * (g.cell + g.gap) + g.cell * 0.5f, w = cui__text_width(ui, CUI_FONT_BODY, fs, s, -1, false);
-            if (cx - w * 0.5f < last + 6) continue;
-            cui__draw_text_at(ui, CUI_FONT_BODY, fs, cx, by + 13, CUI__AT_CENTER, CUI_C(ui, TEXT_MUTED), s, false);
+            bool hl = j == hi_col;
+            cui_font f = hl ? CUI_FONT_MEDIUM : CUI_FONT_BODY;
+            float cx = g.gx + j * (g.cell + g.gap) + g.cell * 0.5f, w = cui__text_width(ui, f, fs, s, -1, false);
+            if (cx - w * 0.5f < last + 6 && !hl) continue;
+            cui__draw_text_at(ui, f, fs, cx, by + 13, CUI__AT_CENTER, hl ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), s, false);
             last = cx + w * 0.5f;
         }
         by += 22;
     }
-    /* scale */
-    const char *lo = cui__fmt_value(ui, p->o.format, p->lo), *hi = cui__fmt_value(ui, p->o.format, p->hi);
-    float hiw = cui__text_width(ui, CUI_FONT_BODY, fs, hi, -1, true);
-    float sw = 120, sx = g.gx + p->cols * (g.cell + g.gap) - g.gap - hiw - 8 - sw, sy = by + 12;
-    for (int k = 0; k < 24; k++) {
-        cui_rect c = { sx + sw * k / 24.0f, sy, sw / 24.0f + 0.5f, 8 };
-        cui_corners cr = CUI_CORNERS(0);
-        if (k == 0) cr = (cui_corners){ 4, 0, 0, 4 };
-        if (k == 23) cr = (cui_corners){ 0, 4, 4, 0 };
-        cui_draw_rect(ui, c, cr, cui__viz_seq(ui, p->base, (k + 0.5f) / 24.0f));
-    }
-    cui__draw_text_at(ui, CUI_FONT_BODY, fs, sx - 8, sy + 4, CUI__AT_RIGHT, CUI_C(ui, TEXT_MUTED), lo, true);
-    cui__draw_text_at(ui, CUI_FONT_BODY, fs, sx + sw + 8, sy + 4, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), hi, true);
+    /* the range on the left, the step key on the right */
+    float right = g.gx + p->cols * (g.cell + g.gap) - g.gap, ky = by + 10, sz = CUI_MIN(12.0f, g.cell);
+    const char *range = cui__frame_printf(ui, "%s \xe2\x80\x93 %s", cui__fmt_value(ui, p->o.format, p->lo), cui__fmt_value(ui, p->o.format, p->hi));
+    float rw = cui__text_width(ui, CUI_FONT_BODY, fs, range, -1, true);
+    float left = cui__heat_key(ui, p->base, right, ky, sz, g.gx + rw + 16, true);
+    if (left == right) left = cui__heat_key(ui, p->base, right, ky, sz, g.gx + rw + 12, false);
+    float range_x = p->o.row_labels ? g.gx - g.lw : g.gx;
+    if (range_x + rw + 12 <= left) cui__draw_text_at(ui, CUI_FONT_BODY, fs, range_x, ky + sz * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), range, true);
     cui__tip_draw(ui, &p->tip);
 }
 
@@ -259,7 +311,7 @@ int cui_heatmap_ex(cui_ctx *ui, const char *id_str, const float *values, int row
     memset(p, 0, sizeof *p);
     p->v = cui__copy_floats(ui, values, rows * cols);
     p->rows = rows; p->cols = cols; p->lo = lo; p->hi = hi; p->o = *o;
-    p->base = cui__viz_base(ui, o->color);
+    p->base = cui__heat_base(ui, o->color);
     p->intro = st->intro.x;
     p->hover = st->hover_t > 0.01f ? st->shown : -1;
     if (p->hover >= rows * cols) p->hover = -1;
@@ -269,7 +321,8 @@ int cui_heatmap_ex(cui_ctx *ui, const char *id_str, const float *values, int row
         const char *rl = o->row_labels && o->row_labels[i] ? o->row_labels[i] : cui__frame_printf(ui, "Row %d", i + 1);
         const char *cl = o->col_labels && o->col_labels[j] ? o->col_labels[j] : cui__frame_printf(ui, "%d", j + 1);
         p->tip.title = cui__frame_printf(ui, "%s \xc2\xb7 %s", rl, cl);
-        cui__tip_row(&p->tip, "Value", cui__fmt_value(ui, o->format, values[p->hover]), cui__viz_seq(ui, p->base, (values[p->hover] - lo) / (hi - lo)));
+        cui__tip_row(&p->tip, "Value", cui__fmt_value(ui, o->format, values[p->hover]),
+                     cui__heat_step(ui, p->base, cui__heat_level((values[p->hover] - lo) / (hi - lo))));
     }
     float h = g.grid_h + (o->col_labels ? 22 : 0) + 30;
     cui_size w = o->width.kind ? o->width : (o->cell > 0 ? CUI_PX(g.lw + cols * (g.cell + g.gap) - g.gap) : CUI_FILL);
@@ -295,12 +348,6 @@ static int cui__cal_level(float v, float maxv) {
     return CUI_CLAMP(l, 1, 4);
 }
 
-static cui_color cui__cal_color(cui_ctx *ui, cui_color base, int level) {
-    if (level == 0) return cui__viz_empty(ui);
-    static const float t[5] = { 0, 0.08f, 0.38f, 0.68f, 1.0f };
-    return cui__viz_seq(ui, base, t[level]);
-}
-
 #define CUI__CAL_LW 32.0f
 #define CUI__CAL_TOP 20.0f
 
@@ -309,8 +356,18 @@ static void cui__paint_calendar(cui_ctx *ui, cui_node *n, void *data) {
     cui_rect r = n->rect;
     float fs = cui__fs(ui, ui->theme.text_xs), step = p->cell + p->gap;
     float gx = r.x + CUI__CAL_LW, gy = r.y + CUI__CAL_TOP;
-    float rad = p->cell >= 12 ? 3 : 2;
-    for (int k = 0; k < 5; k += 2) cui__draw_text_at(ui, CUI_FONT_BODY, fs, r.x, gy + k * step + p->cell * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), cui__weekday_short(ui, k), false);
+    float rad = cui__heat_radius(p->cell);
+    /* the hovered day's weekday and month labels speak up */
+    bool on = p->hover >= 0 && p->tip.alpha > 0.5f;
+    int hi_wd = on ? ((p->base_day + p->hover + 3) % 7 + 7) % 7 : -1;
+    cui_date hd = cui_date_from_days(p->base_day + (on ? p->hover : 0));
+    for (int k = 0; k < 7; k++) {
+        if (k % 2 && k != hi_wd) continue;
+        if (k == 6 && k != hi_wd) continue;
+        bool hl = k == hi_wd;
+        cui__draw_text_at(ui, hl ? CUI_FONT_MEDIUM : CUI_FONT_BODY, fs, r.x, gy + k * step + p->cell * 0.5f, CUI__AT_LEFT,
+                          hl ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), cui__weekday_short(ui, k), false);
+    }
     float last_end = -1e9f;
     for (int w = 0; w < p->weeks; w++) {
         int first = w * 7 - p->wd0;   /* day index of this column's Monday */
@@ -318,8 +375,10 @@ static void cui__paint_calendar(cui_ctx *ui, cui_node *n, void *data) {
         bool starts = first <= 0 ? (w == 0) : dd.day <= 7;
         float x = gx + w * step;
         if (starts && x > last_end + 4 && w < p->weeks - 1) {
-            cui__draw_text_at(ui, CUI_FONT_BODY, fs, x, r.y + 8, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), cui__month_short(ui, dd.month - 1), false);
-            last_end = x + cui__text_width(ui, CUI_FONT_BODY, fs, cui__month_short(ui, dd.month - 1), -1, false);
+            bool hl = on && dd.month == hd.month && dd.year == hd.year;
+            cui_font f = hl ? CUI_FONT_MEDIUM : CUI_FONT_BODY;
+            cui__draw_text_at(ui, f, fs, x, r.y + 8, CUI__AT_LEFT, hl ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_MUTED), cui__month_short(ui, dd.month - 1), false);
+            last_end = x + cui__text_width(ui, f, fs, cui__month_short(ui, dd.month - 1), -1, false);
         }
         for (int k = 0; k < 7; k++) {
             int di = first + k;
@@ -327,26 +386,23 @@ static void cui__paint_calendar(cui_ctx *ui, cui_node *n, void *data) {
             int lv = cui__cal_level(p->v[di], p->maxv);
             float a = cui__clampf(p->intro * 1.8f - (float)w / (float)p->weeks * 0.8f, 0, 1);
             cui_rect c = { x, gy + k * step, p->cell, p->cell };
-            cui_draw_rect(ui, c, CUI_CORNERS(rad), cui_mix(cui__viz_empty(ui), cui__cal_color(ui, p->base, lv), a));
-            if (di == p->hover && p->tip.alpha > 0.01f)
-                cui_draw_rect_border(ui, (cui_rect){ c.x - 1.5f, c.y - 1.5f, c.w + 3, c.h + 3 }, CUI_CORNERS(rad + 1.5f), cui__rgba(0, 0, 0, 0),
-                                     cui_alpha(CUI_C(ui, FOREGROUND), p->tip.alpha), 1.5f);
+            cui_draw_rect(ui, c, CUI_CORNERS(rad), cui_mix(cui__viz_empty(ui), cui__heat_step(ui, p->base, lv), a));
         }
     }
-    /* legend */
+    if (p->hover >= 0 && p->tip.alpha > 0.01f) {
+        int di = p->hover + p->wd0;
+        cui__heat_ring(ui, (cui_rect){ gx + (di / 7) * step, gy + (di % 7) * step, p->cell, p->cell }, rad, p->tip.alpha);
+    }
+    /* the total on the left, the step key on the right; a narrow chart drops the key's words first */
     float ly = gy + 7 * step + 12;
-    float lx = gx + p->weeks * step - p->gap;
+    float right = gx + p->weeks * step - p->gap;
     float sz = CUI_MIN(p->cell, 12);
-    float more_w = cui__text_width(ui, CUI_FONT_BODY, fs, "More", -1, false), less_w = cui__text_width(ui, CUI_FONT_BODY, fs, "Less", -1, false);
     const char *tot = p->o.unit ? cui__frame_printf(ui, "%s %s", cui__fmt_value(ui, p->o.format, p->total), p->o.unit) : NULL;
     float tot_w = tot ? cui__text_width(ui, CUI_FONT_BODY, fs, tot, -1, true) : 0;
-    /* a narrow chart: the swatches lose their Less / More words before they run into the total */
-    bool words = !tot || gx + tot_w + 12 <= lx - more_w - 6 - 5 * (sz + 3) - 3 - less_w;
-    float x = lx;
-    if (words) { x -= more_w; cui__draw_text_at(ui, CUI_FONT_BODY, fs, x, ly + sz * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), "More", false); x -= 6; }
-    for (int lv = 4; lv >= 0; lv--) { x -= sz; cui_draw_rect(ui, (cui_rect){ x, ly, sz, sz }, CUI_CORNERS(rad), cui__cal_color(ui, p->base, lv)); x -= 3; }
-    if (words) cui__draw_text_at(ui, CUI_FONT_BODY, fs, x - 3, ly + sz * 0.5f, CUI__AT_RIGHT, CUI_C(ui, TEXT_MUTED), "Less", false);
-    if (tot && gx + tot_w + 9 <= x) cui__draw_text_at(ui, CUI_FONT_BODY, fs, gx, ly + sz * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_SECONDARY), tot, true);
+    float min_x = tot ? gx + tot_w + 12 : r.x;
+    float left = cui__heat_key(ui, p->base, right, ly, sz, min_x, true);
+    if (left == right) left = cui__heat_key(ui, p->base, right, ly, sz, r.x, false);
+    if (tot && gx + tot_w + 9 <= left) cui__draw_text_at(ui, CUI_FONT_BODY, fs, gx, ly + sz * 0.5f, CUI__AT_LEFT, CUI_C(ui, TEXT_SECONDARY), tot, true);
     cui__tip_draw(ui, &p->tip);
 }
 
@@ -388,7 +444,7 @@ int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id_str, cui_date start, con
     memset(p, 0, sizeof *p);
     p->v = cui__copy_floats(ui, values, days);
     p->days = days; p->wd0 = wd0; p->weeks = weeks; p->base_day = base; p->maxv = maxv; p->total = total;
-    p->cell = cell; p->gap = gap; p->base = cui__viz_base(ui, o->color); p->o = *o;
+    p->cell = cell; p->gap = gap; p->base = cui__heat_base(ui, o->color); p->o = *o;
     p->intro = st->intro.x;
     p->hover = st->hover_t > 0.01f && st->shown < days ? st->shown : -1;
     if (p->hover >= 0) {
@@ -397,7 +453,7 @@ int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id_str, cui_date start, con
         p->tip.alpha = st->hover_t; p->tip.x = ui->mx; p->tip.y = ui->my; p->tip.bounds = pr;
         p->tip.title = cui__frame_printf(ui, "%s, %s %d, %d", cui__weekday_short(ui, wd), cui__month_short(ui, dd.month - 1), dd.day, dd.year);
         cui__tip_row(&p->tip, o->unit ? o->unit : "Value", cui__fmt_value(ui, o->format, values[p->hover]),
-                     cui__cal_color(ui, p->base, cui__cal_level(values[p->hover], maxv)));
+                     cui__heat_step(ui, p->base, cui__cal_level(values[p->hover], maxv)));
     }
     float h = CUI__CAL_TOP + 7 * step - gap + 12 + CUI_MIN(cell, 12) + 2;
     int node = cui__viz_node(ui, id, CUI_FIT, CUI_PX(h), cui__paint_calendar, p, hover >= 0);

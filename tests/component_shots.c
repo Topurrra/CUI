@@ -1994,7 +1994,13 @@ static void viz_data(void) {
     }
     done = true;
 }
-SCENE(heatmap) {
+static void body_heatmap(cui_ctx *ui);
+static void scene_heatmap(cui_ctx *ui, int f) {
+    /* Wednesday at 14h, to show the ring, the tooltip and the lit labels */
+    if (f < 0) { cui_rect r = cui_get_rect(ui, cui_make_id(ui, "traffic")); if (-f - 1 == 40 && r.w > 0) cui_input_mouse_move(ui, r.x + 40 + 14.5f * 33, r.y + 2.5f * 33); return; }
+    frame_wrap(ui, body_heatmap);
+}
+static void body_heatmap(cui_ctx *ui) {
     viz_data();
     static const char *wd[] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
     static const char *hours[24] = { "0h", NULL, NULL, "3h", NULL, NULL, "6h", NULL, NULL, "9h", NULL, NULL, "12h", NULL, NULL, "15h", NULL, NULL, "18h", NULL, NULL, "21h", NULL, NULL };
