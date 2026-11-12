@@ -75,6 +75,7 @@ set(CUI_CORE_SOURCES
     src/cui_instrument.c
     src/cui_tour.c
     src/cui_photo.c
+    src/cui_creative.c
     src/cui_files.c
     src/cui_terminal.c
     src/cui_emoji.c

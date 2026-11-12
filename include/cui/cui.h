@@ -3469,6 +3469,168 @@ CUI_API cui_gradient_result cui_gradient_editor_ex(cui_ctx *ui, const char *id, 
  * continue past the first and last stop). */
 CUI_API cui_color cui_gradient_eval(const cui_gradient_stop *stops, int count, float t);
 
+/* ---- Creative controls ---- */
+
+/* Status tag: an icon, a label and a fill tinted by the state, for a table cell, a card
+ * header or a group of tags. "In progress" turns its dashed ring slowly (it holds still with
+ * reduced motion). A NULL label shows the state's English name.
+ *
+ *     cui_status_tag(ui, "Failed", CUI_TAG_FAILED);
+ *     if (cui_status_tag(ui, name, CUI_TAG_CUSTOM, .icon = CUI_ICON_TAG, .tone = CUI_TONE_TEAL, .removable = true)) remove(name);
+ */
+typedef enum cui_tag_status {
+    CUI_TAG_PENDING = 0, CUI_TAG_IN_PROGRESS, CUI_TAG_SUBMITTED, CUI_TAG_IN_REVIEW,
+    CUI_TAG_SUCCESS, CUI_TAG_FAILED, CUI_TAG_EXPIRED,
+    CUI_TAG_CUSTOM             /* your `icon` and `tone` only */
+} cui_tag_status;
+typedef struct cui_status_tag_opts {
+    int _;
+    cui_control_size size;     /* CUI_SIZE_SM is 24 points high, for tables and tag groups; default 30 */
+    bool removable;            /* the tag becomes a button that shows an x on hover: the call returns true when it is clicked, or on Enter, Delete or Backspace */
+    const char *icon;          /* instead of the state's icon */
+    cui_tone tone;             /* instead of the state's color; 0 keeps it (gray for CUI_TAG_CUSTOM) */
+    const char *id;            /* identity of a removable tag when two share a label */
+} cui_status_tag_opts;
+CUI_API bool cui_status_tag_ex(cui_ctx *ui, const char *label, cui_tag_status status, const cui_status_tag_opts *opts);
+
+/* Ratio slider: a whole split into two named parts, with a bar between them to drag.
+ * *ratio is the first part's share, 0..1. Both names and percentages stay readable: the
+ * split stops where a part would get too narrow for them. Arrows move one step (Shift:
+ * ten), Home and End go to the limits.
+ *
+ *     cui_ratio_slider(ui, "COFFEE", "MILK", &coffee, .tone = CUI_TONE_WARNING);
+ */
+typedef struct cui_ratio_slider_opts {
+    int _;
+    cui_tone tone;             /* color of the first part; 0 uses the accent */
+    float step;                /* arrow key step as a share, default 0.01 (one percent) */
+    float height;              /* default 52 */
+    cui_size width;            /* default fill */
+    bool disabled;
+} cui_ratio_slider_opts;
+CUI_API bool cui_ratio_slider_ex(cui_ctx *ui, const char *first, const char *second, float *ratio, const cui_ratio_slider_opts *opts);
+
+/* The controls below sit in a control well: a rounded panel with the label on the left,
+ * the value on the right and the control under them. `plain` drops the panel and keeps
+ * the label row and the control. A label that starts with "##" shows no label row. Those
+ * that take an action button return these flags: */
+enum { CUI_WELL_CHANGED = 1, CUI_WELL_ACTION = 2 };   /* the value changed; the action button was pressed */
+
+/* Gradient slider: a slider whose track is the value itself (a hue wheel, a white balance
+ * temperature, an opacity over a checkerboard, or your own stops), with a thumb filled with
+ * the color under it. An optional tool button after the track (an eyedropper) reports
+ * clicks. Keys as for the slider. Returns CUI_WELL_* flags.
+ *
+ *     cui_gradient_slider(ui, "Hue", &hue, 0, 360, .swatch = true);
+ *     cui_gradient_slider(ui, "Opacity", &alpha, 0, 1, .track = CUI_GRADIENT_OPACITY, .color = brush);
+ */
+typedef enum cui_gradient_track { CUI_GRADIENT_HUE = 0, CUI_GRADIENT_TEMPERATURE, CUI_GRADIENT_OPACITY } cui_gradient_track;
+typedef struct cui_gradient_slider_opts {
+    int _;
+    cui_gradient_track track;  /* the built-in track, default the hue wheel; ignored when `stops` is set */
+    const cui_gradient_stop *stops;  /* your own track, positions 0..1 */
+    int stop_count;
+    cui_color color;           /* CUI_GRADIENT_OPACITY: the color it fades in; unset: the accent */
+    cui_color *color_out;      /* receives the color under the thumb */
+    float step;                /* snap to multiples of step from min; 0 = continuous */
+    const char *format;        /* printf format for the value; default "%.0f°" for hue, "%.0f K" for temperature, a percent of the range for opacity, "%.0f" for stops */
+    const char *value;         /* text at the right of the label instead of the formatted value */
+    bool swatch;               /* a dot in the color under the thumb after the track */
+    const char *tool;          /* icon of a button after the track, e.g. a picker; a click returns CUI_WELL_ACTION */
+    const char *tool_tooltip;  /* names the tool button */
+    bool tool_on;              /* shows the tool button pressed, e.g. while picking */
+    bool plain;                /* no well around it */
+    bool disabled;
+} cui_gradient_slider_opts;
+CUI_API int cui_gradient_slider_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_gradient_slider_opts *opts);
+
+/* Step slider: a few discrete stops marked with dots; the thumb snaps to each and glides
+ * between them. Arrows move one stop, Home and End go to the ends. Returns CUI_WELL_* flags.
+ *
+ *     cui_step_slider(ui, "Variations", &n, 1, 4, .tool = CUI_ICON_REFRESH_CW, .tool_tooltip = "Generate");
+ */
+typedef struct cui_step_slider_opts {
+    int _;
+    const char *const *labels; /* a name for each stop, shown as the value: labels[*value - min] */
+    const char *format;        /* printf format for the value, default "%d" */
+    const char *value;         /* text at the right of the label instead */
+    const char *tool;          /* icon of a button after the track; a click returns CUI_WELL_ACTION */
+    const char *tool_tooltip;
+    bool tool_on;
+    bool plain;
+    bool disabled;
+} cui_step_slider_opts;
+CUI_API int cui_step_slider_ex(cui_ctx *ui, const char *label, int *value, int min, int max, const cui_step_slider_opts *opts);
+
+/* Palette strip: a joined row of color swatches (up to 16). A click on a swatch locks or
+ * unlocks it, and the shuffle button after the row recolors the unlocked ones. The swatch
+ * under the pointer widens and shows its hex code. Tab reaches the swatches, Left and
+ * Right move between them, Space or Enter locks. Returns CUI_WELL_CHANGED when a lock or a
+ * color changed and CUI_WELL_ACTION when shuffle was pressed.
+ *
+ *     static uint32_t seed = 7;
+ *     cui_palette_strip(ui, "Color palette", colors, locked, 5, .seed = &seed);
+ */
+typedef struct cui_palette_strip_opts {
+    int _;
+    uint32_t *seed;            /* shuffle state, yours: shuffle recolors the unlocked swatches from it and moves it on, so the same seed gives the same colors; NULL only reports the press */
+    const char *value;         /* text at the right of the label, e.g. "Click a swatch to lock it" */
+    bool no_shuffle;           /* no shuffle button */
+    float height;              /* default 32 */
+    bool plain;
+} cui_palette_strip_opts;
+CUI_API int cui_palette_strip_ex(cui_ctx *ui, const char *label, cui_color *colors, bool *locked, int count, const cui_palette_strip_opts *opts);
+
+/* Aspect ratio picker: each choice drawn as a rectangle of its own proportions with its
+ * ratio under it, and an optional dashed "Custom". The value at the right of the label is
+ * the size in pixels. Tab reaches the choices, Left and Right move between them.
+ *
+ *     static const cui_aspect sizes[] = { { 1, 1 }, { 4, 3 }, { 16, 9 } };
+ *     cui_aspect_picker(ui, "Aspect ratio", &pick, .ratios = sizes, .count = 3, .custom = true);
+ */
+typedef struct cui_aspect { int w, h; const char *label; } cui_aspect;   /* label NULL shows "w:h" */
+typedef struct cui_aspect_picker_opts {
+    int _;
+    const cui_aspect *ratios;  /* your choices; NULL: 1:1, 4:5, 3:2, 16:9, 9:16 and 21:9 */
+    int count;
+    bool custom;               /* adds a "Custom" choice after a divider; *index == the count of choices selects it */
+    const char *custom_label;  /* default "Custom" */
+    int base;                  /* the short side in pixels, for the size at the right of the label; default 1080, negative hides the size */
+    const char *value;         /* text at the right of the label instead of the size */
+    bool plain;
+} cui_aspect_picker_opts;
+CUI_API bool cui_aspect_picker_ex(cui_ctx *ui, const char *label, int *index, const cui_aspect_picker_opts *opts);
+
+/* Option field with action: a compact segmented choice and the icon button of the action it
+ * feeds (save as png, jpg or webp, then download). Returns CUI_WELL_* flags.
+ *
+ *     if (cui_option_action(ui, "Save as", formats, 3, &fmt, CUI_ICON_DOWNLOAD, .tooltip = "Download") & CUI_WELL_ACTION) save(fmt);
+ */
+typedef struct cui_option_action_opts {
+    int _;
+    const char *tooltip;       /* names the action button */
+    bool action_on;            /* shows the action button pressed */
+    bool action_disabled;
+    const char *value;         /* text at the right of the label */
+    bool plain;
+} cui_option_action_opts;
+CUI_API int cui_option_action_ex(cui_ctx *ui, const char *label, const char *const *items, int count, int *index, const char *icon, const cui_option_action_opts *opts);
+
+/* Seed field: a random seed in the monospaced font. The dice rolls a new one, its digits
+ * rolling into place, and the lock keeps it fixed (the dice is off while locked). Returns
+ * CUI_WELL_CHANGED when the seed or the lock changed and CUI_WELL_ACTION on a roll.
+ *
+ *     cui_seed_field(ui, "Seed", &seed, &fixed, .value = fixed ? "Same image every run" : "Random each run");
+ */
+typedef struct cui_seed_field_opts {
+    int _;
+    const char *value;         /* text at the right of the label */
+    const char *random_text;   /* the mode word in the field while unlocked, default "random" */
+    const char *fixed_text;    /* and while locked, default "fixed" */
+    bool plain;
+} cui_seed_field_opts;
+CUI_API int cui_seed_field_ex(cui_ctx *ui, const char *label, uint32_t *seed, bool *locked, const cui_seed_field_opts *opts);
+
 /* ---- Timeline ---- */
 
 /* Timeline editor (dope sheet): a track list on the left, a time ruler on
@@ -4569,6 +4731,15 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 /* curve and gradient editors */
 #define cui_curve_editor(ui, id, keys, count, cap, ...) cui_curve_editor_ex((ui), (id), (keys), (count), (cap), CUI__OPTS(cui_curve_opts, __VA_ARGS__))
 #define cui_gradient_editor(ui, id, stops, count, cap, ...) cui_gradient_editor_ex((ui), (id), (stops), (count), (cap), CUI__OPTS(cui_gradient_opts, __VA_ARGS__))
+/* creative controls */
+#define cui_status_tag(ui, label, status, ...) cui_status_tag_ex((ui), (label), (status), CUI__OPTS(cui_status_tag_opts, __VA_ARGS__))
+#define cui_ratio_slider(ui, first, second, ratio, ...) cui_ratio_slider_ex((ui), (first), (second), (ratio), CUI__OPTS(cui_ratio_slider_opts, __VA_ARGS__))
+#define cui_gradient_slider(ui, label, v, lo, hi, ...) cui_gradient_slider_ex((ui), (label), (v), (lo), (hi), CUI__OPTS(cui_gradient_slider_opts, __VA_ARGS__))
+#define cui_step_slider(ui, label, v, lo, hi, ...) cui_step_slider_ex((ui), (label), (v), (lo), (hi), CUI__OPTS(cui_step_slider_opts, __VA_ARGS__))
+#define cui_palette_strip(ui, label, colors, locked, n, ...) cui_palette_strip_ex((ui), (label), (colors), (locked), (n), CUI__OPTS(cui_palette_strip_opts, __VA_ARGS__))
+#define cui_aspect_picker(ui, label, index, ...) cui_aspect_picker_ex((ui), (label), (index), CUI__OPTS(cui_aspect_picker_opts, __VA_ARGS__))
+#define cui_option_action(ui, label, items, n, index, icon, ...) cui_option_action_ex((ui), (label), (items), (n), (index), (icon), CUI__OPTS(cui_option_action_opts, __VA_ARGS__))
+#define cui_seed_field(ui, label, seed, locked, ...) cui_seed_field_ex((ui), (label), (seed), (locked), CUI__OPTS(cui_seed_field_opts, __VA_ARGS__))
 #endif /* !__cplusplus */
 
 #ifdef __cplusplus

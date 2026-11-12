@@ -2287,3 +2287,155 @@ Each glyph is five dots wide and seven high, with a column of space between glyp
 The lit dots take the foreground color, `color`, or the accent with `accent`. In a box narrower than the text the dots shrink until it fits. With `marquee` the text scrolls instead, and asks for frames only while it does; with reduced motion it shrinks rather than moves. The glyphs run left to right in every reading direction, while `align` follows it: in a right-to-left interface the start is the right edge of the box.
 
 A dot-matrix display only displays: it takes no focus and returns nothing.
+
+## Creative controls
+
+Controls for editors, generators and design tools: a status tag, a ratio slider, and six controls that sit in a control well, a rounded panel with the label on the left, the value on the right and the control under them. Wells side by side line up, since their control rows share one height. Every well control takes `plain` to drop the panel and keep the label row and the control, and a label that starts with `##` shows no label row. The gallery's *Creative controls* page shows them all.
+
+### Status tag
+
+A tag with an icon, a label and a fill tinted by its state, for a table cell, a card header or a group of tags.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/status-tag-dark.png"><img src="images/components/status-tag.png" alt="Seven status tags (pending, in progress, submitted, in review, success, failed, expired), and the same in the small size in a card, one showing its remove x"></picture>
+
+```c
+cui_status_tag(ui, "Failed", CUI_TAG_FAILED);
+cui_status_tag(ui, NULL, CUI_TAG_IN_PROGRESS);                /* NULL: the state's name, "In progress" */
+if (cui_status_tag(ui, name, CUI_TAG_CUSTOM, .icon = CUI_ICON_TAG, .tone = CUI_TONE_TEAL,
+                   .size = CUI_SIZE_SM, .removable = true))
+    remove_tag(name);
+```
+
+The seven states each have an icon and a color from the theme: pending orange, in progress sky, submitted violet, in review amber, success green, failed red and expired gray. "In progress" shows a dashed ring that turns once every 2.4 seconds and holds still with reduced motion. `icon` and `tone` replace the state's icon and color; `CUI_TAG_CUSTOM` has only yours, gray when you give no tone. The text keeps a 4.5:1 contrast with the fill in light and dark. `size` set to `CUI_SIZE_SM` makes the tag 24 points high instead of 30, for tables and tag groups.
+
+A tag only displays unless it is `removable`. Then it is a button that grows an x on hover and focus, and the call returns true on the frame it is clicked. It keeps its state by its label, so give `id` when two removable tags share one. The tag does not hide itself: stop drawing it when the call returns true.
+
+Keyboard: a removable tag is a Tab stop; Enter, Space, Delete or Backspace removes it.
+
+### Ratio slider
+
+A whole split into two named parts, with a bar between them to drag.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/ratio-slider-dark.png"><img src="images/components/ratio-slider.png" alt="Two ratio sliders: COFFEE 37% in amber against MILK 63%, and TRAIN 80% in sky blue against TEST 20%"></picture>
+
+```c
+static float coffee = 0.37f;   /* the first part's share, 0..1 */
+if (cui_ratio_slider(ui, "COFFEE", "MILK", &coffee, .tone = CUI_TONE_WARNING)) mix(coffee);
+```
+
+The first part takes `tone` (the accent by default) and reads from the start edge; the second part is neutral and reads from the end. Names and percentages are in the monospaced font, and the two percentages always add up to 100. The split stops where a part would get too narrow for its name and percentage, so both stay readable at any width; when the slider is too narrow for both names, it keeps the percentages and drops the names. The stop applies to dragging and the keys; a value you set yourself is drawn where it fits and left as it is until someone moves it.
+
+Dragging snaps to `step` (one percent by default) and the call returns true when the value changed. `height` (52 by default), `width` and `disabled` do what they say. In a right-to-left interface the first part sits on the right.
+
+Keyboard: Tab focuses the bar. Left and Right move it a step (Shift: ten steps), in the direction they point, and Home and End go to the limits.
+
+### Gradient slider
+
+A slider whose track is the value itself, with a thumb filled with the color under it.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/gradient-slider-dark.png"><img src="images/components/gradient-slider.png" alt="Three wells: a hue slider at 190 degrees with a cyan swatch, a white balance slider at 5600 K with a picker button, and an opacity slider over a checkerboard at 72%"></picture>
+
+```c
+cui_gradient_slider(ui, "Hue", &hue, 0, 360, .swatch = true, .color_out = &picked);
+if (cui_gradient_slider(ui, "White balance", &kelvin, 2500, 10000, .track = CUI_GRADIENT_TEMPERATURE, .step = 100,
+                        .tool = CUI_ICON_TARGET, .tool_tooltip = "Pick from image", .tool_on = picking) & CUI_WELL_ACTION)
+    picking = !picking;
+cui_gradient_slider(ui, "Opacity", &alpha, 0, 1, .track = CUI_GRADIENT_OPACITY, .color = brush);
+```
+
+`track` picks a built-in track: the hue wheel (the default), a white balance from cool blue to warm amber, or an opacity that fades `color` in over a checkerboard (the accent when unset). `stops` and `stop_count` draw your own track instead, with the same `cui_gradient_stop` the gradient editor uses; stops with transparency get the checkerboard too. The track's colors are the value's colors in every theme, so they are not theme colors. `color_out` receives the color under the thumb, the same color `cui_gradient_eval` gives for your stops.
+
+The value at the right of the label follows the track: degrees for the hue, kelvin for the temperature, a percent of the range for the opacity. `format` and `value` replace it. `step` snaps the value, `swatch` adds a dot in the current color after the track, and `tool` adds an icon button whose click returns `CUI_WELL_ACTION`; `tool_on` shows it pressed while its mode is on. The call returns `CUI_WELL_CHANGED` when the value changed. Right to left, the track runs from the right.
+
+Keyboard: as the slider. Tab focuses the track, the arrow keys move one percent of the range or one step (Shift: ten), Home and End go to the ends, and Tab moves on to the tool button.
+
+### Step slider
+
+A slider with a few discrete stops marked with dots; the thumb snaps to each and glides between them.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/step-slider-dark.png"><img src="images/components/step-slider.png" alt="Two wells: Variations at 3 of 4 stops with a generate button, and Quality at Good of Draft, Good and Best"></picture>
+
+```c
+static int n = 3;
+if (cui_step_slider(ui, "Variations", &n, 1, 4, .tool = CUI_ICON_REFRESH_CW, .tool_tooltip = "Generate") & CUI_WELL_ACTION)
+    generate(n);
+static const char *const quality[] = { "Draft", "Good", "Best" };
+cui_step_slider(ui, "Quality", &q, 0, 2, .labels = quality);
+```
+
+Every whole number from `min` to `max` is a stop. The pointer and the keys only ever choose a stop: a click or a drag goes to the nearest one, and the thumb springs there. The value at the right of the label is the number (`format`, "%d" by default), the stop's name from `labels`, or your `value`. `tool`, `tool_tooltip` and `tool_on` add an action button as on the gradient slider. The call returns `CUI_WELL_CHANGED` and `CUI_WELL_ACTION` flags.
+
+Keyboard: Tab focuses the track, the arrow keys move one stop, Home and End go to the first and last.
+
+### Palette strip
+
+A joined row of color swatches with a lock on each and a shuffle button for the rest.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/palette-strip-dark.png"><img src="images/components/palette-strip.png" alt="Five joined swatches, two with a lock, the hovered one wider and showing 37C6D0, and a shuffle button"></picture>
+
+```c
+static cui_color colors[5] = { ... };
+static bool locked[5];
+static uint32_t seed = 7;
+cui_palette_strip(ui, "Color palette", colors, locked, 5, .seed = &seed, .value = "Click a swatch to lock it");
+```
+
+A click on a swatch locks or unlocks it, and a lock glyph marks the locked ones. The swatch under the pointer or the keyboard focus widens and shows its hex code, in dark or light ink, whichever reads on it. Up to 16 swatches; you own the colors and the locks, and `locked` may be `NULL` for a strip without locks.
+
+With `seed`, shuffle recolors every unlocked swatch itself: the colors come from a small generator that keeps near one hue, sometimes takes its opposite, and keeps the chroma moderate, and the seed moves on with each shuffle, so the same seed gives the same palettes in the same order. Without a seed, shuffle only reports the press and you choose the colors. The call returns `CUI_WELL_CHANGED` when a lock or a color changed and `CUI_WELL_ACTION` when shuffle was pressed. `no_shuffle` hides the button and `height` sets the strip's height (32 by default).
+
+Keyboard: Tab reaches the swatches. Left and Right move between them, in the direction they point, and Space or Enter locks or unlocks the focused one. Tab moves on to the shuffle button.
+
+### Aspect ratio picker
+
+A row of aspect ratios, each drawn as a rectangle of its own proportions with the ratio under it.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/aspect-picker-dark.png"><img src="images/components/aspect-picker.png" alt="Shapes for 1:1, 4:5 (selected), 3:2, 16:9, 9:16 and 21:9, then a dashed Custom after a divider; the value reads 1080 × 1350"></picture>
+
+```c
+static int pick = 1;
+cui_aspect_picker(ui, "Aspect ratio", &pick, .custom = true);   /* 1:1, 4:5, 3:2, 16:9, 9:16, 21:9 */
+static const cui_aspect print[] = { { 3, 2, NULL }, { 7, 5, "5×7" }, { 4, 3, NULL } };
+cui_aspect_picker(ui, "Print", &size, .ratios = print, .count = 3);
+```
+
+Without `ratios` the picker offers the photo set 1:1, 4:5, 3:2, 16:9, 9:16 and 21:9. Your own `ratios` are `cui_aspect` values with a width, a height and an optional `label` (it shows "w:h" without one). Every shape fits a 22 point box by its longer side, so the choices can be told apart without reading. `custom` adds a dashed "Custom" after a divider (`custom_label` renames it); `*index` equal to the number of ratios selects it, and what custom means is up to you.
+
+The value at the right of the label is the size in pixels with the short side `base` pixels long (1080 by default), "1080 × 1350" for 4:5; a negative `base` hides it, and `value` replaces it. The call returns true when the choice changed.
+
+Keyboard: Tab reaches the choices. Left and Right move to the neighbouring choice and select it, in the direction they point.
+
+### Option field with action
+
+A compact segmented choice and the icon button of the action it feeds.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/option-action-dark.png"><img src="images/components/option-action.png" alt="Two wells: Background with hidden and visible and a scissors button, and Save as with png, jpg and webp, a download button and 2.4 MB"></picture>
+
+```c
+static const char *const formats[] = { "png", "jpg", "webp" };
+if (cui_option_action(ui, "Save as", formats, 3, &fmt, CUI_ICON_DOWNLOAD, .tooltip = "Download") & CUI_WELL_ACTION)
+    save(fmt);
+```
+
+The choice is the [segmented control](components.md#segmented-control) in its small size, filling the row, and the button is a ghost icon button named by `tooltip`. The call returns `CUI_WELL_CHANGED` when the choice changed and `CUI_WELL_ACTION` when the button was pressed. `action_on` shows the button pressed, `action_disabled` turns it off, and `value` puts text at the right of the label, such as the file size of the chosen format.
+
+Keyboard: Tab reaches the choice, then the button. Left and Right move the choice, Enter or Space presses the button.
+
+### Seed field
+
+A random seed in the monospaced font, with a dice that rolls a new one and a lock that keeps it.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/seed-field-dark.png"><img src="images/components/seed-field.png" alt="Two seed fields: 1234567890, random, with a dice and an open lock; and 3141592653, fixed, with the dice dimmed and the lock pressed"></picture>
+
+```c
+static uint32_t seed = 1234567890;
+static bool fixed;
+if (cui_seed_field(ui, "Seed", &seed, &fixed, .value = fixed ? "Same image every run" : "Random each run") & CUI_WELL_CHANGED)
+    regenerate(seed);
+```
+
+The dice rolls a new ten digit seed and its digits roll into place, each on its own wheel and the later ones a little longer; with reduced motion the new seed simply appears. A roll is deterministic: from the same seed, the dice gives the same sequence. The lock fixes the seed, and while it is locked the dice is off. Pass `NULL` for `locked` to leave the lock out.
+
+The field shows "random" or "fixed" (`random_text` and `fixed_text` change them) and `value` puts text at the right of the label. The call returns `CUI_WELL_CHANGED` when the seed or the lock changed and `CUI_WELL_ACTION` when the dice rolled. The digits read left to right in every reading direction.
+
+Keyboard: Tab reaches the dice, then the lock; Enter or Space presses the focused one.

@@ -8,6 +8,15 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 - `cui_set_clipboard_text` and `cui_get_clipboard_text`: copy from a menu item or a status bar ("Copy path") and read the clipboard for a Paste item, through the same platform hooks the copy button and text fields use ([#32](https://github.com/yappologistic/CUI/issues/32)).
 - `cui_app_follow_system_theme(app, follow)` starts or stops following the system's light or dark setting while the app runs, for a theme switcher with Light, Dark and System. Stopping keeps the current theme, so a `cui_set_theme` after it lasts (on macOS the system setting used to undo it every frame); starting applies the system setting at once ([#34](https://github.com/yappologistic/CUI/issues/34)).
+- **Creative controls**, eight components for editors, generators and design tools; six of them sit in a control well, a rounded panel with a label, a value and the control. See [Creative controls](docs/components-more.md#creative-controls) and the gallery's new *Creative controls* page.
+  - **Status tag** (`cui_status_tag`): an icon, a label and a tinted fill for pending, in progress (a slowly turning dashed ring), submitted, in review, success, failed and expired, or your own icon and tone. A small size, and an optional remove x.
+  - **Ratio slider** (`cui_ratio_slider`): a whole split into two named parts with a bar to drag; the names and percentages stay readable at any split. Arrow keys, Shift for steps of ten, Home and End.
+  - **Gradient slider** (`cui_gradient_slider`): the track is the value, a hue wheel, a white balance, an opacity over a checkerboard or your own stops, and the thumb is filled with the color under it. An optional tool button.
+  - **Step slider** (`cui_step_slider`): a few stops marked with dots; the thumb snaps to each and glides between them. Optional names for the stops and an action button.
+  - **Palette strip** (`cui_palette_strip`): joined swatches you lock with a click, and a shuffle that recolors the rest from a seed you keep, so the same seed gives the same palettes. The swatch under the pointer widens and shows its hex code.
+  - **Aspect ratio picker** (`cui_aspect_picker`): each ratio drawn in its own proportions, a photo set or your own, an optional dashed Custom, and the size in pixels.
+  - **Option field with action** (`cui_option_action`): a compact segmented choice and the icon button of the action it feeds.
+  - **Seed field** (`cui_seed_field`): a seed in the monospaced font; the dice rolls a new one with rolling digits, and the lock keeps it.
 
 ### Changed
 

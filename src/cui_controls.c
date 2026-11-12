@@ -283,7 +283,7 @@ static void cui__slider_header(cui_ctx *ui, const char *label, const char *value
 }
 
 /** Apply the same keyboard increments and reading direction to every thumb. */
-static float cui__slider_keys(cui_ctx *ui, float t, float step, bool rtl) {
+float cui__slider_keys(cui_ctx *ui, float t, float step, bool rtl) {
     cui_key less = rtl ? CUI_KEY_RIGHT : CUI_KEY_LEFT, more = rtl ? CUI_KEY_LEFT : CUI_KEY_RIGHT;
     if (ui->mods & CUI_MOD_SHIFT) step *= 10;
     if (cui_key_pressed(ui, less) || cui_key_pressed(ui, CUI_KEY_DOWN)) t -= step;
