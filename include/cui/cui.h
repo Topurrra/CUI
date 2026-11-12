@@ -1874,16 +1874,26 @@ typedef struct cui_calendar_heatmap_opts {
 } cui_calendar_heatmap_opts;
 CUI_API int cui_calendar_heatmap_ex(cui_ctx *ui, const char *id, cui_date start, const float *values, int days, const cui_calendar_heatmap_opts *opts);
 
-/* Treemap: rectangles with areas proportional to their values. */
+/* Treemap: rectangles with areas proportional to their values, on neutral tiles graded
+ * by size, each with its label, value and share. The accent marks only the hovered or
+ * selected tile; an item's own `color` fills its tile instead. */
 typedef struct cui_viz_item {
     const char *label;
     float value;               /* the item's amount: its area, length or share, by chart (activity rings: 1 is a full turn) */
     cui_color color;
 } cui_viz_item;
-typedef struct cui_treemap_opts { int _; cui_size width; float height; const char *format; } cui_treemap_opts;
+typedef struct cui_treemap_opts {
+    int _;
+    cui_size width;
+    float height;              /* default 300 */
+    const char *format;        /* the values, e.g. "%.0f KB" */
+    int *selected;             /* the selected item or -1, kept by you; a click selects, a second click clears. `NULL`: no selection */
+} cui_treemap_opts;
 CUI_API int cui_treemap_ex(cui_ctx *ui, const char *id, const cui_viz_item *items, int count, const cui_treemap_opts *opts);
 
-/* Radar chart: series over shared axes (series[i].values[axis]). */
+/* Radar chart: series over shared axes (series[i].values[axis]), light fills with crisp
+ * outlines on hairline rings. The last series shows its points, or the one nearest the
+ * pointer, with a chip of the hovered value. */
 typedef struct cui_radar_opts {
     int _;
     float size;

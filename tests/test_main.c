@@ -3156,6 +3156,28 @@ static void test_radial_gauge_styles(void) {
     CHECK(breaks == 0 && bottom);               /* the ring closes under the value */
 }
 
+/* treemap selection: a click selects a tile, a second click on it clears, NULL keeps none */
+static int g_tm_pick = -1;
+static void build_tm_select(cui_ctx *ui, void *u) {
+    (void)u;
+    static const cui_viz_item items[] = { { "Big", 3, { 0 } }, { "Small", 1, { 0 } } };
+    cui_treemap(ui, "pick", items, 2, .width = CUI_PX(400), .height = 200, .selected = &g_tm_pick);
+}
+static void test_treemap_select(void) {
+    printf("treemap: a click selects a tile and a second click clears it\n");
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
+    cui_set_viewport(ui, 420, 220, 1);
+    run(ui, build_tm_select, NULL, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "pick"));
+    click_at(ui, build_tm_select, NULL, r.x + 60, r.y + 100);    /* the big tile fills the left three quarters */
+    CHECK(g_tm_pick == 0);
+    click_at(ui, build_tm_select, NULL, r.x + 360, r.y + 100);
+    CHECK(g_tm_pick == 1);
+    click_at(ui, build_tm_select, NULL, r.x + 360, r.y + 100);
+    CHECK(g_tm_pick == -1);
+    cui_destroy(ui);
+}
+
 /* draw data and renderer ------------------------------------------------ */
 
 static void build_rect(cui_ctx *ui, void *u) {
@@ -7826,6 +7848,7 @@ int main(void) {
     test_theme();
     test_series_palette();
     test_radial_gauge_styles();
+    test_treemap_select();
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();

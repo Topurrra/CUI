@@ -1640,7 +1640,7 @@ You own the graph: node, pin and link ids are your integers, the editor moves th
 
 ## More charts
 
-These follow the same rules as the [core charts](components.md#charts): a tooltip on hover, an intro animation, theme colors. Each returns the index of the mark that was clicked, or -1. Series colors come from a palette checked for color blindness in both modes: neighbouring series stay apart for protanopia and deuteranopia, and the palette rotates so the first series sits next to your accent. Charts that compare amounts on one scale (heatmaps, the treemap, the bar list) use shades of a single hue instead.
+These follow the same rules as the [core charts](components.md#charts): a tooltip on hover, an intro animation, theme colors. Each returns the index of the mark that was clicked, or -1. Series colors come from a palette checked for color blindness in both modes: neighbouring series stay apart for protanopia and deuteranopia, and the palette rotates so the first series sits next to your accent. Charts that compare amounts on one scale use one color instead: the heatmaps step up to the accent, the bar list uses shades of one hue, and the treemap uses neutral tiles with the accent only on the tile you point at or select.
 
 ### Heatmap
 
@@ -1679,13 +1679,14 @@ A treemap shows the parts of a whole as rectangles sized by value. A radar chart
 
 ```c
 static const cui_viz_item mods[] = { { "Layout", 55 }, { "Text", 42 }, { "Draw", 35 } /* ... */ };
-cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB");
+static int picked = -1;
+cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB", .selected = &picked);
 
 cui_series releases[] = { { "1.0", a, 6 }, { "1.1", b, 6 } };
 cui_radar_chart(ui, "radar", releases, 2, axes, 6, .size = 210, .max = 100);
 ```
 
-The treemap uses a squarified layout, so rectangles stay close to square; labels appear where they fit and the text color follows the fill. Give an item a `color` to pick it out. The radar draws a ring per tick with its value, fills each series lightly and lists them in a legend; hovering near an axis shows every series' value on it.
+The treemap uses a squarified layout, so rectangles stay close to square, with 3 point gaps and corners of up to 10 points. Tiles are neutral, a little lighter (darker in light mode) for larger items, so size reads without a color competing for attention. A tile shows its label, its value and, when tall enough, its share; a small tile keeps only a compact value. The accent fills and rings only the hovered tile and the selected one: pass `selected`, an int you keep (-1 for none), and a click selects a tile and a second click clears it. Give an item a `color` to fill its tile with it; the text then follows that fill. The radar draws hairline rings and spokes, fills every series lightly under a crisp 1.75 point outline, and lists them in a legend. The ring values sit beside the most upright spoke that keeps them clear of the data (on the top spoke with a small backing when none does). Only the last series shows its points; hovering near an axis picks the series whose point there is nearest, shows its points and puts its value in a chip beside the point.
 
 ### Funnel, split bar and waffle
 

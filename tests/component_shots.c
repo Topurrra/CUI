@@ -2011,7 +2011,17 @@ SCENE(calendar_heatmap) {
     cui_date start = { 2025, 11, 6 };
     cui_calendar_heatmap(ui, "year", start, viz_days, 364, .unit = "contributions");
 }
-SCENE(treemap_radar) {
+static void body_treemap_radar(cui_ctx *ui);
+static void scene_treemap_radar(cui_ctx *ui, int f) {
+    /* the 1.1 point on the Size axis, to show the radar's value chip */
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "radar"));
+        if (-f - 1 == 40 && r.w > 0) cui_input_mouse_move(ui, r.x + r.w * 0.5f + 0.866f * 85, r.y + 26 + 100 - 0.5f * 85);
+        return;
+    }
+    frame_wrap(ui, body_treemap_radar);
+}
+static void body_treemap_radar(cui_ctx *ui) {
     static const cui_viz_item mods[] = {
         { "Layout", 55 }, { "Text", 42 }, { "Draw", 35 }, { "Controls", 31 }, { "Charts", 23 },
         { "Overlays", 19 }, { "Platform", 16 }, { "Theme", 9 }, { "Icons", 7 }, { "Grid", 6 },
@@ -2019,7 +2029,8 @@ SCENE(treemap_radar) {
     static const float a[] = { 82, 64, 90, 58, 75, 88 }, b[] = { 70, 85, 72, 80, 60, 79 };
     static const char *axes[] = { "Speed", "Size", "Polish", "Docs", "Platforms", "Tests" };
     cui_row(ui, .gap = 28, .align = CUI_ALIGN_CENTER, .width = CUI_FILL, .wrap = true) {
-        cui_box(ui, .width = CUI_GROW(1), .min_width = 300) { cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB"); }
+        static int picked = 2;   /* "Draw", to show the selected tile */
+        cui_box(ui, .width = CUI_GROW(1), .min_width = 300) { cui_treemap(ui, "bundle", mods, 10, .height = 290, .format = "%.0f KB", .selected = &picked); }
         cui_series rs[] = { { "1.0", a, 6, { 0 } }, { "1.1", b, 6, { 0 } } };
         cui_column(ui, .gap = 2, .align = CUI_ALIGN_CENTER) {
             cui_label(ui, "Review scores by release");
