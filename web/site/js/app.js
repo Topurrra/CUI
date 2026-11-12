@@ -910,11 +910,11 @@ function siteFooter() {
       h('a', { href: 'https://github.com/yappologistic/CUI', target: '_blank', rel: 'noreferrer' }, 'Source')));
 }
 
-// components added in the last two rounds; their cards and sidebar rows say "New".
+// components added in the latest round; their cards and sidebar rows say "New".
 // Keep this to recent additions: drop ids from here once they have settled in.
-const NEW = new Set(['knob-fader-and-level-meter', 'radial-gauge', 'candlestick-chart', 'month-calendar', 'guided-tour',
-                     'image-viewer-and-cropper', 'file-browser-and-picker', 'terminal', 'emoji-picker',
-                     'markdown-view', 'code-editor', 'diff-viewer', 'docking', 'tree-table-and-path-bar', 'timeline-editor'].filter((id) => CAT.items[id]));
+const NEW = new Set(['status-tag', 'ratio-slider', 'gradient-slider', 'step-slider', 'palette-strip', 'aspect-ratio-picker',
+                     'option-field-with-action', 'seed-field', 'grouped-toolbar', 'format-bar', 'live-cursors', 'canvas-controls',
+                     'result-card', 'selection-bar', 'voice-waveform', 'voice-recorder', 'voice-note', 'voice-session'].filter((id) => CAT.items[id]));
 const newBadge = (id, cls = 'new-badge') => (NEW.has(id) ? h('span', { class: cls, title: 'Recently added' }, 'New') : null);
 
 // the query part of a hash: #/components?q=grid&cat=charts
