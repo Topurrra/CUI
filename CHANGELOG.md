@@ -17,6 +17,12 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
   - **Aspect ratio picker** (`cui_aspect_picker`): each ratio drawn in its own proportions, a photo set or your own, an optional dashed Custom, and the size in pixels.
   - **Option field with action** (`cui_option_action`): a compact segmented choice and the icon button of the action it feeds.
   - **Seed field** (`cui_seed_field`): a seed in the monospaced font; the dice rolls a new one with rolling digits, and the lock keeps it.
+- Grouped toolbar: `cui_toolbar` with `.style = CUI_TOOLBAR_GROUPED` puts items in raised groups (`cui_toolbar_group`) inside one pill, with an inset radio set (`cui_toolbar_radio`) and a filled primary action (`cui_toolbar_primary`); `CUI_TOOLBAR_FLOATING` is one bordered pill for bars over content. Both keep the toolbar's keys and overflow menu, and every style gains cycle pickers (`cui_toolbar_cycle`), colored buttons (`.tone`) and a corner mark for buttons that open a flyout (`.flyout`, `cui_flyout_mark`).
+- Format bar: `cui_format_bar` edits one `cui_text_format`: a color grid, bold, underline, link, a text style menu that previews each style at its size, alignment and list flyouts, and delete behind a small confirmation. Menu items take a `font` and `text_size` for such previews.
+- Live cursors: `cui_live_cursors` draws other people's pointers over a canvas with name flags and chat bubbles, gliding to each new position at any frame rate; `cui_presence_pill` shows who is here and who is speaking, and `cui_selection_ring` marks what someone has selected.
+- Canvas controls: `cui_canvas_controls` is a floating zoom rail (in, a percentage that resets to 100%, out, fit and toggles of your own) that drives the node editor's `cui_node_view`, stepping through zoom presets and keeping the middle in place.
+- Result card: `cui_result_card` shows a picture cropped to rounded corners with a status chip and a title and caption on a fade; its actions go in a floating toolbar under it.
+- Selection bar: `cui_selection_bar` slides up under a list while something is selected, with the count, a clear button and labeled actions, and returns the action picked; Esc clears the selection.
 
 ### Changed
 

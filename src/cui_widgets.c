@@ -497,7 +497,7 @@ static cui_color cui__name_tone(cui_ctx *ui, const char *name) {
     return tones[h % 7];
 }
 
-static int cui__initials(const char *name, char *out) {
+int cui__initials(const char *name, char *out) {
     int n = 0;
     bool word_start = true;
     for (const char *p = name; p && *p && n < 8; p++) {

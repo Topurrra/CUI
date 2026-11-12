@@ -291,6 +291,7 @@ CATEGORIES = [
     ("pickers", "Pickers"), ("navigation", "Navigation"), ("overlays", "Overlays"), ("feedback", "Feedback"),
     ("data", "Data display"), ("charts", "Charts"), ("planning", "Planning"), ("social", "Conversation and media"),
     ("motion", "Motion"), ("ai", "AI interfaces"), ("devtools", "Developer tools"), ("instruments", "Instruments"),
+    ("canvas", "Canvas and bars"),
 ]
 MAIN_CAT = {
     "Text": "basics", "Badge, avatar and keycap": "basics", "Card and metric": "basics", "Image": "basics",
@@ -314,6 +315,7 @@ MORE_CAT = {
     "App chrome": "navigation",
     "Tool panels": "data", "Developer tools": "devtools", "Instruments": "instruments",
     "Creative controls": "selection",
+    "Canvas and bars": "canvas",
 }
 ITEM_CAT = {"Table of contents": "navigation", "Status tag": "feedback"}
 # sections whose docs have no screenshot: the scene that shows them
@@ -462,7 +464,8 @@ CORE_TYPES = {"cui_ctx", "cui_rect", "cui_vec2", "cui_color", "cui_size", "cui_c
               "cui_font", "cui_id", "cui_date", "cui_key_combo"}
 
 # structs a page is about that no function of the page takes directly
-EXTRA_TYPES = {"chart-annotations": ["cui_chart_annotation"]}
+EXTRA_TYPES = {"chart-annotations": ["cui_chart_annotation"],
+               "canvas-controls": ["cui_canvas_toggle"], "format-bar": ["cui_text_style"]}
 
 def item_types(it, owners):
     """The structs an item's own functions take (data) and return (results), with the

@@ -255,7 +255,9 @@ bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *
     cui__open(ui, i);
     cui_color fg = o->danger ? CUI_C(ui, DANGER) : CUI_C(ui, FOREGROUND);
     if (o->icon) cui__icon_node(ui, o->icon, 16, o->danger ? fg : CUI_C(ui, TEXT_SECONDARY));
-    int t = cui__text_node(ui, label, cui__display_len(label), CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), fg, false);
+    float ts = o->text_size > 0 ? o->text_size : ui->theme.text_body;
+    if (o->text_size > 0) ui->nodes[i].h = CUI_PX(CUI_MAX(32.0f, roundf(cui__fs(ui, ts)) + 20));
+    int t = cui__text_node(ui, label, cui__display_len(label), o->font, cui__fs(ui, ts), fg, false);
     ui->nodes[t].line_height = 1.3f;
     ui->nodes[t].w = CUI_FILL;
     if (o->shortcut) {
