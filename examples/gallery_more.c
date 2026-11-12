@@ -1701,6 +1701,8 @@ static void page_creative(cui_ctx *ui) {
                 saved_as = format;
         }
         cui_seed_field(ui, "Seed", &seed, &seed_fixed, .value = seed_fixed ? "Same image every run" : "Random each run");
+    }
+}
 
 /* ---- canvas and bars ------------------------------------------------------- */
 
@@ -1848,6 +1850,8 @@ static void page_canvas(cui_ctx *ui) {
             }
         }
         cui_selection_bar(ui, "canvas-bulk", 0, acts, 3, .selected = picked, .item_count = 5, .anchor = cui_make_id(ui, "canvas-files"));
+    }
+}
 
 /* ---- voice ---------------------------------------------------------------- */
 
