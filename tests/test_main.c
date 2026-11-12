@@ -3073,6 +3073,36 @@ static void test_theme(void) {
     cui_destroy(ui);
 }
 
+/* the series palette: every color readable on the page, at one lightness, under every accent */
+static double series_lin(int c) { double v = c / 255.0; return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4); }
+static double series_lum(cui_color c) { return 0.2126 * series_lin(c.r) + 0.7152 * series_lin(c.g) + 0.0722 * series_lin(c.b); }
+static double series_oklab_l(cui_color c) {
+    double r = series_lin(c.r), g = series_lin(c.g), b = series_lin(c.b);
+    double l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    double m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    double s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+}
+
+static void test_series_palette(void) {
+    printf("theme: the series palette is even and readable in both modes\n");
+    for (int dark = 0; dark < 2; dark++)
+        for (int a = 0; a < CUI_ACCENT_COUNT; a++) {
+            cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT, .accent = (cui_accent)a });
+            cui_color bg = cui_token_color(ui, CUI_TOKEN_SURFACE);
+            double lo = 1, hi = 0, worst = 99;
+            for (int k = 0; k < 6; k++) {
+                cui_color c = cui_token_color(ui, (cui_token)(CUI_TOKEN_SERIES_1 + k));
+                double L = series_oklab_l(c), y1 = series_lum(c), y2 = series_lum(bg);
+                double cr = (fmax(y1, y2) + 0.05) / (fmin(y1, y2) + 0.05);
+                lo = fmin(lo, L); hi = fmax(hi, L); worst = fmin(worst, cr);
+            }
+            CHECK(hi - lo < 0.02);   /* one lightness: no series louder than another */
+            CHECK(worst >= 3.0);     /* graphics contrast on a card */
+            cui_destroy(ui);
+        }
+}
+
 /* draw data and renderer ------------------------------------------------ */
 
 static void build_rect(cui_ctx *ui, void *u) {
@@ -7741,6 +7771,7 @@ int main(void) {
     test_dock();
     test_virtual_list();
     test_theme();
+    test_series_palette();
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();

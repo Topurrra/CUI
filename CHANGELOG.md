@@ -9,6 +9,10 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - `cui_set_clipboard_text` and `cui_get_clipboard_text`: copy from a menu item or a status bar ("Copy path") and read the clipboard for a Paste item, through the same platform hooks the copy button and text fields use ([#32](https://github.com/yappologistic/CUI/issues/32)).
 - `cui_app_follow_system_theme(app, follow)` starts or stops following the system's light or dark setting while the app runs, for a theme switcher with Light, Dark and System. Stopping keeps the current theme, so a `cui_set_theme` after it lasts (on macOS the system setting used to undo it every frame); starting applies the system setting at once ([#34](https://github.com/yappologistic/CUI/issues/34)).
 
+### Changed
+
+- **A calmer series palette.** The six chart colors keep their order (blue, orange, aqua, violet, yellow, magenta), so neighbours stay apart under color blindness, but now share one lightness and about one chroma in each mode. No series shouts over another or over the rest of the interface, and the light colors keep 4.2:1 or more on white.
+
 ### Fixed
 
 - A confirmation popover opened with Enter waits for a separate activation.
