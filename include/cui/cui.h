@@ -3101,6 +3101,7 @@ typedef struct cui_doc_tabs_result {
     bool changed;              /* *selected changed (click, keys or a move) */
     int close;                 /* tab to close, or -1 */
     int move_from, move_to;    /* move the tab at move_from to move_to, or -1 */
+    int activated;             /* tab double clicked this frame (to rename it, say), or -1 */
 } cui_doc_tabs_result;
 CUI_API cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id, const cui_doc_tab *tabs, int count, int *selected, const cui_doc_tabs_opts *opts);
 

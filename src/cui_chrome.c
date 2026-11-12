@@ -1225,6 +1225,7 @@ static void cui__dtf_build_tab(cui__dtf *f, int k, int vis_sel, float rad, float
     }
     if (!o->no_close && (ui->hot == tid || ui->hot == cid) && ui->mpressed[CUI_MOUSE_MIDDLE] && st->from < 0) f->res->close = k;
     if (sr.clicked) f->res->close = k;
+    if (tr.double_clicked && !sr.hovered) f->res->activated = k;
 
     cui__dtab_state *ts = cui_state(ui, tid ^ 0x1u, sizeof *ts);
     cui__dtf_tab_motion(f, ts, k);
@@ -1288,7 +1289,7 @@ cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_d
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     cui_doc_tabs_result res;
-    res.changed = false; res.close = -1; res.move_from = -1; res.move_to = -1;
+    res.changed = false; res.close = -1; res.move_from = -1; res.move_to = -1; res.activated = -1;
     int sel_local = 0;
     if (!selected) selected = &sel_local;
     if (!tabs || count < 0) count = 0;

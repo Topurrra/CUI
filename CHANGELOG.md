@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- Document tabs report a double click in `cui_doc_tabs_result.activated`, to rename a tab, say.
 - Code editor `.borderless`: no border, corners or focus ring, drawn on the window background, for an editor that fills a pane.
 - **Color emoji in text**: text draws emoji in place from the emoji font, in headings, table cells, list items, labels and fields, where it used to leave a gap. Sequences stay whole (variation selectors, skin tones, ZWJ families and jobs, keycaps, flags), each about one em wide on the text's baseline. The markdown view turns it on and loads the system emoji font the first time an emoji shows up; any other app turns it on by loading an emoji font or using an emoji component. See [Emoji in text](docs/components-more.md#emoji-in-text).
 - `cui_set_clipboard_text` and `cui_get_clipboard_text`: copy from a menu item or a status bar ("Copy path") and read the clipboard for a Paste item, through the same platform hooks the copy button and text fields use ([#32](https://github.com/yappologistic/CUI/issues/32)).
