@@ -643,6 +643,7 @@ const char *cui__weekday_short(cui_ctx *ui, int d);   /* "Mon" */
 const char *cui__weekday_min(cui_ctx *ui, int d);     /* "Mo" */
 const char *cui__today_text(cui_ctx *ui);
 const char *cui__size_text(cui_ctx *ui, double bytes);   /* "4.2 KB" */
+const char *cui__mmss(cui_ctx *ui, float seconds);        /* a play time, "3:07"; negative reads as 0 */
 int cui__utc_offset(int64_t t);                           /* minutes east of UTC of the local zone at t */
 
 /* ---- shared widget pieces ---- */
