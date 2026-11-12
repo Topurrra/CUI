@@ -739,6 +739,10 @@ float cui_animate_spring(cui_ctx *ui, cui_id id, float target, float duration, f
 void cui_begin_frame(cui_ctx *ui, float dt) {
     if (ui->in_frame) cui_end_frame(ui);
     if (!isfinite(dt) || dt < 0) dt = 0;
+    /* at most an hour of clock per frame: a first dt of "seconds since 1970" (a last time of 0)
+     * would otherwise put the clock where a float cannot tell frames apart, and the spinner,
+     * which draws from (float)ui->time, would stop. An idle hour expires every timer anyway. */
+    if (dt > 3600.0f) dt = 3600.0f;
     ui->in_frame = true;
     ui->dt = CUI_MIN(dt, 0.25f);
     ui->time += dt;

@@ -422,6 +422,24 @@ static void test_copy_button_focus(void) {
     cui_destroy(ui);
 }
 
+/* the clock takes the whole idle interval for timers, but not an absurd one: a first dt of
+ * "seconds since 1970" must not throw the clock where a float stops counting frames */
+static void test_clock_step_bound(void) {
+    printf("frame clock: idle intervals count, absurd ones are bounded\n");
+    cui_ctx *ui = new_ctx();
+    cui_begin_frame(ui, 1.0f / 60.0f); cui_end_frame(ui);
+    double t0 = cui_time(ui);
+    cui_begin_frame(ui, 2.5f); cui_end_frame(ui);              /* an idle wait of 2.5 s counts in full */
+    CHECK(fabs(cui_time(ui) - t0 - 2.5) < 1e-6);
+    double t1 = cui_time(ui);
+    cui_begin_frame(ui, 1.7e9f); cui_end_frame(ui);            /* now - 0 */
+    CHECK(cui_time(ui) - t1 <= 3600.0 + 1e-3);
+    cui_begin_frame(ui, -1.0f); cui_end_frame(ui);             /* negative and NaN count as no time */
+    cui_begin_frame(ui, NAN); cui_end_frame(ui);
+    CHECK(cui_time(ui) - t1 <= 3600.0 + 1e-3);
+    cui_destroy(ui);
+}
+
 /* cui_set_clipboard_text / cui_get_clipboard_text: the platform hooks, for menu items
  * that copy or paste (issue #32) */
 static void test_clipboard_api(void) {
@@ -7569,6 +7587,7 @@ int main(void) {
     test_copy_button_focus();
     test_nav_highlight();
     test_clipboard_api();
+    test_clock_step_bound();
     test_toggles_and_slider();
     test_text_input();
     test_disabled_password_reveal();

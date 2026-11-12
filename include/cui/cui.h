@@ -198,7 +198,7 @@ CUI_API cui_vec2 cui_viewport_size(cui_ctx *ui);
 CUI_API float cui_dpi_scale(cui_ctx *ui);
 
 /* dt is the elapsed time since the previous frame in seconds.
- * Timers use the full interval. Animation steps are capped after idle. */
+ * Timers use the full interval (up to an hour). Animation steps are capped after idle. */
 CUI_API void cui_begin_frame(cui_ctx *ui, float dt);
 CUI_API void cui_end_frame(cui_ctx *ui);
 
