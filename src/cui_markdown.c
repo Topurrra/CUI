@@ -893,7 +893,10 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
     memset(&co, 0, sizeof co);
     co.lang = lg;
     co.size = c->body;
-    cui_code_block_ex(ui, cui__frame_printf(ui, "code%d", c->code_seq++), buf, &co);
+    const char *cid = cui__frame_printf(ui, "code%d", c->code_seq++);
+    float mw;
+    if (!strcmp(lg, "mermaid") && cui__mermaid_block(ui, cid, buf, o, c->body, &mw)) return c->fit ? mw : 0;   /* a diagram */
+    cui_code_block_ex(ui, cid, buf, &co);
     return c->fit ? widest + 42 : 0;
 }
 

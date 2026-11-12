@@ -1520,10 +1520,15 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * task items (- [ ] and - [x]), block quotes, fenced code blocks (``` or ~~~
  * with a language, drawn by cui_code_block with its highlighter), indented
  * code, horizontal rules (--- *** ___) and pipe tables with an alignment row
- * (drawn with cui_table, scrolling sideways when narrower than their columns).
+ * (drawn with cui_table, scrolling sideways when narrower than their columns),
  * a leading YAML front matter block (--- ... ---, shown as a collapsed
- * "Properties" row), and [[wiki links]] ([[target]], [[target|label]],
- * [[target#heading]], ![[embeds]]; reported through .link with .link_is_wiki).
+ * "Properties" row), [[wiki links]] ([[target]], [[target|label]],
+ * [[target#heading]], ![[embeds]]; reported through .link with .link_is_wiki),
+ * and ```mermaid blocks drawn as diagrams: flowcharts (graph / flowchart, any
+ * direction, the usual node shapes, link styles and labels, chains, &,
+ * subgraphs) laid out like cui_graph_view, pie charts (a donut chart) and
+ * gantt charts with dateFormat YYYY-MM-DD (a read only cui_gantt); other
+ * diagrams and text that does not parse stay code.
  * Everything else (HTML, reference links, footnotes, math) shows as plain
  * text. Containers nest at most 12 deep; deeper content shows as text.
  *

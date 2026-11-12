@@ -1539,6 +1539,73 @@ SCENE(markdown_vault) {
             "Blocked on [[Build farm]] and the [[Signing#Certificates|signing certificates]]; see also ![[roadmap.png]].\n");
     }
 }
+/* mermaid diagrams in markdown: a flowchart left to right, one top down with edge labels and a
+ * decision, and a pie */
+SCENE(mermaid) {
+    cui_box(ui, UPTO(720)) {
+        cui_markdown(ui, "notes",
+            "### Release pipeline\n"
+            "\n"
+            "```mermaid\n"
+            "graph LR\n"
+            "    src[Source] --> build(Build) --> test{{Tests}}\n"
+            "    test --> pkg([Package]) & docs[[Docs]]\n"
+            "    pkg --> store[(Registry)]\n"
+            "```\n"
+            "\n"
+            "```mermaid\n"
+            "flowchart TD\n"
+            "    A[Request] --> B{Cached?}\n"
+            "    B -->|yes| C[Serve from cache]\n"
+            "    B -->|no| D(Fetch origin)\n"
+            "    D -- 200 --> E[Store]\n"
+            "    D -. error .-> F((Retry))\n"
+            "    E --> C\n"
+            "```\n"
+            "\n"
+            "```mermaid\n"
+            "pie title Time spent\n"
+            "    \"Coding\" : 46\n"
+            "    \"Review\" : 22\n"
+            "    \"Meetings\" : 18\n"
+            "    \"Docs\" : 14\n"
+            "```\n");
+    }
+}
+/* mermaid: subgraphs drawn as titled groups, bottom to top, and a gantt chart */
+SCENE(mermaid_more) {
+    cui_box(ui, UPTO(720)) {
+        cui_markdown(ui, "notes",
+            "```mermaid\n"
+            "flowchart LR\n"
+            "    %% services behind a gateway\n"
+            "    subgraph edge [Edge]\n"
+            "        gw[Gateway]\n"
+            "    end\n"
+            "    subgraph core [Core services]\n"
+            "        auth(Auth) & users(Users)\n"
+            "    end\n"
+            "    client([Client]) ==> gw\n"
+            "    gw --> auth & users\n"
+            "    users --> db[(Postgres)]\n"
+            "    auth -.-> cache[(Redis)]\n"
+            "    classDef hot fill:#f96\n"
+            "    class gw hot\n"
+            "```\n"
+            "\n"
+            "```mermaid\n"
+            "gantt\n"
+            "    title Release 2.4\n"
+            "    dateFormat YYYY-MM-DD\n"
+            "    section Build\n"
+            "    Design      :done, des, 2024-03-01, 4d\n"
+            "    Implement   :active, impl, after des, 8d\n"
+            "    section Ship\n"
+            "    Review      :crit, rev, after impl, 3d\n"
+            "    Release     :milestone, after rev, 0d\n"
+            "```\n");
+    }
+}
 /* diff viewer: two versions of a config loader. The mode toggle and the
  * selected change are static and wired to the view, so the live page keeps
  * them; folds open on a click and stay open. */
@@ -4467,6 +4534,7 @@ int main(int argc, char **argv) {
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true },
+        { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },

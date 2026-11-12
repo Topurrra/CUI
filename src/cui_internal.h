@@ -22,7 +22,8 @@
  *   shared widget pieces             cui_widgets.c, cui_controls.c, cui_overlay.c...
  *   text editing primitives          cui_textedit.c (shared with the code editor)
  *   syntax highlighting              cui_code.c (code block, code editor, diff viewer)
- *   layered graph layout             cui_graph.c (the dependency graph's layout, shared)
+ *   layered graph layout             cui_graph.c (dependency graph, mermaid flowcharts)
+ *   mermaid diagrams                 cui_mermaid.c (fenced mermaid blocks in markdown)
  *
  * Naming: cui__ for internal functions, CUI__ for internal constants and macros, cui_ for
  * the public API in include/cui/. */
@@ -786,5 +787,10 @@ void cui__layered_free(cui_ctx *ui, cui__layered *g);
  * max_boxes > 0 caps nodes plus waypoints: past it nothing is laid out and it returns false. */
 bool cui__layered_layout(cui_ctx *ui, cui__layered *g, const float *w, const float *h, int n,
                          const cui_graph_edge *edges, int ne, bool top_down, float gap_layer, float gap_node, int max_boxes);
+
+/* ---- mermaid diagrams (cui_mermaid.c): fenced mermaid blocks in the markdown view ---- */
+/* Builds the diagram in src (len bytes) under id, body the markdown's text size; false, with
+ * nothing built, when src is not a diagram it draws. *natural gets the width it would like. */
+bool cui__mermaid_block(cui_ctx *ui, const char *id, const char *src, int len, float body, float *natural);
 
 #endif /* CUI_INTERNAL_H */

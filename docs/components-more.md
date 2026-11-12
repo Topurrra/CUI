@@ -781,6 +781,18 @@ The view wraps to whatever width it gets: words wrap between fonts, a word wider
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/markdown-vault-dark.png"><img src="images/components/markdown-vault.png" alt="Markdown with a collapsed properties row and wiki links"></picture>
 
+A fenced block with the language `mermaid` is drawn as a diagram instead of code, natively, with no browser or script:
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/mermaid-dark.png"><img src="images/components/mermaid.png" alt="Mermaid flowcharts and a pie chart in the markdown view"></picture>
+
+- **Flowcharts** (`graph` or `flowchart`, with `TD`, `TB`, `BT`, `LR` or `RL`) are laid out in layers by the same layout as the [dependency graph](#dependency-graph). Nodes are `A`, `A[box]`, `A(round)`, `A([stadium])`, `A[[subroutine]]`, `A[(database)]`, `A{decision}`, `A{{hexagon}}`, `A((circle))` and `A>flag]` (`[/ /]` shapes draw as boxes), with `"quoted"` text and `<br>` line breaks. Links are `-->`, `---`, `-.->`, `==>` and `~~~` (laid out, not drawn), with `<`, `o` and `x` ends, labels as `-->|text|` or `-- text -->`, chains (`A --> B --> C`) and `&` (`A & B --> C`). A labelled link gets a place of its own in the layout, so labels never sit on a node. `subgraph id [title] ... end` draws a titled box around its nodes when the box fits without covering other nodes; otherwise the grouping is left out. `%%` comments, front matter, `classDef`, `class`, `style`, `linkStyle`, `click` and `direction` are read and ignored. The diagram fits the width (down to 55%, then it scrolls sideways) and is as tall as it needs, up to 520 points; past that a drag pans it, the wheel scrolls it and Ctrl or Cmd with the wheel zooms.
+- **Pie charts** (`pie`, `title`, `showData`, `"label" : value`) are drawn by the donut chart, with its legend.
+- **Gantt charts** (`gantt`, `title`, `dateFormat YYYY-MM-DD`, tasks as `Name :done, id, 2024-03-01, 4d`, `after id`, `until id`, lengths in `d`, `w` or `h`, and the `done`, `active`, `crit` and `milestone` tags) are drawn by the read only [gantt chart](#gantt-chart): done tasks green, active ones in the series color, `crit` in red, others as plans, with `after` as a dependency. Sections, `excludes` and the axis settings are ignored.
+
+Any other diagram (sequence, class, state...) and text that does not parse shows as the code block it was, so a half-written diagram never breaks the page. Diagrams are capped at 300 nodes and 600 links. The text is parsed and laid out once when it changes and kept for the block, so a diagram costs only drawing on later frames.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/mermaid-more-dark.png"><img src="images/components/mermaid-more.png" alt="A mermaid flowchart with subgraphs and a gantt chart"></picture>
+
 Links are never opened for you. The result reports the URL of a link clicked or activated this frame (and the one under the pointer), and a link's URL also shows as its tooltip. A task box reports the byte offset of the character between its brackets, its line and the state it was toggled to; `cui_markdown_apply_task` writes that into your text, or you can edit it yourself. Tab moves through the links and task boxes; Enter opens the focused link and Space toggles a box. Text is not selectable, since CUI text has no selection yet; code blocks have their copy button.
 
 ### Code editor
