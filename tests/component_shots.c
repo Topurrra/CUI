@@ -4418,7 +4418,7 @@ int main(int argc, char **argv) {
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 320, true },
         { "bar-donut", scene_bar_chart, 840, 290, true }, { "command-palette", scene_palette, 680, 460, true },
-        { "icons", scene_icons, 1040, 1120, false },
+        { "icons", scene_icons, 1040, 1440, false },
         { "radio-cards", scene_radio_cards, 940, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },
         { "button-extras", scene_button_extras, 640, 110, true }, { "timeline", scene_timeline, 620, 300, true },
         { "mosaic", scene_mosaic, 1440, 900, true, true, CUI_ACCENT_BLUE },

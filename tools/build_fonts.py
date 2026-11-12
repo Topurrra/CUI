@@ -42,6 +42,12 @@ award thumbs-up thumbs-down smile at-sign hash percent paperclip printer scissor
 file-text notebook-pen square-pen badge-check circle-user user-plus key-round fingerprint
 bug rocket target compass history archive circle square-check square
 skip-back skip-forward shuffle repeat radio audio-lines
+columns-2 folder-plus file-plus panel-left-close panel-left-open list-tree workflow file-json
+file-code file-terminal file-image file-cog file-spreadsheet file-type file-lock file-archive
+file-video file-audio file-question braces book-open notebook-text square-split-horizontal
+chevrons-down-up git-commit-horizontal link-2 text-search scan-search pin calendar-days network
+chart-gantt maximize minimize app-window captions quote list-ordered heading-1 heading-2 table
+image-plus sigma
 """.split()
 
 

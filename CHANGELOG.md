@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- 43 more built-in Lucide icons (now 211): file types (`CUI_ICON_FILE_JSON`, `FILE_CODE`, `FILE_IMAGE`, ...), `FOLDER_PLUS`, `FILE_PLUS`, `COLUMNS_2`, `PANEL_LEFT_CLOSE` and `PANEL_LEFT_OPEN`, `LIST_TREE`, `WORKFLOW`, `BRACES`, `BOOK_OPEN`, `NETWORK`, `CHART_GANTT`, `HEADING_1`, `TABLE`, `SIGMA` and more. Existing icons keep their names and glyphs. See [Icons](docs/icons.md).
 - `cui_app_desc.custom_titlebar` (Windows): no system title bar or frame; the app draws its own with `cui_app_minimize`, `cui_app_toggle_maximize`, `cui_app_is_maximized` and `cui_app_drag_window`. The edges still resize, and the shadow, snapping and Alt+Space menu stay. Other platforms keep the system bar (`cui_app_has_custom_titlebar` says which).
 - Document tabs report a double click in `cui_doc_tabs_result.activated`, to rename a tab, say.
 - Code editor `.borderless`: no border, corners or focus ring, drawn on the window background, for an editor that fills a pane.
