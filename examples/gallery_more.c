@@ -1823,7 +1823,7 @@ static void page_canvas(cui_ctx *ui) {
     cui_row(ui, .gap = 28, .wrap = true, .align = CUI_ALIGN_START, .width = CUI_FILL, .pad_bottom = 60) {
         cui_column(ui, .gap = 10, .align = CUI_ALIGN_CENTER, .min_width = 360) {   /* room for the whole action bar */
             cui_result_card(ui, "canvas-result", canvas_picture(ui), "Final result", .caption = "Minimal illustration, soft gradients and smooth shapes against a clear sky",
-                            .badge = "Done in 4.2 s", .image_w = 288, .image_h = 360, .width = CUI_PX(290));
+                            .badge = "Done in 4.2 s", .image_w = 288, .image_h = 360, .width = CUI_PX(344));
             cui_toolbar(ui, "canvas-result-actions", .style = CUI_TOOLBAR_FLOATING) {
                 cui_toolbar_button(ui, CUI_ICON_MAXIMIZE_2, .tooltip = "Expand");
                 cui_toolbar_button(ui, CUI_ICON_BOOKMARK, .tooltip = "Save", .toggle = &saved, .tone = CUI_TONE_WARNING);

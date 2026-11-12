@@ -4261,7 +4261,7 @@ static void cb_canvas(cui_ctx *ui, const char *id, bool people, cui_node_view *v
     static const cui_live_user users[] = {
         { .name = "Paul", .tone = CUI_TONE_WARNING, .x = 118, .y = 172, .speaking = true },
         { .name = "Kate", .tone = CUI_TONE_INFO, .x = 432, .y = 156, .says = "Bumping steps to 40?" },
-        { .name = "Mario", .tone = CUI_TONE_ROSE, .x = 192, .y = 248 },
+        { .name = "Mario", .tone = CUI_TONE_ROSE, .x = 236, .y = 306 },
     };
     cui_canvas_toggle toggles[] = { { CUI_ICON_EYE, "Show grid", &cb_grid }, { CUI_ICON_LAYERS, "Layers", NULL } };
     cui_box(ui, .dir = CUI_STACK, .width = CUI_FILL, .height = CUI_PX(height), .radius = 14, .clip = true) {
@@ -4346,7 +4346,7 @@ static void cb_result(cui_ctx *ui) {
     static const char *const scales[] = { "1x", "2x", "4x" }, *const types[] = { "PNG", "JPG", "WEBP" };
     cui_column(ui, .gap = 10, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
         cui_result_card(ui, "result", cb_result_image(ui), "Final result", .caption = "Minimal illustration, soft gradients and smooth shapes against a clear sky",
-                        .badge = "Done in 4.2 s", .image_w = 288, .image_h = 360, .width = CUI_PX(290));
+                        .badge = "Done in 4.2 s", .image_w = 288, .image_h = 360, .width = CUI_PX(344));
         cui_toolbar(ui, "result-actions", .style = CUI_TOOLBAR_FLOATING) {
             cui_toolbar_button(ui, CUI_ICON_MAXIMIZE_2, .tooltip = "Expand");
             cui_toolbar_button(ui, CUI_ICON_BOOKMARK, .tooltip = "Save", .toggle = &cb_saved, .tone = CUI_TONE_WARNING);
