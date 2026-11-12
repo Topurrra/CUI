@@ -228,7 +228,7 @@ cui_textarea(ui, "bio", bio, sizeof bio, .label = "Bio", .height = 120);
 cui_textarea(ui, "body", body, sizeof body, .height = -1);   /* fill the available height */
 ```
 
-Word wraps, scrolls with the wheel, Up and Down move between visual lines. Enter inserts a newline; Ctrl+Enter submits.
+Text wraps and scrolls with the wheel. When the text reaches the edge in the wheel's direction, the next wheel event can scroll the enclosing view. Up and Down move between visual lines. Enter inserts a newline and Ctrl+Enter submits.
 
 Returns the same flags as the text field: `CUI_CHANGED` on a frame the text changes, `CUI_SUBMITTED` when it is submitted, and `CUI_FOCUSED` and `CUI_BLURRED` on the frames it gains and loses the focus. `bio` is your buffer and the next argument its size in bytes, the terminating zero included. The library edits it in place, never writes past it, and drops what does not fit without cutting a UTF-8 character in half. Lines are separated by `\n`. `height` is in points and defaults to 96, and a negative value fills the height left in the container. It takes the options of the text field. For source code, use the code editor.
 
@@ -245,7 +245,7 @@ cui_select(ui, "country", items, 5, &country, .label = "Country");
 cui_select(ui, "lang", languages, n, &lang, .searchable = true, .placeholder = "Pick a language");
 ```
 
-`searchable` adds a filter field at the top of the list (a combobox). Options: `label`, `placeholder`, `icons`, `searchable`, `disabled`, `width`. Keyboard: Up/Down open the list and move the highlight, Enter chooses, Esc closes.
+`searchable` adds a filter field at the top of the list (a combobox). Options: `label`, `placeholder`, `icons`, `searchable`, `disabled`, `width`. Up/Down open the list and move the highlight. In a searchable select, Enter opens the list or chooses the highlighted item. Esc closes the list and returns focus from the search field to the trigger.
 
 Returns true on the frame the choice changes. `country` is your `int`, the index of the chosen item. A value outside 0 to `count` - 1, such as -1, means nothing is chosen, and the field then shows `placeholder`, or "Select". Choosing an item closes the list, which scrolls once it is taller than 300 points. The search keeps the items that contain the typed text, whatever the case. For several choices use the multi-select, and for two to five options that should stay visible use a segmented control.
 
@@ -282,7 +282,7 @@ cui_number(ui, "price", &price, 0, 1e6, .decimals = 2, .suffix = "USD");
 
 Type a value, use the minus and plus buttons, or Up/Down (Shift for 10 steps). Values are clamped to the range.
 
-Returns true on a frame the value changes, which while typing is every keystroke that reads as a different number. `seats` is your `double`. The field shows a value you set from code as soon as it is not focused, and pulls a value outside the range back in on every frame. `step` is what the buttons and the keys add or take away, 1 when not set. `decimals` is how many places are shown, 0 when not set. It does not round the value: 2.5 typed into a field with no decimals stays 2.5 in your variable.
+Returns true on a frame the value changes. During typing, only a complete finite number can change your `double`. Enter or loss of focus restores the accepted value to the field, clamped to the range and formatted with `decimals`. A value set from code appears when the field is unfocused, and out-of-range values are clamped each frame. `step` is the increment for the buttons and keys and defaults to 1. `decimals` defaults to 0 and only affects display, so typing 2.5 still stores 2.5 in your variable.
 
 ## Color picker
 
@@ -715,7 +715,7 @@ static char tags[256] = "design, c99";
 cui_tag_input(ui, "topics", tags, sizeof tags, .label = "Topics", .max_tags = 8);
 ```
 
-Tags live in your buffer as a comma separated list. Enter or a comma adds the typed tag, the x on a chip removes it, Backspace in an empty field removes the last one.
+Tags live in your buffer as a comma separated list. Enter or a comma adds the typed tag, the x on a chip removes it, and Backspace in an empty field removes the last one. A batch of comma-separated tags fills at most the remaining `max_tags` slots.
 
 Returns true on the frame a tag is added or removed. `tags` is your buffer and the next argument its size in bytes. The library rewrites it as `"design, c99"`, tags joined by a comma and a space. To read the tags, split the text at the commas and trim the spaces. A tag that no longer fits in the buffer is not added. The word being typed is kept by the library and is not in your buffer until it becomes a tag.
 
@@ -730,7 +730,7 @@ if (cui_otp_input(ui, "code", code, 6)) verify(code);   /* true once when comple
 
 Type or paste: letters and digits fill the boxes in order, anything else is ignored. Backspace removes the last character.
 
-Returns true once, on the frame the last box is filled, and again only after a character was removed and the code completed anew. `code` is your buffer of `length` + 1 bytes, zero terminated; start it empty, as a `static` array is. The library writes the characters as they were typed, without changing their case. To clear the boxes after a wrong code, set `code[0] = 0`. `length` is the number of boxes, at most 12, and codes of six or more get a gap in the middle. The boxes are 44 points wide and shrink to 30 in a narrow container.
+Returns true on the frame the last box is filled or a paste replaces the complete code with a different one. `code` is your zero-terminated buffer of `length` + 1 bytes. Start it empty, as a `static` array is. The library preserves the case of the typed characters. To clear the boxes after a wrong code, set `code[0] = 0`. `length` is the number of boxes, at most 12, and codes of six or more get a gap in the middle. The boxes are 44 points wide and shrink to 30 in a narrow container.
 
 Keyboard: Tab focuses the boxes as one field. Backspace removes the last character and Esc leaves the field.
 

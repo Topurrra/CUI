@@ -44,6 +44,12 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- The wheel scrolls a text area before its enclosing scroll view, then reaches the outer view at the text area's edges.
+- Tag input enforces its tag limit for every tag in a batch.
+- Pasting a different complete one-time code emits another completion event.
+- A searchable select returns focus to its trigger on dismissal and can reopen with Enter.
+- Number fields reject nonfinite drafts and display the accepted value on Enter or focus loss.
+
 - A confirmation popover opened with Enter waits for a separate activation.
 - After Escape leaves a text field in a dialog, the next Escape can close the dialog.
 - A disabled password field's reveal button ignores clicks and is skipped by Tab.

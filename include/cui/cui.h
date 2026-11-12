@@ -639,7 +639,8 @@ typedef struct cui_input_opts {
 
 /* Single line text field. Returns CUI_CHANGED / CUI_SUBMITTED (Enter) flags. */
 CUI_API int cui_input_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_input_opts *opts);
-/* Multi-line text area with word wrap. */
+/* Multi-line text area with word wrap. The wheel scrolls the text first and
+ * goes to the enclosing scroll view at the text area's edges. */
 CUI_API int cui_textarea_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_input_opts *opts);
 /* Search field with a search icon and a clear button. */
 CUI_API int cui_search_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_input_opts *opts);
@@ -653,6 +654,8 @@ typedef struct cui_number_opts {
     cui_size width;
     const char *suffix;        /* muted text after the value, before the - and + buttons, e.g. "kg" */
 } cui_number_opts;
+/* A bounded number field. Only complete finite drafts update the value.
+ * Enter or loss of focus shows the accepted value using opts.decimals. */
 CUI_API bool cui_number_ex(cui_ctx *ui, const char *id, double *value, double min, double max, const cui_number_opts *opts);
 
 /* ------------------------------------------------------------------------ */
@@ -668,6 +671,7 @@ typedef struct cui_select_opts {
     bool disabled;
     cui_size width;
 } cui_select_opts;
+/* A searchable select returns focus to its trigger when its search closes. */
 CUI_API bool cui_select_ex(cui_ctx *ui, const char *id, const char *const *items, int count, int *index, const cui_select_opts *opts);
 
 typedef struct cui_date { int year, month, day; } cui_date;   /* month 1..12 */
@@ -1085,10 +1089,12 @@ typedef struct cui_tag_opts {
     int max_tags;              /* most tags the field holds; once reached it takes no more typing. 0 means no limit */
     cui_size width;
 } cui_tag_opts;
+/* max_tags applies to every tag, including a batch separated by commas. */
 CUI_API bool cui_tag_input_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_tag_opts *opts);
 
 /* One time code input: `length` boxes; code must hold length + 1 bytes.
- * Returns true when all boxes are filled (once per change). */
+ * Returns true when all boxes are filled, including when a paste replaces
+ * one complete code with a different complete code. */
 CUI_API bool cui_otp_input(cui_ctx *ui, const char *id, char *code, int length);
 
 /* Connected buttons. Put buttons between begin and end. */

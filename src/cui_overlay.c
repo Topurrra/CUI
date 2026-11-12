@@ -299,6 +299,7 @@ void cui_menu_label(cui_ctx *ui, const char *text) {
 
 typedef struct { float hover, focus; char query[96]; } cui__select_state;
 
+/** Hand focus back to the trigger when its search editor is dismissed. */
 bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, int count, int *index, const cui_select_opts *o) {
     cui_select_opts d;
     memset(&d, 0, sizeof d);
@@ -319,6 +320,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
         if (!open) {
             cui__menu_nav *nav = cui_state(ui, pid ^ 0x4E4156u, sizeof *nav);
             nav->highlight = *index;
+            if (o->searchable && r.keyboard_activate) ui->kpressed[CUI_KEY_ENTER] = 0;
         }
     }
     if (p && !p->open && r.focus_visible && (cui_key_pressed(ui, CUI_KEY_DOWN) || cui_key_pressed(ui, CUI_KEY_UP))) {
@@ -373,15 +375,17 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
     if (col >= 0) cui__close(ui);
     ui->last_id = id;
 
+    cui_push_id_int(ui, (int)pid);
+    cui_id sid = cui_make_id(ui, "#q");
+    cui_pop_id(ui);
     if (cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_START, 0, 6, 0, true)) {
         if (o->searchable) {
             cui_input_opts io;
             memset(&io, 0, sizeof io);
             io.placeholder = "Search";
-            io.autofocus = true;
             io.size = CUI_SIZE_SM;
-            cui_id sid = cui_make_id(ui, "#q");
-            if (p && p->opened_frame == ui->frame - 1) ui->focus = sid;
+            io.autofocus = p->open;
+            if (p->open && p->opened_frame == ui->frame - 1) ui->focus = sid;
             int box = cui__node_new(ui, 0);
             ui->nodes[box].pad[0] = 2; ui->nodes[box].pad[2] = 4;
             cui__open(ui, box);
@@ -419,6 +423,10 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
         (void)nav;
         cui__scroll_end_ex(ui);
         cui__popup_end(ui);
+    }
+    if (ui->focus == sid && (!p || !p->open || !o->searchable)) {
+        ui->focus = disabled ? 0 : id;
+        ui->edit = NULL;
     }
     return *index != old;
 }

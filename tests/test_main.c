@@ -767,6 +767,123 @@ static void test_textarea_and_clear(void) {
     cui_destroy(ui);
 }
 
+/** Put a scrollable editor inside a viewport with room to scroll both ways. */
+static void build_nested_textarea(cui_ctx *ui, void *user) {
+    area_ctx *a = user;
+    cui_scroll(ui, .id = "page", .height = CUI_PX(180), .width = CUI_PX(320)) {
+        cui_box(ui, .height = CUI_PX(80)) {}
+        cui_textarea(ui, "notes", a->buf, sizeof a->buf, .height = 80);
+        a->id = cui_last_id(ui);
+        cui_box(ui, .height = CUI_PX(400)) {}
+    }
+}
+
+/** Keep the editor in place until the wheel points past one of its edges. */
+static void test_nested_textarea_wheel(void) {
+    printf("text area: wheel routing in a scrolling page\n");
+    cui_ctx *ui = new_ctx();
+    area_ctx a = { .buf = "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight\nNine\nTen" };
+    run(ui, build_nested_textarea, &a, 2);
+    cui_scroll_to(ui, "page", 40);
+    run(ui, build_nested_textarea, &a, 2);
+    const cui_rect before = rect_of(ui, a.id);
+    cui_input_mouse_move(ui, before.x + before.w / 2, before.y + before.h / 2);
+    run(ui, build_nested_textarea, &a, 1);
+    const uint32_t unscrolled = frame_hash(ui);
+
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_nested_textarea, &a, 1);
+    const cui_rect after = rect_of(ui, a.id);
+    CHECK_NEAR(after.y, before.y, 0.01);
+    CHECK(frame_hash(ui) != unscrolled);
+
+    if (fabsf(after.y - before.y) < 0.01f) {
+        cui_input_scroll(ui, 0, -100);
+        run(ui, build_nested_textarea, &a, 1);
+        CHECK_NEAR(rect_of(ui, a.id).y, before.y, 0.01);
+        cui_input_scroll(ui, 0, -1);
+        run(ui, build_nested_textarea, &a, 1);
+        const float lower_edge = rect_of(ui, a.id).y;
+        CHECK(lower_edge < before.y);
+        cui_input_mouse_move(ui, before.x + before.w / 2, lower_edge + before.h / 2);
+        cui_input_scroll(ui, 0, 100);
+        run(ui, build_nested_textarea, &a, 1);
+        CHECK_NEAR(rect_of(ui, a.id).y, lower_edge, 0.01);
+        cui_input_scroll(ui, 0, 1);
+        run(ui, build_nested_textarea, &a, 1);
+        CHECK(rect_of(ui, a.id).y > lower_edge);
+    }
+    cui_destroy(ui);
+}
+
+/** Give the number field room for the draft and both step buttons. */
+static void build_number_edit(cui_ctx *ui, void *user) {
+    cui_number(ui, "quantity", user, 0, 99, .width = CUI_PX(240));
+}
+
+/** Commit a canonical draft and keep the previous value on invalid input. */
+static void test_number_edit_commit(void) {
+    printf("number field: clamp committed text and reject nonfinite input\n");
+    cui_ctx *ui = new_ctx();
+    double value = 3;
+    run(ui, build_number_edit, &value, 2);
+    key(ui, build_number_edit, &value, CUI_KEY_TAB, 0);
+    key(ui, build_number_edit, &value, CUI_KEY_A, CUI_MOD_PRIMARY);
+    type(ui, build_number_edit, &value, "999");
+    key(ui, build_number_edit, &value, CUI_KEY_ENTER, 0);
+    CHECK(value == 99);
+    key(ui, build_number_edit, &value, CUI_KEY_A, CUI_MOD_PRIMARY);
+    g_clip[0] = 0;
+    key(ui, build_number_edit, &value, CUI_KEY_C, CUI_MOD_PRIMARY);
+    if (strcmp(g_clip, "99") != 0) printf("  Committed draft: %s\n", g_clip);
+    CHECK(strcmp(g_clip, "99") == 0);
+
+    type(ui, build_number_edit, &value, "nan");
+    if (!isfinite(value)) printf("  Number field returned a nonfinite value\n");
+    CHECK(isfinite(value) && value == 99);
+    key(ui, build_number_edit, &value, CUI_KEY_ENTER, 0);
+    key(ui, build_number_edit, &value, CUI_KEY_A, CUI_MOD_PRIMARY);
+    g_clip[0] = 0;
+    key(ui, build_number_edit, &value, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "99") == 0);
+
+    type(ui, build_number_edit, &value, "7x");
+    CHECK(value == 99);
+    key(ui, build_number_edit, &value, CUI_KEY_TAB, 0);
+    key(ui, build_number_edit, &value, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    key(ui, build_number_edit, &value, CUI_KEY_A, CUI_MOD_PRIMARY);
+    g_clip[0] = 0;
+    key(ui, build_number_edit, &value, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "99") == 0);
+    cui_destroy(ui);
+}
+
+/** Let the searchable popup own the only text editor in the frame. */
+static void build_searchable_select(cui_ctx *ui, void *user) {
+    const char *items[] = { "Alpha", "Beta" };
+    cui_select(ui, "choice", items, 2, user, .searchable = true);
+}
+
+/** Escape closes the search and leaves its trigger available to Enter. */
+static void test_searchable_select_reopen(void) {
+    printf("searchable select: keyboard reopening after Escape\n");
+    cui_ctx *ui = new_ctx();
+    int choice = 0;
+    run(ui, build_searchable_select, &choice, 2);
+    key(ui, build_searchable_select, &choice, CUI_KEY_TAB, 0);
+    key(ui, build_searchable_select, &choice, CUI_KEY_DOWN, 0);
+    run(ui, build_searchable_select, &choice, 1);
+    CHECK(cui_wants_keyboard(ui));
+    key(ui, build_searchable_select, &choice, CUI_KEY_ESCAPE, 0);
+    run(ui, build_searchable_select, &choice, 1);
+    CHECK(!cui_wants_keyboard(ui));
+    key(ui, build_searchable_select, &choice, CUI_KEY_ENTER, 0);
+    run(ui, build_searchable_select, &choice, 1);
+    CHECK(cui_wants_keyboard(ui));
+    CHECK(choice == 0);
+    cui_destroy(ui);
+}
+
 /* more actions ------------------------------------------------------------ */
 
 typedef struct {
@@ -2208,11 +2325,13 @@ static void test_focus_trap(void) {
     cui_destroy(ui);
 }
 
-typedef struct { char tags[128]; char otp[8]; int otp_done; int held; cui_id tag_id, otp_id, hold_id; } extras_ctx;
+typedef struct { char tags[128]; char otp[8]; int max_tags, otp_done, held; cui_id tag_id, otp_id, hold_id; } extras_ctx;
+
+/** Use the same controls for ordinary editing and batched input. */
 static void build_extras(cui_ctx *ui, void *u) {
     extras_ctx *x = u;
     cui_column(ui, .pad = 20, .gap = 16, .width = CUI_PX(500)) {
-        cui_tag_input(ui, "tags", x->tags, sizeof x->tags);
+        cui_tag_input(ui, "tags", x->tags, sizeof x->tags, .max_tags = x->max_tags);
         x->tag_id = cui_last_id(ui);
         if (cui_otp_input(ui, "otp", x->otp, 4)) x->otp_done++;
         x->otp_id = cui_last_id(ui);
@@ -2271,6 +2390,20 @@ static void test_toast_deadline(void) {
     cui_destroy(ui);
 }
 
+/** One input event can fill the last slot but cannot create another tag. */
+static void test_tag_limit_batch(void) {
+    printf("tag input: enforce capacity for each separator\n");
+    cui_ctx *ui = new_ctx();
+    extras_ctx x = { .max_tags = 1 };
+    run(ui, build_extras, &x, 2);
+    key(ui, build_extras, &x, CUI_KEY_TAB, 0);
+    type(ui, build_extras, &x, "one,two,");
+    if (strcmp(x.tags, "one") != 0) printf("  Tags after one input event: %s\n", x.tags);
+    CHECK(strcmp(x.tags, "one") == 0);
+    cui_destroy(ui);
+}
+
+/** Ordinary editing, replacement of complete codes, and held activation. */
 static void test_extras(void) {
     printf("extras: tag input, one time code, hold to confirm\n");
     cui_ctx *ui = new_ctx();
@@ -2302,6 +2435,13 @@ static void test_extras(void) {
     snprintf(g_clip, sizeof g_clip, " 7-7-7-7 ");
     key(ui, build_extras, &x, CUI_KEY_V, CUI_MOD_PRIMARY);
     CHECK(strcmp(x.otp, "7777") == 0 && x.otp_done == 2);
+    snprintf(g_clip, sizeof g_clip, "8B9C");
+    key(ui, build_extras, &x, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(strcmp(x.otp, "8B9C") == 0);
+    if (x.otp_done != 3) printf("  Completion count after replacing a complete code: %d\n", x.otp_done);
+    CHECK(x.otp_done == 3);
+    key(ui, build_extras, &x, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(x.otp_done == 3);
     /* hold: a short press does nothing, a long one fires once */
     cui_vec2 hc = center(rect_of(ui, x.hold_id));
     click_at(ui, build_extras, &x, hc.x, hc.y);
@@ -7896,6 +8036,9 @@ int main(void) {
     test_disabled_password_reveal();
     test_empty_field_caret();
     test_textarea_and_clear();
+    test_nested_textarea_wheel();
+    test_number_edit_commit();
+    test_searchable_select_reopen();
     test_more_actions();
     test_toggle_group_arrows();
     test_more_inputs();
@@ -7942,6 +8085,7 @@ int main(void) {
     test_dialog_escape_after_edit();
     test_menu();
     test_focus_trap();
+    test_tag_limit_batch();
     test_extras();
     test_toast_deadline();
     test_reorder();

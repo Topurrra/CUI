@@ -356,6 +356,7 @@ void cui__paint(cui_ctx *ui);
 int cui__float_begin(cui_ctx *ui, cui_id id, int z, cui_id anchor, int placement, float offset);
 void cui__float_end(cui_ctx *ui);
 int cui__absolute(cui_ctx *ui, cui_id id, float x, float y, float w, float h);
+cui_rect cui__xform_rect(cui_ctx *ui, cui_rect r);
 void cui__paint_add_hit(cui_ctx *ui, cui_id id, cui_rect r, uint32_t flags);
 /* From a paint callback: the wheel over r (inside the current clip) goes to id, ahead of any scroll area under it. */
 void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r);
@@ -387,6 +388,9 @@ typedef struct cui_hit {
     cui_id layer;
     int order;
 } cui_hit;
+
+/* Hit-only flags for controls whose wheel range is separate from layout scroll. */
+enum { CUI_HIT_WHEEL_UP = 1 << 19, CUI_HIT_WHEEL_DOWN = 1 << 20 };
 
 typedef struct cui_interact {
     bool hovered, pressed, clicked, right_clicked, double_clicked, focused, active, released, keyboard_activate;
