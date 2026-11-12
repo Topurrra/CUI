@@ -770,11 +770,11 @@ static void test_textarea_and_clear(void) {
 /** Put a scrollable editor inside a viewport with room to scroll both ways. */
 static void build_nested_textarea(cui_ctx *ui, void *user) {
     area_ctx *a = user;
-    cui_scroll(ui, .id = "page", .height = CUI_PX(180), .width = CUI_PX(320)) {
+    cui_scroll(ui, .id = "page", .height = CUI_PX(180), .width = CUI_PX(320), .horizontal = true) {
         cui_box(ui, .height = CUI_PX(80)) {}
         cui_textarea(ui, "notes", a->buf, sizeof a->buf, .height = 80);
         a->id = cui_last_id(ui);
-        cui_box(ui, .height = CUI_PX(400)) {}
+        cui_box(ui, .width = CUI_PX(520), .height = CUI_PX(400)) {}
     }
 }
 
@@ -813,6 +813,37 @@ static void test_nested_textarea_wheel(void) {
         run(ui, build_nested_textarea, &a, 1);
         CHECK(rect_of(ui, a.id).y > lower_edge);
     }
+    cui_destroy(ui);
+}
+
+/** A mixed wheel event scrolls the text vertically and the page horizontally. */
+static void test_nested_textarea_mixed_wheel(void) {
+    printf("text area: mixed-axis wheel and Shift routing\n");
+    cui_ctx *ui = new_ctx();
+    area_ctx a = { .buf = "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight\nNine\nTen" };
+    run(ui, build_nested_textarea, &a, 2);
+    cui_scroll_to(ui, "page", 40);
+    run(ui, build_nested_textarea, &a, 2);
+    const cui_rect before = rect_of(ui, a.id);
+    cui_input_mouse_move(ui, before.x + before.w / 2, before.y + before.h / 2);
+
+    cui_input_scroll(ui, -1, -1);
+    run(ui, build_nested_textarea, &a, 1);
+    const cui_rect mixed = rect_of(ui, a.id);
+    CHECK(mixed.x < before.x);
+    CHECK_NEAR(mixed.y, before.y, 0.01);
+
+    /* Scrolling back up must move the text toward its top before moving the page. */
+    cui_input_scroll(ui, 0, 1);
+    run(ui, build_nested_textarea, &a, 1);
+    CHECK_NEAR(rect_of(ui, a.id).y, mixed.y, 0.01);
+
+    const cui_rect before_shift = rect_of(ui, a.id);
+    cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_SHIFT);
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_nested_textarea, &a, 1);
+    CHECK(rect_of(ui, a.id).x < before_shift.x);
+    CHECK_NEAR(rect_of(ui, a.id).y, before_shift.y, 0.01);
     cui_destroy(ui);
 }
 
@@ -8037,6 +8068,7 @@ int main(void) {
     test_empty_field_caret();
     test_textarea_and_clear();
     test_nested_textarea_wheel();
+    test_nested_textarea_mixed_wheel();
     test_number_edit_commit();
     test_searchable_select_reopen();
     test_more_actions();

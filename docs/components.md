@@ -228,7 +228,7 @@ cui_textarea(ui, "bio", bio, sizeof bio, .label = "Bio", .height = 120);
 cui_textarea(ui, "body", body, sizeof body, .height = -1);   /* fill the available height */
 ```
 
-Text wraps and scrolls with the wheel. When the text reaches the edge in the wheel's direction, the next wheel event can scroll the enclosing view. Up and Down move between visual lines. Enter inserts a newline and Ctrl+Enter submits.
+Text wraps and scrolls with the wheel. When the text reaches the edge in the wheel's direction, the next wheel event can scroll the enclosing view. With mixed trackpad input, the text can scroll vertically while the enclosing view scrolls horizontally. Shift-wheel uses the enclosing scroll view. Up and Down move between visual lines. Enter inserts a newline and Ctrl+Enter submits.
 
 Returns the same flags as the text field: `CUI_CHANGED` on a frame the text changes, `CUI_SUBMITTED` when it is submitted, and `CUI_FOCUSED` and `CUI_BLURRED` on the frames it gains and loses the focus. `bio` is your buffer and the next argument its size in bytes, the terminating zero included. The library edits it in place, never writes past it, and drops what does not fit without cutting a UTF-8 character in half. Lines are separated by `\n`. `height` is in points and defaults to 96, and a negative value fills the height left in the container. It takes the options of the text field. For source code, use the code editor.
 

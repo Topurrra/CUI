@@ -44,7 +44,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
-- The wheel scrolls a text area before its enclosing scroll view, then reaches the outer view at the text area's edges.
+- The wheel scrolls a text area before its enclosing scroll view, then reaches the outer view at the text area's edges. Diagonal input can scroll the text vertically and the outer view horizontally.
 - Tag input enforces its tag limit for every tag in a batch.
 - Pasting a different complete one-time code emits another completion event.
 - A searchable select returns focus to its trigger on dismissal and can reopen with Enter.
