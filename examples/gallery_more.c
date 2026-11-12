@@ -1011,7 +1011,7 @@ static void page_motion(cui_ctx *ui) {
 
 static void page_ai(cui_ctx *ui) {
     static char draft[512] = "";
-    static int model = 0, vote = 0, orb_state = 1, removed = -1;
+    static int model = 0, vote = 0, removed = -1;
     static bool busy = false;
     static double started = -1;
     static const char *files[] = { "quarterly-report.pdf", "metrics.csv" };
@@ -1078,13 +1078,6 @@ static void page_ai(cui_ctx *ui) {
                 { "Check the citations", NULL, CUI_TASK_PENDING },
             };
             cui_agent_plan(ui, "plan", steps, 5, .title = "Research plan");
-            section(ui, "Voice", "Idle, listening, thinking and speaking.");
-            cui_column(ui, .align = CUI_ALIGN_CENTER, .gap = 12, .width = CUI_FILL) {
-                float lvl = 0.35f + 0.35f * sinf((float)now * 5.1f) * sinf((float)now * 1.7f);
-                if (cui_voice_orb(ui, "orb", (cui_voice_state)orb_state, lvl, .size = 170)) orb_state = orb_state == 1 ? 0 : 1;
-                static const char *states[] = { "Idle", "Listening", "Thinking", "Speaking" };
-                cui_segmented(ui, "orb-state", states, 4, &orb_state, .size = CUI_SIZE_SM);
-            }
             section(ui, "Suggestions", "Ways to start.");
             static const cui_prompt_suggestion sugg[] = {
                 { CUI_ICON_CODE, "Explain this code", "Walk through what it does" },
@@ -1855,6 +1848,124 @@ static void page_canvas(cui_ctx *ui) {
             }
         }
         cui_selection_bar(ui, "canvas-bulk", 0, acts, 3, .selected = picked, .item_count = 5, .anchor = cui_make_id(ui, "canvas-files"));
+
+/* ---- voice ---------------------------------------------------------------- */
+
+/* A stand-in for a microphone: words with pauses between them. The page measures it
+ * 20 times a second, as an app would read its audio input. */
+static float voice_noise(float t, float s) {
+    return (sinf(t * 1.7f + s) * 0.5f + sinf(t * 3.1f + s * 2.3f) * 0.3f + sinf(t * 7.3f + s * 0.7f) * 0.2f) * 0.5f + 0.5f;
+}
+static float voice_level(float t, float s) {
+    return (sinf(t * 2.6f + s) > -0.45f ? 1.0f : 0.06f) * (0.28f + voice_noise(t * 2.4f, s) * 0.72f);
+}
+#define VOICE_RATE 20.0f   /* levels a second */
+#define VOICE_MAX 600      /* thirty seconds */
+
+typedef struct { float levels[64]; cui_voice_note note; bool mine; } voice_msg;
+
+/* a spoken conversation that plays in a loop: you ask, it thinks (no sound) and answers */
+typedef struct { cui_voice_owner who; float seconds; bool thinking; const char *text; } voice_turn;
+static const voice_turn voice_script[] = {
+    { CUI_VOICE_YOU, 3.2f, false, "What's the weather like tomorrow morning?" }, { CUI_VOICE_REPLY, 1.4f, true, NULL },
+    { CUI_VOICE_REPLY, 4.2f, false, "Clear and cool, about 9 degrees at eight, warming to 15 by noon." },
+    { CUI_VOICE_YOU, 2.4f, false, "Should I bring a jacket?" }, { CUI_VOICE_REPLY, 1.1f, true, NULL },
+    { CUI_VOICE_REPLY, 3.0f, false, "A light one, yes. It's breezy until around ten." },
+};
+static int voice_turn_at(float t, float *into) {
+    float total = 0;
+    for (int k = 0; k < 6; k++) total += voice_script[k].seconds;
+    t = fmodf(t, total);
+    for (int k = 0; k < 6; k++) { if (t < voice_script[k].seconds) { *into = t; return k; } t -= voice_script[k].seconds; }
+    *into = 0;
+    return 0;
+}
+
+static void page_voice(cui_ctx *ui) {
+    static char draft[256] = "";
+    static bool recording = false, muted = false;
+    static float take[VOICE_MAX];
+    static int take_n = 0;
+    static voice_msg msgs[8];
+    static int msg_n = 0;
+    static float call[240];
+    static uint8_t call_who[240];
+    static int call_n = 0;
+    static double last = -1, call_start = 0, next_level = 0;
+    double now = cui_time(ui);
+    float dt = last < 0 ? 0 : (float)(now - last);
+    last = now;
+    if (msg_n == 0) {   /* a message that came in earlier */
+        voice_msg *m = &msgs[msg_n++];
+        for (int k = 0; k < 64; k++) m->levels[k] = (0.2f + voice_noise(k * 0.3f, 0.4f) * 0.8f) * (sinf(k * 0.45f + 0.4f) > -0.7f ? 1.0f : 0.15f);
+        m->note = (cui_voice_note){ m->levels, 64, 0, 9, 1, false };
+    }
+    /* measure the "microphone" and the call 20 times a second */
+    while (next_level <= now) {
+        float t = (float)next_level;
+        if (recording && take_n < VOICE_MAX) take[take_n++] = 0.85f * voice_level(t * 1.1f, 1.7f);
+        float into;
+        int k = voice_turn_at(t - (float)call_start, &into);
+        const voice_turn *tu = &voice_script[k];
+        if (call_n == 240) { memmove(call, call + 1, sizeof call - sizeof call[0]); memmove(call_who, call_who + 1, sizeof call_who - 1); call_n--; }
+        call_who[call_n] = (uint8_t)tu->who;
+        call[call_n++] = tu->thinking ? CUI_VOICE_SILENT : tu->who == CUI_VOICE_YOU ? (muted ? 0 : 0.8f * voice_level(t * 1.3f, 2)) : voice_level(t * 1.4f, 5);
+        next_level += 1.0 / VOICE_RATE;
+    }
+    if (next_level - now > 1) next_level = now;   /* after a pause, start from now */
+
+    section(ui, "Voice messages", "Press the microphone to record: the strip scrolls with the level. Cancel throws the take away, send adds it below.");
+    cui_column(ui, .gap = 10, .width = CUI_FILL, .max_width = 620) {
+        for (int k = 0; k < msg_n; k++) {
+            voice_msg *m = &msgs[k];
+            if (m->note.playing) {   /* the "player": the page plays nothing, it only moves the position */
+                m->note.position += dt * (m->note.speed > 0 ? m->note.speed : 1);
+                if (m->note.position >= m->note.duration) { m->note.position = 0; m->note.playing = false; }
+                cui_request_wakeup(ui, 1.0f / 30.0f);
+            }
+            cui_push_id_int(ui, k);
+            cui_voice_note(ui, "note", &m->note, .mine = m->mine);
+            cui_pop_id(ui);
+        }
+        int ev = cui_chat_composer(ui, "composer", draft, sizeof draft, .placeholder = "Message", .mic = true, .recording = recording,
+                                   .levels = take, .level_count = take_n, .record_seconds = take_n / VOICE_RATE);
+        if (ev & CUI_COMPOSER_RECORD) { recording = true; take_n = 0; }
+        if (ev & CUI_COMPOSER_CANCEL) recording = false;
+        if (ev & CUI_COMPOSER_VOICE) {
+            recording = false;
+            if (msg_n == 8) { memmove(msgs + 1, msgs + 2, sizeof msgs[0] * 6); msg_n--; }
+            voice_msg *m = &msgs[msg_n++];
+            cui_voice_resample(take, take_n, m->levels, 64);   /* a short waveform kept with the message */
+            m->note = (cui_voice_note){ m->levels, 64, 0, take_n / VOICE_RATE, 1, false };
+            m->mine = true;
+            for (int k = 0; k < msg_n; k++) msgs[k].note.levels = msgs[k].levels;   /* moved by the memmove */
+        }
+        if (ev & CUI_COMPOSER_SEND) draft[0] = 0;
+        if (recording) cui_request_wakeup(ui, 1.0f / VOICE_RATE);
+    }
+
+    section(ui, "Voice session", "Both voices on one timeline, with the live transcript. While it thinks there is no sound, so the strip stays flat.");
+    float into;
+    int k = voice_turn_at((float)(now - call_start), &into);
+    const voice_turn *cur = &voice_script[k], *said = cur->thinking ? &voice_script[k - 1] : cur;
+    cui_voice_state state = cur->thinking ? CUI_VOICE_THINKING : cur->who == CUI_VOICE_REPLY ? CUI_VOICE_SPEAKING : muted ? CUI_VOICE_MUTED : CUI_VOICE_LISTENING;
+    float reveal = cur->thinking ? 1 : into / cur->seconds * 1.15f;
+    int len = (int)strlen(said->text), shown = reveal >= 1 ? len : (int)(len * reveal);
+    char spoken[128];
+    snprintf(spoken, sizeof spoken, "%.*s", shown, said->text);
+    cui_card(ui, .pad = 20, .width = CUI_FILL, .max_width = 620) {
+        int f = cui_voice_session(ui, "call", state, call, call_n, .owners = call_who, .transcript = spoken, .upcoming = said->text + shown,
+                                  .speaker = said->who, .muted = &muted);
+        if (f & CUI_VOICE_SESSION_END) { call_start = now; call_n = 0; cui_toast(ui, "Call ended", .description = "A new one starts from the top."); }
+    }
+    cui_request_wakeup(ui, 1.0f / VOICE_RATE);
+
+    section(ui, "Voice waveform", "The strip on its own: the newest levels scroll in from the right, a finished clip fits the width and seeks.");
+    static float clip[160], clip_progress = 0.3f;
+    for (int i = 0; i < 160; i++) clip[i] = (0.2f + voice_noise(i * 0.22f, 1.3f) * 0.8f) * (sinf(i * 0.12f + 1) > -0.75f ? 1.0f : 0.1f);
+    cui_column(ui, .gap = 12, .width = CUI_FILL, .max_width = 620) {
+        cui_voice_wave(ui, "live", call, call_n, .owners = call_who);
+        cui_voice_wave(ui, "clip", clip, 160, .progress = &clip_progress);
     }
 }
 
@@ -1882,8 +1993,8 @@ static const more_page pages[] = {
     { "More developer tools", CUI_ICON_BUG, page_devtools2 },
     { "Instruments", CUI_ICON_CHART_LINE, page_instruments },
     { "Creative controls", CUI_ICON_PALETTE, page_creative },
-
     { "Canvas and bars", CUI_ICON_LAYERS, page_canvas },
+    { "Voice", CUI_ICON_MIC, page_voice },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

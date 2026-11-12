@@ -2457,6 +2457,125 @@ SCENE(voice_orb) {
         }
     }
 }
+/* ---- voice: levels as a microphone would give them, 20 a second: words with pauses
+ * between them. The scenes step with the frame clock, so the docs image is the same
+ * every time and the live site scrolls. */
+static float voice_noise(float t, float s) {
+    return (sinf(t * 1.7f + s) * 0.5f + sinf(t * 3.1f + s * 2.3f) * 0.3f + sinf(t * 7.3f + s * 0.7f) * 0.2f) * 0.5f + 0.5f;
+}
+static float voice_level(float t, float s) {
+    return (sinf(t * 2.6f + s) > -0.45f ? 1.0f : 0.06f) * (0.28f + voice_noise(t * 2.4f, s) * 0.72f);
+}
+#define VOICE_STEP 0.05f   /* seconds between levels */
+static int voice_step(cui_ctx *ui) { return (int)(cui_time(ui) / VOICE_STEP); }   /* levels measured so far */
+/* the newest n levels of a voice after `step` of them, newest last */
+static void voice_fill(float *out, int n, int step, float rate, float seed, float gain) {
+    float now = step * VOICE_STEP + 40;
+    for (int k = 0; k < n; k++) out[k] = gain * voice_level((now - (n - 1 - k) * VOICE_STEP) * rate, seed);
+}
+/* a finished clip: louder and quieter stretches and a pause */
+static void voice_clip(float *out, int n, float seed) {
+    for (int k = 0; k < n; k++)
+        out[k] = (0.2f + voice_noise(k * 0.3f, seed) * 0.8f) * (sinf(k * 0.45f + seed) > -0.7f ? 1.0f : 0.15f);
+}
+static float vw_progress = 0.45f;
+static void voice_wave_row(cui_ctx *ui, const char *label, const char *detail, bool accent) {
+    cui_row(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER) {
+        cui_text(ui, label, .size = 12.5f, .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY, .width = CUI_FILL);
+        cui_text(ui, detail, .size = 12, .color = accent ? CUI_COLOR_ACCENT : CUI_COLOR_TEXT_MUTED);
+    }
+}
+SCENE(voice_wave) {
+    static float you[200], reply[200], clip[160];
+    static char rec_time[16], note_time[16];
+    voice_fill(you, 200, voice_step(ui), 1.1f, 1.7f, 0.85f);
+    voice_fill(reply, 200, voice_step(ui), 1.3f, 5.0f, 1.0f);
+    voice_clip(clip, 160, 1.3f);
+    cui_column(ui, .gap = 10, UPTO(560)) {
+        snprintf(rec_time, sizeof rec_time, "0:%02d", 7 + (int)cui_time(ui) % 50);
+        voice_wave_row(ui, "Recording you", rec_time, false);
+        cui_voice_wave(ui, "you", you, 200);
+        voice_wave_row(ui, "Reply", "Speaking", true);
+        cui_voice_wave(ui, "reply", reply, 200, .owner = CUI_VOICE_REPLY);
+        snprintf(note_time, sizeof note_time, "0:%02d / 0:12", (int)(vw_progress * 12));
+        voice_wave_row(ui, "Voice note", note_time, false);
+        cui_voice_wave(ui, "note", clip, 160, .progress = &vw_progress);
+    }
+}
+
+static char vr_draft[256] = "";
+static bool vr_recording = true;
+SCENE(voice_recorder) {
+    static float mic[240];
+    voice_fill(mic, 240, voice_step(ui), 1.1f, 1.7f, 0.85f);
+    int n = 120 + voice_step(ui) % 120;   /* the take grows from the right */
+    cui_column(ui, .gap = 14, UPTO(560)) {
+        static char idle[256] = "";
+        cui_chat_composer(ui, "idle", idle, sizeof idle, .placeholder = "Message", .mic = true);
+        int ev = cui_chat_composer(ui, "rec", vr_draft, sizeof vr_draft, .mic = true, .recording = vr_recording,
+                                   .levels = mic + 240 - n, .level_count = n, .record_seconds = n * VOICE_STEP);
+        if (ev & CUI_COMPOSER_RECORD) vr_recording = true;
+        if (ev & (CUI_COMPOSER_CANCEL | CUI_COMPOSER_VOICE)) vr_recording = false;
+    }
+}
+
+static cui_voice_note vn_notes[2] = { { NULL, 0, 4.8f, 12, 1.5f, true }, { NULL, 0, 0, 8, 1, false } };
+SCENE(voice_note) {
+    static float a[90], b[64];
+    voice_clip(a, 90, 0.4f);
+    voice_clip(b, 64, 2.9f);
+    vn_notes[0].levels = a; vn_notes[0].count = 90;
+    vn_notes[1].levels = b; vn_notes[1].count = 64;
+    cui_column(ui, .gap = 10, UPTO(560)) {
+        cui_voice_note(ui, "theirs", &vn_notes[0]);
+        cui_voice_note(ui, "mine", &vn_notes[1], .mine = true);
+    }
+}
+
+/* a spoken conversation: you ask, the assistant thinks (no sound) and answers */
+typedef struct { cui_voice_owner who; float seconds; bool thinking; const char *text; } voice_turn;
+static const voice_turn vs_script[] = {
+    { CUI_VOICE_YOU, 3.2f, false, "What's the weather like tomorrow morning?" }, { CUI_VOICE_REPLY, 1.4f, true, NULL },
+    { CUI_VOICE_REPLY, 4.2f, false, "Clear and cool, about 9 degrees at eight, warming to 15 by noon." },
+    { CUI_VOICE_YOU, 2.4f, false, "Should I bring a jacket?" }, { CUI_VOICE_REPLY, 1.1f, true, NULL },
+    { CUI_VOICE_REPLY, 3.0f, false, "A light one, yes. It's breezy until around ten." },
+};
+/* the turn at t seconds into the script (looping), and how far into it */
+static const voice_turn *vs_turn_at(float t, float *into) {
+    float total = 0;
+    for (int k = 0; k < 6; k++) total += vs_script[k].seconds;
+    t = fmodf(t, total);
+    for (int k = 0; k < 6; k++) { if (t < vs_script[k].seconds) { *into = t; return &vs_script[k]; } t -= vs_script[k].seconds; }
+    *into = 0;
+    return &vs_script[0];
+}
+static bool vs_muted = false;
+SCENE(voice_session) {
+    static float lv[220];
+    static uint8_t own[220];
+    float now = 5.9f + voice_step(ui) * VOICE_STEP;
+    int n = 0;
+    for (int k = 219; k >= 0; k--) {   /* oldest first, starting with the conversation */
+        float t = now - k * VOICE_STEP, into;
+        if (t < 0) continue;
+        const voice_turn *tu = vs_turn_at(t, &into);
+        own[n] = (uint8_t)tu->who;
+        lv[n++] = tu->thinking ? CUI_VOICE_SILENT : tu->who == CUI_VOICE_YOU ? (vs_muted ? 0 : 0.8f * voice_level(t * 1.3f, 2)) : voice_level(t * 1.4f, 5);
+    }
+    float into;
+    const voice_turn *cur = vs_turn_at(now, &into);
+    const voice_turn *said = cur->thinking ? cur - 1 : cur;
+    cui_voice_state state = cur->thinking ? CUI_VOICE_THINKING : cur->who == CUI_VOICE_REPLY ? CUI_VOICE_SPEAKING : vs_muted ? CUI_VOICE_MUTED : CUI_VOICE_LISTENING;
+    float reveal = into / cur->seconds * 1.15f;
+    int len = (int)strlen(said->text), k = cur->thinking || reveal >= 1 ? len : (int)(len * reveal);
+    static char spoken[128];
+    snprintf(spoken, sizeof spoken, "%.*s", k, said->text);
+    cui_column(ui, UPTO(600)) {
+        cui_voice_session(ui, "call", state, lv, n, .owners = own, .transcript = spoken, .upcoming = said->text + k,
+                          .speaker = said->who, .muted = &vs_muted);
+    }
+}
+
 SCENE(suggestions) {
     static const cui_prompt_suggestion sugg[] = {
         { CUI_ICON_CODE, "Explain this code", "Walk through what it does" },
@@ -4341,6 +4460,8 @@ int main(int argc, char **argv) {
         { "reasoning-tools", scene_reasoning_tools, 680, 640, true }, { "agent-plan", scene_agent_plan, 820, 340, true },
         { "sources", scene_sources, 680, 380, true }, { "composer", scene_composer, 640, 190, true }, { "model-picker", scene_model_picker, 380, 300, true },
         { "voice-orb", scene_voice_orb, 760, 230, true }, { "suggestions", scene_suggestions, 640, 260, true },
+        { "voice-wave", scene_voice_wave, 620, 290, true, false, CUI_ACCENT_GREEN }, { "voice-recorder", scene_voice_recorder, 620, 270, true, false, CUI_ACCENT_GREEN },
+        { "voice-note", scene_voice_note, 620, 190, true, false, CUI_ACCENT_GREEN }, { "voice-session", scene_voice_session, 660, 290, true, false, CUI_ACCENT_GREEN },
         { "app-chrome", scene_app_chrome, 900, 440, true }, { "menu-bar", scene_menu_bar, 640, 360, true },
         { "docking", scene_docking, 960, 560, true },
         { "toolbar", scene_toolbar, 640, 370, true }, { "status-bar", scene_status_bar, 820, 160, true },

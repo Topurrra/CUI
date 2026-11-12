@@ -59,6 +59,7 @@ set(CUI_CORE_SOURCES
     src/cui_viz.c
     src/cui_motion.c
     src/cui_ai.c
+    src/cui_voice.c
     src/cui_image.c
     src/cui_nodes.c
     src/cui_flame.c

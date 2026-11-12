@@ -7,6 +7,10 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 ### Added
 
 - `cui_set_clipboard_text` and `cui_get_clipboard_text`: copy from a menu item or a status bar ("Copy path") and read the clipboard for a Paste item, through the same platform hooks the copy button and text fields use ([#32](https://github.com/yappologistic/CUI/issues/32)).
+- **Voice waveform** (`cui_voice_wave`): a voice drawn as fine dots, 13 rows mirrored around a center line, each dot as bright as the level covers it. It scrolls as you push levels, or shows a whole clip with its played part in the accent, a playhead and seeking by click, drag or arrow keys. Silence draws only a faint center line, and two voices can share one timeline. `cui_voice_resample` keeps a short waveform for a message. See [Voice](docs/components-more.md#voice) and the gallery's new *Voice* page.
+- **Voice recorder** in the chat composer: `.mic` adds a microphone button, and while the app sets `.recording` the composer shows a recording dot, the time, the mic levels scrolling by, Cancel and Send, at the same height, returning `CUI_COMPOSER_RECORD`, `CUI_COMPOSER_CANCEL` and `CUI_COMPOSER_VOICE`.
+- **Voice note** (`cui_voice_note`): a recorded message in a bubble with play and pause, its waveform as the seek bar, played and total time, and a 1x, 1.5x and 2x speed chip (`CUI_PLAYER_SPEED`). `.mine` tints it with the accent. The app plays the audio and passes the position.
+- **Voice session** (`cui_voice_session`): a spoken conversation with an assistant on one scrolling timeline, you in the foreground and the assistant in the accent, with a state label (Listening, Thinking, Speaking, Muted: `CUI_VOICE_MUTED` is new), a legend, the live transcript with the unspoken part dimmed, and Mute and End buttons.
 - `cui_app_follow_system_theme(app, follow)` starts or stops following the system's light or dark setting while the app runs, for a theme switcher with Light, Dark and System. Stopping keeps the current theme, so a `cui_set_theme` after it lasts (on macOS the system setting used to undo it every frame); starting applies the system setting at once ([#34](https://github.com/yappologistic/CUI/issues/34)).
 - **Creative controls**, eight components for editors, generators and design tools; six of them sit in a control well, a rounded panel with a label, a value and the control. See [Creative controls](docs/components-more.md#creative-controls) and the gallery's new *Creative controls* page.
   - **Status tag** (`cui_status_tag`): an icon, a label and a tinted fill for pending, in progress (a slowly turning dashed ring), submitted, in review, success, failed and expired, or your own icon and tone. A small size, and an optional remove x.
@@ -34,6 +38,10 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **Sankey** nodes are slim (6 points) and colored by meaning, with the new `node_colors` option and the palette or neutral gray for the rest. Flows fade from their source's color to their target's, hovering a node or a flow lights its whole path upstream and downstream, and labels sit beside the nodes as the name over the value and share, with no plates over the flows.
 - **Gantt chart** bars are colored by state (done, active, planned) with their progress inside and a percentage at the end; planned bars are dashed and tinted. A new `state` field on `cui_gantt_task` sets it, and its zero value works it out from the progress and `today`. Dependencies are soft curves with small arrowheads, today is an accent line with a "Today" chip, weekends are faintly shaded, and a milestone is an outlined diamond with its name and date.
 - **Uptime bars**: healthy days are a slightly softer green, so incidents stand out more.
+
+### Changed
+
+- The voice orb (`cui_voice_orb`) is deprecated in favor of the voice components. It keeps working, but it has left the gallery and the docs site.
 
 ### Fixed
 
