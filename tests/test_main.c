@@ -5695,7 +5695,7 @@ typedef struct {
     char text[4096];
     int length;             /* 0: strlen */
     float width;            /* 0: fill a 600 point column */
-    bool streaming;
+    bool streaming, no_front_matter;
     cui_markdown_result res;
     int links, toggles;
     char last_link[128];
@@ -5703,7 +5703,7 @@ typedef struct {
 static void build_md(cui_ctx *ui, void *u) {
     md_test *m = u;
     cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
-        m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming);
+        m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter);
     }
     if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
     if (m->res.task_offset >= 0) m->toggles++;
@@ -5722,6 +5722,129 @@ static bool md_find_link(cui_ctx *ui, md_test *m, float y, cui_vec2 *at) {
 }
 static unsigned md_rng = 0x2545F491u;
 static unsigned md_rand(void) { md_rng ^= md_rng << 13; md_rng ^= md_rng >> 17; md_rng ^= md_rng << 5; return md_rng; }
+
+/* Scans the view with the pointer and collects the distinct links it reports (wiki ones flagged). */
+static int md_collect(cui_ctx *ui, md_test *m, char out[][64], bool *wiki, int max) {
+    cui_rect r = md_rect(ui);
+    int n = 0;
+    for (float y = r.y + 4; y < r.y + r.h; y += 6) {
+        for (float x = r.x + 2; x < r.x + r.w; x += 4) {
+            cui_input_mouse_move(ui, x, y);
+            md_frames(ui, m, 1);
+            if (!m->res.hovered_link) continue;
+            CHECK(m->res.hovered_rect.w > 0 && m->res.hovered_rect.h > 0);
+            bool seen = false;
+            for (int k = 0; k < n; k++) seen = seen || strcmp(out[k], m->res.hovered_link) == 0;
+            if (!seen && n < max) { snprintf(out[n], 64, "%s", m->res.hovered_link); wiki[n++] = m->res.hovered_is_wiki; }
+        }
+    }
+    return n;
+}
+static bool md_has_link(char out[][64], const bool *wiki, int n, const char *s, bool is_wiki) {
+    for (int k = 0; k < n; k++) if (strcmp(out[k], s) == 0 && wiki[k] == is_wiki) return true;
+    return false;
+}
+
+/* front matter, wiki links and heading positions (the vault features) */
+static void test_markdown_vault(void) {
+    printf("markdown: front matter, wiki links, headings\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    snprintf(m.text, sizeof m.text, "body");
+    md_frames(ui, &m, 3);
+    float line_h = md_rect(ui).h, plain_h = line_h;
+
+    /* detected: collapsed block above the body, headings and task offsets stay in original text terms */
+    snprintf(m.text, sizeof m.text, "---\ntitle: A note\ntags: [x, y]\naliases:\n  - a\n  - b\nstatus: \"done\"\n---\n# Head\n\n- [ ] task\n");
+    md_frames(ui, &m, 3);
+    cui_rect r = md_rect(ui);
+    float collapsed = r.h;
+    CHECK(m.res.heading_count == 1 && m.res.headings[0].level == 1 && m.res.headings[0].line == 9);
+    CHECK(m.res.headings[0].text_len == 4 && strncmp(m.res.headings[0].text, "Head", 4) == 0);
+    CHECK(m.res.headings[0].text == strstr(m.text, "Head"));
+    CHECK(m.res.headings[0].y > 20 && m.res.headings[0].y < r.h);   /* below the properties row */
+    m.toggles = 0;
+    click_at(ui, build_md, &m, r.x + 9, r.y + r.h - line_h * 0.5f);
+    CHECK(m.toggles == 1 && m.res.task_offset == (int)(strstr(m.text, "[ ]") - m.text) + 1 && m.res.task_line == 11);
+    md_frames(ui, &m, 2);
+    /* expands on a click on the header, again collapses */
+    click_at(ui, build_md, &m, r.x + 20, r.y + 8);
+    md_frames(ui, &m, 40);
+    CHECK(md_rect(ui).h > collapsed + 3 * line_h);
+    CHECK(m.res.heading_count == 1 && m.res.headings[0].y > 3 * line_h);
+    click_at(ui, build_md, &m, r.x + 20, r.y + 8);
+    md_frames(ui, &m, 40);
+    CHECK(fabsf(md_rect(ui).h - collapsed) < 0.5f);
+    /* the same text without the block it would have been about three rules and lines taller; hidden: gone */
+    m.no_front_matter = true;
+    md_frames(ui, &m, 3);
+    CHECK(md_rect(ui).h < collapsed - 4);
+    CHECK(m.res.heading_count == 1 && m.res.headings[0].line == 9);
+    m.no_front_matter = false;
+    /* closing with ... works; a heading inside front matter is not a heading */
+    snprintf(m.text, sizeof m.text, "---  \n# not a heading\nk: v\n...\nbody\n");
+    md_frames(ui, &m, 3);
+    CHECK(m.res.heading_count == 0 && md_rect(ui).h > plain_h + 10);
+    /* unclosed: not front matter (the opening line is a rule, the key a paragraph, # a heading) */
+    snprintf(m.text, sizeof m.text, "---\nk: v\n\n# H\n");
+    md_frames(ui, &m, 3);
+    CHECK(m.res.heading_count == 1 && m.res.headings[0].line == 4);
+    CHECK(md_rect(ui).h > collapsed - 4 * line_h);
+    /* headings: ATX and setext, none in a fenced block, levels and lines */
+    snprintf(m.text, sizeof m.text, "# One\n\ntext\n\n```\n# not\n```\n\nTwo\n---\n\n### Three ###\n> ## Four\n");
+    md_frames(ui, &m, 4);
+    CHECK(m.res.heading_count == 4);
+    if (m.res.heading_count == 4) {
+        const int lv[4] = { 1, 2, 3, 2 }, ln[4] = { 1, 9, 12, 13 };
+        for (int k = 0; k < 4; k++) CHECK(m.res.headings[k].level == lv[k] && m.res.headings[k].line == ln[k]);
+        for (int k = 1; k < 4; k++) CHECK(m.res.headings[k].y > m.res.headings[k - 1].y);
+        CHECK(m.res.headings[2].text_len == 5 && strncmp(m.res.headings[2].text, "Three", 5) == 0);
+    }
+
+    /* wiki links */
+    m.width = 900;
+    snprintf(m.text, sizeof m.text,
+             "See [[Note A]], [[Note B|the b]], [[Note C#Sec]], [[Note D#Sec|dd]] and ![[Img.png]] then `[[code]]` and [web](https://e.org/x).\n\n```\n[[fenced]]\n```\n");
+    md_frames(ui, &m, 4);
+    static char got[12][64];
+    bool wiki[12];
+    int ng = md_collect(ui, &m, got, wiki, 12);
+    CHECK(ng == 6);
+    CHECK(md_has_link(got, wiki, ng, "Note A", true) && md_has_link(got, wiki, ng, "Note B", true));
+    CHECK(md_has_link(got, wiki, ng, "Note C#Sec", true) && md_has_link(got, wiki, ng, "Note D#Sec", true));
+    CHECK(md_has_link(got, wiki, ng, "Img.png", true) && md_has_link(got, wiki, ng, "https://e.org/x", false));
+    /* a click reports the target, flagged; a normal link is not */
+    r = md_rect(ui);
+    cui_vec2 at;
+    snprintf(m.text, sizeof m.text, "[[Note B#Sec|the b]] [x](https://e.org)");
+    md_frames(ui, &m, 3);
+    CHECK(md_find_link(ui, &m, r.y + line_h / 2, &at));
+    CHECK(m.res.hovered_is_wiki && strcmp(m.res.hovered_link, "Note B#Sec") == 0);
+    CHECK(m.res.hovered_rect.x <= at.x && at.x <= m.res.hovered_rect.x + m.res.hovered_rect.w);
+    m.links = 0;
+    click_at(ui, build_md, &m, at.x, at.y);
+    CHECK(m.links == 1 && m.res.link_is_wiki && strcmp(m.last_link, "Note B#Sec") == 0);
+    CHECK(md_find_link(ui, &m, r.y + line_h / 2, &at));
+    m.links = 0;
+    cui_input_mouse_move(ui, r.x + r.w - 1, r.y + 1);
+    md_frames(ui, &m, 2);
+    m.width = 0;
+    /* streaming: an unclosed [[ at the end renders as if closed, but is not clickable yet */
+    snprintf(m.text, sizeof m.text, "go [[Some Not");
+    m.streaming = true;
+    md_frames(ui, &m, 3);
+    CHECK(md_rect(ui).h > 0 && m.res.hovered_link == NULL);
+    cui_input_mouse_move(ui, md_rect(ui).x + 40, md_rect(ui).y + 6);
+    md_frames(ui, &m, 2);
+    CHECK(m.res.hovered_link == NULL);
+    snprintf(m.text, sizeof m.text, "go [[");
+    md_frames(ui, &m, 2);
+    snprintf(m.text, sizeof m.text, "go [[Some Note]");
+    md_frames(ui, &m, 2);
+    m.streaming = false;
+    cui_destroy(ui);
+}
 
 static void test_markdown(void) {
     printf("markdown: edge cases, links, tasks, keys, streaming, fuzz\n");
@@ -7896,6 +8019,7 @@ int main(void) {
     test_tools();
     test_hex_view();
     test_markdown();
+    test_markdown_vault();
     test_code_editor();
     test_diff();
     test_dials();

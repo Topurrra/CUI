@@ -1521,6 +1521,9 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * with a language, drawn by cui_code_block with its highlighter), indented
  * code, horizontal rules (--- *** ___) and pipe tables with an alignment row
  * (drawn with cui_table, scrolling sideways when narrower than their columns).
+ * a leading YAML front matter block (--- ... ---, shown as a collapsed
+ * "Properties" row), and [[wiki links]] ([[target]], [[target|label]],
+ * [[target#heading]], ![[embeds]]; reported through .link with .link_is_wiki).
  * Everything else (HTML, reference links, footnotes, math) shows as plain
  * text. Containers nest at most 12 deep; deeper content shows as text.
  *
@@ -1544,10 +1547,23 @@ typedef struct cui_markdown_opts {
     cui_color color;           /* body text color, default foreground; links then take it too, underlined */
     bool streaming;            /* text is still arriving */
     bool compact;              /* smaller headings and tighter spacing, for chat bubbles */
+    bool no_front_matter;      /* hide a leading YAML front matter block instead of showing it as collapsed properties */
 } cui_markdown_opts;
+typedef struct cui_markdown_heading {
+    int level;                 /* 1 to 6 (ATX and setext) */
+    int line;                  /* 1 based line in the text (of the first line for a setext heading) */
+    const char *text;          /* the heading's source text without the # markers: points into the text, not NUL terminated */
+    int text_len;
+    float y;                   /* top of the heading relative to the top of the view, points, from the latest layout (0 on the first frame) */
+} cui_markdown_heading;
 typedef struct cui_markdown_result {
     const char *link;          /* URL of the link clicked (or activated with Enter) this frame, or NULL; frame memory */
     const char *hovered_link;  /* URL of the link under the pointer, or NULL; frame memory */
+    bool link_is_wiki;         /* link is a [[wiki link]]: the target, with a #heading when given (no label), not a URL */
+    bool hovered_is_wiki;      /* the same for hovered_link */
+    cui_rect hovered_rect;     /* screen rect of the hovered link (its last line when it wraps), in points, to anchor a preview */
+    int heading_count;         /* headings in the text, in order (none inside code blocks or front matter) */
+    const cui_markdown_heading *headings;   /* frame memory, valid this frame; NULL when there are none */
     int task_offset;           /* a task box was toggled: byte offset in text of the character between its brackets, else -1 */
     int task_line;             /* that item's 1 based line in text, 0 when none */
     bool task_checked;         /* the state the box was toggled to */

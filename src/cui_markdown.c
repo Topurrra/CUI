@@ -59,7 +59,7 @@ static bool md_has(md_line L, char c) { return L.len > 0 && memchr(L.s, c, (size
 
 enum { MS_STRONG = 1, MS_EM = 2, MS_STRIKE = 4, MS_CODE = 8, MS_BREAK = 16 };
 typedef struct { const char *p; int len; uint8_t style; int link; } md_run;
-typedef struct { const char *url; int len; bool www, pending, autolink; } md_link;
+typedef struct { const char *url; int len; bool www, pending, autolink, wiki; } md_link;
 typedef struct { md_run *runs; int nruns; md_link *links; int nlinks; } md_inline;
 
 enum { TK_TXT, TK_DELIM, TK_CODE, TK_BR, TK_LOPEN, TK_LCLOSE, TK_AUTO };
@@ -253,6 +253,49 @@ static md_inline md_parse_inline(cui_ctx *ui, const char *s, int n, bool tail) {
             }
             i += k; ts = i;
             continue;
+        }
+        if ((c == '[' && i + 1 < n && s[i + 1] == '[') || (c == '!' && i + 2 < n && s[i + 1] == '[' && s[i + 2] == '[')) {
+            /* [[target]], [[target|label]], [[target#heading|label]] and the ![[embed]] form */
+            int os = i + (c == '!' ? 3 : 2), e = os;
+            bool closed = false;
+            while (e < n && s[e] != '\n') {
+                if (s[e] == ']' && e + 1 < n && s[e + 1] == ']') { closed = true; break; }
+                e++;
+            }
+            bool open_tail = !closed && tail && e >= n;
+            if (open_tail && e > os && s[e - 1] == ']') e--;   /* half of the closing ]] */
+            if ((closed || open_tail) && nl < link_cap) {
+                int a = os, b = e, bar = -1;
+                for (int q = a; q < b; q++) if (s[q] == '|') { bar = q; break; }
+                int te = bar >= 0 ? bar : b;                  /* target: a..te, label: bar+1..b */
+                int ta = a, la = bar + 1, lb = b;
+                while (ta < te && md_sp(s[ta])) ta++;
+                while (te > ta && md_sp(s[te - 1])) te--;
+                if (bar >= 0) { while (la < lb && md_sp(s[la])) la++; while (lb > la && md_sp(s[lb - 1])) lb--; }
+                const char *dp = NULL;
+                int dl = 0;
+                if (bar >= 0 && lb > la) { dp = s + la; dl = lb - la; }
+                else {
+                    int hash = -1;
+                    for (int q = ta; q < te; q++) if (s[q] == '#') { hash = q; break; }
+                    if (hash >= 0 && te - hash > 1) {
+                        if (hash == ta) { dp = s + hash + 1; dl = te - hash - 1; }
+                        else { dp = cui__frame_printf(ui, "%.*s > %.*s", hash - ta, s + ta, te - hash - 1, s + hash + 1); dl = (int)strlen(dp); }
+                    } else if (te > ta) { dp = s + ta; dl = te - ta; }
+                }
+                if (dl > 0) {
+                    MD_FLUSH();
+                    md_tok *t = md_add(&T, TK_AUTO, dp, dl);
+                    if (t) {
+                        links[nl].url = s + ta; links[nl].len = te - ta;
+                        links[nl].autolink = links[nl].wiki = true; links[nl].pending = open_tail;
+                        t->link = nl++;
+                    }
+                    i = closed ? e + 2 : n; ts = i;
+                    continue;
+                }
+                if (open_tail) { MD_FLUSH(); i = n; ts = n; continue; }   /* [[ with nothing yet: held back */
+            }
         }
         if (c == '[' || (c == '!' && i + 1 < n && s[i + 1] == '[')) {
             int k = c == '!' ? 2 : 1;
@@ -658,6 +701,11 @@ typedef struct {
     float u;                     /* spacing unit: body / 13 */
     cui_color fg, fg2, link_c, code_bg, marker_c, rule_c, rail_c;
     int link_seq, code_seq, table_seq;
+    cui_id leaf_id;              /* id for the next inline block's node (headings: their position) */
+    cui_id root_id;
+    const md_line *lines;        /* every line of the text, for line numbers */
+    int nlines;
+    cui_markdown_heading *heads; int nheads;
     cui_markdown_result *res;
 } md_ctx;
 
@@ -717,12 +765,17 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
         cui__tween(ui, &st[1], r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
         hover[k] = st[0]; focus[k] = st[1];
         const char *url = NULL;
-        if (r.hovered || r.clicked) url = lk->www ? cui__frame_printf(ui, "http://%.*s", lk->len, lk->url) : cui__frame_strdup(ui, lk->url, lk->len);
-        if (r.hovered) { cui__set_cursor(ui, CUI_CURSOR_HAND); c->res->hovered_link = url; }
-        if (r.clicked) c->res->link = url;
+        if (r.hovered || r.clicked) url = lk->wiki ? cui__frame_strdup(ui, lk->url, lk->len) : lk->www ? cui__frame_printf(ui, "http://%.*s", lk->len, lk->url) : cui__frame_strdup(ui, lk->url, lk->len);
+        if (r.hovered) {
+            cui__set_cursor(ui, CUI_CURSOR_HAND);
+            c->res->hovered_link = url; c->res->hovered_is_wiki = lk->wiki;
+            c->res->hovered_rect = cui__prev_rect(ui, id);
+        }
+        if (r.clicked) { c->res->link = url; c->res->link_is_wiki = lk->wiki; }
         if (!lk->autolink) { ui->last_id = id; cui_tooltip(ui, r.hovered && url ? url : ""); }
     }
-    int leaf = cui__leaf(ui, 0, CUI_FILL, CUI_PX((float)L.lines * f->lh));
+    int leaf = cui__leaf(ui, c->leaf_id, CUI_FILL, CUI_PX((float)L.lines * f->lh));
+    c->leaf_id = 0;
     md_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->seg = L.seg; p->n = L.n; p->f = *f;
     p->fg = fg; p->link_c = c->custom_color ? fg : c->link_c; p->code_bg = c->code_bg;
@@ -788,8 +841,21 @@ static float md_paragraph(md_ctx *c, const md_box *b, const md_line *L, int n) {
     return md_inline_block(c, s, len, &f, b->fg, md_tail(c, L[n - 1]), b->w);
 }
 
-static float md_heading(md_ctx *c, const md_box *b, int level, const char *s, int len, bool tail) {
+/* Records a heading for the result: its line and its top in the latest layout. */
+static void md_note_heading(md_ctx *c, int level, md_line src) {
+    if (!c->heads || c->nheads >= c->nlines) return;
+    int lo = 0, hi = c->nlines - 1;
+    while (lo < hi) { int mid = (lo + hi + 1) / 2; if (c->lines[mid].off <= src.off) lo = mid; else hi = mid - 1; }
+    cui_markdown_heading *h = &c->heads[c->nheads++];
+    h->level = level; h->line = lo + 1; h->text = src.s; h->text_len = src.len;
+    c->leaf_id = cui__hash(&c->nheads, sizeof c->nheads, c->id ^ 0x4EAD1u);
+    cui_rect hr = cui__prev_rect(c->ui, c->leaf_id), rr = cui__prev_rect(c->ui, c->root_id);
+    h->y = cui__has_prev_rect(c->ui, c->leaf_id) ? hr.y - rr.y : 0;
+}
+
+static float md_heading(md_ctx *c, const md_box *b, int level, md_line src, const char *s, int len, bool tail) {
     cui_theme *t = &c->ui->theme;
+    md_note_heading(c, level, src);
     float scale = c->body / t->text_body;
     float size;
     if (c->compact) size = level == 1 ? t->heading[3] : level == 2 ? t->text_lg : t->text_body;
@@ -1247,7 +1313,7 @@ static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b) {
             i = j < n ? j + 1 : n;
         } else if (md_atx(T, &level, &content)) {
             md_space(c, md_gap_before(c, b, prev, BK_HEADING, level));
-            w = md_heading(c, b, level, content.s, content.len, md_tail(c, Li));
+            w = md_heading(c, b, level, content, content.s, content.len, md_tail(c, Li));
             prev = BK_HEADING;
             i++;
         } else if (md_hrule(T)) {
@@ -1284,7 +1350,7 @@ static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b) {
                 int len;
                 const char *s = md_join(c, L + i, j - i, &len);
                 md_space(c, md_gap_before(c, b, prev, BK_HEADING, setext));
-                w = md_heading(c, b, setext, s, len, false);
+                w = md_heading(c, b, setext, md_trim(L[i]), s, len, false);
                 prev = BK_HEADING;
                 i = j + 1;
             } else {
@@ -1297,6 +1363,159 @@ static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b) {
         best = CUI_MAX(best, w);
     }
     return best;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Front matter                                                             */
+/* ------------------------------------------------------------------------ */
+
+typedef struct { const char *k, *v; int klen, vlen; } md_prop;
+typedef struct { bool open; float hover, focus; } md_fm_state;
+typedef struct {
+    const md_prop *p; int n;
+    md_font f;
+    float keyw, hover, focus, pad, row_h, head_h;
+    bool open, rows;               /* rows: this node is the expanded list under the header */
+    cui_color surface, key_c, val_c, mute_c;
+    char head[32];
+} md_fm_paint;
+
+/* A line that is exactly --- (or ... when closing), spaces after it allowed. */
+static bool md_fm_line(md_line L, char ch) {
+    if (L.len < 3 || L.s[0] != ch || L.s[1] != ch || L.s[2] != ch) return false;
+    for (int i = 3; i < L.len; i++) if (L.s[i] != ' ') return false;
+    return true;
+}
+
+/* Index of the closing line when the text opens with front matter, else -1. */
+static int md_fm_end(const md_line *L, int n) {
+    if (n < 2 || !md_fm_line(L[0], '-')) return -1;
+    for (int k = 1; k < n; k++) if (md_fm_line(L[k], '-') || md_fm_line(L[k], '.')) return k;
+    return -1;
+}
+
+static md_line md_unquote(md_line T) {
+    if (T.len >= 2 && (T.s[0] == '"' || T.s[0] == '\'') && T.s[T.len - 1] == T.s[0]) { T = md_skip(T, 1); T.len--; }
+    return T;
+}
+
+/* Appends T (trimmed, unquoted) to the value being built in pool, after ", " when it is not the first. */
+static void md_fm_add(char *pool, int *o, int *vlen, md_line T) {
+    T = md_unquote(md_trim(T));
+    if (T.len <= 0) return;
+    if (*vlen > 0) { pool[(*o)++] = ','; pool[(*o)++] = ' '; *vlen += 2; }
+    memcpy(pool + *o, T.s, (size_t)T.len);
+    *o += T.len; *vlen += T.len;
+}
+
+/* key: value lines and simple lists become rows; anything else is skipped. */
+static int md_fm_parse(cui_ctx *ui, const md_line *L, int n, md_prop **out) {
+    md_prop *props = cui__frame_alloc(ui, sizeof(md_prop) * (size_t)(n + 1));
+    int total = 0;
+    for (int k = 0; k < n; k++) total += L[k].len + 4;
+    char *pool = cui__frame_alloc(ui, (size_t)total + 8);
+    int np = 0, o = 0, vlen = 0;
+    for (int k = 0; k < n; k++) {
+        md_line T = md_trim(L[k]);
+        if (T.len == 0 || T.s[0] == '#') continue;
+        bool indented = md_indent(L[k], NULL) > 0;
+        if (T.s[0] == '-' && (T.len == 1 || md_sp(T.s[1]))) {   /* - item: belongs to the key above */
+            if (np > 0) { md_fm_add(pool, &o, &vlen, md_skip(T, 1)); props[np - 1].vlen = vlen; }
+            continue;
+        }
+        int colon = -1;
+        for (int q = 0; q < T.len; q++) if (T.s[q] == ':' && (q + 1 == T.len || md_sp(T.s[q + 1]))) { colon = q; break; }
+        if (colon <= 0) {
+            if (indented && np > 0) { md_fm_add(pool, &o, &vlen, T); props[np - 1].vlen = vlen; }   /* continuation */
+            continue;
+        }
+        md_line kl = T, key, val;
+        kl.len = colon;
+        key = md_trim(kl);
+        val = md_trim(md_skip(T, colon + 1));
+        md_prop *pr = &props[np++];
+        pr->k = key.s; pr->klen = key.len;
+        pr->v = pool + o; vlen = 0; pr->vlen = 0;
+        if (val.len >= 2 && val.s[0] == '[' && val.s[val.len - 1] == ']') {   /* [a, b] */
+            md_line in = md_skip(val, 1);
+            in.len--;
+            int st = 0;
+            for (int q = 0; q <= in.len; q++) {
+                if (q < in.len && in.s[q] != ',') continue;
+                md_line item = md_skip(in, st);
+                item.len = q - st;
+                md_fm_add(pool, &o, &vlen, item);
+                st = q + 1;
+            }
+        } else md_fm_add(pool, &o, &vlen, val);
+        pr->vlen = vlen;
+    }
+    *out = props;
+    return np;
+}
+
+static void md_paint_fm(cui_ctx *ui, cui_node *n, void *data) {
+    md_fm_paint *p = data;
+    cui_rect r = n->rect;
+    float rad = ui->theme.radius_control;
+    cui_corners cr = p->rows ? (cui_corners){ 0, 0, rad, rad } : p->open ? (cui_corners){ rad, rad, 0, 0 } : CUI_CORNERS(rad);
+    cui_draw_rect(ui, r, cr, p->surface);
+    const md_font *f = &p->f;
+    float fh = cui__font_line_height(ui, f->reg, f->size);
+    if (!p->rows) {
+        if (p->hover > 0.01f) cui_draw_rect(ui, r, cr, cui_alpha(p->mute_c, 0.08f * p->hover));
+        float ty = r.y + (r.h - fh) * 0.5f;
+        cui__draw_text_line(ui, f->reg, f->size, r.x + p->pad, ty, p->mute_c, p->head, -1, false);
+        float cx = r.x + r.w - p->pad - f->size * 0.5f, cy = r.y + r.h * 0.5f, s = f->size * 0.22f;
+        float ang = p->open ? 0.0f : -1.5708f, ca = cosf(ang), sa = sinf(ang);
+        cui_vec2 pts[3] = { { -s * 1.6f, -s * 0.8f }, { 0, s * 0.8f }, { s * 1.6f, -s * 0.8f } };
+        for (int k = 0; k < 3; k++) { float x = pts[k].x, y = pts[k].y; pts[k].x = cx + x * ca - y * sa; pts[k].y = cy + x * sa + y * ca; }
+        cui_draw_polyline(ui, pts, 3, 1.4f, p->mute_c, false);
+        if (p->focus > 0.01f) cui__draw_focus_ring(ui, r, cr, p->focus);
+        return;
+    }
+    float vx = r.x + p->pad + p->keyw + p->pad;
+    float vw = CUI_MAX(8.0f, r.x + r.w - p->pad - vx);
+    for (int k = 0; k < p->n; k++) {
+        float y = r.y + (float)k * p->row_h + (p->row_h - fh) * 0.5f;
+        cui__draw_text_ellipsis(ui, f->bold, f->size, r.x + p->pad, y, p->keyw, p->key_c, p->p[k].k, p->p[k].klen, false);
+        cui__draw_text_ellipsis(ui, f->reg, f->size, vx, y, vw, p->val_c, p->p[k].v, p->p[k].vlen, false);
+    }
+}
+
+/* The collapsed "Properties" block above the document. */
+static void md_front_matter(md_ctx *c, const md_prop *props, int np, float W) {
+    cui_ctx *ui = c->ui;
+    cui_id hid = cui__hash(&np, sizeof np, c->id ^ 0xF407A77u);
+    cui_interact r = cui__interact(ui, hid, CUI_IF_FOCUSABLE);
+    md_fm_state *st = cui_state(ui, hid, sizeof *st);
+    if (r.clicked) st->open = !st->open;
+    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+    if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    md_font f = md_make_font(c, c->body * 12.0f / 13.0f, CUI_FONT_BODY, CUI_FONT_MEDIUM, 1.5f);
+    md_fm_paint *p = cui__frame_alloc(ui, sizeof *p);
+    memset(p, 0, sizeof *p);
+    p->p = props; p->n = np; p->f = f; p->open = st->open;
+    p->pad = 10.0f * c->u; p->row_h = f.size * 1.5f + 4.0f * c->u; p->head_h = f.size * 1.5f + 12.0f * c->u;
+    p->hover = st->hover; p->focus = st->focus;
+    p->surface = c->custom_color ? cui_alpha(c->fg, 0.06f) : cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.045f);
+    p->key_c = c->fg2; p->val_c = c->fg; p->mute_c = c->custom_color ? c->fg2 : CUI_C(ui, TEXT_MUTED);
+    snprintf(p->head, sizeof p->head, "Properties \xc2\xb7 %d", np);
+    for (int k = 0; k < np; k++) p->keyw = CUI_MAX(p->keyw, cui__text_width(ui, f.bold, f.size, props[k].k, props[k].klen, false));
+    p->keyw = CUI_MIN(p->keyw, W * 0.4f);
+    int head = cui__leaf(ui, hid, CUI_FILL, CUI_PX(p->head_h));
+    ui->nodes[head].paint = md_paint_fm;
+    ui->nodes[head].paint_data = p;
+    cui__mark_interactive(ui, head, CUI_IF_FOCUSABLE);
+    if (st->open) {
+        md_fm_paint *q = cui__frame_alloc(ui, sizeof *q);
+        *q = *p;
+        q->rows = true;
+        int body = cui__leaf(ui, 0, CUI_FILL, CUI_PX((float)np * p->row_h + 6.0f * c->u));
+        ui->nodes[body].paint = md_paint_fm;
+        ui->nodes[body].paint_data = q;
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1373,8 +1592,24 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
         if (!(k == len && st == len && n > 0)) { lines[n].s = text + st; lines[n].len = e - st; lines[n].off = st; n++; }
         st = k + 1;
     }
+    int total = len > 0 ? n : 0, first = 0;
+    c.lines = lines; c.nlines = total; c.root_id = id;
+    c.heads = total > 0 ? cui__frame_alloc(ui, sizeof(cui_markdown_heading) * (size_t)total) : NULL;
+    int fe = md_fm_end(lines, total);
+    if (fe >= 0) {   /* front matter: a properties block, not markdown */
+        first = fe + 1;
+        md_prop *props;
+        int np = md_fm_parse(ui, lines + 1, fe - 1, &props);
+        if (np > 0 && !o->no_front_matter) {
+            md_front_matter(&c, props, np, W);
+            bool more = false;
+            for (int k = first; k < total && !more; k++) more = !md_blank(lines[k]);
+            if (more) md_space(&c, (c.compact ? 8.0f : 16.0f) * c.u);
+        }
+    }
     md_box box = { W, 0, false, c.fg };
-    float natural = md_blocks(&c, lines, len > 0 ? n : 0, &box);
+    float natural = md_blocks(&c, lines + first, total - first, &box);
+    res.headings = c.heads; res.heading_count = c.nheads;
 
     cui_pop_id(ui);
     cui__close(ui);
