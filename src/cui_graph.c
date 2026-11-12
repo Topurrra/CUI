@@ -277,19 +277,11 @@ cui_commit_graph_result cui_commit_graph_ex(cui_ctx *ui, const char *id_str, con
 #define CUI__GV_DETAIL 14.0f       /* extra height for a detail line */
 #define CUI__GV_DRAG   3.0f
 
-typedef struct { float x, y, w, h; int layer; } cui__gv_box;
-
 typedef struct {
     bool init, fit;              /* fit: fit the view to the graph next frame */
     int own_sel;
     uint32_t key;
-    int n;                       /* nodes; box[n..nv) are waypoints of edges that skip layers */
-    int nv;
-    cui__gv_box *box;
-    int ne;                      /* edges as laid out: each runs from[k] -> its waypoints -> to[k] */
-    int *from, *to, *rstart, *rlen, *route;
-    float gw, gh;                /* the graph's size at zoom 1 */
-    bool top_down;
+    cui__layered g;              /* the layout, at zoom 1 */
     float px, py, zoom;          /* the view: graph point (0, 0) sits at (px, py) from the panel's corner */
     int mode;                    /* 0 idle, 1 pressed, 2 panning */
     float press_x, press_y, last_x, last_y;
@@ -297,11 +289,11 @@ typedef struct {
     float focus;
 } cui__gv_state;
 
-static void cui__gv_free(cui_ctx *ui, cui__gv_state *s) {
-    cui__free(ui, s->box); cui__free(ui, s->from);
-    s->box = NULL; s->from = s->to = s->rstart = s->rlen = s->route = NULL;
+void cui__layered_free(cui_ctx *ui, cui__layered *g) {
+    cui__free(ui, g->box); cui__free(ui, g->from);
+    g->box = NULL; g->from = g->to = g->rstart = g->rlen = g->route = NULL;
 }
-static void cui__gv_dtor(cui_ctx *ui, void *data) { cui__gv_free(ui, (cui__gv_state *)data); }
+static void cui__gv_dtor(cui_ctx *ui, void *data) { cui__layered_free(ui, &((cui__gv_state *)data)->g); }
 
 static uint32_t cui__gv_key(const cui_graph_node *nodes, int n, const cui_graph_edge *edges, int e, bool top_down) {
     uint32_t h = cui__hash(&n, sizeof n, 0x6A9Fu);
@@ -319,12 +311,13 @@ static uint32_t cui__gv_key(const cui_graph_node *nodes, int n, const cui_graph_
  * first walk) are left out of this. An edge that skips layers gets a waypoint in each layer it
  * crosses, so it is routed between the nodes instead of through them. Then each layer is ordered
  * by where its neighbours sit, a few sweeps, to cross fewer edges. Runs once per change. */
-static void cui__gv_layout(cui_ctx *ui, cui__gv_state *s, const cui_graph_node *nodes, int n, const cui_graph_edge *edges, int ne, bool top_down) {
-    cui__gv_free(ui, s);
-    s->n = s->nv = s->ne = 0;
-    s->gw = s->gh = 0;
-    s->top_down = top_down;
-    if (n <= 0) return;
+bool cui__layered_layout(cui_ctx *ui, cui__layered *g, const float *bw, const float *bh, int n,
+                         const cui_graph_edge *edges, int ne, bool top_down, float gap_layer, float gap_node, int max_boxes) {
+    cui__layered_free(ui, g);
+    g->n = g->nv = g->ne = 0;
+    g->gw = g->gh = 0;
+    g->top_down = top_down;
+    if (n <= 0) return true;
     /* the edges that are valid, without loops */
     size_t ee = (size_t)CUI_MAX(1, ne);
     int *ef = cui__frame_alloc(ui, sizeof(int) * ee), *et = cui__frame_alloc(ui, sizeof(int) * ee), m = 0;
@@ -376,29 +369,25 @@ static void cui__gv_layout(cui_ctx *ui, cui__gv_state *s, const cui_graph_node *
     int layers = 0, waypoints = 0;
     for (int v = 0; v < n; v++) layers = CUI_MAX(layers, layer[v] + 1);
     for (int k = 0; k < ne; k++) if (!back[k]) waypoints += CUI_MAX(0, layer[et[k]] - layer[ef[k]] - 1);
+    if (max_boxes > 0 && n + waypoints > max_boxes) return false;
     /* storage: boxes for nodes and waypoints, and the routes */
     int nv = n + waypoints;
-    s->box = cui__alloc(ui, sizeof(cui__gv_box) * (size_t)nv);
-    s->from = cui__alloc(ui, sizeof(int) * (ee * 4 + (size_t)CUI_MAX(1, waypoints)));
-    if (!s->box || !s->from) { cui__gv_free(ui, s); return; }
-    s->to = s->from + ee; s->rstart = s->to + ee; s->rlen = s->rstart + ee; s->route = s->rlen + ee;
-    s->n = n; s->nv = nv; s->ne = ne;
-    float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
-    for (int v = 0; v < n; v++) {
-        float lw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, nodes[v].label ? nodes[v].label : "", -1, false);
-        float dw = nodes[v].detail ? cui__text_width(ui, CUI_FONT_BODY, fx, nodes[v].detail, -1, false) : 0;
-        s->box[v] = (cui__gv_box){ 0, 0, CUI_CLAMP(CUI_MAX(lw, dw) + 34, 72.0f, 220.0f), CUI__GV_NODE_H + (nodes[v].detail ? CUI__GV_DETAIL : 0), layer[v] };
-    }
+    g->box = cui__alloc(ui, sizeof(cui__layer_box) * (size_t)nv);
+    g->from = cui__alloc(ui, sizeof(int) * (ee * 4 + (size_t)CUI_MAX(1, waypoints)));
+    if (!g->box || !g->from) { cui__layered_free(ui, g); return false; }
+    g->to = g->from + ee; g->rstart = g->to + ee; g->rlen = g->rstart + ee; g->route = g->rlen + ee;
+    g->n = n; g->nv = nv; g->ne = ne;
+    for (int v = 0; v < n; v++) g->box[v] = (cui__layer_box){ 0, 0, bw[v], bh[v], layer[v] };
     /* segments of the expanded graph: node -> waypoint -> ... -> node */
     size_t sn = (size_t)CUI_MAX(1, ne + waypoints);
     int *sa = cui__frame_alloc(ui, sizeof(int) * sn), *sb = cui__frame_alloc(ui, sizeof(int) * sn), ns = 0, wv = n, rp = 0;
     for (int k = 0; k < ne; k++) {
-        s->from[k] = ef[k]; s->to[k] = et[k]; s->rstart[k] = rp; s->rlen[k] = 0;
+        g->from[k] = ef[k]; g->to[k] = et[k]; g->rstart[k] = rp; g->rlen[k] = 0;
         if (back[k]) { sa[ns] = ef[k]; sb[ns] = et[k]; ns++; continue; }   /* a cycle's edge is drawn, not used for order */
         int prev = ef[k];
         for (int L = layer[ef[k]] + 1; L < layer[et[k]]; L++) {
-            s->box[wv] = (cui__gv_box){ 0, 0, top_down ? 10.0f : 0.0f, top_down ? 0.0f : 10.0f, L };
-            s->route[rp++] = wv; s->rlen[k]++;
+            g->box[wv] = (cui__layer_box){ 0, 0, top_down ? 10.0f : 0.0f, top_down ? 0.0f : 10.0f, L };
+            g->route[rp++] = wv; g->rlen[k]++;
             sa[ns] = prev; sb[ns] = wv; ns++;
             prev = wv++;
         }
@@ -410,18 +399,18 @@ static void cui__gv_layout(cui_ctx *ui, cui__gv_state *s, const cui_graph_node *
     int *deg = cui__frame_alloc(ui, sizeof(int) * vv), *order = cui__frame_alloc(ui, sizeof(int) * vv);
     int *cnt = cui__frame_alloc(ui, sizeof(int) * (size_t)layers);
     memset(cnt, 0, sizeof(int) * (size_t)layers);
-    for (int v = 0; v < nv; v++) pos[v] = (float)cnt[s->box[v].layer]++;
+    for (int v = 0; v < nv; v++) pos[v] = (float)cnt[g->box[v].layer]++;
     for (int sweep = 0; sweep < 8; sweep++) {
         memset(sum, 0, sizeof(float) * vv); memset(deg, 0, sizeof(int) * vv);
         for (int k = 0; k < ns; k++) {
-            if (s->box[sa[k]].layer == s->box[sb[k]].layer) continue;
+            if (g->box[sa[k]].layer == g->box[sb[k]].layer) continue;
             sum[sb[k]] += pos[sa[k]]; deg[sb[k]]++;
             sum[sa[k]] += pos[sb[k]]; deg[sa[k]]++;
         }
         for (int v = 0; v < nv; v++) if (deg[v]) pos[v] = pos[v] * 0.25f + 0.75f * sum[v] / deg[v];
         for (int L = 0; L < layers; L++) {
             int c = 0;
-            for (int v = 0; v < nv; v++) if (s->box[v].layer == L) order[c++] = v;
+            for (int v = 0; v < nv; v++) if (g->box[v].layer == L) order[c++] = v;
             for (int a = 1; a < c; a++) { int x = order[a], b2 = a - 1; while (b2 >= 0 && pos[order[b2]] > pos[x]) { order[b2 + 1] = order[b2]; b2--; } order[b2 + 1] = x; }
             for (int r = 0; r < c; r++) pos[order[r]] = (float)r;
         }
@@ -432,27 +421,42 @@ static void cui__gv_layout(cui_ctx *ui, cui__gv_state *s, const cui_graph_node *
     float *lpos = cui__frame_alloc(ui, sizeof(float) * (size_t)layers);
     for (int L = 0; L < layers; L++) { lsize[L] = 0; lthick[L] = 0; }
     for (int v = 0; v < nv; v++) {
-        int L = s->box[v].layer;
-        float along = top_down ? s->box[v].w : s->box[v].h, across = top_down ? s->box[v].h : s->box[v].w;
-        lsize[L] += along + CUI__GV_GAP_Y;
+        int L = g->box[v].layer;
+        float along = top_down ? g->box[v].w : g->box[v].h, across = top_down ? g->box[v].h : g->box[v].w;
+        lsize[L] += along + gap_node;
         lthick[L] = CUI_MAX(lthick[L], across);
     }
     float longest = 0, at = 0;
-    for (int L = 0; L < layers; L++) { lsize[L] -= CUI__GV_GAP_Y; longest = CUI_MAX(longest, lsize[L]); }
-    for (int L = 0; L < layers; L++) { lpos[L] = at; at += lthick[L] + CUI__GV_GAP_X * (top_down ? 0.6f : 1.0f); }
+    for (int L = 0; L < layers; L++) { lsize[L] -= gap_node; longest = CUI_MAX(longest, lsize[L]); }
+    for (int L = 0; L < layers; L++) { lpos[L] = at; at += lthick[L] + gap_layer * (top_down ? 0.6f : 1.0f); }
     for (int L = 0; L < layers; L++) {
         int c = 0;
-        for (int v = 0; v < nv; v++) if (s->box[v].layer == L) order[c++] = v;
+        for (int v = 0; v < nv; v++) if (g->box[v].layer == L) order[c++] = v;
         for (int a = 1; a < c; a++) { int x = order[a], b2 = a - 1; while (b2 >= 0 && pos[order[b2]] > pos[x]) { order[b2 + 1] = order[b2]; b2--; } order[b2 + 1] = x; }
         float cur = (longest - lsize[L]) * 0.5f;
         for (int r = 0; r < c; r++) {
-            cui__gv_box *bx = &s->box[order[r]];
+            cui__layer_box *bx = &g->box[order[r]];
             bool way = order[r] >= n;
-            if (top_down) { if (way) bx->h = lthick[L]; bx->x = cur; bx->y = lpos[L] + (lthick[L] - bx->h) * 0.5f; cur += bx->w + CUI__GV_GAP_Y; }
-            else { if (way) bx->w = lthick[L]; bx->y = cur; bx->x = lpos[L] + (lthick[L] - bx->w) * 0.5f; cur += bx->h + CUI__GV_GAP_Y; }
+            if (top_down) { if (way) bx->h = lthick[L]; bx->x = cur; bx->y = lpos[L] + (lthick[L] - bx->h) * 0.5f; cur += bx->w + gap_node; }
+            else { if (way) bx->w = lthick[L]; bx->y = cur; bx->x = lpos[L] + (lthick[L] - bx->w) * 0.5f; cur += bx->h + gap_node; }
         }
     }
-    for (int v = 0; v < nv; v++) { s->gw = CUI_MAX(s->gw, s->box[v].x + s->box[v].w); s->gh = CUI_MAX(s->gh, s->box[v].y + s->box[v].h); }
+    for (int v = 0; v < nv; v++) { g->gw = CUI_MAX(g->gw, g->box[v].x + g->box[v].w); g->gh = CUI_MAX(g->gh, g->box[v].y + g->box[v].h); }
+    return true;
+}
+
+/* the dependency graph's boxes: wide enough for the label and the detail line */
+static void cui__gv_layout(cui_ctx *ui, cui__gv_state *s, const cui_graph_node *nodes, int n, const cui_graph_edge *edges, int ne, bool top_down) {
+    size_t nn = (size_t)CUI_MAX(1, n);
+    float *w = cui__frame_alloc(ui, sizeof(float) * nn), *h = cui__frame_alloc(ui, sizeof(float) * nn);
+    float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
+    for (int v = 0; v < n; v++) {
+        float lw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, nodes[v].label ? nodes[v].label : "", -1, false);
+        float dw = nodes[v].detail ? cui__text_width(ui, CUI_FONT_BODY, fx, nodes[v].detail, -1, false) : 0;
+        w[v] = CUI_CLAMP(CUI_MAX(lw, dw) + 34, 72.0f, 220.0f);
+        h[v] = CUI__GV_NODE_H + (nodes[v].detail ? CUI__GV_DETAIL : 0);
+    }
+    cui__layered_layout(ui, &s->g, w, h, n, edges, ne, top_down, CUI__GV_GAP_X, CUI__GV_GAP_Y, 0);
 }
 
 typedef struct {
@@ -468,8 +472,8 @@ typedef struct {
 
 /* where an edge leaves (out) or enters a box, on screen */
 static cui_vec2 cui__gv_port(const cui__gv_paint *p, cui_rect r, int v, bool out) {
-    const cui__gv_box *b = &p->s->box[v];
-    bool td = p->s->top_down;
+    const cui__layer_box *b = &p->s->g.box[v];
+    bool td = p->s->g.top_down;
     float x = r.x + p->px + (b->x + (td ? b->w * 0.5f : out ? b->w : 0)) * p->zoom;
     float y = r.y + p->py + (b->y + (td ? (out ? b->h : 0) : b->h * 0.5f)) * p->zoom;
     return (cui_vec2){ x, y };
@@ -493,22 +497,22 @@ static void cui__paint_graph_view(cui_ctx *ui, cui_node *n, void *data) {
     const cui__gv_state *s = p->s;
     cui_rect r = n->rect;
     float z = p->zoom;
-    bool td = s->top_down;
+    bool td = s->g.top_down;
     cui_push_clip(ui, cui__rect_inset(r, 1));
     bool any_lit = p->hover >= 0 || p->sel >= 0;
     cui_color edge = CUI_C(ui, BORDER_STRONG), lit_edge = cui__emphasis(ui);
     /* edges: S curves from box to box through the waypoints, straight across each waypoint, then an arrowhead */
     for (int pass = 0; pass < 2; pass++)       /* lit edges last, so they sit on top */
-    for (int k = 0; k < s->ne; k++) {
-        int a = s->from[k], b = s->to[k];
+    for (int k = 0; k < s->g.ne; k++) {
+        int a = s->g.from[k], b = s->g.to[k];
         bool lit = any_lit && ((p->lit[a] == 1 && p->lit[b]) || (p->lit[b] == 1 && p->lit[a]));
         if (lit != (pass == 1)) continue;
         cui_color c = lit ? lit_edge : any_lit ? cui_alpha(edge, 0.45f) : edge;
         float th = lit ? 2.0f : 1.25f;
         int prev = a;
         cui_vec2 pts[13];
-        for (int w = 0; w <= s->rlen[k]; w++) {
-            int next = w < s->rlen[k] ? s->route[s->rstart[k] + w] : b;
+        for (int w = 0; w <= s->g.rlen[k]; w++) {
+            int next = w < s->g.rlen[k] ? s->g.route[s->g.rstart[k] + w] : b;
             cui_vec2 s0 = cui__gv_port(p, r, prev, true), e0 = cui__gv_port(p, r, next, false);
             int np = cui__gv_curve(s0, e0, td, z, pts);
             cui_draw_polyline(ui, pts, np, th, c, false);
@@ -525,8 +529,8 @@ static void cui__paint_graph_view(cui_ctx *ui, cui_node *n, void *data) {
     /* nodes */
     float fs = cui__fs(ui, ui->theme.text_sm) * z, fx = cui__fs(ui, ui->theme.text_xs) * z;
     float lh = cui__font_line_height(ui, CUI_FONT_MEDIUM, fs);
-    for (int v = 0; v < s->n; v++) {
-        const cui__gv_box *b = &s->box[v];
+    for (int v = 0; v < s->g.n; v++) {
+        const cui__layer_box *b = &s->g.box[v];
         cui_rect br = { r.x + p->px + b->x * z, r.y + p->py + b->y * z, b->w * z, b->h * z };
         if (br.x > r.x + r.w || br.y > r.y + r.h || br.x + br.w < r.x || br.y + br.h < r.y) continue;
         bool dim = any_lit && !p->lit[v];
@@ -558,8 +562,8 @@ static void cui__paint_graph_view(cui_ctx *ui, cui_node *n, void *data) {
 static void cui__paint_gv_wheel(cui_ctx *ui, cui_node *n, void *data) { cui__paint_wheel_hit(ui, *(cui_id *)data, n->rect); }
 
 static int cui__gv_hit(const cui__gv_state *s, cui_rect R, float mx, float my) {
-    for (int v = s->n - 1; v >= 0; v--) {
-        const cui__gv_box *b = &s->box[v];
+    for (int v = s->g.n - 1; v >= 0; v--) {
+        const cui__layer_box *b = &s->g.box[v];
         float x = R.x + s->px + b->x * s->zoom, y = R.y + s->py + b->y * s->zoom;
         if (mx >= x && mx <= x + b->w * s->zoom && my >= y && my <= y + b->h * s->zoom) return v;
     }
@@ -567,11 +571,11 @@ static int cui__gv_hit(const cui__gv_state *s, cui_rect R, float mx, float my) {
 }
 
 static void cui__gv_fit(cui__gv_state *s, cui_rect R) {
-    if (s->gw <= 0 || s->gh <= 0 || R.w <= 0) { s->zoom = 1; s->px = s->py = CUI__GV_PAD; return; }
-    float z = CUI_MIN((R.w - 2 * CUI__GV_PAD) / s->gw, (R.h - 2 * CUI__GV_PAD) / s->gh);
+    if (s->g.gw <= 0 || s->g.gh <= 0 || R.w <= 0) { s->zoom = 1; s->px = s->py = CUI__GV_PAD; return; }
+    float z = CUI_MIN((R.w - 2 * CUI__GV_PAD) / s->g.gw, (R.h - 2 * CUI__GV_PAD) / s->g.gh);
     s->zoom = CUI_CLAMP(z, 0.2f, 1.0f);
-    s->px = (R.w - s->gw * s->zoom) * 0.5f;
-    s->py = (R.h - s->gh * s->zoom) * 0.5f;
+    s->px = (R.w - s->g.gw * s->zoom) * 0.5f;
+    s->py = (R.h - s->g.gh * s->zoom) * 0.5f;
 }
 
 static void cui__gv_zoom_at(cui__gv_state *s, float nz, float x, float y) {   /* x, y from the panel's corner */
@@ -583,25 +587,25 @@ static void cui__gv_zoom_at(cui__gv_state *s, float nz, float x, float y) {   /*
 
 /* arrows move the selection: along edges (Right and Left, or Down and Up when top down), or across a layer */
 static int cui__gv_step(const cui__gv_state *s, const cui_graph_edge *edges, int ne, int sel, int dx, int dy) {
-    if (sel < 0 || sel >= s->n) return s->n > 0 ? 0 : -1;
-    bool along = s->top_down ? dy != 0 : dx != 0;
-    int dir = s->top_down ? dy : dx;
+    if (sel < 0 || sel >= s->g.n) return s->g.n > 0 ? 0 : -1;
+    bool along = s->g.top_down ? dy != 0 : dx != 0;
+    int dir = s->g.top_down ? dy : dx;
     int best = -1;
     float bd = 1e30f;
-    const cui__gv_box *a = &s->box[sel];
+    const cui__layer_box *a = &s->g.box[sel];
     if (along) {
         for (int k = 0; k < ne; k++) {
             int o = dir > 0 ? (edges[k].from == sel ? edges[k].to : -1) : (edges[k].to == sel ? edges[k].from : -1);
-            if (o < 0 || o >= s->n) continue;
-            float d = s->top_down ? fabsf(s->box[o].x - a->x) : fabsf(s->box[o].y - a->y);
+            if (o < 0 || o >= s->g.n) continue;
+            float d = s->g.top_down ? fabsf(s->g.box[o].x - a->x) : fabsf(s->g.box[o].y - a->y);
             if (d < bd) { bd = d; best = o; }
         }
         return best >= 0 ? best : sel;
     }
-    int across = s->top_down ? dx : dy;
-    for (int v = 0; v < s->n; v++) {
-        if (v == sel || s->box[v].layer != a->layer) continue;
-        float d = s->top_down ? s->box[v].x - a->x : s->box[v].y - a->y;
+    int across = s->g.top_down ? dx : dy;
+    for (int v = 0; v < s->g.n; v++) {
+        if (v == sel || s->g.box[v].layer != a->layer) continue;
+        float d = s->g.top_down ? s->g.box[v].x - a->x : s->g.box[v].y - a->y;
         if ((across > 0 && d > 0 && d < bd) || (across < 0 && d < 0 && -d < bd)) { bd = fabsf(d); best = v; }
     }
     return best >= 0 ? best : sel;
@@ -622,7 +626,7 @@ cui_graph_result cui_graph_view_ex(cui_ctx *ui, const char *id_str, const cui_gr
     int *sel = o->selected ? o->selected : &s->own_sel;
     if (*sel >= node_count) *sel = -1;
     uint32_t key = cui__gv_key(nodes, node_count, edges, edge_count, o->top_down);
-    if (key != s->key || s->n != node_count) { cui__gv_layout(ui, s, nodes, node_count, edges, edge_count, o->top_down); s->key = key; s->fit = true; }
+    if (key != s->key || s->g.n != node_count) { cui__gv_layout(ui, s, nodes, node_count, edges, edge_count, o->top_down); s->key = key; s->fit = true; }
     bool has_rect = cui__has_prev_rect(ui, id);
     cui_rect R = cui__prev_rect(ui, id);
     if (s->fit && has_rect && R.w > 0) { cui__gv_fit(s, R); s->fit = false; }
@@ -664,7 +668,7 @@ cui_graph_result cui_graph_view_ex(cui_ctx *ui, const char *id_str, const cui_gr
             if (to != *sel && to >= 0) {
                 *sel = to;
                 /* keep it in view */
-                const cui__gv_box *b = &s->box[to];
+                const cui__layer_box *b = &s->g.box[to];
                 float x = s->px + b->x * s->zoom, y = s->py + b->y * s->zoom, w = b->w * s->zoom, h = b->h * s->zoom;
                 if (x < 8) s->px += 8 - x;
                 if (x + w > R.w - 8) s->px -= x + w - (R.w - 8);
@@ -695,28 +699,28 @@ cui_graph_result cui_graph_view_ex(cui_ctx *ui, const char *id_str, const cui_gr
     cui__mark_interactive(ui, en, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     cui__gv_paint *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
-    size_t nn = (size_t)CUI_MAX(1, s->n);
+    size_t nn = (size_t)CUI_MAX(1, s->g.n);
     p->s = s;
     p->label = cui__frame_alloc(ui, sizeof(char *) * nn);
     p->detail = cui__frame_alloc(ui, sizeof(char *) * nn);
     p->tone = cui__frame_alloc(ui, sizeof(cui_tone) * nn);
     p->lit = cui__frame_alloc(ui, nn);
     memset(p->lit, 0, nn);
-    for (int v = 0; v < s->n; v++) {
+    for (int v = 0; v < s->g.n; v++) {
         p->label[v] = cui__frame_strdup(ui, nodes[v].label ? nodes[v].label : "", -1);
         p->detail[v] = nodes[v].detail ? cui__frame_strdup(ui, nodes[v].detail, -1) : NULL;
         p->tone[v] = nodes[v].tone;
     }
     int focus_node = hover >= 0 ? hover : *sel;
-    if (focus_node >= 0 && focus_node < s->n) {
+    if (focus_node >= 0 && focus_node < s->g.n) {
         p->lit[focus_node] = 1;
-        for (int k = 0; k < s->ne; k++) {
-            if (s->from[k] == focus_node && !p->lit[s->to[k]]) p->lit[s->to[k]] = 2;
-            if (s->to[k] == focus_node && !p->lit[s->from[k]]) p->lit[s->from[k]] = 2;
+        for (int k = 0; k < s->g.ne; k++) {
+            if (s->g.from[k] == focus_node && !p->lit[s->g.to[k]]) p->lit[s->g.to[k]] = 2;
+            if (s->g.to[k] == focus_node && !p->lit[s->g.from[k]]) p->lit[s->g.from[k]] = 2;
         }
     }
     p->px = s->px; p->py = s->py; p->zoom = s->zoom;
-    p->hover = hover; p->sel = *sel; p->empty = s->n == 0;
+    p->hover = hover; p->sel = *sel; p->empty = s->g.n == 0;
     cui__tween(ui, &s->focus, bi.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     p->focus = s->focus;
     nd->paint = cui__paint_graph_view; nd->paint_data = p;
@@ -729,7 +733,7 @@ cui_graph_result cui_graph_view_ex(cui_ctx *ui, const char *id_str, const cui_gr
     *wp = wid;
     ui->nodes[wheel].paint_data = wp;
     if (hover >= 0 && ui->active == 0 && nodes[hover].detail) {
-        const cui__gv_box *b = &s->box[hover];
+        const cui__layer_box *b = &s->g.box[hover];
         cui_id tid = id ^ (0x7117u * (cui_id)(hover + 1));
         cui__absolute(ui, tid, s->px + b->x * s->zoom, s->py + b->y * s->zoom, b->w * s->zoom, b->h * s->zoom);
         cui__tooltip_passive(ui, tid, cui__frame_printf(ui, "%s\n%s", nodes[hover].label ? nodes[hover].label : "", nodes[hover].detail));

@@ -22,6 +22,7 @@
  *   shared widget pieces             cui_widgets.c, cui_controls.c, cui_overlay.c...
  *   text editing primitives          cui_textedit.c (shared with the code editor)
  *   syntax highlighting              cui_code.c (code block, code editor, diff viewer)
+ *   layered graph layout             cui_graph.c (the dependency graph's layout, shared)
  *
  * Naming: cui__ for internal functions, CUI__ for internal constants and macros, cui_ for
  * the public API in include/cui/. */
@@ -765,5 +766,25 @@ void cui__syntax_colors(cui_ctx *ui, cui_color *c);   /* CUI__TK_COUNT colors, b
 /* One line of code in the mono font at (x, y), highlighted when lang is set, stopping past
  * max_x; *in_block carries a block comment to the next line. Returns the x after it. */
 float cui__draw_code_line(cui_ctx *ui, const char *lang, const char *s, int n, bool *in_block, float x, float y, float size, const cui_color *colors, float max_x);
+
+/* ---- layered graph layout (cui_graph.c): the dependency graph's layout, for other diagrams too ---- */
+typedef struct { float x, y, w, h; int layer; } cui__layer_box;
+typedef struct {
+    int n;                       /* nodes; box[n..nv) are waypoints of edges that skip layers */
+    int nv;
+    cui__layer_box *box;
+    int ne;                      /* edges as laid out: each runs from[k] -> its waypoints -> to[k] */
+    int *from, *to, *rstart, *rlen, *route;
+    float gw, gh;                /* the graph's size */
+    bool top_down;
+} cui__layered;
+void cui__layered_free(cui_ctx *ui, cui__layered *g);
+/* Lays out n boxes of the sizes w[i] x h[i] in layers (edges point to later layers, cycles
+ * broken), gap_layer between layers (0.6 of it top down) and gap_node between the boxes of a
+ * layer. Edges out of range or from a node to itself are left out, so the laid out edges match
+ * the given ones only when there are none. Heap memory in g; scratch from the frame arena.
+ * max_boxes > 0 caps nodes plus waypoints: past it nothing is laid out and it returns false. */
+bool cui__layered_layout(cui_ctx *ui, cui__layered *g, const float *w, const float *h, int n,
+                         const cui_graph_edge *edges, int ne, bool top_down, float gap_layer, float gap_node, int max_boxes);
 
 #endif /* CUI_INTERNAL_H */
