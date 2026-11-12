@@ -680,6 +680,15 @@ void cui__field_message(cui_ctx *ui, const char *hint, const char *error);
 int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizontal);
 void cui__nice_range(float lo, float hi, int target_ticks, float *out_lo, float *out_hi, float *out_step);
 const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v);
+/* slider keys on a 0..1 position (cui_controls.c): arrows move by step (Shift: ten steps),
+ * Home and End go to the ends; right to left, Left moves toward the end */
+float cui__slider_keys(cui_ctx *ui, float t, float step, bool rtl);
+/* gradient pieces (cui_curves.c): a checkerboard cut to a rounded rectangle, and a ramp of
+ * stops drawn as cui_gradient_eval colors it, its ends rounded by rad */
+void cui__draw_checker(cui_ctx *ui, cui_rect r, float rad, float cell, cui_color light, cui_color dark);
+void cui__draw_gradient_ramp(cui_ctx *ui, cui_rect r, float rad, const cui_gradient_stop *stops, int n);
+/* a dashed rounded rectangle, the dashes running on round the corners (cui_pickers.c) */
+void cui__draw_dashed_rrect(cui_ctx *ui, cui_rect r, float rad, cui_color c, float th, float dash, float gap);
 /* chart annotations (cui_instrument.c): drawn by every chart that takes them */
 void cui__paint_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n, cui_rect plot, double x0, double x1,
                             double y0, double y1, float label_top, bool gutter);

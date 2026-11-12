@@ -817,7 +817,7 @@ typedef struct { cui_gradient_stop *stops; int n; cui_color light, dark, edge; b
 
 /* A checkerboard inside a rounded rectangle: cells are cut to the shape's
  * two bands, so nothing shows past the rounded corners. */
-static void cui__gr_checker(cui_ctx *ui, cui_rect r, float rad, float cell, cui_color light, cui_color dark) {
+void cui__draw_checker(cui_ctx *ui, cui_rect r, float rad, float cell, cui_color light, cui_color dark) {
     cui_draw_rect(ui, r, CUI_CORNERS(rad), light);
     cui_rect band[2] = { { r.x + rad, r.y, r.w - 2 * rad, r.h }, { r.x, r.y + rad, r.w, r.h - 2 * rad } };
     int cols = (int)ceilf(r.w / cell), rows = (int)ceilf(r.h / cell);
@@ -835,21 +835,16 @@ static void cui__gr_checker(cui_ctx *ui, cui_rect r, float rad, float cell, cui_
 /* The ramp: vertical strips between the stops and along the rounded ends,
  * each strip's edges colored by cui_gradient_eval (the renderer interpolates
  * between them exactly as the eval does). */
-static void cui__paint_gradient_ramp(cui_ctx *ui, cui_node *nd, void *data) {
-    cui__gr_ramp_paint *p = data;
-    cui_rect r = nd->rect;
-    if (r.w < 4 || p->n <= 0) return;
-    float rad = CUI_MIN(8.0f, r.h * 0.5f);
-    if (p->alpha) cui__gr_checker(ui, r, rad, 7.0f, p->light, p->dark);
+void cui__draw_gradient_ramp(cui_ctx *ui, cui_rect r, float rad, const cui_gradient_stop *stops, int n) {
     enum { ARC = 8 };
-    int cap = 2 * (ARC + 1) + p->n + 2, m = 0;
+    int cap = 2 * (ARC + 1) + n + 2, m = 0;
     float *xs = cui__frame_alloc(ui, sizeof(float) * (size_t)cap);
     for (int k = 0; k <= ARC; k++) {
         float e = rad * (1.0f - cosf((float)k / ARC * CUI_PI * 0.5f));
         xs[m++] = r.x + e;
         xs[m++] = r.x + r.w - e;
     }
-    for (int i = 0; i < p->n; i++) xs[m++] = r.x + cui__clampf(p->stops[i].pos, 0, 1) * r.w;
+    for (int i = 0; i < n; i++) xs[m++] = r.x + cui__clampf(stops[i].pos, 0, 1) * r.w;
     for (int a = 1; a < m; a++) {   /* insertion sort: a few dozen values */
         float v = xs[a];
         int b = a - 1;
@@ -864,7 +859,7 @@ static void cui__paint_gradient_ramp(cui_ctx *ui, cui_node *nd, void *data) {
         if (k > 0 && x - xs[k - 1] < 1e-3f) continue;
         float dl = r.x + rad - x, dr = x - (r.x + r.w - rad), dd = CUI_MAX(dl, dr), h = 0;
         if (dd > 0) { dd = CUI_MIN(dd, rad); h = rad - sqrtf(CUI_MAX(0.0f, rad * rad - dd * dd)); }
-        cui_color c = cui_gradient_eval(p->stops, p->n, (x - r.x) / r.w);
+        cui_color c = cui_gradient_eval(stops, n, (x - r.x) / r.w);
         if (nv >= 2) {
             uint32_t a = (uint32_t)nv - 2;
             uint32_t q[6] = { a, a + 2, a + 3, a, a + 3, a + 1 };
@@ -875,6 +870,15 @@ static void cui__paint_gradient_ramp(cui_ctx *ui, cui_node *nd, void *data) {
         v[nv].x = x; v[nv].y = r.y + r.h - h; v[nv].c = c; nv++;
     }
     if (ni) cui__draw_triangles(ui, v, nv, idx, ni);
+}
+
+static void cui__paint_gradient_ramp(cui_ctx *ui, cui_node *nd, void *data) {
+    cui__gr_ramp_paint *p = data;
+    cui_rect r = nd->rect;
+    if (r.w < 4 || p->n <= 0) return;
+    float rad = CUI_MIN(8.0f, r.h * 0.5f);
+    if (p->alpha) cui__draw_checker(ui, r, rad, 7.0f, p->light, p->dark);
+    cui__draw_gradient_ramp(ui, r, rad, p->stops, p->n);
     cui_draw_rect_border(ui, r, CUI_CORNERS(rad), cui__rgba(0, 0, 0, 0), p->edge, 1);
 }
 
