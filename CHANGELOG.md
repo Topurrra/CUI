@@ -18,6 +18,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **Treemap and radar.** Treemap tiles are neutral, graded by size, with 3 point gaps, a label, a value and a share figure, and only the hovered or selected tile in the accent; small tiles keep a compact value. New `selected` option: a click selects a tile and a second click clears it. The radar has hairline rings, light fills under crisp outlines, points only on the series you point at (the last one otherwise) with a chip of the hovered value, and ring values kept off the lines.
 - **Sankey** nodes are slim (6 points) and colored by meaning, with the new `node_colors` option and the palette or neutral gray for the rest. Flows fade from their source's color to their target's, hovering a node or a flow lights its whole path upstream and downstream, and labels sit beside the nodes as the name over the value and share, with no plates over the flows.
 - **Gantt chart** bars are colored by state (done, active, planned) with their progress inside and a percentage at the end; planned bars are dashed and tinted. A new `state` field on `cui_gantt_task` sets it, and its zero value works it out from the progress and `today`. Dependencies are soft curves with small arrowheads, today is an accent line with a "Today" chip, weekends are faintly shaded, and a milestone is an outlined diamond with its name and date.
+- **Uptime bars**: healthy days are a slightly softer green, so incidents stand out more.
 
 ### Fixed
 
