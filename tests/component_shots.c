@@ -1632,6 +1632,31 @@ SCENE(mermaid_more) {
             "```\n");
     }
 }
+/* mermaid: cycles and loops. A labelled edge back to an earlier node, two edges between one
+ * pair in opposite directions, several edges into one side, a cycle top down and a self loop */
+SCENE(mermaid_cycles) {
+    cui_box(ui, UPTO(880)) {
+        cui_markdown(ui, "notes",
+            "```mermaid\n"
+            "flowchart LR\n"
+            "    A[Edit note] --> B{Press Sync}\n"
+            "    B -->|commit| C[(Local repo)]\n"
+            "    C -->|pull --rebase| D[GitHub]\n"
+            "    D -->|push| C\n"
+            "    B -.->|no git| E([Show a hint])\n"
+            "```\n"
+            "\n"
+            "```mermaid\n"
+            "graph TD\n"
+            "    S[Start] --> W{Ready?}\n"
+            "    W -->|no| T[Wait] --> W\n"
+            "    W -->|yes| R((Run))\n"
+            "    R --> R\n"
+            "    R --> X[Done]\n"
+            "    X --> S\n"
+            "```\n");
+    }
+}
 /* diff viewer: two versions of a config loader. The mode toggle and the
  * selected change are static and wired to the view, so the live page keeps
  * them; folds open on a click and stay open. */
@@ -4560,7 +4585,7 @@ int main(int argc, char **argv) {
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true },
-        { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true },
+        { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },

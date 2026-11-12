@@ -151,6 +151,24 @@ static void test_caps(void) {
         mm_frames(ui, &m, 2);
         CHECK(m.ok && mm_height(ui) > 519);
     }
+    /* an edge back to an earlier node is laid out between the same layers, not past the end:
+     * this chart fits 880 points at full size, as wide as it was without the back edge */
+    {
+        static const char *const sync =
+            "flowchart LR\n    A[Edit note] --> B{Press Sync}\n    B -->|commit| C[(Local repo)]\n"
+            "    C -->|pull --rebase| D[GitHub]\n    D -->|push| C\n    B -.->|no git| E([Show a hint])\n";
+        static const char *const forward =
+            "flowchart LR\n    A[Edit note] --> B{Press Sync}\n    B -->|commit| C[(Local repo)]\n"
+            "    C -->|pull --rebase| D[GitHub]\n    B -.->|no git| E([Show a hint])\n";
+        mm_run a = { forward, 0, false, 0 }, b = { sync, 0, false, 0 };
+        mm_frames(ui, &a, 3);
+        mm_frames(ui, &b, 3);
+        CHECK(a.ok && b.ok);
+        CHECK(b.natural < 880 && b.natural <= a.natural + 0.5f);
+        /* top down, with a self loop and a cycle back to the start */
+        CHECK(mm_ok(ui, "graph TD\n  S --> W{Ready?}\n  W -->|no| T --> W\n  W -->|yes| R((Run))\n  R --> R\n  R -->|again| R\n  R --> X --> S"));
+        CHECK(mm_ok(ui, "graph BT\n  A --> B --> C --> A\n  A <--> B\n  B --> B"));
+    }
     /* longer than the source cap */
     {
         static char big[70000];

@@ -23,6 +23,7 @@
 #define CUI__MM_MAX_H      520.0f  /* taller diagrams scroll inside this height */
 #define CUI__MM_PAD        16.0f
 #define CUI__MM_MIN_ZOOM   0.55f   /* below this a wide diagram scrolls sideways instead */
+#define CUI__MM_LOOP       22.0f   /* how far a loop on one node stands out */
 
 enum { CUI__MM_NONE, CUI__MM_FLOW, CUI__MM_PIE, CUI__MM_GANTT };
 enum { CUI__MMS_RECT, CUI__MMS_ROUND, CUI__MMS_STADIUM, CUI__MMS_SUB, CUI__MMS_DB, CUI__MMS_DIAMOND, CUI__MMS_HEX, CUI__MMS_CIRCLE, CUI__MMS_FLAG };
@@ -49,6 +50,9 @@ typedef struct {
     int *lab;                    /* label of each edge label box */
     int nlab;
     uint8_t *seg;                /* per laid out edge: style, head << 2, tail << 4 */
+    float *poff;                 /* per laid out edge: where it leaves and enters its boxes, off their sides' middles */
+    cui__mm_edge *loop;          /* edges from a node to itself, drawn as loops beside it */
+    int nloop;
     cui__mm_group *group;
     int ng;
     bool flip;                   /* BT or RL: the layers run the other way */
@@ -71,6 +75,8 @@ typedef struct {
 static void cui__mm_release(cui_ctx *ui, cui__mm_state *s) {
     cui__layered_free(ui, &s->g);
     cui__free(ui, s->pool); cui__free(ui, s->node); cui__free(ui, s->lab); cui__free(ui, s->seg);
+    cui__free(ui, s->poff); cui__free(ui, s->loop);
+    s->poff = NULL; s->loop = NULL; s->nloop = 0;
     cui__free(ui, s->group); cui__free(ui, s->values); cui__free(ui, (void *)s->names); cui__free(ui, s->tasks);
     s->pool = NULL; s->node = NULL; s->lab = NULL; s->seg = NULL; s->group = NULL;
     s->values = NULL; s->names = NULL; s->tasks = NULL;
@@ -548,6 +554,74 @@ static void cui__mm_groups(cui_ctx *ui, cui__mm_state *s) {
     }
 }
 
+/* The edges that close a cycle, found by a depth first walk from each node in turn (as the
+ * layered layout does). They are laid out reversed, so the layout has no cycle left and an edge
+ * back to an earlier node is routed between the layers like any other. */
+static bool *cui__mm_back_edges(cui_ctx *ui, const cui__mm_flow *f) {
+    size_t nn = (size_t)f->nn, ee = (size_t)CUI_MAX(1, f->ne);
+    bool *back = cui__frame_alloc(ui, sizeof(bool) * ee);
+    int *start = cui__frame_alloc(ui, sizeof(int) * (nn + 1)), *adj = cui__frame_alloc(ui, sizeof(int) * ee);
+    int *fill = cui__frame_alloc(ui, sizeof(int) * nn), *stack = cui__frame_alloc(ui, sizeof(int) * nn), *it = cui__frame_alloc(ui, sizeof(int) * nn);
+    uint8_t *mark = cui__frame_alloc(ui, nn);
+    memset(back, 0, sizeof(bool) * ee);
+    memset(start, 0, sizeof(int) * (nn + 1));
+    memset(mark, 0, nn);
+    for (int k = 0; k < f->ne; k++) if (f->edge[k].from != f->edge[k].to) start[f->edge[k].from + 1]++;
+    for (int v = 0; v < f->nn; v++) { start[v + 1] += start[v]; fill[v] = start[v]; }
+    for (int k = 0; k < f->ne; k++) if (f->edge[k].from != f->edge[k].to) adj[fill[f->edge[k].from]++] = k;
+    for (int root = 0; root < f->nn; root++) {
+        if (mark[root]) continue;
+        int sp = 0;
+        stack[sp] = root; it[sp] = start[root]; sp++; mark[root] = 1;
+        while (sp > 0) {
+            int v = stack[sp - 1];
+            if (it[sp - 1] < start[v + 1]) {
+                int k = adj[it[sp - 1]++], w = f->edge[k].to;
+                if (mark[w] == 1) back[k] = true;
+                else if (mark[w] == 0) { mark[w] = 1; stack[sp] = w; it[sp] = start[w]; sp++; }
+            } else { mark[v] = 2; sp--; }
+        }
+    }
+    return back;
+}
+
+typedef struct { int box, out, k; float key; } cui__mm_portref;
+static int cui__mm_portref_cmp(const void *a, const void *b) {
+    const cui__mm_portref *x = a, *y = b;
+    if (x->box != y->box) return x->box - y->box;
+    if (x->out != y->out) return x->out - y->out;
+    if (x->key != y->key) return x->key < y->key ? -1 : 1;
+    return x->k - y->k;
+}
+
+/* Edges that leave or enter one side of a box spread along it, in the order of the boxes at
+ * their other ends, so they never share a point or a stroke. */
+static bool cui__mm_ports(cui_ctx *ui, cui__mm_state *s) {
+    int ne = s->g.ne;
+    bool td = s->g.top_down;
+    s->poff = cui__alloc(ui, sizeof(float) * (size_t)CUI_MAX(2, 2 * ne));
+    if (!s->poff) return false;
+    cui__mm_portref *r = cui__frame_alloc(ui, sizeof(cui__mm_portref) * (size_t)CUI_MAX(1, 2 * ne));
+    for (int k = 0; k < ne; k++) {
+        int first = s->g.rlen[k] ? s->g.route[s->g.rstart[k]] : s->g.to[k];
+        int last = s->g.rlen[k] ? s->g.route[s->g.rstart[k] + s->g.rlen[k] - 1] : s->g.from[k];
+        const cui__layer_box *a = &s->g.box[first], *b = &s->g.box[last];
+        r[2 * k] = (cui__mm_portref){ s->g.from[k], 1, 2 * k, td ? a->x + a->w * 0.5f : a->y + a->h * 0.5f };
+        r[2 * k + 1] = (cui__mm_portref){ s->g.to[k], 0, 2 * k + 1, td ? b->x + b->w * 0.5f : b->y + b->h * 0.5f };
+    }
+    qsort(r, (size_t)(2 * ne), sizeof *r, cui__mm_portref_cmp);
+    for (int i = 0; i < 2 * ne; ) {
+        int j = i;
+        while (j < 2 * ne && r[j].box == r[i].box && r[j].out == r[i].out) j++;
+        const cui__layer_box *b = &s->g.box[r[i].box];
+        float half = (td ? b->w : b->h) * 0.5f, c = (float)(j - i);
+        float step = c > 1 ? CUI_MIN(14.0f, 1.2f * half / (c - 1)) : 0;
+        for (int q = i; q < j; q++) s->poff[r[q].k] = (q - i - (c - 1) * 0.5f) * step;
+        i = j;
+    }
+    return true;
+}
+
 /* Copies the parsed chart into state and lays it out: an edge with a label runs through a box
  * of its own for the label, so labels get their place in a layer like nodes. */
 static bool cui__mm_build_flow(cui_ctx *ui, cui__mm_state *s, const cui__mm_flow *f) {
@@ -564,11 +638,17 @@ static bool cui__mm_build_flow(cui_ctx *ui, cui__mm_state *s, const cui__mm_flow
         memcpy(s->group, f->group, sizeof(cui__mm_group) * (size_t)f->ng);
         s->ng = f->ng;
     }
-    int nlab = 0, nseg = 0;
+    int nlab = 0, nseg = 0, nloop = 0;
     for (int k = 0; k < f->ne; k++) {
-        if (f->edge[k].from == f->edge[k].to) continue;   /* a loop on one node is not drawn */
+        if (f->edge[k].from == f->edge[k].to) { nloop++; continue; }   /* drawn as a loop beside its node */
         if (f->edge[k].label > 0) { nlab++; nseg += 2; } else nseg++;
     }
+    if (nloop) {
+        s->loop = cui__alloc(ui, sizeof(cui__mm_edge) * (size_t)nloop);
+        if (!s->loop) return false;
+        for (int k = 0; k < f->ne; k++) if (f->edge[k].from == f->edge[k].to) s->loop[s->nloop++] = f->edge[k];
+    }
+    bool *back = cui__mm_back_edges(ui, f);
     s->lab = cui__alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, nlab));
     s->seg = cui__alloc(ui, (size_t)CUI_MAX(1, nseg));
     if (!s->lab || !s->seg) return false;
@@ -578,8 +658,13 @@ static bool cui__mm_build_flow(cui_ctx *ui, cui__mm_state *s, const cui__mm_flow
     for (int v = 0; v < s->nn; v++) cui__mm_node_size(ui, s, v, &bw[v], &bh[v]);
     int m = 0;
     for (int k = 0; k < f->ne; k++) {
-        const cui__mm_edge *e = &f->edge[k];
+        cui__mm_edge e0 = f->edge[k];
+        const cui__mm_edge *e = &e0;
         if (e->from == e->to) continue;
+        if (back[k]) {   /* laid out the other way round, with its ends swapped, so it comes back between the same layers */
+            int t = e0.from; e0.from = e0.to; e0.to = t;
+            uint8_t h = e0.head; e0.head = e0.tail; e0.tail = h;
+        }
         uint8_t st = e->style;
         if (e->label > 0) {
             int L = s->nn + s->nlab;
@@ -601,8 +686,16 @@ static bool cui__mm_build_flow(cui_ctx *ui, cui__mm_state *s, const cui__mm_flow
             cui__layer_box *b = &s->g.box[v];
             if (td) b->y = s->g.gh - b->y - b->h; else b->x = s->g.gw - b->x - b->w;
         }
+    if (!cui__mm_ports(ui, s)) return false;
     cui__mm_groups(ui, s);
     float x0 = 0, y0 = 0, x1 = s->g.gw, y1 = s->g.gh;
+    for (int k = 0; k < s->nloop; k++) {   /* loops stand out above (left to right) or right of (top down) their node */
+        const cui__layer_box *b = &s->g.box[s->loop[k].from];
+        float lw = 0, lh = 0;
+        if (s->loop[k].label > 0) lw = cui__mm_label_size(ui, s->pool + s->loop[k].label, s->lfs, &lh) + 12;
+        if (td) x1 = CUI_MAX(x1, b->x + b->w + CUI__MM_LOOP + 4 + lw);
+        else y0 = CUI_MIN(y0, b->y - CUI__MM_LOOP - 4 - (lh > 0 ? lh + 6 : 0));
+    }
     for (int k = 0; k < s->ng; k++) {
         const cui__mm_group *G = &s->group[k];
         if (!G->shown) continue;
@@ -879,14 +972,56 @@ static cui_vec2 cui__mm_pt(const cui__mm_paint *p, cui_rect r, float x, float y)
     return (cui_vec2){ r.x + p->px + (x - p->s->x0) * p->zoom, r.y + p->py + (y - p->s->y0) * p->zoom };
 }
 
-/* where an edge leaves (out) or enters a box: the middle of the side along the layers */
-static cui_vec2 cui__mm_port(const cui__mm_paint *p, cui_rect r, int v, bool out) {
-    const cui__mm_state *s = p->s;
+static float cui__mm_round_inset(float a, float half, float rad) {
+    float flat = half - rad;
+    if (a <= flat || rad <= 0) return 0;
+    float d = CUI_MIN(a - flat, rad);
+    return rad - sqrtf(CUI_MAX(0.0f, rad * rad - d * d));
+}
+
+/* How far inside its box a node's outline lies at offset o (signed: right or down) from the
+ * middle of a side: 0 top, 1 right, 2 bottom, 3 left. Edge labels are small rounded boxes,
+ * waypoints have no outline. */
+static float cui__mm_inset(const cui__mm_state *s, int v, int side, float o) {
+    if (v >= s->nn + s->nlab) return 0;
     const cui__layer_box *b = &s->g.box[v];
+    bool across = side == 0 || side == 2;   /* the side runs left to right */
+    float hw = b->w * 0.5f, hh = b->h * 0.5f, half = across ? hw : hh, depth = across ? hh : hw;
+    float a = CUI_MIN(fabsf(o), half);
+    int shape = v < s->nn ? s->node[v].shape : -1;
+    switch (shape) {
+    case CUI__MMS_DIAMOND: return depth * a / half;
+    case CUI__MMS_CIRCLE: return hw - sqrtf(CUI_MAX(0.0f, hw * hw - a * a));
+    case CUI__MMS_STADIUM: return across ? cui__mm_round_inset(a, hw, hh) : hh - sqrtf(CUI_MAX(0.0f, hh * hh - a * a));
+    case CUI__MMS_HEX: { float k = b->h * 0.25f; return across ? (a > hw - k ? (a - (hw - k)) * hh / k : 0) : k * a / hh; }
+    case CUI__MMS_FLAG: {
+        float k = b->h * 0.35f;
+        if (side == 1) return k * a / hh;
+        return across && o > hw - k ? (CUI_MIN(o, hw) - (hw - k)) * hh / k : 0;
+    }
+    case CUI__MMS_DB: { if (!across) return 0; float t = a / hw; return 6 * (1 - sqrtf(CUI_MAX(0.0f, 1 - t * t))); }
+    case CUI__MMS_ROUND: return cui__mm_round_inset(a, half, 10);
+    case CUI__MMS_SUB: return cui__mm_round_inset(a, half, 3);
+    default: return cui__mm_round_inset(a, half, 4);
+    }
+}
+
+/* a point on box v's outline: on side (0 top, 1 right, 2 bottom, 3 left), o off its middle */
+static cui_vec2 cui__mm_side_pt(const cui__mm_state *s, int v, int side, float o) {
+    const cui__layer_box *b = &s->g.box[v];
+    float in = cui__mm_inset(s, v, side, o);
+    if (side == 0) return (cui_vec2){ b->x + b->w * 0.5f + o, b->y + in };
+    if (side == 2) return (cui_vec2){ b->x + b->w * 0.5f + o, b->y + b->h - in };
+    if (side == 1) return (cui_vec2){ b->x + b->w - in, b->y + b->h * 0.5f + o };
+    return (cui_vec2){ b->x + in, b->y + b->h * 0.5f + o };
+}
+
+/* where an edge leaves (out) or enters a box: on the side facing along the layers, o off its middle */
+static cui_vec2 cui__mm_port(const cui__mm_paint *p, cui_rect r, int v, bool out, float o) {
+    const cui__mm_state *s = p->s;
     bool far_side = out != s->flip, td = s->g.top_down;
-    float x = b->x + (td ? b->w * 0.5f : far_side ? b->w : 0);
-    float y = b->y + (td ? (far_side ? b->h : 0) : b->h * 0.5f);
-    return cui__mm_pt(p, r, x, y);
+    cui_vec2 q = cui__mm_side_pt(s, v, td ? (far_side ? 2 : 0) : (far_side ? 1 : 3), o);
+    return cui__mm_pt(p, r, q.x, q.y);
 }
 
 static void cui__mm_dashed(cui_ctx *ui, const cui_vec2 *pt, int n, float th, cui_color c, float dash, float gap) {
@@ -939,9 +1074,10 @@ static void cui__mm_paint_edges(cui_ctx *ui, const cui__mm_paint *p, cui_rect r)
         if (style == CUI__MML_HIDDEN) continue;
         float th = style == CUI__MML_THICK ? 2.75f : 1.35f;
         int from = s->g.from[k], to = s->g.to[k], prev = from;
+        float so = s->poff[2 * k], eo = s->poff[2 * k + 1];
         for (int w = 0; w <= s->g.rlen[k]; w++) {
             int nxt = w < s->g.rlen[k] ? s->g.route[s->g.rstart[k] + w] : to;
-            cui_vec2 s0 = cui__mm_port(p, r, prev, true), e0 = cui__mm_port(p, r, nxt, false);
+            cui_vec2 s0 = cui__mm_port(p, r, prev, true, prev == from ? so : 0), e0 = cui__mm_port(p, r, nxt, false, nxt == to ? eo : 0);
             /* the line stops where an end's mark starts */
             if (prev == from && tail) { s0.x += ax * (a - 1); s0.y += ay * (a - 1); }
             if (nxt == to && head) { e0.x -= ax * (a - 1); e0.y -= ay * (a - 1); }
@@ -954,13 +1090,55 @@ static void cui__mm_paint_edges(cui_ctx *ui, const cui__mm_paint *p, cui_rect r)
             }
             cui__mm_stroke(ui, pts, 17, th, p->edge, style, z);
             if (nxt != to) {   /* straight across a waypoint's layer */
-                cui_vec2 across[2] = { e0, cui__mm_port(p, r, nxt, true) };
+                cui_vec2 across[2] = { e0, cui__mm_port(p, r, nxt, true, 0) };
                 cui__mm_stroke(ui, across, 2, th, p->edge, style, z);
             }
             prev = nxt;
         }
-        if (head) cui__mm_end(ui, head, cui__mm_port(p, r, to, false), ax, ay, a, p->edge, p->panel, 1.35f);
-        if (tail) cui__mm_end(ui, tail, cui__mm_port(p, r, from, true), -ax, -ay, a, p->edge, p->panel, 1.35f);
+        if (head) cui__mm_end(ui, head, cui__mm_port(p, r, to, false, eo), ax, ay, a, p->edge, p->panel, 1.35f);
+        if (tail) cui__mm_end(ui, tail, cui__mm_port(p, r, from, true, so), -ax, -ay, a, p->edge, p->panel, 1.35f);
+    }
+}
+
+static void cui__mm_text(cui_ctx *ui, const char *t, float cx, float cy, float fs, cui_color c);
+
+/* A loop from a node to itself: out of its top and back (left to right), or out of its right
+ * side and back (top down), with its label beyond the loop. */
+static void cui__mm_paint_loops(cui_ctx *ui, const cui__mm_paint *p, cui_rect r) {
+    const cui__mm_state *s = p->s;
+    bool td = s->g.top_down;
+    float z = p->zoom, a = 8 * CUI_MAX(z, 0.6f);
+    for (int k = 0; k < s->nloop; k++) {
+        const cui__mm_edge *e = &s->loop[k];
+        if (e->style == CUI__MML_HIDDEN) continue;
+        const cui__layer_box *b = &s->g.box[e->from];
+        int side = td ? 1 : 0;
+        float d = CUI_MIN((td ? b->h : b->w) * 0.25f, 12.0f);
+        /* it leaves at g0 and comes back at g1, on the same side */
+        cui_vec2 g0 = cui__mm_side_pt(s, e->from, side, td ? -d : d), g1 = cui__mm_side_pt(s, e->from, side, td ? d : -d);
+        cui_vec2 s0 = cui__mm_pt(p, r, g0.x, g0.y), e0 = cui__mm_pt(p, r, g1.x, g1.y), tip = e0, tail_tip = s0;
+        float nx = td ? 1.0f : 0.0f, ny = td ? 0.0f : -1.0f, L = CUI__MM_LOOP * z * 1.33f;   /* out of the side */
+        if (e->head) { e0.x += nx * (a - 1); e0.y += ny * (a - 1); }
+        if (e->tail) { s0.x += nx * (a - 1); s0.y += ny * (a - 1); }
+        float sx = td ? 0 : d * z, sy = td ? d * z : 0;   /* the loop bulges a little past its ends */
+        cui_vec2 c1 = { s0.x + nx * L + sx, s0.y + ny * L - sy }, c2 = { e0.x + nx * L - sx, e0.y + ny * L + sy }, pts[17];
+        for (int i = 0; i <= 16; i++) {
+            float t = i / 16.0f, u = 1 - t;
+            pts[i].x = u * u * u * s0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * e0.x;
+            pts[i].y = u * u * u * s0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * e0.y;
+        }
+        float th = e->style == CUI__MML_THICK ? 2.75f : 1.35f;
+        cui__mm_stroke(ui, pts, 17, th, p->edge, e->style, z);
+        if (e->head) cui__mm_end(ui, e->head, tip, -nx, -ny, a, p->edge, p->panel, 1.35f);
+        if (e->tail) cui__mm_end(ui, e->tail, tail_tip, -nx, -ny, a, p->edge, p->panel, 1.35f);
+        if (e->label > 0) {
+            float lfs = s->lfs * z, lh, lw = cui__mm_label_size(ui, s->pool + e->label, lfs, &lh);
+            cui_vec2 apex = pts[8];
+            float cx = td ? apex.x + 6 * z + lw * 0.5f : apex.x, cy = td ? apex.y : apex.y - 3 * z - lh * 0.5f;
+            cui_rect lr = { cx - lw * 0.5f - 6 * z, cy - lh * 0.5f - 3 * z, lw + 12 * z, lh + 6 * z };
+            cui_draw_rect(ui, lr, CUI_CORNERS(4 * z), p->panel);
+            cui__mm_text(ui, s->pool + e->label, cx, cy, lfs, p->label_text);
+        }
     }
 }
 
@@ -1045,6 +1223,7 @@ static void cui__paint_mermaid(cui_ctx *ui, cui_node *n, void *data) {
         if (gfs >= 4) cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, gfs, gr.x + 10 * z, gr.y + 6 * z, gr.w - 20 * z, p->group_text, s->pool + G->title, -1, false);
     }
     cui__mm_paint_edges(ui, p, r);
+    cui__mm_paint_loops(ui, p, r);
     for (int v = 0; v < s->nn + s->nlab; v++) {
         const cui__layer_box *b = &s->g.box[v];
         cui_vec2 o = cui__mm_pt(p, r, b->x, b->y);
