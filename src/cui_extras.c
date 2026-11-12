@@ -395,8 +395,7 @@ void cui_button_group_end(cui_ctx *ui) {
     if (gn->first >= 0 && ui->nodes[gn->first].id && !gn->id) {
         gn->id = ui->nodes[gn->first].id ^ 0xB6A0u;
         float natural = 0;
-        int nb = 0;
-        for (int c = gn->first; c >= 0; c = ui->nodes[c].next, nb++) {
+        for (int c = gn->first; c >= 0; c = ui->nodes[c].next) {
             cui_node *ch = &ui->nodes[c];
             if (ch->w.kind == CUI_SIZE_FIXED) { natural += ch->w.value; continue; }
             if (ch->w.kind != CUI_SIZE_FIT) { natural = -1; break; }
