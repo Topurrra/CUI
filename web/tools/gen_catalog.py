@@ -312,8 +312,10 @@ MORE_CAT = {
     "Feedback": "feedback", "Data": "data", "Code": "data", "Conversation": "social", "Media": "social",
     "Planning": "planning", "More charts": "charts", "Motion": "motion", "AI interfaces": "ai",
     "App chrome": "navigation",
-    "Tool panels": "data", "Developer tools": "devtools", "Instruments": "instruments",
+    "Tool panels": "data", "Developer tools": "devtools", "Instruments": "instruments", "Voice": "ai",
 }
+# deprecated components: their docs stay in the guide for existing code, but they get no page on the site
+DEPRECATED = {"Voice orb"}
 ITEM_CAT = {"Table of contents": "navigation"}
 # sections whose docs have no screenshot: the scene that shows them
 NO_IMAGE = {
@@ -323,7 +325,7 @@ NO_IMAGE = {
     "Speed dial": ["speed-dial"], "Theme switcher and toggle": ["theme-switcher"], "Swipe actions": ["swipe-actions"],
     "Money field": ["money-field"], "Prefix and suffix": ["prefix-suffix"], "Rolling numbers": ["rolling-numbers"],
 }
-EXTRA_FOR = {"Toast": ["toast-demo"], "Dialog": ["dialog-demo"],
+EXTRA_FOR = {"Toast": ["toast-demo"], "Dialog": ["dialog-demo"], "Voice recorder": ["voice-demo"], "Voice note": ["voice-demo"],
              # the four chrome parts together in one window, after each part alone
              "Menu bar": ["app-chrome"], "Toolbar": ["app-chrome"], "Document tabs": ["app-chrome"], "Status bar": ["app-chrome"]}
 # live variants shown before the doc scene, when the doc scene only poses a moment
@@ -618,6 +620,9 @@ def field_mentions(fields, body_html, item_id):
     found = set(re.findall(r"<code>\.?(\w+)(?: = [^<]*)?</code>", prose)) | set(item_id.split("-"))
     return len(names & found)
 
+# pages about a mode of another page's component, which show that component's options too
+SHARED_OPTIONS = {"voice-recorder": {"cui_chat_composer"}}
+
 # layout containers an example happens to build with; their options belong to the Layout guide
 LAYOUT_STRUCTS = {"cui_box", "cui_scroll_opts", "cui_split_opts"}
 
@@ -632,7 +637,8 @@ def item_options(it, owners, fn_struct, structs):
         if not st or not structs[st]["fields"]: continue
         if st in LAYOUT_STRUCTS and not a.startswith(("cui_" + it["id"].replace("-", "_"))): continue
         own = owners.get(a, set())
-        if it["id"] not in own and (own or field_mentions(structs[st]["fields"], it["html"], it["id"]) < 2): continue
+        shared = a in SHARED_OPTIONS.get(it["id"], ())
+        if not shared and it["id"] not in own and (own or field_mentions(structs[st]["fields"], it["html"], it["id"]) < 2): continue
         by_struct.setdefault(st, [])
         if a not in by_struct[st]: by_struct[st].append(a)
     return [{"fn": fns, "struct": st, "line": structs[st]["line"], "fields": structs[st]["fields"]}
@@ -861,6 +867,7 @@ def main():
     srcs = scene_sources(table)
     main_secs, _ = sections("docs/components.md", 2)
     more_secs, more_groups = sections("docs/components-more.md", 3)
+    more_secs = [s for s in more_secs if s["title"] not in DEPRECATED]
     all_secs = main_secs + more_secs
     anchors, used = {}, set()
     for s in all_secs:

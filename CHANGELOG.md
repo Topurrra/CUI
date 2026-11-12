@@ -7,7 +7,15 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 ### Added
 
 - `cui_set_clipboard_text` and `cui_get_clipboard_text`: copy from a menu item or a status bar ("Copy path") and read the clipboard for a Paste item, through the same platform hooks the copy button and text fields use ([#32](https://github.com/yappologistic/CUI/issues/32)).
+- **Voice waveform** (`cui_voice_wave`): a voice drawn as fine dots, 13 rows mirrored around a center line, each dot as bright as the level covers it. It scrolls as you push levels, or shows a whole clip with its played part in the accent, a playhead and seeking by click, drag or arrow keys. Silence draws only a faint center line, and two voices can share one timeline. `cui_voice_resample` keeps a short waveform for a message. See [Voice](docs/components-more.md#voice) and the gallery's new *Voice* page.
+- **Voice recorder** in the chat composer: `.mic` adds a microphone button, and while the app sets `.recording` the composer shows a recording dot, the time, the mic levels scrolling by, Cancel and Send, at the same height, returning `CUI_COMPOSER_RECORD`, `CUI_COMPOSER_CANCEL` and `CUI_COMPOSER_VOICE`.
+- **Voice note** (`cui_voice_note`): a recorded message in a bubble with play and pause, its waveform as the seek bar, played and total time, and a 1x, 1.5x and 2x speed chip (`CUI_PLAYER_SPEED`). `.mine` tints it with the accent. The app plays the audio and passes the position.
+- **Voice session** (`cui_voice_session`): a spoken conversation with an assistant on one scrolling timeline, you in the foreground and the assistant in the accent, with a state label (Listening, Thinking, Speaking, Muted: `CUI_VOICE_MUTED` is new), a legend, the live transcript with the unspoken part dimmed, and Mute and End buttons.
 - `cui_app_follow_system_theme(app, follow)` starts or stops following the system's light or dark setting while the app runs, for a theme switcher with Light, Dark and System. Stopping keeps the current theme, so a `cui_set_theme` after it lasts (on macOS the system setting used to undo it every frame); starting applies the system setting at once ([#34](https://github.com/yappologistic/CUI/issues/34)).
+
+### Changed
+
+- The voice orb (`cui_voice_orb`) is deprecated in favor of the voice components. It keeps working, but it has left the gallery and the docs site.
 
 ### Fixed
 

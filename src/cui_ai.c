@@ -1,6 +1,6 @@
 /* AI interface pieces: reasoning, tool calls, plans, status, sources,
  * context meter, response actions, prompt suggestions, model picker, chat
- * composer and a voice orb. */
+ * composer (with its voice recorder) and the deprecated voice orb. */
 #include "cui_internal.h"
 
 
@@ -840,10 +840,11 @@ bool cui_model_picker_ex(cui_ctx *ui, const char *id_str, const cui_model *model
 /* Chat composer                                                            */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { float focus; cui_spring send; } cui__cmp_state;
+typedef struct { float focus; cui_spring send; bool was_recording; } cui__cmp_state;
 
-/* the ids a composer's parts answer to */
-typedef struct { cui_id id, fid, sid; } cui__cmp_ids;
+/* the ids a composer's parts answer to, so focus can move between the text, the
+ * microphone and the recorder's buttons */
+typedef struct { cui_id id, fid, sid, mic, cancel; } cui__cmp_ids;
 
 static void cui__composer_attachments(cui_ctx *ui, const cui_composer_opts *o, int *result) {
     int row = cui__node_new(ui, 0);
@@ -909,7 +910,7 @@ static bool cui__composer_send(cui_ctx *ui, cui__cmp_state *st, cui_id sid, bool
     return hit;
 }
 
-/* the text and its toolbar: attach, the model picker and send */
+/* the text and its toolbar: attach, the model picker, the microphone and send */
 static void cui__composer_editor(cui_ctx *ui, const cui__cmp_ids *ids, cui__cmp_state *st, char *buf, size_t cap,
                                  const cui_composer_opts *o, float input_h, bool empty, int *result) {
     cui_input_opts io;
@@ -933,8 +934,47 @@ static void cui__composer_editor(cui_ctx *ui, const cui__cmp_ids *ids, cui__cmp_
         if (cui_model_picker_ex(ui, "model", o->models, o->model_count, o->model, &mo)) *result |= CUI_COMPOSER_MODEL;
     }
     cui_spacer(ui);
+    if (o->mic) {
+        cui_button_opts mo;
+        memset(&mo, 0, sizeof mo);
+        mo.variant = CUI_BUTTON_GHOST; mo.size = CUI_SIZE_SM; mo.tooltip = "Record a voice message";
+        if (cui__icon_button_id(ui, ids->mic, CUI_ICON_MIC, &mo)) *result |= CUI_COMPOSER_RECORD;
+        ui->nodes[ui->last_node].radius = CUI_CORNERS(ui->theme.radius_surface - 10);
+    }
     bool can = o->busy || !empty;
     if (cui__composer_send(ui, st, ids->sid, can, o->busy)) *result |= o->busy ? CUI_COMPOSER_STOP : CUI_COMPOSER_SEND;
+    cui__close(ui);
+}
+
+/* recording: one row as tall as the text and toolbar it stands in for, so nothing
+ * around the composer moves. Cancel, the recording dot and time, the mic levels
+ * scrolling by, and send. */
+static void cui__composer_recorder(cui_ctx *ui, const cui__cmp_ids *ids, cui__cmp_state *st, const cui_composer_opts *o,
+                                   float height, int *result) {
+    int row = cui__node_new(ui, 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->gap = 10; rn->w = CUI_FILL; rn->h = CUI_PX(height);
+    cui__open(ui, row);
+    cui_button_opts bo;
+    memset(&bo, 0, sizeof bo);
+    bo.variant = CUI_BUTTON_OUTLINE; bo.size = CUI_SIZE_SM; bo.tooltip = "Cancel";
+    if (cui__icon_button_id(ui, ids->cancel, CUI_ICON_X, &bo)) *result |= CUI_COMPOSER_CANCEL;
+    ui->nodes[ui->last_node].radius = CUI_CORNERS(ui->theme.radius_surface - 10);
+    /* the dot blinks slowly, the one motion here that no level drives; it holds still under reduced motion */
+    float blink = 1;
+    if (ui->theme.motion > 0) {
+        blink = 0.675f + 0.325f * cosf((float)fmod(ui->time, 1.2) * (2 * CUI_PI / 1.2f));
+        cui__wakeup_after(ui, 1.0f / 30.0f);
+    }
+    int dot = cui__leaf(ui, 0, CUI_PX(8), CUI_PX(8));
+    ui->nodes[dot].radius = CUI_CORNERS(4); ui->nodes[dot].bg = CUI_C(ui, DANGER); ui->nodes[dot].opacity = blink;
+    int t = cui__text_node(ui, cui__mmss(ui, o->record_seconds), -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_SECONDARY), false);
+    ui->nodes[t].flags |= CUI_NF_TABULAR | CUI_NF_KEEP_W; ui->nodes[t].min_w = 30;
+    cui__keep_ltr(ui, t);
+    cui_voice_wave_opts wo;
+    memset(&wo, 0, sizeof wo);
+    cui_voice_wave_ex(ui, "levels", o->levels, o->level_count, &wo);
+    if (cui__composer_send(ui, st, ids->sid, true, false)) *result |= CUI_COMPOSER_VOICE;
     cui__close(ui);
 }
 
@@ -946,8 +986,17 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     int result = 0;
     cui__cmp_ids ids;
     ids.id = cui_make_id(ui, id_str);
-    ids.fid = ids.id ^ 0xF1E1Du; ids.sid = ids.id ^ 0x5E7Du;
+    ids.fid = ids.id ^ 0xF1E1Du; ids.sid = ids.id ^ 0x5E7Du; ids.mic = ids.id ^ 0x41C0u; ids.cancel = ids.id ^ 0xCA9Cu;
     cui__cmp_state *st = cui_state(ui, ids.id, sizeof *st);
+    bool recording = o->recording;
+    /* the keyboard follows the switch: from the microphone or the text to send, and back */
+    if (recording && !st->was_recording && (ui->focus == ids.mic || ui->focus == ids.fid)) ui->focus = ids.sid;
+    if (!recording && st->was_recording && (ui->focus == ids.cancel || ui->focus == ids.sid)) ui->focus = o->mic ? ids.mic : ids.fid;
+    st->was_recording = recording;
+    if (recording && (ui->focus == ids.cancel || ui->focus == ids.sid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        ui->kpressed[CUI_KEY_ESCAPE] = 0;
+        result |= CUI_COMPOSER_CANCEL;
+    }
     bool empty = true;
     for (const char *c = buf; *c; c++) if (*c != ' ' && *c != '\n' && *c != '\t') { empty = false; break; }
     /* Enter sends; Shift+Enter is a new line */
@@ -980,7 +1029,8 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     int maxl = o->max_lines > 0 ? o->max_lines : 8;
     lines = CUI_CLAMP(lines, 1, maxl);
     float input_h = lines * line_h + 12;
-    cui__composer_editor(ui, &ids, st, buf, cap, o, input_h, empty, &result);
+    if (recording) cui__composer_recorder(ui, &ids, st, o, input_h + 4 + 32, &result);   /* the box's gap, then the toolbar, as tall as send */
+    else cui__composer_editor(ui, &ids, st, buf, cap, o, input_h, empty, &result);
     cui_pop_id(ui);
     cui__close(ui);
     ui->last_id = ids.id;
@@ -988,7 +1038,7 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
 }
 
 /* ------------------------------------------------------------------------ */
-/* Voice orb                                                                */
+/* Voice orb (deprecated: the voice components in cui_voice.c replace it)   */
 /* ------------------------------------------------------------------------ */
 
 typedef struct { cui_spring level, scale; float state_t[4]; bool init; } cui__orb_state;
@@ -1052,6 +1102,7 @@ bool cui_voice_orb_ex(cui_ctx *ui, const char *id_str, cui_voice_state state, fl
     cui_voice_orb_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
+    if ((unsigned)state > CUI_VOICE_SPEAKING) state = CUI_VOICE_IDLE;   /* the orb has no muted look */
     cui_id id = cui_make_id(ui, id_str);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__orb_state *st = cui_state(ui, id, sizeof *st);

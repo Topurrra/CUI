@@ -2156,7 +2156,8 @@ typedef struct cui_now_playing_opts {
     cui_size width;
     bool compact;              /* smaller artwork and padding, and no previous button */
 } cui_now_playing_opts;
-enum { CUI_PLAYER_TOGGLE = 1, CUI_PLAYER_PREV = 2, CUI_PLAYER_NEXT = 4, CUI_PLAYER_SEEK = 8 };
+/* what the user did, from the now playing card and the voice note: CUI_PLAYER_SPEED is the voice note's speed chip */
+enum { CUI_PLAYER_TOGGLE = 1, CUI_PLAYER_PREV = 2, CUI_PLAYER_NEXT = 4, CUI_PLAYER_SEEK = 8, CUI_PLAYER_SPEED = 16 };
 CUI_API int cui_now_playing_ex(cui_ctx *ui, const char *id, cui_now_playing *np, const cui_now_playing_opts *opts);
 
 /* ------------------------------------------------------------------------ */
@@ -2270,8 +2271,16 @@ CUI_API bool cui_model_picker_ex(cui_ctx *ui, const char *id, const cui_model *m
 /* Chat composer: a growing text area with attachments, a model picker and a
  * send button that turns into stop while busy. Enter sends, Shift+Enter adds
  * a line. Returns CUI_COMPOSER_* flags; *removed is the attachment whose x
- * was clicked. */
-enum { CUI_COMPOSER_SEND = 1, CUI_COMPOSER_STOP = 2, CUI_COMPOSER_ATTACH = 4, CUI_COMPOSER_REMOVE = 8, CUI_COMPOSER_MODEL = 16 };
+ * was clicked.
+ *
+ * With `mic`, a microphone button asks to record a voice message
+ * (CUI_COMPOSER_RECORD). While you set `recording`, the composer is a
+ * recorder: a recording dot, the time, your mic levels scrolling by as a voice
+ * waveform, Cancel (CUI_COMPOSER_CANCEL, Escape) and Send (CUI_COMPOSER_VOICE).
+ * It records nothing itself: you open the microphone, push its levels and
+ * clear `recording` when the take is sent or thrown away. */
+enum { CUI_COMPOSER_SEND = 1, CUI_COMPOSER_STOP = 2, CUI_COMPOSER_ATTACH = 4, CUI_COMPOSER_REMOVE = 8, CUI_COMPOSER_MODEL = 16,
+       CUI_COMPOSER_RECORD = 32, CUI_COMPOSER_CANCEL = 64, CUI_COMPOSER_VOICE = 128 };
 typedef struct cui_composer_opts {
     int _;
     const char *placeholder;
@@ -2284,14 +2293,106 @@ typedef struct cui_composer_opts {
     int *model;                /* index of the chosen model, read and written */
     int max_lines;             /* default 8 */
     cui_size width;
+    bool mic;                  /* a microphone button beside send, which returns `CUI_COMPOSER_RECORD` */
+    bool recording;            /* shows the recorder instead of the text: set it on `CUI_COMPOSER_RECORD`, clear it on cancel or send */
+    const float *levels;       /* the microphone's levels while recording (0..1, newest last), drawn as a scrolling voice waveform */
+    int level_count;           /* number of `levels` */
+    float record_seconds;      /* how long the take is so far, shown beside the recording dot */
 } cui_composer_opts;
 CUI_API int cui_chat_composer_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_composer_opts *opts);
 
-/* Voice orb: a living shape for voice modes. level is the input or output
+/* What a voice conversation is doing, for the voice session's label (and the
+ * voice orb, which shows the first four). */
+typedef enum cui_voice_state { CUI_VOICE_IDLE = 0, CUI_VOICE_LISTENING, CUI_VOICE_THINKING, CUI_VOICE_SPEAKING, CUI_VOICE_MUTED } cui_voice_state;
+
+/* Deprecated: use the voice session (cui_voice_session), the voice waveform
+ * (cui_voice_wave) or the composer's recorder instead. Kept so existing code
+ * builds; it gets no new features.
+ * Voice orb: a living shape for voice modes. level is the input or output
  * loudness (0..1). Returns true when clicked. */
-typedef enum cui_voice_state { CUI_VOICE_IDLE = 0, CUI_VOICE_LISTENING, CUI_VOICE_THINKING, CUI_VOICE_SPEAKING } cui_voice_state;
 typedef struct cui_voice_orb_opts { int _; float size; cui_color color; } cui_voice_orb_opts;
 CUI_API bool cui_voice_orb_ex(cui_ctx *ui, const char *id, cui_voice_state state, float level, const cui_voice_orb_opts *opts);
+
+/* ------------------------------------------------------------------------ */
+/* Voice                                                                    */
+/* ------------------------------------------------------------------------ */
+
+/* Voice waveform: a voice drawn as fine dots, 13 rows mirrored around a center
+ * line. Each level (0..1, newest last) is one column, and a dot lights in
+ * proportion to how much of it the level covers, so the edges stay smooth.
+ *
+ * By default the newest levels scroll in at the right and the oldest fade at
+ * the left edge: push the loudness into a buffer each time you measure it, and
+ * the strip moves only when you do. With `clip` the whole buffer is resampled
+ * to fit; with `progress` as well, the played part is in the accent, the rest
+ * gray, with a playhead, and clicking, dragging or the arrow keys seek
+ * (returns true when they did). A level below zero (CUI_VOICE_SILENT) is no
+ * audio at all, silence or thinking: only the faint center line shows there.
+ *
+ *     levels[n++] = mic_level();                       // each time you measure
+ *     cui_voice_wave(ui, "mic", levels, n);
+ */
+#define CUI_VOICE_SILENT (-1.0f)
+typedef enum cui_voice_owner { CUI_VOICE_YOU = 0, CUI_VOICE_REPLY = 1 } cui_voice_owner;
+typedef struct cui_voice_wave_opts {
+    int _;
+    bool clip;                 /* the whole clip resampled to the width, instead of the newest levels scrolling in */
+    float *progress;           /* a clip's played fraction (0..1): colors the played part, draws a playhead and seeks; implies `clip` */
+    const uint8_t *owners;     /* one per level, `CUI_VOICE_YOU` or `CUI_VOICE_REPLY`, for two voices on one timeline; `NULL`: all `owner` */
+    cui_voice_owner owner;     /* whose voice it is: you in the foreground color, the reply in the accent */
+    cui_color color;           /* lit dots in this color instead of the owner's */
+    float pitch;               /* distance between dot centers in points, default 3.6; the strip is 14 pitches tall */
+    float step;                /* how far an arrow key seeks, as a fraction of the clip, default 0.05 */
+    cui_size width;            /* default fill */
+} cui_voice_wave_opts;
+CUI_API bool cui_voice_wave_ex(cui_ctx *ui, const char *id, const float *levels, int count, const cui_voice_wave_opts *opts);
+/* Resamples a clip to `columns` levels the way the clip strip does (the loudest
+ * level of each stretch; a stretch with no audio stays CUI_VOICE_SILENT), for
+ * keeping a short waveform with a message. Returns the number written. */
+CUI_API int cui_voice_resample(const float *levels, int count, float *out, int columns);
+
+/* Voice note: a recorded message in a bubble, with play and pause, its voice
+ * waveform as the seek bar (click or drag; the arrow keys step), the time
+ * played and the length, and a speed chip that cycles 1x, 1.5x and 2x. It
+ * plays nothing itself: you play the audio and pass the position on every
+ * frame. Returns CUI_PLAYER_TOGGLE, CUI_PLAYER_SEEK and CUI_PLAYER_SPEED. */
+typedef struct cui_voice_note {
+    const float *levels;       /* the clip's loudness, 0..1, oldest first (resampled to fit) */
+    int count;                 /* number of `levels` */
+    float position;            /* seconds played; written when the user seeks */
+    float duration;            /* length of the clip in seconds */
+    float speed;               /* playback rate, 1, 1.5 or 2 (0 reads as 1); the chip moves it to the next */
+    bool playing;              /* shows pause instead of play; the play button flips it */
+} cui_voice_note;
+typedef struct cui_voice_note_opts {
+    int _;
+    bool mine;                 /* a message you sent: tinted with the accent and placed at the end of the row */
+    cui_size width;            /* default 330 points, narrower in a narrower container */
+} cui_voice_note_opts;
+CUI_API int cui_voice_note_ex(cui_ctx *ui, const char *id, cui_voice_note *note, const cui_voice_note_opts *opts);
+
+/* Voice session: a spoken conversation with an assistant on one timeline. The
+ * waveform scrolls with both voices, you in the foreground color and the
+ * assistant in the accent (tag each level in `owners`); a label says what is
+ * happening (Listening, Thinking..., Speaking, Muted: the `state` you pass),
+ * with a legend, the live transcript under it and Mute and End buttons. While
+ * the assistant thinks there is no sound, so push CUI_VOICE_SILENT: the strip
+ * shows a flat gap rather than a made-up wave. Returns CUI_VOICE_SESSION_*. */
+enum { CUI_VOICE_SESSION_MUTE = 1, CUI_VOICE_SESSION_END = 2 };
+typedef struct cui_voice_session_opts {
+    int _;
+    const uint8_t *owners;     /* one per level: `CUI_VOICE_YOU` or `CUI_VOICE_REPLY`; `NULL`: all yours */
+    const char *label;         /* text for the state instead of "Listening", "Thinking...", "Speaking", "Muted" or "Waiting" */
+    const char *transcript;    /* the words of the current turn spoken so far, under the strip; `NULL` for none */
+    const char *upcoming;      /* the rest of the turn, not spoken yet: dimmed after `transcript` */
+    cui_voice_owner speaker;   /* whose turn the transcript is, named before it */
+    const char *you;           /* your name in the legend and the transcript, default "You" */
+    const char *assistant;     /* the assistant's name, default "Assistant" */
+    bool *muted;               /* the microphone is muted: the button reads Unmute; a click flips it. `NULL` leaves Mute out */
+    bool no_end;               /* leaves the End button out */
+    cui_size width;            /* default fill */
+} cui_voice_session_opts;
+CUI_API int cui_voice_session_ex(cui_ctx *ui, const char *id, cui_voice_state state, const float *levels, int count, const cui_voice_session_opts *opts);
 
 /* ------------------------------------------------------------------------ */
 /* Planning                                                                 */
@@ -4401,6 +4502,9 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_model_picker(ui, id, models, n, sel, ...) cui_model_picker_ex((ui), (id), (models), (n), (sel), CUI__OPTS(cui_model_picker_opts, __VA_ARGS__))
 #define cui_chat_composer(ui, id, buf, cap, ...) cui_chat_composer_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_composer_opts, __VA_ARGS__))
 #define cui_voice_orb(ui, id, state, level, ...) cui_voice_orb_ex((ui), (id), (state), (level), CUI__OPTS(cui_voice_orb_opts, __VA_ARGS__))
+#define cui_voice_wave(ui, id, levels, n, ...) cui_voice_wave_ex((ui), (id), (levels), (n), CUI__OPTS(cui_voice_wave_opts, __VA_ARGS__))
+#define cui_voice_note(ui, id, note, ...)   cui_voice_note_ex((ui), (id), (note), CUI__OPTS(cui_voice_note_opts, __VA_ARGS__))
+#define cui_voice_session(ui, id, state, levels, n, ...) cui_voice_session_ex((ui), (id), (state), (levels), (n), CUI__OPTS(cui_voice_session_opts, __VA_ARGS__))
 #define cui_shimmer_text(ui, text, ...)    cui_shimmer_text_ex((ui), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_typewriter(ui, id, text, ...)   cui_typewriter_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))
 #define cui_text_reveal(ui, id, text, ...)  cui_text_reveal_ex((ui), (id), (text), CUI__OPTS(cui_text_fx_opts, __VA_ARGS__))

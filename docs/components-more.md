@@ -1,6 +1,6 @@
 # More components
 
-The second half of the library: richer actions and inputs, pickers, disclosure, data views, more charts, motion, AI interface pieces and developer tools. Everything follows the same rules as the [core components](components.md): named options, keyboard support, light and dark, reduced motion. Each family has a page in the gallery (`./build/examples/gallery`, section *Extended*).
+The second half of the library: richer actions and inputs, pickers, disclosure, data views, more charts, motion, AI interface pieces, developer tools, instruments and voice. Everything follows the same rules as the [core components](components.md): named options, keyboard support, light and dark, reduced motion. Each family has a page in the gallery (`./build/examples/gallery`, section *Extended*).
 
 ## Actions
 
@@ -1991,7 +1991,7 @@ if (ev & CUI_COMPOSER_STOP) stop();
 if (ev & CUI_COMPOSER_REMOVE) remove_file(removed);
 ```
 
-The text area grows with its content up to `max_lines`, then scrolls. Enter sends and Shift+Enter starts a new line. Send stays disabled while the draft is empty, and while `busy` it becomes a stop button. The model picker can also be used alone: `cui_model_picker(ui, "model", models, n, &model)`.
+The text area grows with its content up to `max_lines`, then scrolls. Enter sends and Shift+Enter starts a new line. Send stays disabled while the draft is empty, and while `busy` it becomes a stop button. The model picker can also be used alone: `cui_model_picker(ui, "model", models, n, &model)`. With `mic` the composer also records voice messages: see [Voice recorder](#voice-recorder).
 
 ### Suggestions, response actions and the context meter
 
@@ -2025,6 +2025,8 @@ Keyboard: Tab moves through the suggestions and the response actions, and Enter 
 ### Voice orb
 
 An animated orb for voice modes that shows listening, thinking and speaking.
+
+**Deprecated.** The [voice components](#voice) replace it: the [voice session](#voice-session) for a spoken conversation, the [voice waveform](#voice-waveform) for a level, and the composer's [recorder](#voice-recorder) for a voice message. `cui_voice_orb` keeps working so existing code builds, but it gets no new features and is no longer in the gallery.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-orb-dark.png"><img src="images/components/voice-orb.png" alt="Voice orb"></picture>
 
@@ -2278,3 +2280,101 @@ Each glyph is five dots wide and seven high, with a column of space between glyp
 The lit dots take the foreground color, `color`, or the accent with `accent`. In a box narrower than the text the dots shrink until it fits. With `marquee` the text scrolls instead, and asks for frames only while it does; with reduced motion it shrinks rather than moves. The glyphs run left to right in every reading direction, while `align` follows it: in a right-to-left interface the start is the right edge of the box.
 
 A dot-matrix display only displays: it takes no focus and returns nothing.
+
+## Voice
+
+A voice drawn as fine dots, and the three places it is used: recording a voice message in the composer, playing one back, and talking with an assistant. None of them record or play audio. Your app owns the microphone and the player, and passes levels, positions and states on every frame; the components draw them and report what the user did. The *Voice* page in the gallery has them all working together, with a pretend microphone.
+
+### Voice waveform
+
+A strip of fine dots that shows a voice, newest level at the right, or a whole clip with its played part.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-wave-dark.png"><img src="images/components/voice-wave.png" alt="Three dot waveforms: your recording in the foreground color, a reply in the accent, and a voice note half played with a playhead"></picture>
+
+```c
+static float levels[600];                        /* 0..1, newest last */
+static int n;
+if (have_new_level) levels[n++] = mic_level;     /* when you measure it, 20 times a second or so */
+cui_voice_wave(ui, "mic", levels, n);
+
+cui_voice_wave(ui, "reply", reply_levels, rn, .owner = CUI_VOICE_REPLY);
+
+static float played;                             /* 0..1 */
+if (cui_voice_wave(ui, "clip", clip, clip_n, .progress = &played)) seek(played * length);
+```
+
+The dots sit on a 3.6 point grid (`pitch`), 13 rows mirrored around a center line, so the strip is 14 pitches tall, about 50 points; it fills its width unless `width` says otherwise. Each level from 0 to 1 is one column. A dot lights in proportion to how much of it the level covers, so the shape has smooth edges rather than steps, and a level of 0 still lights the center dot faintly: the voice is there, just quiet. A level below zero, `CUI_VOICE_SILENT`, means no audio at all, silence or an assistant thinking: only the faint, unlit center line shows there, and the strip never makes up a wave.
+
+By default the strip scrolls: the newest `count` levels fill it from the right and the oldest fade out at the left edge. It moves only when you push a level, so nothing animates on its own. With `clip` the whole buffer is resampled to the columns that fit, each column taking the loudest level of its stretch. With `progress` (a pointer to the played fraction, which implies `clip`) the played columns take the accent, the rest gray, and a thin playhead marks the position; clicking or dragging seeks, and the call returns true on the frames it changed `*progress`. `cui_voice_resample(levels, count, out, columns)` resamples the same way, for keeping a short waveform with a message.
+
+Your voice is drawn in the foreground color and a reply in the accent: set `owner` for the whole strip, or pass `owners`, one `CUI_VOICE_YOU` or `CUI_VOICE_REPLY` per level, to put two voices on one timeline. Under the neutral accent, where the accent is the foreground, your voice turns gray beside the reply. `color` replaces both. Time runs left to right in every reading direction, like the other waveforms.
+
+Keyboard: with `progress`, Tab focuses the strip, Left and Right seek by `step` (5% of the clip), and Home and End go to the start and the end. Without it the strip only displays.
+
+### Voice recorder
+
+The chat composer turned into a recorder: a recording dot, the time, your microphone level scrolling by, Cancel and Send.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-recorder-dark.png"><img src="images/components/voice-recorder.png" alt="A composer with a microphone button, and below it the same composer recording, with Cancel, a red dot, 0:07, a scrolling dot waveform and Send"></picture>
+
+```c
+static bool recording;
+int ev = cui_chat_composer(ui, "composer", draft, sizeof draft, .mic = true, .recording = recording,
+                           .levels = take, .level_count = take_n, .record_seconds = take_n / 20.0f);
+if (ev & CUI_COMPOSER_RECORD) { open_microphone(); take_n = 0; recording = true; }
+if (ev & CUI_COMPOSER_CANCEL) { close_microphone(); recording = false; }           /* throw the take away */
+if (ev & CUI_COMPOSER_VOICE)  { close_microphone(); send_voice(take, take_n); recording = false; }
+```
+
+`mic` puts a microphone button beside send; a click returns `CUI_COMPOSER_RECORD`. While you set `recording`, the text and toolbar give way to one row at their height, so nothing around the composer moves: Cancel (`CUI_COMPOSER_CANCEL`), a recording dot with the time from `record_seconds`, the levels you pass in `levels` as a scrolling [voice waveform](#voice-waveform), and Send (`CUI_COMPOSER_VOICE`, not `CUI_COMPOSER_SEND`, so a take is never mistaken for the draft). The draft and the attachments stay as they were. The dot blinks slowly, the only motion that no level drives, and holds still under reduced motion.
+
+The composer starts and stops nothing: set `recording` when it asks to record and clear it on cancel or send, as with `busy`.
+
+Keyboard: Enter or Space on the microphone starts a take and moves focus to Send; Enter on Send sends it, and Escape (while Cancel or Send has focus) or Cancel throws it away. Focus then goes back to the microphone.
+
+### Voice note
+
+A recorded message in a bubble, with play and pause, its waveform as the seek bar, the time and a speed chip.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-note-dark.png"><img src="images/components/voice-note.png" alt="A received voice note playing at 1.5x, a third played in the accent with a playhead, and a sent voice note tinted with the accent"></picture>
+
+```c
+static cui_voice_note note = { levels, 64, 0, 12.4f, 1, false };   /* levels, count, position, duration, speed, playing */
+note.position = player_position();                                  /* every frame, from your player */
+int ev = cui_voice_note(ui, "note", &note);
+if (ev & CUI_PLAYER_TOGGLE) note.playing ? player_play() : player_pause();
+if (ev & CUI_PLAYER_SEEK)   player_seek(note.position);
+if (ev & CUI_PLAYER_SPEED)  player_rate(note.speed);
+
+cui_voice_note(ui, "sent", &sent, .mine = true);
+```
+
+The play button flips `playing` and returns `CUI_PLAYER_TOGGLE`. The clip's `levels` are resampled to fit, played part in the accent, the rest gray, with a playhead once it has started; clicking or dragging on it writes `position` (in seconds, from `duration`) and returns `CUI_PLAYER_SEEK`. The time reads played over length, "0:04 / 0:12". The chip shows `speed` (0 reads as 1) and moves it to the next of 1, 1.5 and 2, returning `CUI_PLAYER_SPEED`. It plays nothing itself: you pass the position every frame, and only a user's seek changes it.
+
+The bubble is 330 points wide (`width`), narrower in a narrow container. `mine` tints it with the accent, as your own message, and places it at the end of the row; the play button then takes the accent too. In a right-to-left interface the row mirrors, while the waveform still runs left to right.
+
+Keyboard: Tab moves through the play button, the waveform and the speed chip. Enter or Space plays, pauses or changes the speed; on the waveform, Left and Right step a second, and Home and End go to the start and the end.
+
+### Voice session
+
+A spoken conversation with an assistant: both voices on one scrolling timeline, what is happening, the live transcript, and Mute and End.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/voice-session-dark.png"><img src="images/components/voice-session.png" alt="A voice session labelled Speaking with a legend, a timeline of your voice, a flat gap while thinking and the assistant in the accent, a transcript half spoken, and Mute and End buttons"></picture>
+
+```c
+/* each time you measure: one level and whose it is */
+levels[n] = assistant_speaking ? output_level : thinking ? CUI_VOICE_SILENT : mic_level;
+owners[n++] = assistant_speaking || thinking ? CUI_VOICE_REPLY : CUI_VOICE_YOU;
+
+static bool muted;
+int ev = cui_voice_session(ui, "call", state, levels, n, .owners = owners, .muted = &muted,
+                           .transcript = said, .upcoming = still_to_say, .speaker = CUI_VOICE_REPLY);
+if (ev & CUI_VOICE_SESSION_MUTE) set_microphone(!muted);
+if (ev & CUI_VOICE_SESSION_END)  hang_up();
+```
+
+The timeline is a scrolling [voice waveform](#voice-waveform) with `owners`: you in the foreground color, the assistant in the accent. The label says what is happening from the `state` you pass, `CUI_VOICE_LISTENING` ("Listening"), `CUI_VOICE_THINKING` ("Thinking…"), `CUI_VOICE_SPEAKING` ("Speaking", in the accent), `CUI_VOICE_MUTED` ("Muted") or `CUI_VOICE_IDLE` ("Waiting"); `label` replaces the text. While the assistant thinks there is no sound, so push `CUI_VOICE_SILENT`: the strip shows a flat gap rather than a made-up wave. A legend names the two colors (`you` and `assistant`, "You" and "Assistant" by default).
+
+Under the strip, the transcript of the current turn names its `speaker`, then shows `transcript`, the words already spoken, followed by `upcoming`, the rest of the turn, dimmed. It keeps room for two lines so the buttons stay put as a turn grows. Mute flips `*muted`, reads Unmute while it is set and returns `CUI_VOICE_SESSION_MUTE`; leave `muted` unset to leave the button out. End returns `CUI_VOICE_SESSION_END`; `no_end` leaves it out.
+
+Keyboard: Tab moves to Mute and End, and Enter or Space presses them. The timeline only displays.
