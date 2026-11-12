@@ -666,7 +666,7 @@ cui_donut_chart(ui, "share", values, labels, 4, .format = "%.0f%%");
 cui_sparkline(ui, values, 12, CUI_PX(120), 32, CUI_COLOR_SERIES(0));
 ```
 
-Charts draw in once, pick nice axis ticks, show a crosshair that glides between points and a tooltip with every series on hover. Colors come from the theme's series palette, which starts at the accent hue. Options: `width`, `height`, `labels`, `label_count`, `area`, `smooth`, `stacked`, `no_grid`, `no_legend`, `format`, `min`, `max`. With `area` and several series, only the first is filled, so fills never tint each other into a third color.
+Charts draw in once and pick nice axis ticks. Gridlines are faint dashed hairlines over a solid zero line, and the axis labels are small and muted, so the data leads. The line chart shows a crosshair that glides between points and a tooltip with every series on hover. Bars are slim, with rounded tops and a small gap inside a group; hovering a column lays a soft band behind it, brings its label forward and shows a compact chip over it with each series' value (the full tooltip when the chip would not fit). The donut is a thin ring whose segments are parted by real gaps, with the leading or hovered share in the middle; its legend puts a thin bar under each name that shows the share's size against the largest. Colors come from the theme's series palette, which starts at the accent hue. Options: `width`, `height`, `labels`, `label_count`, `area`, `smooth`, `stacked`, `no_grid`, `no_legend`, `format`, `min`, `max`. With `area` and several series, only the first is filled, so fills never tint each other into a third color.
 
 ## Image
 

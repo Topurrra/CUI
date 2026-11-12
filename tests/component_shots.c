@@ -314,7 +314,18 @@ SCENE(line_chart) {
     cui_series s[2] = { { "Subscriptions", a, 12, { 0 } }, { "Cloud spend", b, 12, { 0 } } };
     cui_card(ui, UPTO(680)) { cui_line_chart(ui, "l", s, 2, .labels = m, .label_count = 12, .area = true, .smooth = true, .height = 200, .format = "$%.0fk"); }
 }
-SCENE(bar_chart) {
+/* hovers a point inside the rect an id had last frame, at fractions of its size */
+static void hover_id(cui_ctx *ui, cui_id id, int f, int at, float fx, float fy) {
+    cui_rect r = cui_get_rect(ui, id);
+    if (f == at && r.w > 0) cui_input_mouse_move(ui, r.x + r.w * fx, r.y + r.h * fy);
+}
+static void body_bar_chart(cui_ctx *ui);
+static void scene_bar_chart(cui_ctx *ui, int f) {
+    /* April's column, to show the hover band and its value chip */
+    if (f < 0) { hover_id(ui, cui_make_id(ui, "b") ^ 0x9107u, -f - 1, 40, 0.56f, 0.7f); return; }
+    frame_wrap(ui, body_bar_chart);
+}
+static void body_bar_chart(cui_ctx *ui) {
     static const float a[] = { 42, 51, 38, 64, 58, 71 }, b[] = { 28, 33, 30, 41, 46, 49 };
     static const char *m[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun" };
     cui_series s[2] = { { "Desktop", a, 6, { 0 } }, { "Mobile", b, 6, { 0 } } };

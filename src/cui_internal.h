@@ -684,6 +684,8 @@ const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v);
 void cui__paint_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n, cui_rect plot, double x0, double x1,
                             double y0, double y1, float label_top, bool gutter);
 cui_chart_annotation *cui__copy_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n);
+/* a dashed hairline from x0 to x1 at y: `dash` points drawn every `period` (cui_instrument.c) */
+void cui__draw_hdash(cui_ctx *ui, float x0, float x1, float y, float dash, float period, cui_color c);
 void cui__scroll_end_ex(cui_ctx *ui);
 cui_color cui__backdrop(cui_ctx *ui);
 

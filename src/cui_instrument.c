@@ -72,8 +72,8 @@ static void cui__ins_draw_axis(cui_ctx *ui, const cui__ins_axis *a, float px, fl
 /* Annotations, shared by every chart that takes them                       */
 /* ======================================================================== */
 
-static void cui__ann_dashes(cui_ctx *ui, float x0, float x1, float y, cui_color c) {
-    for (float x = x0; x < x1; x += 6) cui_draw_rect(ui, (cui_rect){ x, y, CUI_MIN(3.0f, x1 - x), 1 }, CUI_CORNERS(0), c);
+void cui__draw_hdash(cui_ctx *ui, float x0, float x1, float y, float dash, float period, cui_color c) {
+    for (float x = x0; x < x1; x += period) cui_draw_rect(ui, (cui_rect){ x, y, CUI_MIN(dash, x1 - x), 1 }, CUI_CORNERS(0), c);
 }
 
 /* Draws `a` over `plot`, mapping x from x0..x1 and values from y0..y1. Labels of vertical
@@ -124,7 +124,7 @@ void cui__paint_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n, c
         if (an->kind == CUI_ANNOTATION_Y) {
             if (an->y < y0 || an->y > y1) continue;
             float yy = floorf(plot.y + plot.h - (float)((an->y - y0) / (y1 - y0)) * plot.h) + 0.5f;
-            cui__ann_dashes(ui, plot.x, plot.x + plot.w, yy - 0.5f, an->accent ? em : CUI_C(ui, BORDER_STRONG));
+            cui__draw_hdash(ui, plot.x, plot.x + plot.w, yy - 0.5f, 3, 6, an->accent ? em : CUI_C(ui, BORDER_STRONG));
             continue;
         }
         if (an->x < x0 || an->x > x1) continue;
