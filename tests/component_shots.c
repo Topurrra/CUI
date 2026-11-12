@@ -1539,6 +1539,32 @@ SCENE(markdown_vault) {
             "Blocked on [[Build farm]] and the [[Signing#Certificates|signing certificates]]; see also ![[roadmap.png]].\n");
     }
 }
+/* callouts: > [!type] Title, one foldable and collapsed, one open with markdown inside */
+SCENE(markdown_callouts) {
+    cui_box(ui, UPTO(520)) {
+        cui_markdown(ui, "callouts",
+            "> [!abstract] Summary\n"
+            "> Ship the **0.9** release on Friday; the signing change is the only risk.\n"
+            "\n"
+            "> [!info]\n"
+            "> The build farm has `12` agents.\n"
+            "\n"
+            "> [!tip] Faster builds\n"
+            "> - Warm the cache first\n"
+            "> - Pin the toolchain\n"
+            "\n"
+            "> [!important]+ Read before merging\n"
+            "> Release branches are frozen after **Thursday**.\n"
+            "\n"
+            "> [!warning] Certificates expire\n"
+            "> Renew them before the 1st.\n"
+            "\n"
+            "> [!danger]- Rollback steps\n"
+            "> Hidden until opened.\n"
+            "\n"
+            "> A plain quote stays a quote.\n");
+    }
+}
 /* mermaid diagrams in markdown: a flowchart left to right, one top down with edge labels and a
  * decision, and a pie */
 SCENE(mermaid) {
@@ -4533,7 +4559,7 @@ int main(int argc, char **argv) {
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
-        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true },
+        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true },
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },

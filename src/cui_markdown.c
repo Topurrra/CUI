@@ -700,7 +700,7 @@ typedef struct {
     float body;                  /* unscaled body size */
     float u;                     /* spacing unit: body / 13 */
     cui_color fg, fg2, link_c, code_bg, marker_c, rule_c, rail_c;
-    int link_seq, code_seq, table_seq;
+    int link_seq, code_seq, table_seq, callout_seq;
     cui_id leaf_id;              /* id for the next inline block's node (headings: their position) */
     cui_id root_id;
     const md_line *lines;        /* every line of the text, for line numbers */
@@ -1170,6 +1170,139 @@ static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, f
     return j;
 }
 
+/* ---- callouts: > [!type]+- Title ---- */
+
+static char md_lc(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
+static bool md_alnum(char c) { return (c >= '0' && c <= '9') || (md_lc(c) >= 'a' && md_lc(c) <= 'z'); }
+typedef struct { cui_color c; float w, inset; } md_bar_paint;
+static void md_paint_bar(cui_ctx *ui, cui_node *n, void *data) {
+    md_bar_paint *p = data;
+    cui_draw_rect(ui, (cui_rect){ n->rect.x + p->inset * 0.5f, n->rect.y + p->inset, p->w, n->rect.h - p->inset * 2 }, CUI_CORNERS(p->w * 0.5f), p->c);
+}
+
+typedef struct { const char *name; cui_tone tone; const char *icon; } md_callout_kind;
+static const md_callout_kind md_callout_kinds[] = {
+    { "note", CUI_TONE_ACCENT, CUI_ICON_PENCIL },
+    { "abstract", CUI_TONE_TEAL, CUI_ICON_CLIPBOARD }, { "summary", CUI_TONE_TEAL, CUI_ICON_CLIPBOARD }, { "tldr", CUI_TONE_TEAL, CUI_ICON_CLIPBOARD },
+    { "info", CUI_TONE_INFO, CUI_ICON_INFO },
+    { "todo", CUI_TONE_INFO, CUI_ICON_CIRCLE_CHECK },
+    { "tip", CUI_TONE_TEAL, CUI_ICON_ZAP }, { "hint", CUI_TONE_TEAL, CUI_ICON_ZAP },
+    { "important", CUI_TONE_VIOLET, CUI_ICON_SPARKLES },
+    { "success", CUI_TONE_SUCCESS, CUI_ICON_CHECK }, { "check", CUI_TONE_SUCCESS, CUI_ICON_CHECK }, { "done", CUI_TONE_SUCCESS, CUI_ICON_CHECK },
+    { "question", CUI_TONE_WARNING, CUI_ICON_CIRCLE_HELP }, { "help", CUI_TONE_WARNING, CUI_ICON_CIRCLE_HELP }, { "faq", CUI_TONE_WARNING, CUI_ICON_CIRCLE_HELP },
+    { "warning", CUI_TONE_WARNING, CUI_ICON_TRIANGLE_ALERT }, { "caution", CUI_TONE_WARNING, CUI_ICON_TRIANGLE_ALERT },
+    { "attention", CUI_TONE_WARNING, CUI_ICON_TRIANGLE_ALERT },
+    { "failure", CUI_TONE_DANGER, CUI_ICON_X }, { "fail", CUI_TONE_DANGER, CUI_ICON_X }, { "missing", CUI_TONE_DANGER, CUI_ICON_X },
+    { "danger", CUI_TONE_DANGER, CUI_ICON_ZAP }, { "error", CUI_TONE_DANGER, CUI_ICON_ZAP },
+    { "bug", CUI_TONE_DANGER, CUI_ICON_BUG },
+    { "example", CUI_TONE_VIOLET, CUI_ICON_LIST },
+    { "quote", CUI_TONE_NEUTRAL, CUI_ICON_QUOTE }, { "cite", CUI_TONE_NEUTRAL, CUI_ICON_QUOTE },
+};
+
+typedef struct {
+    const char *type; int type_len;
+    char fold;                 /* 0, '+' (open) or '-' (collapsed) */
+    md_line title;
+} md_callout_head;
+
+typedef struct { bool init, open; float hover, focus; } md_callout_state;
+
+/* [!type], [!type]+ or [!type]- then an optional title, as the first line of a quote. */
+static bool md_callout_parse(md_line L, md_callout_head *h) {
+    L = md_trim(L);
+    if (L.len < 4 || L.s[0] != '[' || L.s[1] != '!') return false;
+    int e = 2;
+    while (e < L.len && (md_alnum(L.s[e]) || L.s[e] == '-' || L.s[e] == '_')) e++;
+    if (e == 2 || e >= L.len || L.s[e] != ']') return false;
+    h->type = L.s + 2; h->type_len = e - 2;
+    h->fold = 0;
+    e++;
+    if (e < L.len && (L.s[e] == '+' || L.s[e] == '-')) h->fold = L.s[e++];
+    h->title = md_trim(md_skip(L, e));
+    return true;
+}
+
+static void md_callout(md_ctx *c, const md_box *b, const md_line *sub, int count, const md_callout_head *h, float *nat) {
+    cui_ctx *ui = c->ui;
+    const md_callout_kind *kind = &md_callout_kinds[0];   /* unknown types are notes */
+    for (int k = 0; k < CUI_COUNTOF(md_callout_kinds); k++) {
+        const char *nm = md_callout_kinds[k].name;
+        if ((int)strlen(nm) != h->type_len) continue;
+        bool same = true;
+        for (int q = 0; q < h->type_len && same; q++) same = md_lc(h->type[q]) == nm[q];
+        if (same) { kind = &md_callout_kinds[k]; break; }
+    }
+    const char *title = NULL;
+    int title_len = h->title.len;
+    if (title_len > 0) title = h->title.s;
+    else {   /* the type name, capitalized */
+        char *t = cui__frame_alloc(ui, (size_t)h->type_len + 1);
+        for (int q = 0; q < h->type_len; q++) t[q] = (char)(q == 0 && md_lc(h->type[q]) >= 'a' ? md_lc(h->type[q]) - 32 : md_lc(h->type[q]));
+        t[h->type_len] = 0;
+        title = t; title_len = h->type_len;
+    }
+    bool dark = ui->mode == CUI_THEME_DARK;
+    cui_color tone, bg;
+    if (c->custom_color) { tone = c->fg; bg = cui_alpha(c->fg, 0.08f); }
+    else {
+        tone = kind->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, TEXT_SECONDARY) : cui__tone_color(ui, kind->tone);
+        bg = cui_mix(CUI_C(ui, SURFACE), kind->tone == CUI_TONE_NEUTRAL ? CUI_C(ui, FOREGROUND) : tone, dark ? 0.11f : 0.07f);
+    }
+    float u = c->u;
+    bool foldable = h->fold != 0;
+    int seq = c->callout_seq++;
+    cui_id hid = cui__hash(&seq, sizeof seq, c->id ^ 0xCA110u);
+    md_callout_state *st = NULL;
+    cui_interact r = { 0 };
+    if (foldable) {
+        r = cui__interact(ui, hid, CUI_IF_FOCUSABLE);
+        st = cui_state(ui, hid, sizeof *st);
+        if (!st->init) { st->init = true; st->open = h->fold == '+'; }
+        if (r.clicked) st->open = !st->open;
+        cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+        if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    }
+    bool open = !foldable || st->open;
+    float padx = 14 * u, pady = 10 * u;
+    int box = cui__node_new(ui, 0);
+    cui_node *bn = &ui->nodes[box];
+    bn->w = CUI_FILL;
+    bn->pad[0] = pady; bn->pad[2] = pady; bn->pad[1] = padx; bn->pad[3] = padx + 3 * u;
+    bn->radius = CUI_CORNERS(ui->theme.radius_control);
+    bn->bg = bg;
+    md_bar_paint *bar = cui__frame_alloc(ui, sizeof *bar);
+    bar->c = cui_alpha(tone, 0.85f); bar->w = 3 * u; bar->inset = ui->theme.radius_control * 0.55f;
+    bn->paint = md_paint_bar;
+    bn->paint_data = bar;
+    cui__open(ui, box);
+    md_font f = md_body(c);
+    int row = cui__node_new(ui, foldable ? hid : 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->gap = 8 * u; rn->w = CUI_FILL;
+    cui__open(ui, row);
+    cui__icon_node(ui, kind->icon, f.size * 1.15f, tone);
+    int tn = cui__text_node(ui, title, title_len, CUI_FONT_MEDIUM, f.size, tone, true);
+    ui->nodes[tn].line_height = 1.5f;
+    ui->nodes[tn].w = CUI_FILL;
+    if (foldable) {
+        cui__chevron_node(ui, open ? 0.0f : -1.5708f, f.size * 1.2f, cui_alpha(tone, 0.6f + 0.4f * st->hover));
+    }
+    cui__close(ui);
+    if (foldable) {
+        cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
+        if (st->focus > 0.01f) cui__focus_ring(ui, row, st->focus);
+    }
+    float w = 0;
+    if (open && count > 1) {
+        md_space(c, 2 * u);
+        md_box cb = { b->w - padx * 2 - 3 * u, b->depth + 1, false, c->fg };
+        w = md_blocks(c, sub + 1, count - 1, &cb);
+    }
+    cui__close(ui);
+    if (nat) *nat = w + padx * 2 + 3 * u;
+}
+
 static int md_quote(md_ctx *c, const md_box *b, const md_line *L, int n, int i, float *nat) {
     cui_ctx *ui = c->ui;
     md_line *sub = cui__frame_alloc(ui, sizeof(md_line) * (size_t)(n - i));
@@ -1187,6 +1320,11 @@ static int md_quote(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
             sub[count++] = L[j];   /* lazy continuation of a quoted paragraph */
         } else break;
         j++;
+    }
+    md_callout_head ch;
+    if (count > 0 && md_callout_parse(sub[0], &ch)) {
+        md_callout(c, b, sub, count, &ch, nat);
+        return j;
     }
     float u = c->u;
     int q = cui__node_new(ui, 0);

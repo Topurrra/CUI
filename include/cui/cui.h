@@ -1528,7 +1528,8 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * direction, the usual node shapes, link styles and labels, chains, &,
  * subgraphs) laid out like cui_graph_view, pie charts (a donut chart) and
  * gantt charts with dateFormat YYYY-MM-DD (a read only cui_gantt); other
- * diagrams and text that does not parse stay code.
+ * diagrams and text that does not parse stay code. Quotes that start with
+ * [!type] Title are callouts (note, tip, warning...; [!type]- and [!type]+ fold).
  * Everything else (HTML, reference links, footnotes, math) shows as plain
  * text. Containers nest at most 12 deep; deeper content shows as text.
  *

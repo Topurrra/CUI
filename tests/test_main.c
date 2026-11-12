@@ -5846,6 +5846,66 @@ static void test_markdown_vault(void) {
     cui_destroy(ui);
 }
 
+/* callouts: > [!type] Title */
+static float md_height_of(cui_ctx *ui, md_test *m, const char *text) {
+    snprintf(m->text, sizeof m->text, "%s", text);
+    md_frames(ui, m, 40);
+    return md_rect(ui).h;
+}
+static void test_markdown_callouts(void) {
+    printf("markdown: callouts\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    float quote = md_height_of(ui, &m, "> body\n");
+    float note = md_height_of(ui, &m, "> [!note]\n> body\n");
+    CHECK(note > quote + 14);                       /* a title row and a box */
+    CHECK(fabsf(md_height_of(ui, &m, "> [!NOTE] Own title\n> body\n") - note) < 0.5f);
+    CHECK(fabsf(md_height_of(ui, &m, "> [!unknown-kind]\n> body\n") - note) < 0.5f);   /* unknown types are notes */
+    CHECK(fabsf(md_height_of(ui, &m, "> [!tldr]\n> body\n") - md_height_of(ui, &m, "> [!abstract]\n> body\n")) < 0.5f);
+    CHECK(fabsf(md_height_of(ui, &m, "> [!caution]\n> body\n") - md_height_of(ui, &m, "> [!warning]\n> body\n")) < 0.5f);
+    /* not callouts: plain quotes with a bracket, an empty type, a marker that is not on the first line */
+    CHECK(fabsf(md_height_of(ui, &m, "> [!] body\n") - md_height_of(ui, &m, "> body\n")) < 8);
+    CHECK(md_height_of(ui, &m, "> first\n> [!note]\n") < note);
+    CHECK(fabsf(md_height_of(ui, &m, "> a plain quote\n") - quote) < 0.5f);
+    /* foldable: - starts collapsed, + open, a click toggles, a plain callout is not foldable */
+    float closed = md_height_of(ui, &m, "> [!tip]- Title\n> body\n");
+    cui_destroy(ui);
+    ui = new_ctx();   /* the open state is kept per block: a fresh context starts from the marker again */
+    float open = md_height_of(ui, &m, "> [!tip]+ Title\n> body\n");
+    CHECK(closed < open - 10 && closed > 20);
+    cui_destroy(ui);
+    ui = new_ctx();
+    closed = md_height_of(ui, &m, "> [!tip]- Title\n> body\n");
+    cui_rect r = md_rect(ui);
+    click_at(ui, build_md, &m, r.x + 40, r.y + 14);
+    md_frames(ui, &m, 40);
+    CHECK(fabsf(md_rect(ui).h - open) < 0.5f);
+    click_at(ui, build_md, &m, r.x + 40, r.y + 14);
+    md_frames(ui, &m, 40);
+    CHECK(fabsf(md_rect(ui).h - closed) < 0.5f);
+    md_height_of(ui, &m, "> [!tip] Title\n> body\n");
+    r = md_rect(ui);
+    float h0 = r.h;
+    click_at(ui, build_md, &m, r.x + 40, r.y + 14);
+    md_frames(ui, &m, 40);
+    CHECK(fabsf(md_rect(ui).h - h0) < 0.5f);
+    /* markdown inside: headings, tasks and links keep their lines and offsets */
+    snprintf(m.text, sizeof m.text, "intro\n\n> [!info] Title\n> ## Inside\n> - [ ] task\n");
+    md_frames(ui, &m, 40);
+    CHECK(m.res.heading_count == 1 && m.res.headings[0].level == 2 && m.res.headings[0].line == 4);
+    CHECK(m.res.headings[0].text == strstr(m.text, "Inside") && m.res.headings[0].y > 20);
+    r = md_rect(ui);
+    m.toggles = 0;
+    click_at(ui, build_md, &m, r.x + 14 + 3 + 9, r.y + r.h - 10 - 12);
+    CHECK(m.toggles == 1 && m.res.task_line == 5 && m.res.task_offset == (int)(strstr(m.text, "[ ]") - m.text) + 1);
+    /* a collapsed callout lists no headings from inside it; a callout after front matter works */
+    snprintf(m.text, sizeof m.text, "---\nk: v\n---\n> [!bug]- B\n> # Hidden\n\n# Shown\n");
+    md_frames(ui, &m, 40);
+    CHECK(m.res.heading_count == 1 && m.res.headings[0].line == 7);
+    cui_destroy(ui);
+}
+
 static void test_markdown(void) {
     printf("markdown: edge cases, links, tasks, keys, streaming, fuzz\n");
     cui_ctx *ui = new_ctx();
@@ -8020,6 +8080,7 @@ int main(void) {
     test_hex_view();
     test_markdown();
     test_markdown_vault();
+    test_markdown_callouts();
     test_code_editor();
     test_diff();
     test_dials();
