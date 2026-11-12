@@ -44,6 +44,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- Code editor with `.lang = "text"`: lines that start with spaces or a tab were drawn blank. Plain text now splits off leading white space like the other languages.
 - A confirmation popover opened with Enter waits for a separate activation.
 - After Escape leaves a text field in a dialog, the next Escape can close the dialog.
 - A disabled password field's reveal button ignores clicks and is skipped by Tab.

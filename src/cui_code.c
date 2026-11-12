@@ -70,7 +70,14 @@ static bool cui__ident_char(char c) { return cui__ident_start(c) || (c >= '0' &&
 int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
     int count = 0, i = 0;
 #define EMIT(st, ln, k) do { if (count < cap) { out[count].start = (st); out[count].len = (ln); out[count].kind = (uint8_t)(k); count++; } } while (0)
-    if (L->plain) { if (n > 0) EMIT(0, n, TK_TEXT); return count; }
+    if (L->plain) {
+        /* leading white space is its own token, as in the other languages: the
+         * code editor skips white space tokens, and an indented line must not vanish */
+        while (i < n && (s[i] == ' ' || s[i] == '\t')) i++;
+        if (i > 0) EMIT(0, i, TK_TEXT);
+        if (i < n) EMIT(i, n - i, TK_TEXT);
+        return count;
+    }
     while (i < n) {
         if (*in_block) {
             int st = i;
