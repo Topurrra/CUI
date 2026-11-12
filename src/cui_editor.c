@@ -1271,10 +1271,11 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     on->w = o->width.kind ? o->width : CUI_FILL;
     on->h = o->height < 0 ? CUI_FILL : CUI_PX(f.height);
     on->min_h = 80;
-    on->radius = CUI_CORNERS(ui->theme.radius_control);
-    cui_color bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
+    on->radius = CUI_CORNERS(o->borderless ? 0 : ui->theme.radius_control);
+    cui_color bg = o->borderless ? CUI_C(ui, BACKGROUND)
+                 : dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
     on->bg = bg;   /* the code block's surface */
-    on->border = 1;
+    on->border = o->borderless ? 0 : 1;
     cui__tween(ui, &st->focus_t, (ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.gid) ? 1.0f : 0.0f, CUI__T_FOCUS);
     on->border_color = cui_mix(CUI_C(ui, BORDER), cui__edge_on(ui), st->focus_t * 0.7f);
     on->flags |= CUI_NF_CLIP;
@@ -1287,7 +1288,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
         cui_rect cr = { f.gx + CUI__ED_GAP - st->sx + (float)f.caret_col * f.cw, f.br.y + CUI__ED_INSET + (float)((double)f.caret_line * f.lh - st->sy), 1, f.lh };
         ui->platform.set_text_input_rect(ui->platform.user, cr);
     }
-    if (f.focused) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
+    if (f.focused && !o->borderless) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
     cui__close(ui);   /* outer */
     ui->last_id = f.id;
 

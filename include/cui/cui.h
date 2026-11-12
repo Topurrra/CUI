@@ -1602,6 +1602,7 @@ typedef struct cui_code_editor_opts {
     const char *placeholder;   /* shown while the text is empty */
     const cui_text_mark *marks;   /* ranges to highlight (search results, regex matches), sorted by start */
     int mark_count;            /* number of `marks` */
+    bool borderless;           /* no border, corners or focus ring, on the window background: an editor that fills a pane */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
