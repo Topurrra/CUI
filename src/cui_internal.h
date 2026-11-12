@@ -657,6 +657,8 @@ void cui__popup_end(cui_ctx *ui);
 void cui__popup_set(cui_ctx *ui, cui_id id, bool open);
 void cui__close_all_popups(cui_ctx *ui);
 void cui__color_picker_open(cui_ctx *ui, cui_id id, cui_color value);   /* opens cui_color_picker's popover from code */
+/* a dashed rounded rectangle, the dashes continuing round the corners (cui_pickers.c: the dropzone, gantt plans) */
+void cui__draw_dashed_rrect(cui_ctx *ui, cui_rect r, float rad, cui_color c, float th, float dash, float gap);
 typedef struct { int highlight; int item_count; int prev_item_count; bool keyboard; } cui__menu_nav;
 typedef struct { cui_color bg, bg_hover, bg_press, fg, border, border_hover; } cui__btn_colors;
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected);

@@ -2424,24 +2424,33 @@ typedef struct cui_month_result {
 CUI_API cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id, cui_date *month, const cui_month_event *events, int count, const cui_month_opts *opts);
 
 /* Gantt chart: a task list beside a timeline of bars. Drag a bar to move
- * it, its ends to resize it. Dependencies are drawn as elbow arrows.
- * Returns the index of a clicked task, or -1. */
+ * it, its ends to resize it. Bars are colored by state (done, active,
+ * planned) with their progress inside, dependencies are soft curves with
+ * small arrowheads, and today is an accent line. Returns the index of a
+ * clicked task, or -1. */
+typedef enum cui_gantt_state {
+    CUI_GANTT_AUTO = 0,        /* from the progress and today: 1 is done, more than 0 is active; untouched work is planned when it starts after today, else active */
+    CUI_GANTT_DONE,            /* a green bar */
+    CUI_GANTT_ACTIVE,          /* a bar in the first series color */
+    CUI_GANTT_PLANNED          /* a dashed, lightly tinted bar */
+} cui_gantt_state;
 typedef struct cui_gantt_task {
     const char *name;          /* shown in the task list and, when it fits, on the bar */
     const char *owner;         /* a name: shows that person's avatar in the task list; `NULL` for none */
     int start;                 /* day the bar starts, counted from `origin`; dragging the bar changes it */
     int end;                   /* day the bar ends, counted from `origin` (it is end - start days long); dragging changes it */
-    float progress;            /* 0..1: the part of the bar drawn darker, as done */
-    cui_tone tone;
-    int depends_on;            /* index of the task this one waits for: an arrow runs from its end to this start. -1 for none */
-    bool milestone;            /* a diamond at `start` instead of a bar; it cannot be resized */
+    float progress;            /* 0..1: the part of the bar filled in, as done, with the percentage at its end */
+    cui_tone tone;             /* overrides the state's color when set */
+    int depends_on;            /* index of the task this one waits for: a curve runs from its end to this start. -1 for none */
+    bool milestone;            /* an outlined diamond at `start`, labelled with its name and date, instead of a bar; it cannot be resized */
+    cui_gantt_state state;     /* done, active or planned; CUI_GANTT_AUTO works it out from `progress` and `today` */
 } cui_gantt_task;
 typedef struct cui_gantt_opts {
     int _;
     float day_width;           /* points per day, default 30 */
     float row_height;          /* points per task row, default 40 */
     cui_size height;
-    int today;                 /* day to mark as today, counted from `origin`; 0 marks none */
+    int today;                 /* day to mark as today, counted from `origin`, with an accent line and a "Today" chip; 0 marks none */
     bool read_only;
 } cui_gantt_opts;
 CUI_API int cui_gantt_ex(cui_ctx *ui, const char *id, cui_gantt_task *tasks, int count, cui_date origin, int days, const cui_gantt_opts *opts);

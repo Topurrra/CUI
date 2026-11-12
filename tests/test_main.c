@@ -3202,6 +3202,42 @@ static void test_sankey_node_colors(void) {
     cui_destroy(ui);
 }
 
+/* gantt state: a bar takes its state's color; AUTO reads it from progress and today */
+static cui_gantt_task g_gantt_case;
+static void build_gantt_case(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_date org = { 2026, 11, 2 };
+    cui_gantt(ui, "gs", &g_gantt_case, 1, org, 10, .day_width = 30, .today = 2, .read_only = true);
+}
+static void gantt_bar_px(cui_gantt_task t, unsigned char out[3]) {
+    g_gantt_case = t;
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
+    cui_set_viewport(ui, 620, 160, 1);
+    run(ui, build_gantt_case, NULL, 10);
+    cui_rect b = cui_get_rect(ui, cui_make_id(ui, "gs") ^ 0xB0D7u);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = calloc((size_t)dd->width_px * dd->height_px, 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    const unsigned char *q = px + ((int)(b.y + 20) * dd->width_px + (int)(b.x + t.start * 30 + (t.end - t.start) * 30 * 0.8f)) * 4;
+    memcpy(out, q, 3);
+    free(px);
+    cui_destroy(ui);
+}
+static void test_gantt_state(void) {
+    printf("gantt: bars take the color of their state\n");
+    unsigned char done[3], planned[3], auto_done[3], auto_planned[3], auto_active[3];
+    gantt_bar_px((cui_gantt_task){ "", NULL, 4, 8, 0, 0, -1, false, CUI_GANTT_DONE }, done);
+    gantt_bar_px((cui_gantt_task){ "", NULL, 4, 8, 0, 0, -1, false, CUI_GANTT_PLANNED }, planned);
+    gantt_bar_px((cui_gantt_task){ "", NULL, 4, 8, 1, 0, -1, false, CUI_GANTT_AUTO }, auto_done);
+    gantt_bar_px((cui_gantt_task){ "", NULL, 4, 8, 0, 0, -1, false, CUI_GANTT_AUTO }, auto_planned);   /* starts after today */
+    gantt_bar_px((cui_gantt_task){ "", NULL, 1, 8, 0, 0, -1, false, CUI_GANTT_AUTO }, auto_active);    /* started, nothing done */
+    CHECK(done[1] > done[0] + 20 && done[1] > done[2]);                     /* a filled green bar */
+    CHECK(abs(planned[0] - planned[1]) < 6 && abs(planned[1] - planned[2]) < 6 && planned[0] > 200);   /* a light gray tint */
+    CHECK(memcmp(done, auto_done, 3) == 0);
+    CHECK(memcmp(planned, auto_planned, 3) == 0);
+    CHECK(auto_active[2] > auto_active[0]);                                 /* the first series color, blue */
+}
+
 /* draw data and renderer ------------------------------------------------ */
 
 static void build_rect(cui_ctx *ui, void *u) {
@@ -7874,6 +7910,7 @@ int main(void) {
     test_radial_gauge_styles();
     test_treemap_select();
     test_sankey_node_colors();
+    test_gantt_state();
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();

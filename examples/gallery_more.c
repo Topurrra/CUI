@@ -750,15 +750,16 @@ static void page_planning(cui_ctx *ui) {
     int ev = cui_week_calendar(ui, "week", cui_date_from_days(monday), events, (int)(sizeof events / sizeof events[0]), .start_hour = 8, .end_hour = 19, .height = CUI_PX(420));
     if (ev >= 0) cui_toast(ui, events[ev].title, .description = events[ev].detail);
 
-    section(ui, "Gantt", "Drag bars to reschedule, pull either end to change the length. Arrows follow dependencies.");
+    section(ui, "Gantt", "Drag bars to reschedule, pull either end to change the length. Curves follow dependencies.");
     static cui_gantt_task tasks[] = {
-        { "Research", "Maya Okafor", 0, 5, 1, CUI_TONE_TEAL, -1, false },
-        { "Wireframes", "Aiko Tanaka", 4, 10, 1, CUI_TONE_TEAL, 0, false },
-        { "Design system", "Rosa Delgado", 8, 17, 0.7f, CUI_TONE_TEAL, 1, false },
-        { "Core engine", "Jonas Berg", 6, 20, 0.55f, CUI_TONE_INFO, 0, false },
-        { "Platform backends", "Daniel Mensah", 14, 26, 0.2f, CUI_TONE_TEAL, 3, false },
-        { "Beta", NULL, 27, 27, 0, CUI_TONE_WARNING, 4, true },
-        { "Docs and launch", "Priya Nair", 28, 36, 0, CUI_TONE_SUCCESS, 5, false },
+        /* no tones: each bar takes its state's color, worked out from its progress and today */
+        { "Research", "Maya Okafor", 0, 5, 1, 0, -1, false },
+        { "Wireframes", "Aiko Tanaka", 4, 10, 1, 0, 0, false },
+        { "Design system", "Rosa Delgado", 8, 17, 0.7f, 0, 1, false },
+        { "Core engine", "Jonas Berg", 6, 20, 0.55f, 0, 0, false },
+        { "Platform backends", "Daniel Mensah", 14, 26, 0.2f, 0, 3, false },
+        { "Beta", NULL, 27, 27, 0, 0, 4, true },
+        { "Docs and launch", "Priya Nair", 28, 36, 0, 0, 5, false },
     };
     cui_date origin = cui_date_from_days(monday - 7);
     int tk = cui_gantt(ui, "plan", tasks, (int)(sizeof tasks / sizeof tasks[0]), origin, 42, .today = 7 + (td - monday));

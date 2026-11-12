@@ -1735,12 +1735,13 @@ static void body_gantt(cui_ctx *ui);
 static void scene_gantt(cui_ctx *ui, int f) { if (f < 0) return; frame_wrap(ui, body_gantt); }
 static void body_gantt(cui_ctx *ui) {
     static cui_gantt_task tasks[] = {
-        { "Research", "Maya Okafor", 0, 5, 1, CUI_TONE_TEAL, -1, false },
-        { "Wireframes", "Aiko Tanaka", 4, 10, 1, CUI_TONE_TEAL, 0, false },
-        { "Design system", "Rosa Delgado", 8, 16, 0.7f, CUI_TONE_TEAL, 1, false },
-        { "Core engine", "Jonas Berg", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
-        { "Beta", NULL, 21, 21, 0, CUI_TONE_WARNING, 3, true },
-        { "Launch", "Priya Nair", 22, 27, 0, CUI_TONE_SUCCESS, 4, false },
+        /* no tones: the bars take their state's color (done, active, planned) from progress and today */
+        { "Research", "Maya Okafor", 0, 5, 1, 0, -1, false },
+        { "Wireframes", "Aiko Tanaka", 4, 10, 1, 0, 0, false },
+        { "Design system", "Rosa Delgado", 8, 16, 0.7f, 0, 1, false },
+        { "Core engine", "Jonas Berg", 6, 19, 0.55f, 0, 0, false },
+        { "Beta", NULL, 21, 21, 0, 0, 3, true },
+        { "Launch", "Priya Nair", 22, 27, 0, 0, 4, false },
     };
     cui_date org = { 2026, 10, 26 };
     cui_gantt(ui, "plan", tasks, 6, org, 27, .day_width = 26.3f, .today = 10);   /* the range fits the frame: no date cut at the edge */

@@ -1599,15 +1599,16 @@ A task list on the left and a timeline that scrolls sideways, with months, day n
 
 ```c
 static cui_gantt_task tasks[] = {
-    /* name, owner, start day, end day, progress, tone, depends on, milestone */
-    { "Research", "Maya Okafor", 0, 5, 1.0f, CUI_TONE_VIOLET, -1, false },
-    { "Core engine", "Jonas Berg", 6, 19, 0.55f, CUI_TONE_INFO, 0, false },
-    { "Beta", NULL, 21, 21, 0, CUI_TONE_WARNING, 1, true },
+    /* name, owner, start day, end day, progress, tone, depends on, milestone, state */
+    { "Research", "Maya Okafor", 0, 5, 1.0f, 0, -1, false },               /* done: its progress is 1 */
+    { "Core engine", "Jonas Berg", 6, 19, 0.55f, 0, 0, false },            /* active */
+    { "Beta", NULL, 21, 21, 0, 0, 1, true },                               /* a milestone */
+    { "Launch", "Priya Nair", 22, 27, 0, 0, 2, false, CUI_GANTT_PLANNED },
 };
-int clicked = cui_gantt(ui, "plan", tasks, 3, start_date, 28, .today = 10);
+int clicked = cui_gantt(ui, "plan", tasks, 4, start_date, 28, .today = 10);
 ```
 
-Drag a bar to reschedule it, or drag either end to change its length. The darker part of a bar is its progress. Dependencies draw as elbow arrows and milestones as diamonds. A focused bar moves a day with the arrow keys and changes its length with Shift and the arrows.
+Drag a bar to reschedule it, or drag either end to change its length. Bars are colored by `state`: done in green, active in the first series color, planned in a neutral tint with a dashed edge. `CUI_GANTT_AUTO`, the default, works the state out: a progress of 1 is done, any progress is active, and untouched work is planned when it starts after `today` and active once that day has come. A task's `tone`, when set, replaces the state's color. The filled part of a bar is its progress, with the percentage at the bar's end when the name leaves room for it. Dependencies are soft curves with small arrowheads, running behind the bars; when a task starts before the one it waits for ends, the curve leaves from that bar's edge. A milestone is an outlined diamond labelled with its name and date. `today` draws an accent line over the rows with a small "Today" chip in the header, and weekends are lightly shaded. A focused bar moves a day with the arrow keys and changes its length with Shift and the arrows.
 
 ### Node editor
 
