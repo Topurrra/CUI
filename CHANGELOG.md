@@ -11,16 +11,16 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
-- Steppers with repeated captions adapt independently to the width of their own rows.
-- Pagination uses its parent's inner width to choose the compact layout, including in unnamed boxes.
-- Breadcrumb links and numbered page buttons show a focus ring when reached by keyboard.
-- The range slider supports adjusting either thumb with the keyboard and shows which thumb has focus.
-- Each arrow press in a toggle group moves focus by one item.
-- The first tooltip waits for a full hover, and an idle window shows it at the requested wakeup.
-- Timed toasts expire on schedule after idle, and their actions stop accepting input once dismissal begins.
-- A disabled password field's reveal button ignores clicks and is skipped by Tab.
-- After Escape leaves a text field in a dialog, the next Escape can close the dialog.
 - A confirmation popover opened with Enter waits for a separate activation.
+- After Escape leaves a text field in a dialog, the next Escape can close the dialog.
+- A disabled password field's reveal button ignores clicks and is skipped by Tab.
+- Timed toasts expire on schedule after idle, and their actions stop accepting input once dismissal begins.
+- The first tooltip waits for a full hover, and an idle window shows it at the requested wakeup.
+- Each arrow press in a toggle group moves focus by one item.
+- The range slider supports adjusting either thumb with the keyboard and shows which thumb has focus.
+- Breadcrumb links and numbered page buttons show a focus ring when reached by keyboard.
+- Pagination uses its parent's inner width to choose the compact layout, including in unnamed boxes.
+- Steppers with repeated captions adapt independently to the width of their own rows.
 - macOS: Quit from the app menu (Cmd-Q), the Dock or AppleScript ended the process from inside the event loop, so nothing after `cui_app_run` ran: no cleanup, no saving, and libraries that check their resources at exit could crash. It now ends `cui_app_run` (or makes `cui_app_frame` return false) as closing the window does, at once even when the app is idle ([#29](https://github.com/yappologistic/CUI/issues/29)).
 - Nav items: when no item of a group was selected, the highlight stayed on the item selected before, and the next selection glided over from there. The highlight now goes away, and the next selection appears in place ([#35](https://github.com/yappologistic/CUI/issues/35)).
 

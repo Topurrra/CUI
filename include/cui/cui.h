@@ -625,7 +625,7 @@ typedef struct cui_input_opts {
     const char *icon;          /* leading icon */
     const char *hint;          /* helper text below */
     const char *error;         /* error text below (red) */
-    bool password;             /* shows dots and a reveal button that honors disabled */
+    bool password;             /* shows dots instead of the text, with an eye button that reveals it (inactive when disabled) */
     bool disabled;
     bool clearable;            /* x button when not empty */
     bool autofocus;
@@ -697,12 +697,13 @@ typedef struct cui_nav_opts {
 } cui_nav_opts;
 CUI_API bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *opts);
 CUI_API void cui_nav_section(cui_ctx *ui, const char *title);
-/* Process steps that collapse labels to fit the width of their own row. */
 
-/* Ancestor links show keyboard focus. Returns the activated index or -1. */
+/* Ancestor links, which show keyboard focus. Returns the clicked index or -1. */
 CUI_API int cui_breadcrumb(cui_ctx *ui, const char *const *items, int count);
-/* Page buttons show keyboard focus. The current page is zero-based. */
+/* Page buttons, which show keyboard focus; page is 0 based. The compact layout is
+ * chosen from the parent's inner width. */
 CUI_API bool cui_pagination(cui_ctx *ui, const char *id, int *page, int page_count);
+/* Process steps; labels collapse to fit the width of their own row. */
 CUI_API void cui_stepper(cui_ctx *ui, const char *const *steps, int count, int current);
 
 /* ------------------------------------------------------------------------ */
@@ -782,7 +783,8 @@ CUI_API bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_ite
 CUI_API void cui_menu_separator(cui_ctx *ui);
 CUI_API void cui_menu_label(cui_ctx *ui, const char *text);
 
-/* Tooltip for the previous component, shown after a short hover delay. */
+/* Tooltip for the previous component. The first hover waits for the delay,
+ * measured in elapsed time even when the app sleeps between frames. */
 CUI_API void cui_tooltip(cui_ctx *ui, const char *text);
 
 /* ------------------------------------------------------------------------ */
