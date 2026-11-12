@@ -816,10 +816,14 @@ static int cui__gr_resort(cui_gradient_stop *s, int n, int i) {
 typedef struct { cui_gradient_stop *stops; int n; cui_color light, dark, edge; bool alpha; } cui__gr_ramp_paint;
 
 /* A checkerboard inside a rounded rectangle: cells are cut to the shape's
- * two bands, so nothing shows past the rounded corners. */
+ * two bands, so nothing shows past the rounded corners. A pill has no second
+ * band; there the cells in each round end are cut to the circle instead. */
 void cui__draw_checker(cui_ctx *ui, cui_rect r, float rad, float cell, cui_color light, cui_color dark) {
     cui_draw_rect(ui, r, CUI_CORNERS(rad), light);
     cui_rect band[2] = { { r.x + rad, r.y, r.w - 2 * rad, r.h }, { r.x, r.y + rad, r.w, r.h - 2 * rad } };
+    bool pill = r.h - 2 * rad < 0.5f;
+    cui_rect ends[2] = { { r.x, r.y, rad, r.h }, { r.x + r.w - rad, r.y, rad, r.h } };
+    float cy = r.y + r.h * 0.5f;
     int cols = (int)ceilf(r.w / cell), rows = (int)ceilf(r.h / cell);
     for (int y = 0; y < rows; y++)
         for (int x = (y & 1); x < cols; x += 2) {
@@ -828,6 +832,16 @@ void cui__draw_checker(cui_ctx *ui, cui_rect r, float rad, float cell, cui_color
             for (int b = 0; b < 2; b++) {
                 cui_rect q = cui__rect_intersect(c, band[b]);
                 if (q.w > 0 && q.h > 0) cui_draw_rect(ui, q, CUI_CORNERS(0), dark);
+            }
+            for (int e = 0; pill && e < 2; e++) {
+                cui_rect q = cui__rect_intersect(c, ends[e]);
+                for (float sx = q.x; sx < q.x + q.w - 0.01f; sx += 1.0f) {   /* one point wide slices follow the curve */
+                    float sw = CUI_MIN(1.0f, q.x + q.w - sx);
+                    float dx = e == 0 ? r.x + rad - sx : sx + sw - (r.x + r.w - rad);   /* the slice's outer edge from the circle's center */
+                    float hh = sqrtf(CUI_MAX(0.0f, rad * rad - dx * dx));
+                    cui_rect sl = cui__rect_intersect((cui_rect){ sx, q.y, sw, q.h }, (cui_rect){ sx, cy - hh, sw, 2 * hh });
+                    if (sl.w > 0 && sl.h > 0) cui_draw_rect(ui, sl, CUI_CORNERS(0), dark);
+                }
             }
         }
 }

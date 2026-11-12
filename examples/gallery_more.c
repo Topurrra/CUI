@@ -1639,6 +1639,77 @@ static void page_instruments(cui_ctx *ui) {
     cui_dot_display(ui, bed > 50 ? "OVER THE LINE AT BEDTIME" : "UNDER THE LINE AT BEDTIME", .pitch = 3, .accent = bed > 50);
 }
 
+/* ---- creative controls ----------------------------------------------- */
+
+static void page_creative(cui_ctx *ui) {
+    static const char *const tag_names[] = { "Pending", "In progress", "Submitted", "In review", "Success", "Failed", "Expired" };
+    static bool tag_gone[7];
+    static float coffee = 0.37f, train = 0.8f;
+    static float hue = 190, kelvin = 5600, opacity = 0.72f;
+    static bool picking;
+    static int variations = 3, generated = 0;
+    static cui_color palette[5] = { CUI_RGB(0xeef0f5), CUI_RGB(0x5c6370), CUI_RGB(0x37c6d0), CUI_RGB(0x1f3a5f), CUI_RGB(0xf2bd68) };
+    static bool locked[5];
+    static uint32_t palette_seed = 7;
+    static int aspect = 1, background = 0, format = 0, saved_as = -1;
+    static uint32_t seed = 1234567890u;
+    static bool seed_fixed;
+
+    section(ui, "Status tag", "An icon, a label and a tinted fill for each state. Click a small tag to remove it.");
+    cui_row(ui, .gap = 8, .wrap = true) {
+        for (int k = 0; k < 7; k++) cui_status_tag(ui, tag_names[k], (cui_tag_status)k);
+    }
+    cui_row(ui, .gap = 6, .wrap = true, .align = CUI_ALIGN_CENTER) {
+        bool any = false;
+        for (int k = 0; k < 7; k++) {
+            if (tag_gone[k]) continue;
+            any = true;
+            if (cui_status_tag(ui, tag_names[k], (cui_tag_status)k, .size = CUI_SIZE_SM, .removable = true)) tag_gone[k] = true;
+        }
+        if (!any && cui_button(ui, "Bring them back", .size = CUI_SIZE_SM, .variant = CUI_BUTTON_GHOST)) memset(tag_gone, 0, sizeof tag_gone);
+    }
+
+    section(ui, "Ratio slider", "Two named parts with a bar between them. Drag it or use the arrow keys (Shift for steps of ten).");
+    cui_column(ui, .gap = 12, .width = CUI_FILL) {
+        cui_ratio_slider(ui, "COFFEE", "MILK", &coffee, .tone = CUI_TONE_WARNING);
+        cui_ratio_slider(ui, "TRAIN", "TEST", &train, .tone = CUI_TONE_INFO);
+    }
+
+    section(ui, "Gradient and step sliders", "The track is the value: a hue, a white balance, an opacity. Step sliders snap to a few stops.");
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 12, .width = CUI_FILL) {
+        cui_gradient_slider(ui, "Hue", &hue, 0, 360, .swatch = true);
+        if (cui_gradient_slider(ui, "White balance", &kelvin, 2500, 10000, .track = CUI_GRADIENT_TEMPERATURE, .step = 100,
+                                .tool = CUI_ICON_TARGET, .tool_tooltip = "Pick from image", .tool_on = picking) & CUI_WELL_ACTION)
+            picking = !picking;
+        cui_gradient_slider(ui, "Opacity", &opacity, 0, 1, .track = CUI_GRADIENT_OPACITY, .color = CUI_RGB(0x2bb8a6));
+        char made[48];
+        snprintf(made, sizeof made, "%d \xc2\xb7 generated %d times", variations, generated);
+        if (cui_step_slider(ui, "Variations", &variations, 1, 4, .tool = CUI_ICON_REFRESH_CW, .tool_tooltip = "Generate",
+                            .value = generated ? made : NULL) & CUI_WELL_ACTION)
+            generated++;
+    }
+
+    section(ui, "Palette strip", "Click a swatch to lock it, then shuffle the rest.");
+    cui_palette_strip(ui, "Color palette", palette, locked, 5, .seed = &palette_seed, .value = "Click a swatch to lock it");
+
+    section(ui, "Aspect ratio, options and seed", "Each ratio drawn as its own shape, a choice with the action it feeds, and a seed that rolls.");
+    cui_column(ui, .gap = 12, .width = CUI_FILL) {
+        cui_aspect_picker(ui, "Aspect ratio", &aspect, .custom = true);
+        cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 12, .width = CUI_FILL) {
+            static const char *const bg[] = { "hidden", "visible" };
+            static const char *const fmt[] = { "png", "jpg", "webp" };
+            static const char *const sizes[] = { "2.4 MB", "640 KB", "410 KB" };
+            cui_option_action(ui, "Background", bg, 2, &background, CUI_ICON_SCISSORS, .tooltip = "Cut out", .value = "erase");
+            char saved[32];
+            snprintf(saved, sizeof saved, "saved, %s", sizes[format]);
+            if (cui_option_action(ui, "Save as", fmt, 3, &format, CUI_ICON_DOWNLOAD, .tooltip = "Download",
+                                  .value = saved_as == format ? saved : sizes[format]) & CUI_WELL_ACTION)
+                saved_as = format;
+        }
+        cui_seed_field(ui, "Seed", &seed, &seed_fixed, .value = seed_fixed ? "Same image every run" : "Random each run");
+    }
+}
+
 /* ---- registry ------------------------------------------------------------ */
 
 typedef struct { const char *name, *icon; void (*fn)(cui_ctx *ui); } more_page;
@@ -1662,6 +1733,7 @@ static const more_page pages[] = {
     { "Developer tools", CUI_ICON_SQUARE_TERMINAL, page_devtools },
     { "More developer tools", CUI_ICON_BUG, page_devtools2 },
     { "Instruments", CUI_ICON_CHART_LINE, page_instruments },
+    { "Creative controls", CUI_ICON_PALETTE, page_creative },
 };
 
 int gallery_more_count(void) { return (int)(sizeof pages / sizeof pages[0]); }

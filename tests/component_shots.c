@@ -3513,6 +3513,113 @@ SCENE(dot_display) {
     }
 }
 
+/* ---- creative controls ---- */
+static const char *const cc_tag_names[] = { "Pending", "In progress", "Submitted", "In review", "Success", "Failed", "Expired" };
+static bool cc_tag_gone[7];
+static void body_status_tag(cui_ctx *ui) {
+    cui_column(ui, .gap = 18, UPTO(560), .align = CUI_ALIGN_CENTER) {
+        cui_row(ui, .gap = 8, .wrap = true, .justify = CUI_JUSTIFY_CENTER) {
+            for (int k = 0; k < 7; k++) cui_status_tag(ui, cc_tag_names[k], (cui_tag_status)k);
+        }
+        cui_column(ui, .width = CUI_FILL, .bg = CUI_COLOR_SURFACE, .border = 1, .radius = 14, .clip = true) {
+            cui_row(ui, .width = CUI_FILL, .pad_x = 14, .pad_y = 10, .gap = 8, .align = CUI_ALIGN_CENTER, .bg = CUI_COLOR_SURFACE_MUTED, .radius_tl = 14, .radius_tr = 14) {
+                cui_icon(ui, CUI_ICON_TAG, 16, CUI_COLOR_TEXT_SECONDARY);
+                cui_text(ui, "Tags", .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_spacer(ui);
+                cui_text(ui, "small, removable", .size = 12, .color = CUI_COLOR_TEXT_MUTED);
+            }
+            cui_separator(ui);
+            cui_row(ui, .width = CUI_FILL, .pad = 14, .gap = 6, .wrap = true) {
+                for (int k = 0; k < 7; k++)
+                    if (!cc_tag_gone[k] && cui_status_tag(ui, cc_tag_names[k], (cui_tag_status)k, .size = CUI_SIZE_SM, .removable = true, .id = cc_tag_names[k] + 0))
+                        cc_tag_gone[k] = true;
+            }
+        }
+    }
+}
+/* the pointer rests on the removable "Submitted" tag, so its x shows */
+static void scene_status_tag(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "Submitted"));
+        if (-f - 1 == 3 && r.w > 0) cui_input_mouse_move(ui, r.x + r.w * 0.5f, r.y + r.h * 0.5f);
+        return;
+    }
+    frame_wrap(ui, body_status_tag);
+}
+
+static float cc_coffee = 0.37f, cc_train = 0.8f;
+SCENE(ratio_slider) {
+    cui_column(ui, .gap = 14, UPTO(560)) {
+        cui_ratio_slider(ui, "COFFEE", "MILK", &cc_coffee, .tone = CUI_TONE_WARNING);
+        cui_ratio_slider(ui, "TRAIN", "TEST", &cc_train, .tone = CUI_TONE_INFO);
+    }
+}
+
+static float cc_hue = 190, cc_kelvin = 5600, cc_opacity = 0.72f;
+static int cc_variations = 3, cc_quality = 1;
+static bool cc_picking;
+SCENE(gradient_slider) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 250, .gap = 12, UPTO(620)) {
+        cui_gradient_slider(ui, "Hue", &cc_hue, 0, 360, .swatch = true);
+        if (cui_gradient_slider(ui, "White balance", &cc_kelvin, 2500, 10000, .track = CUI_GRADIENT_TEMPERATURE, .step = 100,
+                                .tool = CUI_ICON_TARGET, .tool_tooltip = "Pick from image", .tool_on = cc_picking) & CUI_WELL_ACTION)
+            cc_picking = !cc_picking;
+        cui_gradient_slider(ui, "Opacity", &cc_opacity, 0, 1, .track = CUI_GRADIENT_OPACITY, .color = CUI_RGB(0x2bb8a6));   /* the brush color */
+    }
+}
+SCENE(step_slider) {
+    static const char *const quality[] = { "Draft", "Good", "Best" };
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 250, .gap = 12, UPTO(620)) {
+        cui_step_slider(ui, "Variations", &cc_variations, 1, 4, .tool = CUI_ICON_REFRESH_CW, .tool_tooltip = "Generate");
+        cui_step_slider(ui, "Quality", &cc_quality, 0, 2, .labels = quality);
+    }
+}
+
+static cui_color cc_palette[5] = { CUI_RGB(0xeef0f5), CUI_RGB(0x5c6370), CUI_RGB(0x37c6d0), CUI_RGB(0x1f3a5f), CUI_RGB(0xf2bd68) };
+static bool cc_locked[5] = { false, true, false, true, false };
+static uint32_t cc_palette_seed = 7;
+static void body_palette_strip(cui_ctx *ui) {
+    cui_column(ui, UPTO(620)) {
+        cui_palette_strip(ui, "Color palette", cc_palette, cc_locked, 5, .seed = &cc_palette_seed, .value = "Click a swatch to lock it");
+    }
+}
+/* the pointer rests on the third swatch, so it widens and shows its code */
+static void scene_palette_strip(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, cui_make_id(ui, "Color palette"));
+        if (-f - 1 == 3 && r.w > 0) cui_input_mouse_move(ui, r.x + 14 + (r.w - 14 - 12 - 40) * 0.5f, r.y + r.h - 28);
+        return;
+    }
+    frame_wrap(ui, body_palette_strip);
+}
+
+static int cc_aspect = 1;
+SCENE(aspect_picker) {
+    cui_column(ui, UPTO(620)) {
+        cui_aspect_picker(ui, "Aspect ratio", &cc_aspect, .custom = true);
+    }
+}
+
+static int cc_background = 0, cc_format = 0;
+SCENE(option_action) {
+    static const char *const bg[] = { "hidden", "visible" };
+    static const char *const fmt[] = { "png", "jpg", "webp" };
+    static const char *const sizes[] = { "2.4 MB", "640 KB", "410 KB" };
+    cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 250, .gap = 12, UPTO(620)) {
+        cui_option_action(ui, "Background", bg, 2, &cc_background, CUI_ICON_SCISSORS, .tooltip = "Cut out", .value = "erase");
+        cui_option_action(ui, "Save as", fmt, 3, &cc_format, CUI_ICON_DOWNLOAD, .tooltip = "Download", .value = sizes[cc_format]);
+    }
+}
+
+static uint32_t cc_seed = 1234567890u, cc_seed2 = 3141592653u;
+static bool cc_seed_fixed = false, cc_seed2_fixed = true;
+SCENE(seed_field) {
+    cui_column(ui, .gap = 12, UPTO(620)) {
+        cui_seed_field(ui, "Seed", &cc_seed, &cc_seed_fixed, .value = cc_seed_fixed ? "Same image every run" : "Random each run");
+        cui_seed_field(ui, "Noise seed", &cc_seed2, &cc_seed2_fixed, .value = cc_seed2_fixed ? "Same image every run" : "Random each run");
+    }
+}
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -4027,6 +4134,10 @@ int main(int argc, char **argv) {
         { "dot-display", scene_dot_display, 420, 200, true, false, CUI_ACCENT_BLUE },
         { "tw-studio", scene_tw_studio, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-audio", scene_tw_audio, 960, 540, true, false, CUI_ACCENT_NEUTRAL },
         { "tw-markets", scene_tw_markets, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-calendar", scene_tw_calendar, 1200, 675, true, false, CUI_ACCENT_NEUTRAL },
+        { "status-tag", scene_status_tag, 620, 270, true }, { "ratio-slider", scene_ratio_slider, 620, 180, true },
+        { "gradient-slider", scene_gradient_slider, 680, 250, true }, { "step-slider", scene_step_slider, 680, 150, true },
+        { "palette-strip", scene_palette_strip, 680, 150, true }, { "aspect-picker", scene_aspect_picker, 680, 160, true },
+        { "option-action", scene_option_action, 680, 150, true }, { "seed-field", scene_seed_field, 680, 240, true },
     };
     cui_sw_renderer *sw = cui_sw_create();
     if (argc <= 2 || strcmp(argv[2], "button-states") == 0) { render_states(dir, false, sw); render_states(dir, true, sw); }

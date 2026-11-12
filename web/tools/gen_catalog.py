@@ -313,8 +313,9 @@ MORE_CAT = {
     "Planning": "planning", "More charts": "charts", "Motion": "motion", "AI interfaces": "ai",
     "App chrome": "navigation",
     "Tool panels": "data", "Developer tools": "devtools", "Instruments": "instruments",
+    "Creative controls": "selection",
 }
-ITEM_CAT = {"Table of contents": "navigation"}
+ITEM_CAT = {"Table of contents": "navigation", "Status tag": "feedback"}
 # sections whose docs have no screenshot: the scene that shows them
 NO_IMAGE = {
     "Text": ["text"], "Icon button": ["icon-button"], "Color picker": ["color-picker"], "Popover": ["popover"],
