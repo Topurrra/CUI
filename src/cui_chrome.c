@@ -41,8 +41,7 @@ static int cui__bar_row(cui_ctx *ui, cui_id id, float pad_y, float pad_x, bool e
     return row;
 }
 
-/* true when an open popup sits above the layer being built, so the keys are its */
-static bool cui__keys_covered(cui_ctx *ui) {
+bool cui__keys_covered(cui_ctx *ui) {
     int my_z = 0;
     for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].id == ui->current_layer) my_z = ui->popups[i].z;
     for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open && ui->popups[i].z > my_z) return true;
