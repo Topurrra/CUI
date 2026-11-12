@@ -1314,6 +1314,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     if (!id_str) id_str = "markdown";
     int len = o->length > 0 ? o->length : (int)strlen(text);
     cui_id id = cui_make_id(ui, id_str);
+    cui__emoji_text_on(ui);   /* notes and chat are full of emoji */
 
     md_ctx c;
     memset(&c, 0, sizeof c);

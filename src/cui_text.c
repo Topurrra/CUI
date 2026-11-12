@@ -385,7 +385,18 @@ typedef struct {
     float center_off;/* tabular centering offset */
     int start, end;  /* byte range */
     float track;     /* extra advance per glyph (points) */
+    bool emoji;      /* a color emoji from the emoji font, start to end */
 } cui__glyph_iter;
+
+/* emoji in text: the advance and the drawn square, in em */
+#define CUI__EMOJI_ADV 1.22f
+#define CUI__EMOJI_SIDE 1.1f
+
+/* a variation selector FE0F or a keycap 20E3 follows: the emoji font may draw the pair */
+static bool cui__emoji_follows(const char *s, int n) {
+    const unsigned char *u = (const unsigned char *)s;
+    return n >= 3 && ((u[0] == 0xEF && u[1] == 0xB8 && u[2] == 0x8F) || (u[0] == 0xE2 && u[1] == 0x83 && u[2] == 0xA3));
+}
 
 static void cui__iter_init(cui__glyph_iter *it, cui_ctx *ui, cui_font font, float size, const char *s, int len, bool tab) {
     memset(it, 0, sizeof *it);
@@ -405,6 +416,20 @@ static bool cui__iter_next(cui__glyph_iter *it) {
     cui_font gf; int gi;
     cui__find_glyph(ui, it->font, cp, &gf, &gi);
     if (gf < 0) return false;
+    it->emoji = false;
+    if (ui->emoji_text && cp > ' ' && (!gi || cui__emoji_follows(it->s + it->pos, it->len - it->pos))) {
+        int m = ui->emoji_text(ui, it->s + it->start, it->len - it->start, NULL, 0);
+        if (m > 0) {
+            it->end = it->pos = it->start + m;
+            it->emoji = true;
+            it->cp = cp; it->gi = 0; it->gfont = it->font; it->gsize = it->size; it->center_off = 0;
+            it->gx = it->x;
+            it->adv = it->size * CUI__EMOJI_ADV;
+            it->x += it->adv;
+            it->prev_cp = cp; it->prev_gi = 0; it->prev_font = it->font;
+            return true;
+        }
+    }
     cui_font_data *fd = &ui->fonts[gf];
     float gs = cui__glyph_size(ui, it->font, gf, it->size);
     /* tabular figures sit in fixed cells: no kerning against a digit, or "3:18" and "3:42" would differ in width */
@@ -434,8 +459,9 @@ bool cui__text_needs_shaping(cui_ctx *ui, const char *text, int len) {
     for (int p = 0; p < len;) {
         uint32_t cp;
         p += cui__utf8_decode(text + p, len - p, &cp);
+        /* ZWJ alone (no Arabic or Hebrew) joins emoji, which need no shaping */
         if ((cp >= 0x590 && cp <= 0x8ff) || (cp >= 0xfb1d && cp <= 0xfdff) ||
-            (cp >= 0xfe70 && cp <= 0xfeff) || (cp >= 0x200c && cp <= 0x200f) ||
+            (cp >= 0xfe70 && cp <= 0xfeff) || (cp >= 0x200c && cp <= 0x200f && cp != 0x200d) ||
             (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) return true;
     }
     return false;
@@ -1043,6 +1069,21 @@ paint:
 
 /* ---- drawing ---- */
 
+/* an emoji the iterator found, centered on the cap height like an inline icon */
+static void cui__draw_text_emoji(cui_ctx *ui, const cui__glyph_iter *it, float x, float center, cui_color color) {
+    float side = it->size * CUI__EMOJI_SIDE, s = ui->scale;
+    float a = 1;
+    if (ui->text_fx) {
+        float dy = 0;
+        cui_color gc = ui->text_fx(ui, ui->text_fx_data, ui->text_fx_base + it->start, x + it->gx, ui->text_fx_line_y, &dy, color);
+        a = color.a ? (float)gc.a / color.a : 0;
+        center += dy;
+    }
+    if (a <= 0) return;
+    cui_rect r = { roundf((x + it->gx + (it->adv - side) * 0.5f) * s) / s, roundf((center - side * 0.5f) * s) / s, side, side };
+    ui->emoji_text(ui, it->s + it->start, it->end - it->start, &r, a);
+}
+
 static void cui__draw_run(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color,
                           const char *text, int len, bool tabular, float max_x) {
     font = cui__resolve_font(ui, font);
@@ -1067,6 +1108,7 @@ static void cui__draw_run(cui_ctx *ui, cui_font font, float size, float x, float
     cui__iter_init(&it, ui, font, size, text, len, tabular);
     while (cui__iter_next(&it)) {
         if (it.gx + x > max_x) break;
+        if (it.emoji) { cui__draw_text_emoji(ui, &it, x, baseline - base->cap_height * size * 0.5f, color); continue; }
         if (it.cp == ' ' || it.cp == '\n' || it.cp == '\t' || !it.gi) continue;
         float gs_px = it.gsize * s;
         float pen = (x + it.gx + it.center_off) * s;

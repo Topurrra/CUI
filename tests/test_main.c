@@ -7830,6 +7830,32 @@ static void test_emoji_release(void) {
     CHECK(et_rgba_live == 0);
 }
 
+typedef struct { const char *md; } etx_ctx;
+static void build_etx(cui_ctx *ui, void *u) {
+    etx_ctx *c = u;
+    cui_column(ui, .pad = 10) cui_markdown(ui, "md", c->md);
+}
+static float etx_w(cui_ctx *ui, const char *s) { return cui_measure_text(ui, CUI_FONT_BODY, 20, s, -1).width; }
+static void test_emoji_text(void) {
+    printf("emoji: inline in text, sequences as one, drawn by markdown\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_platform(ui, &(cui_platform_iface){ .draw_emoji = em_fake_draw });
+    float plain = etx_w(ui, "ab");
+    etx_ctx c = { "# \xf0\x9f\x97\x92\xef\xb8\x8f Notes\n\n| **\xf0\x9f\x93\x81 Business/** | ok |\n|---|---|\n| a | b |\n\n- \xe2\x9c\x85 done\n" };
+    em_draws = 0;
+    run(ui, build_etx, &c, 3);   /* markdown turns emoji in text on */
+    CHECK(em_draws >= 3);        /* the note, the folder and the check mark */
+    float one = etx_w(ui, "a\xf0\x9f\x93\x81" "b") - plain;   /* folder */
+    CHECK(one > 20 && one < 30);
+    CHECK(fabsf(etx_w(ui, "a\xf0\x9f\x97\x92\xef\xb8\x8f" "b") - plain - one) < 0.01f);   /* with FE0F */
+    CHECK(fabsf(etx_w(ui, "a\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7" "b") - plain - one) < 0.01f);   /* a ZWJ family */
+    CHECK(fabsf(etx_w(ui, "a\xf0\x9f\x91\x8b\xf0\x9f\x8f\xbd" "b") - plain - one) < 0.01f);   /* a skin tone */
+    CHECK(fabsf(etx_w(ui, "a\xf0\x9f\x87\xaf\xf0\x9f\x87\xb5" "b") - plain - one) < 0.01f);   /* a flag */
+    CHECK(fabsf(etx_w(ui, "a" "1\xef\xb8\x8f\xe2\x83\xa3" "b") - plain - one) < 0.01f);   /* a keycap */
+    CHECK(etx_w(ui, "a1b") - plain < one * 0.7f);   /* plain digits stay text */
+    cui_destroy(ui);
+}
+
 /** Share one software renderer across the test contexts and return a failing
  * exit status to CTest if any check in the suite fails. */
 int main(void) {
@@ -7883,6 +7909,7 @@ int main(void) {
     test_atlas_shrink();
     test_sw_incremental();
     test_emoji_release();
+    test_emoji_text();
     test_planning();
     test_node_editor();
     test_flame();

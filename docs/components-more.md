@@ -378,6 +378,17 @@ Emoji are drawn from a color emoji font. CUI reads the one the system has: Segoe
 
 `.group_names` takes ten translated names (recent, then the nine groups), `.placeholder`, `.empty_text` and `.hint` the other text. Search matches the English names. `.no_search`, `.no_tone` and `.no_preview` leave those parts out. `.size` sets the emoji size (26 by default) and `.height` the grid height (280).
 
+#### Emoji in text
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/markdown-emoji-dark.png"><img src="images/components/markdown-emoji.png" alt="Markdown with emoji in a heading, a table and a list"></picture>
+
+```c
+cui_emoji_font_load_system(ui);   /* once: text draws emoji from now on (markdown does this for you) */
+cui_text(ui, "â Deployed");
+```
+
+Text draws emoji in place: labels, fields, table cells, and the headings, lists and tables of the markdown view. A code point the text fonts lack, or one followed by the emoji selector (U+FE0F) or a keycap, is drawn from the emoji font when the font has it, about one em wide and centered on the text like an inline icon. A whole sequence is measured, wrapped and drawn as one: a selector, a skin tone, people joined with ZWJ, a keycap, a flag. The text selector (U+FE0E) keeps the text glyph, and plain digits and signs stay text. A sequence the font cannot draw whole shows its first emoji. The markdown view turns this on and loads the system emoji font the first time an emoji appears in its text; elsewhere, loading an emoji font or using any emoji component turns it on, so an app that never shows emoji does not link the emoji code. Right-to-left text that goes through the shaper still leaves emoji out.
+
 ## Capture
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/capture-dark.png"><img src="images/components/capture.png" alt="Dropzone, signature and avatar upload"></picture>

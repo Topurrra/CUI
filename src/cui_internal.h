@@ -448,6 +448,9 @@ struct cui_ctx {
     /* set by cui_emoji.c when emoji are first used, so the core does not link it in:
      * 0 a frame begins, 1 the renderer changes, 2 the context goes */
     void (*emoji_hook)(cui_ctx *ui, int what);
+    /* set with it, so text draws emoji in place: at s, the bytes of an emoji the emoji font
+     * draws (0 for none); with r, draws that emoji in r (cui_text.c measures and calls it) */
+    int (*emoji_text)(cui_ctx *ui, const char *s, int len, const cui_rect *r, float alpha);
     cui_allocator alloc;
     cui_renderer_iface renderer;
     cui_platform_iface platform;
@@ -648,6 +651,8 @@ const char *cui__mmss(cui_ctx *ui, float seconds);        /* a play time, "3:07"
 int cui__utc_offset(int64_t t);                           /* minutes east of UTC of the local zone at t */
 
 /* ---- shared widget pieces ---- */
+/* turns on color emoji in all text (cui_emoji.c); components with free text, like markdown, call it */
+void cui__emoji_text_on(cui_ctx *ui);
 void cui__widgets_begin_frame(cui_ctx *ui);
 void cui__widgets_end_frame(cui_ctx *ui);   /* toasts, tooltips */
 void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text);   /* hover by rect, for things that are not interactive */

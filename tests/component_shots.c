@@ -1509,6 +1509,22 @@ static void scene_markdown(cui_ctx *ui, int f) {
     if (f < 0) return;
     frame_wrap(ui, body_markdown);
 }
+/* markdown with emoji in headings, tables and lists: drawn in place from the emoji font */
+SCENE(markdown_emoji) {
+    cui_box(ui, UPTO(560)) {
+        cui_markdown(ui, "notes",
+            "# \xf0\x9f\x97\x92\xef\xb8\x8f Notes\n"
+            "\n"
+            "| Folder | State |\n"
+            "|:--|:--|\n"
+            "| **\xf0\x9f\x93\x81 Business/** | ok |\n"
+            "| **\xf0\x9f\xa4\x96 Agents/** | 3 drafts \xe2\x9c\x8f\xef\xb8\x8f |\n"
+            "\n"
+            "- \xe2\x9c\x85 done\n"
+            "- \xf0\x9f\x91\xa9\xf0\x9f\x8f\xbd\xe2\x80\x8d\xf0\x9f\x92\xbb review with Maya\n"
+            "- Ship on the 1\xef\xb8\x8f\xe2\x83\xa3st \xf0\x9f\x9a\x80\n");
+    }
+}
 /* diff viewer: two versions of a config loader. The mode toggle and the
  * selected change are static and wired to the view, so the live page keeps
  * them; folds open on a click and stay open. */
@@ -4436,7 +4452,7 @@ int main(int argc, char **argv) {
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
-        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true },
+        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },

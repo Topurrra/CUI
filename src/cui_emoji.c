@@ -52,11 +52,12 @@ static uint32_t cui__t32(const uint8_t *t, uint32_t len, uint64_t off) { return 
 #define CUI__T32(t, len, off) cui__t32((t), (len), (uint64_t)(off))
 
 static void cui__emoji_hook(cui_ctx *ui, int what);
+static int cui__emoji_text(cui_ctx *ui, const char *s, int len, const cui_rect *r, float alpha);
 
 static cui__emoji *cui__em(cui_ctx *ui) {
     if (!ui->emoji) {
         ui->emoji = cui__alloc(ui, sizeof(cui__emoji));
-        if (ui->emoji) { memset(ui->emoji, 0, sizeof(cui__emoji)); ui->emoji_hook = cui__emoji_hook; }
+        if (ui->emoji) { memset(ui->emoji, 0, sizeof(cui__emoji)); ui->emoji_hook = cui__emoji_hook; ui->emoji_text = cui__emoji_text; }
     }
     return ui->emoji;
 }
@@ -780,6 +781,65 @@ bool cui_emoji_supported(cui_ctx *ui, const char *utf8, int len) {
     cui__emoji *e = ui->emoji;
     return e->loaded ? cui__em_glyph(e, utf8, len) != 0 : true;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Emoji inside ordinary text                                               */
+/* ------------------------------------------------------------------------ */
+
+/* code points that are emoji by default, or can be with FE0F: the text font gets the rest */
+static bool cui__em_pictographic(uint32_t cp) {
+    return (cp >= 0x1F000 && cp <= 0x1FAFF) || (cp >= 0x2190 && cp <= 0x21FF) || (cp >= 0x2300 && cp <= 0x23FF) ||
+           (cp >= 0x25A0 && cp <= 0x27BF) || (cp >= 0x2900 && cp <= 0x297F) || (cp >= 0x2B00 && cp <= 0x2BFF) ||
+           cp == 0xA9 || cp == 0xAE || cp == 0x203C || cp == 0x2049 || cp == 0x2122 || cp == 0x2139 ||
+           cp == 0x24C2 || cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299;
+}
+
+/* the bytes of the emoji sequence at s: a base with its selector, skin tone, keycap and
+ * tags, joined by ZWJ to the next; or a pair of regional indicators (a flag) */
+static int cui__em_sequence(const char *s, int len, bool *keycap) {
+    uint32_t cp;
+    int i = cui__utf8_decode(s, len, &cp);
+    *keycap = false;
+    if (cp >= 0x1F1E6 && cp <= 0x1F1FF) {
+        uint32_t c2; int k = i < len ? cui__utf8_decode(s + i, len - i, &c2) : 0;
+        return k && c2 >= 0x1F1E6 && c2 <= 0x1F1FF ? i + k : i;
+    }
+    while (i < len) {
+        uint32_t c; int k = cui__utf8_decode(s + i, len - i, &c);
+        if (c == 0xFE0F || (c >= 0x1F3FB && c <= 0x1F3FF) || (c >= 0xE0020 && c <= 0xE007F)) i += k;
+        else if (c == 0x20E3) { *keycap = true; i += k; }
+        else if (c == 0x200D && i + k < len) {
+            uint32_t n; int k2 = cui__utf8_decode(s + i + k, len - i - k, &n);
+            if (!cui__em_pictographic(n) || i + k + k2 > 31) break;
+            i += k + k2;
+        } else break;
+        if (i > 31) break;
+    }
+    return CUI_MIN(i, 31);
+}
+
+/* The core's text hook. At s: the length of an emoji the emoji font can draw, or 0 for
+ * text (FE0E asks for text; a font with the glyph keeps plain digits and signs). With r,
+ * draws it there. The emoji font is loaded the first time one is asked for. */
+static int cui__emoji_text(cui_ctx *ui, const char *s, int len, const cui_rect *r, float alpha) {
+    if (r) { cui__em_draw(ui, s, len, *r, alpha, NULL); return len; }
+    uint32_t cp;
+    int first = cui__utf8_decode(s, len, &cp);
+    bool keycap;
+    int n = cui__em_sequence(s, len, &keycap);
+    if (cp < 0x80 ? !keycap : !cui__em_pictographic(cp) && n == first) return 0;
+    if (first + 3 <= len && (unsigned char)s[first] == 0xEF && (unsigned char)s[first + 1] == 0xB8 && (unsigned char)s[first + 2] == 0x8E) return 0;
+    if (!cui__em_can_draw(ui)) return 0;
+    cui__emoji *e = ui->emoji;
+    if (!e->loaded) return n;   /* the platform draws it */
+    if (cui__em_glyph(e, s, n)) return n;
+    /* a sequence the font lacks: its first emoji alone, and the rest after it */
+    int one = first;
+    if (one + 3 <= n && (unsigned char)s[one] == 0xEF && (unsigned char)s[one + 1] == 0xB8 && (unsigned char)s[one + 2] == 0x8F) one += 3;
+    return one < n && cp >= 0x80 && cui__em_glyph(e, s, one) ? one : 0;
+}
+
+void cui__emoji_text_on(cui_ctx *ui) { cui__em(ui); }
 
 typedef struct { char s[32]; int len; } cui__em_one;
 static void cui__paint_emoji(cui_ctx *ui, cui_node *n, void *data) {
