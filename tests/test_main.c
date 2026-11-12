@@ -664,6 +664,48 @@ static void test_text_input(void) {
     cui_destroy(ui);
 }
 
+/* An empty field still has a caret. At offset 0 the bar stands just left of the
+ * text, in the field's padding, where the text clip used to cut it away. */
+typedef struct { char buf[64]; cui_id id; } blank_ctx;
+static void build_blank_field(cui_ctx *ui, void *u) {
+    blank_ctx *e = u;
+    cui_column(ui, .pad = 20) {
+        cui_input(ui, "empty", e->buf, sizeof e->buf, .width = CUI_PX(300));
+        e->id = cui_last_id(ui);
+    }
+}
+
+static int dark_pixels(cui_ctx *ui) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    size_t n = (size_t)dd->width_px * dd->height_px;
+    unsigned char *px = malloc(n * 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    int dark = 0;
+    for (size_t i = 0; i < n; i++) if (px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2] < 300) dark++;
+    free(px);
+    return dark;
+}
+
+static void test_empty_field_caret(void) {
+    printf("text input: an empty field draws a caret, and it blinks\n");
+    cui_ctx *ui = new_ctx();
+    blank_ctx e;
+    memset(&e, 0, sizeof e);
+    run(ui, build_blank_field, &e, 2);
+    cui_vec2 c = center(rect_of(ui, e.id));
+    click_at(ui, build_blank_field, &e, c.x, c.y);
+    CHECK(e.buf[0] == 0);
+    int lo = -1, hi = 0;
+    for (int i = 0; i < 70; i++) {   /* a little over one blink period */
+        run(ui, build_blank_field, &e, 1);
+        int dark = dark_pixels(ui);
+        if (lo < 0 || dark < lo) lo = dark;
+        if (dark > hi) hi = dark;
+    }
+    CHECK(hi > lo + 8);   /* the bar comes and goes inside the field */
+    cui_destroy(ui);
+}
+
 typedef struct { char buf[512]; char other[32]; int flags; cui_id id, other_id; } area_ctx;
 static void build_area(cui_ctx *ui, void *u) {
     area_ctx *a = u;
@@ -7852,6 +7894,7 @@ int main(void) {
     test_toggles_and_slider();
     test_text_input();
     test_disabled_password_reveal();
+    test_empty_field_caret();
     test_textarea_and_clear();
     test_more_actions();
     test_toggle_group_arrows();
