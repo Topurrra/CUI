@@ -132,12 +132,12 @@ CUI is built to stay small. Measured with GCC, `-DCMAKE_BUILD_TYPE=MinSizeRel`, 
 
 | | Size |
 |---|---|
-| Whole library (about 190 components, both renderers, X11 backend, fonts) | about 1,050 KB |
+| Whole library (about 210 components, both renderers, X11 backend, fonts) | about 1,130 KB |
 | of which embedded fonts (Inter, Geist, Geist Mono, 168 Lucide icons) | 95 KB, compressed |
 | `examples/hello` on Linux, whole executable | about 250 KB |
 | `examples/hello.exe` on Windows (MinGW, linked with `-flto`), whole executable | about 300 KB |
-| `examples/assistant`, an AI chat app | about 350 KB |
-| `examples/gallery`, every component in use | about 1,010 KB |
+| `examples/assistant`, an AI chat app | about 360 KB |
+| `examples/gallery`, every component in use | about 1,140 KB |
 
 What keeps it small:
 

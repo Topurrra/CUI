@@ -79,7 +79,7 @@ For a build system other than CMake, or to vendor CUI into a large codebase, use
 
 **The includes differ.** This guide writes `#include <cui/cui.h>` and `#include <cui/cui_app.h>`. With the single-file distribution both are one header beside your code, so write `#include "cui.h"` (or `"cui_single.h"`) in their place and leave the second line out.
 
-`cui.c` is the whole library, about 74,000 lines, and takes around half a minute to compile. Compile it once and link the object file; your own files then build in a moment:
+`cui.c` is the whole library, about 78,000 lines, and takes around half a minute to compile. Compile it once and link the object file; your own files then build in a moment:
 
 ```sh
 cc -std=c99 -Os -ffunction-sections -fdata-sections -c cui.c -o cui.o                 # once

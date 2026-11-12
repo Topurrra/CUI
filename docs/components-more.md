@@ -1,6 +1,6 @@
 # More components
 
-The second half of the library: richer actions and inputs, pickers, disclosure, data views, more charts, motion, AI interface pieces, developer tools, instruments and voice. Everything follows the same rules as the [core components](components.md): named options, keyboard support, light and dark, reduced motion. Each family has a page in the gallery (`./build/examples/gallery`, section *Extended*).
+The second half of the library: richer actions and inputs, pickers, disclosure, data views, more charts, motion, AI interface pieces, developer tools, instruments, creative controls, canvas and bars, and voice. Everything follows the same rules as the [core components](components.md): named options, keyboard support, light and dark, reduced motion. Each family has a page in the gallery (`./build/examples/gallery`, section *Extended*).
 
 ## Actions
 

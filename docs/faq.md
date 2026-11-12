@@ -47,7 +47,7 @@ Most of it is written by AI models under the maintainer's direction. Every commi
 
 ## How small is it, really?
 
-`examples/hello`, a window with a few components, is about 250 KB on Linux as a stripped executable, with the fonts and icons inside. The whole library with every component is about 1,050 KB. An app carries only the components it calls, provided it is linked the way [Getting started](getting-started.md) shows. CI builds the guide's commands and fails if the result grows past its limit.
+`examples/hello`, a window with a few components, is about 250 KB on Linux as a stripped executable, with the fonts and icons inside. The whole library with every component is about 1,130 KB. An app carries only the components it calls, provided it is linked the way [Getting started](getting-started.md) shows. CI builds the guide's commands and fails if the result grows past its limit.
 
 ## Does it work from C++?
 

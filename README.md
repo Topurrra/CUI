@@ -32,7 +32,7 @@
 
 CUI is an immediate-mode UI library written in C99. You describe the screen with function calls every frame. CUI lays it out, handles the mouse and keyboard, and draws it with OpenGL or its own software renderer, in a window on Windows, macOS or Linux, or in a browser through WebAssembly.
 
-- **About 190 components**, from buttons and text fields to a data grid, charts, a code editor and docking panels.
+- **About 210 components**, from buttons and text fields to a data grid, charts, a code editor and docking panels.
 - **No dependencies.** One CMake target, or two files (`cui.h` and `cui.c`) dropped into your project.
 - **Small.** A complete app, window, fonts and all, is about 250 KB. There is no browser or runtime inside.
 - **MIT licensed.**
@@ -144,7 +144,9 @@ Linux needs the X11 development headers (`libx11-dev`). Windows and macOS need n
 | **Planning** | kanban board, week and month calendars, gantt chart, node editor |
 | **Developer tools** | trace viewer, network waterfall, flame graph, dependency and commit graphs, CI pipeline, test explorer, regex tester, query builder |
 | **Instruments** | dot-matrix chart, chart annotations, event track on a time axis, readout, dot-matrix display |
-| **Conversation and AI** | chat, comments, composer, reasoning and tool calls, agent plan, sources and citations |
+| **Creative controls** | status tag, ratio slider, gradient and step sliders, palette strip, aspect ratio picker, seed field |
+| **Canvas and bars** | grouped and floating toolbars, format bar, live cursors, canvas zoom controls, result card, selection bar |
+| **Conversation and AI** | chat, comments, composer, reasoning and tool calls, agent plan, sources and citations, voice recorder, voice notes, voice session |
 | **Your own** | a canvas with a 2D drawing API, per-component state and spring animation |
 
 Every component has a page with a live example, its options, its data structures and what it does with the keyboard: on the [site](https://yappologistic.github.io/CUI/#/components), or in [Components](docs/components.md) and [More components](docs/components-more.md).
@@ -287,8 +289,8 @@ Colors are named tokens (`CUI_COLOR_SURFACE`, `CUI_COLOR_ACCENT` and so on), so 
 | Measure | Result |
 |---|---|
 | `hello` on Linux, the whole executable, stripped | about 250 KB |
-| `assistant` (the AI app above), the whole executable | about 350 KB |
-| The whole library: every component, both renderers, the X11 backend, fonts and icons | about 1,050 KB |
+| `assistant` (the AI app above), the whole executable | about 360 KB |
+| The whole library: every component, both renderers, the X11 backend, fonts and icons | about 1,130 KB |
 | Build, lay out and paint one frame (gallery pages, 1240 × 820 points at 2×) | 0.09 to 0.75 ms, most under 0.25 |
 | A real app in use (Notes, Mail, an IDE; software renderer, 1280 × 800) | 2 to 3% of one core, 11 to 13 MB of memory |
 | Library memory over an hour of use | 2 to 9 MB, flat, with nothing left after `cui_destroy` |

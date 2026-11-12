@@ -770,7 +770,7 @@ function viewHome() {
       h('h1', { class: 'hero-title', 'aria-label': 'Native UI components for C' },
         ...['Native', 'UI', 'components', 'for'].map((w) => h('span', { class: 'hw' }, w)),
         h('span', { class: 'hw hw-logo', html: C_LOGO })),
-      h('p', { class: 'lede' }, 'About 190 components, compiled to machine code with no browser or runtime inside. Windows, macOS, Linux and the web, from one C99 codebase.'),
+      h('p', { class: 'lede' }, 'About 210 components, compiled to machine code with no browser or runtime inside. Windows, macOS, Linux and the web, from one C99 codebase.'),
       h('div', { class: 'hero-actions' },
         h('a', { class: 'btn primary', href: '#/guide/getting-started', html: 'Get started' + I.arrow }),
         h('a', { class: 'btn', href: '#/components' }, 'Browse components')),
