@@ -1712,10 +1712,11 @@ Flows between stages, drawn as ribbons whose width follows the amount.
 ```c
 static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
 static const cui_sankey_link links[] = { { 0, 3, 420 }, { 1, 3, 260 }, { 3, 5, 860 }, { 5, 6, 580 } /* ... */ };
-cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300);
+const cui_color colors[] = { { 0 }, { 0 }, { 0 }, CUI_COLOR_SERIES(0), CUI_COLOR_DANGER, CUI_COLOR_SERIES(0), CUI_COLOR_SUCCESS, CUI_COLOR_TEXT_MUTED };
+cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300, .node_colors = colors);
 ```
 
-Columns follow the links from the sources, and an outcome sits at the step it is reached from, so a drop off stays beside the step it left and no ribbon crosses a column of nodes. Color goes to the outcomes, the largest first, and each ribbon takes the color of where it ends; sources and steps stay neutral gray, so the eye follows where things end up. Hover a node to highlight its links, or a ribbon to see the flow and its share of the source. A cycle in the links does not hang the layout.
+Columns follow the links from the sources, and an outcome sits at the step it is reached from, so a drop off stays beside the step it left and no ribbon crosses a column of nodes. Nodes are slim rounded bars (`node_width`, 6 points by default) colored by meaning: give `node_colors` one color per node, and any node left unset (or every node, without `node_colors`) falls back to the palette for outcomes, the largest first, and neutral gray for sources and steps. Each ribbon fades from its source's color to its target's at a low opacity. Labels sit beside the nodes: the name, then the value and, past the sources, its share of everything that leaves them ("860 · 62%"); a label that runs into the next column is cut with an ellipsis. Hover a node or a ribbon to light its whole path, everything upstream of it and everything downstream, and to see its values in a tooltip. A cycle in the links does not hang the layout.
 
 ### Bar list and activity rings
 

@@ -2249,13 +2249,21 @@ SCENE(candlestick) {
         cui_candlestick(ui, "nrth", cs, N, .labels = labels, .overlays = &ov, .overlay_count = 1, .height = 300);
     }
 }
-SCENE(sankey) {
+static void body_sankey(cui_ctx *ui);
+static void scene_sankey(cui_ctx *ui, int f) {
+    /* the Search to Sign up flow, to show the path it lights */
+    if (f < 0) { cui_rect r = cui_get_rect(ui, cui_make_id(ui, "flow")); if (-f - 1 == 40 && r.w > 0) cui_input_mouse_move(ui, r.x + r.w * 0.12f, r.y + 40); return; }
+    frame_wrap(ui, body_sankey);
+}
+static void body_sankey(cui_ctx *ui) {
     static const char *nodes[] = { "Search", "Social", "Referral", "Sign up", "Bounced", "Trial", "Paid", "Churned" };
     static const cui_sankey_link links[] = {
         { 0, 3, 420 }, { 1, 3, 260 }, { 2, 3, 180 }, { 0, 4, 300 }, { 1, 4, 220 },
         { 3, 5, 860 }, { 5, 6, 580 }, { 5, 7, 280 },
     };
-    cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300);
+    /* colored by meaning: neutral sources, the funnel in the first series color, paid green, lost red */
+    const cui_color colors[] = { { 0 }, { 0 }, { 0 }, CUI_COLOR_SERIES(0), CUI_COLOR_DANGER, CUI_COLOR_SERIES(0), CUI_COLOR_SUCCESS, CUI_COLOR_TEXT_MUTED };
+    cui_sankey(ui, "flow", nodes, 8, links, 8, .height = 300, .node_colors = colors);
 }
 SCENE(bar_list_rings) {
     static const cui_viz_item pages[] = { { "/docs", 4820 }, { "/", 3920 }, { "/gallery", 2410 }, { "/blog/fast-ui-in-c", 1830 }, { "/download", 1210 } };

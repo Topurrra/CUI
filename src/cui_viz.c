@@ -940,8 +940,22 @@ typedef struct {
     float k;                 /* points per unit */
     float *in, *out;
     int *col; int maxcol;
-    int *color;              /* palette slot: sources in order, the rest inherit their main inflow */
+    int *color;              /* palette slot of an outcome, or -1 for neutral */
+    float total;             /* what leaves the sources: the whole the shares are of */
 } cui__sk_geo;
+
+/* A node's label is two lines: its name, then its value and (past the sources) its share of
+ * the whole, "860 · 62%". */
+static const char *cui__sk_value_text(cui_ctx *ui, const cui__sk_geo *g, int i, const char *fmt) {
+    const char *val = cui__fmt_value(ui, fmt, CUI_MAX(g->in[i], g->out[i]));
+    if (g->in[i] <= 0 || g->total <= 0) return val;
+    return cui__frame_printf(ui, "%s \xc2\xb7 %s", val, cui__pct(ui, CUI_MAX(g->in[i], g->out[i]), g->total));
+}
+static void cui__sk_label_widths(cui_ctx *ui, const cui__sk_geo *g, int i, const char *fmt, float *name_w, float *value_w) {
+    float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
+    *name_w = cui__text_width(ui, CUI_FONT_MEDIUM, fs, g->names && g->names[i] ? g->names[i] : "", -1, false);
+    *value_w = cui__text_width(ui, CUI_FONT_BODY, fx, cui__sk_value_text(ui, g, i, fmt), -1, true);
+}
 
 static cui__sk_geo cui__sk_layout(cui_ctx *ui, cui_rect r, const char *const *names, int nn, const cui_sankey_link *links_in, int nl, float nw, const char *fmt) {
     cui__sk_geo g;
@@ -976,12 +990,16 @@ static cui__sk_geo cui__sk_layout(cui_ctx *ui, cui_rect r, const char *const *na
     /* an outcome that ends early (a drop off) stays at its own step; only one fed from the last step sits at the far right,
        so no ribbon has to cross a column of nodes to reach it */
     /* room on the right for the last column's labels */
-    float fs = cui__fs(ui, ui->theme.text_xs), right_w = 0;
+    float right_w = 0;
+    g.total = 0;
+    for (int i = 0; i < nn; i++) if (g.in[i] <= 0) g.total += g.out[i];
     if (g.maxcol > 0)
         for (int i = 0; i < nn; i++)
-            if (g.col[i] == g.maxcol && (g.in[i] > 0 || g.out[i] > 0))
-                right_w = CUI_MAX(right_w, cui__text_width(ui, CUI_FONT_MEDIUM, fs, names && names[i] ? names[i] : "", -1, false) + 6 +
-                                               cui__text_width(ui, CUI_FONT_BODY, fs, cui__fmt_value(ui, fmt, CUI_MAX(g.in[i], g.out[i])), -1, true) + 10);
+            if (g.col[i] == g.maxcol && (g.in[i] > 0 || g.out[i] > 0)) {
+                float nw2, vw2;
+                cui__sk_label_widths(ui, &g, i, fmt, &nw2, &vw2);
+                right_w = CUI_MAX(right_w, CUI_MAX(nw2, vw2) + 12);
+            }
     float span = r.w - right_w - nw;
     /* color goes to the outcomes, the largest first; sources and steps stay neutral, so the eye follows where things end up */
     g.color = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, nn));
@@ -1038,33 +1056,64 @@ static float cui__bez(float a, float b, float t) {   /* ease between two ends wi
     return a + (b - a) * s;
 }
 
-typedef struct { cui__sk_geo g; const char *format; float nw; float intro; int hover_node, hover_link; float t; cui__tip tip; } cui__sk_paint;
+typedef struct { cui__sk_geo g; const char *format; float nw; float intro; int hover_node, hover_link; float t; cui__tip tip; cui_color *node_c; } cui__sk_paint;
+
+/* A node's color: the caller's, else its palette slot (outcomes), else a neutral gray. */
+static cui_color cui__sk_node_color(cui_ctx *ui, const cui__sk_paint *p, const cui__sk_geo *g, int i) {
+    if (p->node_c && cui__color_set(p->node_c[i])) return cui_color_of(ui, p->node_c[i]);
+    return g->color[i] < 0 ? CUI_C(ui, TEXT_MUTED) : cui__viz_color(ui, (cui_color){ 0 }, g->color[i]);
+}
+
+/* The links on the hovered thing's path: everything upstream of where it starts and
+ * downstream of where it ends. A link hover starts and ends at that link. */
+static bool *cui__sk_path(cui_ctx *ui, const cui__sk_geo *g, int node, int link, bool *on_node) {
+    bool *on = cui__frame_alloc(ui, sizeof(bool) * (size_t)CUI_MAX(1, g->nl));
+    bool *up = cui__frame_alloc(ui, sizeof(bool) * (size_t)CUI_MAX(1, g->nn)), *down = cui__frame_alloc(ui, sizeof(bool) * (size_t)CUI_MAX(1, g->nn));
+    memset(on, 0, sizeof(bool) * (size_t)CUI_MAX(1, g->nl));
+    memset(up, 0, sizeof(bool) * (size_t)CUI_MAX(1, g->nn)); memset(down, 0, sizeof(bool) * (size_t)CUI_MAX(1, g->nn));
+    if (node >= 0) up[node] = down[node] = true;
+    else { up[g->links[link].from] = down[g->links[link].to] = true; on[link] = true; }
+    for (int it = 0; it < g->nn; it++) {   /* bounded, so a cycle cannot hang */
+        bool ch = false;
+        for (int l = 0; l < g->nl; l++) {
+            int a = g->links[l].from, b = g->links[l].to;
+            if (up[b] && !up[a]) { up[a] = true; ch = true; }
+            if (down[a] && !down[b]) { down[b] = true; ch = true; }
+        }
+        if (!ch) break;
+    }
+    for (int l = 0; l < g->nl; l++) if (up[g->links[l].to] || down[g->links[l].from]) on[l] = true;
+    for (int i = 0; i < g->nn; i++) on_node[i] = up[i] || down[i];
+    return on;
+}
 
 static void cui__paint_sankey(cui_ctx *ui, cui_node *n, void *data) {
     cui__sk_paint *p = data;
     cui_rect r = n->rect;
-    float fs = cui__fs(ui, ui->theme.text_xs);
-    cui_rect plot = { r.x, r.y, r.w - 0, r.h };
-    cui__sk_geo g = cui__sk_layout(ui, plot, p->g.names, p->g.nn, p->g.links, p->g.nl, p->nw, p->format);
+    float fs = cui__fs(ui, ui->theme.text_sm), fx = cui__fs(ui, ui->theme.text_xs);
+    cui__sk_geo g = cui__sk_layout(ui, r, p->g.names, p->g.nn, p->g.links, p->g.nl, p->nw, p->format);
     bool any = (p->hover_node >= 0 || p->hover_link >= 0) && p->t > 0.01f;
+    bool *node_on = cui__frame_alloc(ui, sizeof(bool) * (size_t)CUI_MAX(1, g.nn));
+    bool *link_on = any ? cui__sk_path(ui, &g, p->hover_node, p->hover_link, node_on) : NULL;
+    cui_color *nc = cui__frame_alloc(ui, sizeof(cui_color) * (size_t)CUI_MAX(1, g.nn));
+    for (int i = 0; i < g.nn; i++) nc[i] = cui__sk_node_color(ui, p, &g, i);
+    bool dark = ui->mode == CUI_THEME_DARK;
     const int seg = 28;
     cui_cvert *v = cui__frame_alloc(ui, sizeof(cui_cvert) * (size_t)(seg + 1) * 2);
     uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)seg * 6);
     for (int l = 0; l < g.nl; l++) {
+        /* a flow fades from its source's color to its target's, faint at rest and strong on the hovered path */
         int a = g.links[l].from, b = g.links[l].to;
         float th = g.links[l].value * g.k;
         float x0 = g.node[a].x + g.node[a].w, x1 = g.node[b].x;
         float reach = cui__clampf(p->intro, 0, 1);
-        bool hl = l == p->hover_link || a == p->hover_node || b == p->hover_node;
-        bool neutral = g.color[b] < 0;
-        cui_color col = neutral ? CUI_C(ui, TEXT_MUTED) : cui__viz_color(ui, (cui_color){ 0 }, g.color[b]);
-        float alpha = neutral ? (ui->mode == CUI_THEME_DARK ? 0.26f : 0.2f) : (ui->mode == CUI_THEME_DARK ? 0.38f : 0.3f);
-        if (any) alpha = hl ? cui__lerp(alpha, 0.6f, p->t) : cui__lerp(alpha, 0.1f, p->t);
-        cui_color c = cui_alpha(col, alpha);
+        float alpha = dark ? 0.2f : 0.18f;
+        if (any) alpha = link_on[l] ? cui__lerp(alpha, dark ? 0.48f : 0.42f, p->t) : cui__lerp(alpha, 0.08f, p->t);
         for (int i = 0; i <= seg; i++) {
             float t = (float)i / seg * reach;
             float x = x0 + (x1 - x0) * t;
             float yt = cui__bez(g.sy[l], g.ty[l], t);
+            cui_color c = cui_alpha(cui_mix(nc[a], nc[b], t), alpha);
             v[i * 2] = (cui_cvert){ x, yt, c };
             v[i * 2 + 1] = (cui_cvert){ x, yt + th, c };
         }
@@ -1077,40 +1126,23 @@ static void cui__paint_sankey(cui_ctx *ui, cui_node *n, void *data) {
     }
     for (int i = 0; i < g.nn; i++) {
         if (g.in[i] <= 0 && g.out[i] <= 0) continue;
-        cui_color col = g.color[i] < 0 ? CUI_C(ui, BORDER_STRONG) : cui__viz_color(ui, (cui_color){ 0 }, g.color[i]);
-        if (any && p->hover_node >= 0 && i != p->hover_node) col = cui_mix(col, CUI_C(ui, SURFACE), 0.3f * p->t);
-        cui_draw_rect(ui, g.node[i], CUI_CORNERS(3), col);
-        bool right = true;
-        float lx = right ? g.node[i].x + g.node[i].w + 8 : g.node[i].x - 8;
-        float ly = g.node[i].y + g.node[i].h * 0.5f;
+        cui_color col = nc[i];
+        float la = 1;
+        if (any && !node_on[i]) { col = cui_mix(col, CUI_C(ui, SURFACE), 0.5f * p->t); la = 1 - 0.45f * p->t; }
+        cui_draw_rect(ui, g.node[i], CUI_CORNERS(CUI_MIN(3.0f, g.node[i].w * 0.5f)), col);
+        /* the label beside the node: the name, then the value and share; no plate over the flows */
+        float lx = g.node[i].x + g.node[i].w + 10, ly = g.node[i].y + g.node[i].h * 0.5f;
         const char *nm = g.names && g.names[i] ? g.names[i] : "";
-        const char *val = cui__fmt_value(ui, p->format, CUI_MAX(g.in[i], g.out[i]));
-        float nmw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, nm, -1, false);
-        if (right) {
-            float vw = cui__text_width(ui, CUI_FONT_BODY, fs, val, -1, true);
-            cui_color plate = cui_alpha(CUI_C(ui, SURFACE), ui->mode == CUI_THEME_DARK ? 0.5f : 0.7f);
-            /* room up to the next column: on a narrow chart the value goes under the name,
-               and a name that still does not fit is cut with an ellipsis */
-            float room = 1e9f;
-            if (g.col[i] < g.maxcol)
-                for (int j = 0; j < g.nn; j++)
-                    if (g.col[j] == g.col[i] + 1 && (g.in[j] > 0 || g.out[j] > 0)) room = CUI_MIN(room, g.node[j].x - lx - 6);
-            if (nmw + 6 + vw <= room) {
-                if (g.col[i] < g.maxcol) cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 9, nmw + vw + 14, 18 }, CUI_CORNERS(6), plate);
-                cui__draw_text_at(ui, CUI_FONT_MEDIUM, fs, lx, ly, CUI__AT_LEFT, CUI_C(ui, FOREGROUND), nm, false);
-                cui__draw_text_at(ui, CUI_FONT_BODY, fs, lx + nmw + 6, ly, CUI__AT_LEFT, CUI_C(ui, TEXT_MUTED), val, true);
-            } else {
-                float tw = CUI_MAX(8.0f, room), bw = CUI_MIN(CUI_MAX(nmw, vw), tw);
-                float fh = cui__font_line_height(ui, CUI_FONT_MEDIUM, fs);
-                cui_draw_rect(ui, (cui_rect){ lx - 4, ly - 16, bw + 8, 32 }, CUI_CORNERS(6), plate);
-                cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, fs, lx, ly - 7 - fh * 0.5f, tw, CUI_C(ui, FOREGROUND), nm, (int)strlen(nm), false);
-                cui__draw_text_ellipsis(ui, CUI_FONT_BODY, fs, lx, ly + 7 - fh * 0.5f, tw, CUI_C(ui, TEXT_MUTED), val, (int)strlen(val), true);
-            }
-        } else {
-            float vw = cui__text_width(ui, CUI_FONT_BODY, fs, val, -1, true);
-            cui__draw_text_at(ui, CUI_FONT_BODY, fs, lx, ly, CUI__AT_RIGHT, CUI_C(ui, TEXT_MUTED), val, true);
-            cui__draw_text_at(ui, CUI_FONT_MEDIUM, fs, lx - vw - 6, ly, CUI__AT_RIGHT, CUI_C(ui, FOREGROUND), nm, false);
-        }
+        const char *val = cui__sk_value_text(ui, &g, i, p->format);
+        float room = 1e9f;   /* up to the next column; a name that does not fit is cut with an ellipsis */
+        if (g.col[i] < g.maxcol)
+            for (int j = 0; j < g.nn; j++)
+                if (g.col[j] == g.col[i] + 1 && (g.in[j] > 0 || g.out[j] > 0)) room = CUI_MIN(room, g.node[j].x - lx - 6);
+        room = CUI_MAX(8.0f, room);
+        float nh = cui__font_line_height(ui, CUI_FONT_MEDIUM, fs), vh = cui__font_line_height(ui, CUI_FONT_BODY, fx);
+        float top = ly - (nh + vh) * 0.5f;
+        cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, fs, lx, top, room, cui_alpha(CUI_C(ui, FOREGROUND), la), nm, (int)strlen(nm), false);
+        cui__draw_text_ellipsis(ui, CUI_FONT_BODY, fx, lx, top + nh, room, cui_alpha(CUI_C(ui, TEXT_MUTED), la), val, (int)strlen(val), true);
     }
     cui__tip_draw(ui, &p->tip);
 }
@@ -1124,7 +1156,7 @@ int cui_sankey_ex(cui_ctx *ui, const char *id_str, const char *const *nodes, int
     cui__viz_state *st = cui__viz_state_get(ui, id);
     cui_interact r = cui__interact(ui, id, 0);
     cui_rect pr = cui__prev_rect(ui, id);
-    float nw = o->node_width > 0 ? o->node_width : 12;
+    float nw = o->node_width > 0 ? o->node_width : 6;
     float h = o->height > 0 ? o->height : 300;
     int hn = -1, hl = -1;
     cui__sk_geo g = cui__sk_layout(ui, pr.w > 0 ? pr : (cui_rect){ 0, 0, 600, h }, nodes, nn, links ? links : (cui_sankey_link[1]){ { 0, 0, 0 } }, nl, nw, o->format);
@@ -1149,6 +1181,10 @@ int cui_sankey_ex(cui_ctx *ui, const char *id_str, const char *const *nodes, int
     memset(p, 0, sizeof *p);
     p->g = g;   /* names and the filtered links; the paint lays out again in its own rect */
     p->format = o->format; p->nw = nw;
+    if (o->node_colors && nn > 0) {
+        p->node_c = cui__frame_alloc(ui, sizeof(cui_color) * (size_t)nn);
+        memcpy(p->node_c, o->node_colors, sizeof(cui_color) * (size_t)nn);
+    }
     p->intro = st->intro.x; p->t = st->hover_t;
     p->hover_node = p->hover_link = -1;
     if (st->hover_t > 0.01f) {
@@ -1164,7 +1200,7 @@ int cui_sankey_ex(cui_ctx *ui, const char *id_str, const char *const *nodes, int
     } else if (p->hover_link >= 0) {
         cui_sankey_link *L = &g.links[p->hover_link];
         p->tip.title = cui__frame_printf(ui, "%s \xe2\x86\x92 %s", nodes && nodes[L->from] ? nodes[L->from] : "", nodes && nodes[L->to] ? nodes[L->to] : "");
-        cui__tip_row(&p->tip, "Flow", cui__fmt_value(ui, o->format, L->value), g.color[L->to] < 0 ? CUI_C(ui, TEXT_MUTED) : cui__viz_color(ui, (cui_color){ 0 }, g.color[L->to]));
+        cui__tip_row(&p->tip, "Flow", cui__fmt_value(ui, o->format, L->value), cui__sk_node_color(ui, p, &g, L->to));
         if (g.out[L->from] > 0) cui__tip_row(&p->tip, "Of the source", cui__pct(ui, L->value, g.out[L->from]), cui__rgba(0, 0, 0, 0));
     } else p->tip.title = NULL;
     cui__viz_node(ui, id, o->width.kind ? o->width : CUI_FILL, CUI_PX(h), cui__paint_sankey, p, hover >= 0);

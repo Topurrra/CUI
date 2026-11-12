@@ -1908,7 +1908,9 @@ CUI_API int cui_radar_chart_ex(cui_ctx *ui, const char *id, const cui_series *se
 typedef struct cui_funnel_opts { int _; cui_size width; float height; const char *format; cui_color color; } cui_funnel_opts;
 CUI_API int cui_funnel_ex(cui_ctx *ui, const char *id, const cui_viz_item *stages, int count, const cui_funnel_opts *opts);
 
-/* Sankey: flows between nodes; columns follow the links from the sources. */
+/* Sankey: flows between nodes; columns follow the links from the sources. Slim nodes in
+ * the colors you give them, flows shaded from source to target color, and hovering a node
+ * or a flow lights its whole path upstream and downstream. */
 typedef struct cui_sankey_link {
     int from;                  /* index of the node the flow leaves */
     int to;                    /* index of the node the flow enters */
@@ -1919,7 +1921,8 @@ typedef struct cui_sankey_opts {
     cui_size width;
     float height;
     const char *format;
-    float node_width;          /* width of the node bars in points, default 12 */
+    float node_width;          /* width of the node bars in points, default 6 */
+    const cui_color *node_colors;   /* one per node, colored by meaning; `NULL`, or an unset entry, falls back to the palette for outcomes and neutral gray for sources and steps */
 } cui_sankey_opts;
 CUI_API int cui_sankey_ex(cui_ctx *ui, const char *id, const char *const *nodes, int node_count, const cui_sankey_link *links, int link_count,
                           const cui_sankey_opts *opts);

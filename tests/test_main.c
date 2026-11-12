@@ -3178,6 +3178,30 @@ static void test_treemap_select(void) {
     cui_destroy(ui);
 }
 
+/* sankey node colors: a node takes the caller's color; one left unset falls back */
+static void build_sankey_colors(cui_ctx *ui, void *u) {
+    (void)u;
+    static const char *nodes[] = { "A", "B" };
+    static const cui_sankey_link links[] = { { 0, 1, 10 } };
+    const cui_color colors[] = { CUI_RGB(0xff0000), { 0 } };
+    cui_sankey(ui, "sk", nodes, 2, links, 1, .width = CUI_PX(300), .height = 120, .node_colors = colors);
+}
+static void test_sankey_node_colors(void) {
+    printf("sankey: nodes take the caller's colors\n");
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
+    cui_set_viewport(ui, 320, 140, 1);
+    run(ui, build_sankey_colors, NULL, 60);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "sk"));
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = calloc((size_t)dd->width_px * dd->height_px, 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    const unsigned char *a = px + ((int)(r.y + r.h * 0.5f) * dd->width_px + (int)(r.x + 3)) * 4;
+    CHECK(a[0] > 240 && a[1] < 20 && a[2] < 20);                  /* the source node in red */
+    CHECK(!(a[0] == a[1] && a[1] == a[2]));
+    free(px);
+    cui_destroy(ui);
+}
+
 /* draw data and renderer ------------------------------------------------ */
 
 static void build_rect(cui_ctx *ui, void *u) {
@@ -7849,6 +7873,7 @@ int main(void) {
     test_series_palette();
     test_radial_gauge_styles();
     test_treemap_select();
+    test_sankey_node_colors();
     test_renderer();
     test_scroll_fade();
     test_pretty_wrap();
