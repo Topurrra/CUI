@@ -198,6 +198,7 @@ void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w
 void cui__plat_set_title(cui_app *app, const char *title) { glfwSetWindowTitle(cui__g(app)->win, title); }
 void cui__plat_set_size(cui_app *app, int w, int h) { glfwSetWindowSize(cui__g(app)->win, w, h); }
 void *cui__plat_native(cui_app *app) { return cui__g(app)->win; }
+bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
 void cui__plat_wait(cui_app *app, double timeout) {
     (void)app;

@@ -384,6 +384,7 @@ void cui__plat_set_size(cui_app *app, int w, int h) {
 }
 
 void *cui__plat_native(cui_app *app) { return (void *)(uintptr_t)cui__x(app)->win; }
+bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
 static void cui__x11_set_cursor(void *user, cui_cursor c) {
     cui_app *app = user;

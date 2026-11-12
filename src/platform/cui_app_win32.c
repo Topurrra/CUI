@@ -228,6 +228,51 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     case WM_CLOSE:
         app->running = false;
         return 0;
+    case WM_NCCALCSIZE:
+        /* custom title bar: the client area takes the whole window. Maximized, Windows
+         * places the window past the screen by its frame, so keep that much back. */
+        if (app->desc.custom_titlebar && wp) {
+            if (IsZoomed(hwnd)) {
+                NCCALCSIZE_PARAMS *p = (NCCALCSIZE_PARAMS *)lp;
+                int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                p->rgrc[0].left += fx; p->rgrc[0].right -= fx;
+                p->rgrc[0].top += fy; p->rgrc[0].bottom -= fy;
+            }
+            return 0;
+        }
+        break;
+    case WM_NCHITTEST:
+        /* custom title bar: the edges still resize; everything else is the app's */
+        if (app->desc.custom_titlebar) {
+            if (IsZoomed(hwnd) || app->desc.fixed_size) return HTCLIENT;
+            POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+            RECT wr;
+            GetWindowRect(hwnd, &wr);
+            int b = (int)(6 * s + 0.5f);
+            bool l = pt.x < wr.left + b, r = pt.x >= wr.right - b, t = pt.y < wr.top + b, d = pt.y >= wr.bottom - b;
+            if (t && l) return HTTOPLEFT;
+            if (t && r) return HTTOPRIGHT;
+            if (d && l) return HTBOTTOMLEFT;
+            if (d && r) return HTBOTTOMRIGHT;
+            if (t) return HTTOP;
+            if (d) return HTBOTTOM;
+            if (l) return HTLEFT;
+            if (r) return HTRIGHT;
+            return HTCLIENT;
+        }
+        break;
+    case WM_APP + 0x51:
+        /* cui_app_drag_window, posted so the move loop runs outside the frame */
+        if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+            POINT pt;
+            GetCursorPos(&pt);
+            ReleaseCapture();
+            SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(pt.x, pt.y));
+        }
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);   /* the move loop ate the release */
+        cui_request_redraw(ui);
+        return 0;
     case WM_SIZE:
         if (w) {
             w->width = LOWORD(lp);
@@ -259,7 +304,7 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         MINMAXINFO *mm = (MINMAXINFO *)lp;
         float sc = w ? w->scale : cui__win32_window_scale(hwnd);
         RECT r = { 0, 0, (LONG)(app->desc.min_width * sc), (LONG)(app->desc.min_height * sc) };
-        AdjustWindowRectEx(&r, (DWORD)GetWindowLongW(hwnd, GWL_STYLE), FALSE, 0);
+        if (!app->desc.custom_titlebar) AdjustWindowRectEx(&r, (DWORD)GetWindowLongW(hwnd, GWL_STYLE), FALSE, 0);
         mm->ptMinTrackSize.x = r.right - r.left;
         mm->ptMinTrackSize.y = r.bottom - r.top;
         return 0;
@@ -383,18 +428,20 @@ bool cui__plat_init(cui_app *app) {
     if (app->desc.fixed_size) style &= ~(DWORD)(WS_THICKFRAME | WS_MAXIMIZEBOX);
     float scale = cui__win32_window_scale(NULL);
     RECT r = { 0, 0, (LONG)(app->desc.width * scale), (LONG)(app->desc.height * scale) };
-    AdjustWindowRectEx(&r, style, FALSE, 0);
+    if (!app->desc.custom_titlebar) AdjustWindowRectEx(&r, style, FALSE, 0);
     WCHAR title[256];
     MultiByteToWideChar(CP_UTF8, 0, app->title, -1, title, 256);
     app->plat = w;
     w->hwnd = CreateWindowExW(0, wc.lpszClassName, title, style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                               NULL, NULL, inst, app);
     if (!w->hwnd) { free(w); app->plat = NULL; return false; }
+    if (app->desc.custom_titlebar)   /* recompute the client area: no title bar or frame */
+        SetWindowPos(w->hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     DragAcceptFiles(w->hwnd, TRUE);   /* files dropped from Explorer arrive as WM_DROPFILES */
     w->scale = cui__win32_window_scale(w->hwnd);
     if (w->scale != scale) {
         RECT r2 = { 0, 0, (LONG)(app->desc.width * w->scale), (LONG)(app->desc.height * w->scale) };
-        AdjustWindowRectEx(&r2, style, FALSE, 0);
+        if (!app->desc.custom_titlebar) AdjustWindowRectEx(&r2, style, FALSE, 0);
         SetWindowPos(w->hwnd, NULL, 0, 0, r2.right - r2.left, r2.bottom - r2.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
     RECT cr;
@@ -505,11 +552,24 @@ void cui__plat_set_title(cui_app *app, const char *title) {
 void cui__plat_set_size(cui_app *app, int width, int height) {
     cui__win32 *w = cui__w(app);
     RECT r = { 0, 0, (LONG)(width * w->scale), (LONG)(height * w->scale) };
-    AdjustWindowRectEx(&r, (DWORD)GetWindowLongW(w->hwnd, GWL_STYLE), FALSE, 0);
+    if (!app->desc.custom_titlebar) AdjustWindowRectEx(&r, (DWORD)GetWindowLongW(w->hwnd, GWL_STYLE), FALSE, 0);
     SetWindowPos(w->hwnd, NULL, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER);
 }
 
 void *cui__plat_native(cui_app *app) { return cui__w(app)->hwnd; }
+
+bool cui__plat_window_op(cui_app *app, int op) {
+    cui__win32 *w = cui__w(app);
+    if (!w || !w->hwnd) return false;
+    switch (op) {
+    case 0: ShowWindow(w->hwnd, SW_MINIMIZE); return true;
+    case 1: ShowWindow(w->hwnd, IsZoomed(w->hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true;
+    case 2: return PostMessageW(w->hwnd, WM_APP + 0x51, 0, 0) != 0;
+    case 3: return IsZoomed(w->hwnd) != 0;
+    case 4: return app->desc.custom_titlebar;
+    default: return false;
+    }
+}
 
 void cui__plat_wait(cui_app *app, double timeout) {
     if (timeout != 0) {

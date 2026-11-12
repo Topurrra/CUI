@@ -420,6 +420,7 @@ void cui__plat_set_size(cui_app *app, int w, int h) {
 }
 
 void *cui__plat_native(cui_app *app) { return (__bridge void *)cui__p(app).window; }
+bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
 void cui__plat_wait(cui_app *app, double timeout) {
     @autoreleasepool {

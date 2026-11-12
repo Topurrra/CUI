@@ -60,6 +60,11 @@ typedef struct cui_app_desc {
      * macOS. Default: none (the X11 backend then sets WM_CLASS to the title
      * and "CUI"). */
     const char *app_id;
+    /* Windows: no system title bar or frame; the app draws its own bar with
+     * cui_app_minimize, cui_app_toggle_maximize, cui_app_quit and cui_app_drag_window.
+     * The edges still resize, and the shadow, snapping and Alt+Space menu stay.
+     * Ignored elsewhere (check cui_app_has_custom_titlebar). */
+    bool custom_titlebar;
 } cui_app_desc;
 
 CUI_API cui_app *cui_app_create(const cui_app_desc *desc);
@@ -93,6 +98,15 @@ CUI_API bool cui_app_is_software(cui_app *app);
 CUI_API void *cui_app_native_window(cui_app *app);
 /* Name of the active backend: "win32", "cocoa", "x11", "sdl2", "glfw". */
 CUI_API const char *cui_app_backend(cui_app *app);
+
+/* Window controls, for an app that draws its own title bar (cui_app_desc.custom_titlebar). */
+CUI_API bool cui_app_has_custom_titlebar(cui_app *app);   /* the option took effect on this platform */
+CUI_API void cui_app_minimize(cui_app *app);
+CUI_API void cui_app_toggle_maximize(cui_app *app);
+CUI_API bool cui_app_is_maximized(cui_app *app);
+/* Starts moving the window with the mouse, as the system title bar does (with snapping).
+ * Call it on the frame the left button goes down on your bar's empty space. */
+CUI_API void cui_app_drag_window(cui_app *app);
 
 /* Native file dialogs. Blocking; returns true and writes the chosen path
  * (UTF-8) to out when the user confirms. On Linux this uses zenity or

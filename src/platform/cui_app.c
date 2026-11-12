@@ -124,6 +124,11 @@ void cui_app_quit(cui_app *app) { app = cui__app_or_current(app); if (app) app->
 bool cui_app_is_software(cui_app *app) { app = cui__app_or_current(app); return app && app->software; }
 void *cui_app_native_window(cui_app *app) { app = cui__app_or_current(app); return app ? cui__plat_native(app) : NULL; }
 const char *cui_app_backend(cui_app *app) { (void)app; return cui__plat_name(); }
+bool cui_app_has_custom_titlebar(cui_app *app) { app = cui__app_or_current(app); return app && cui__plat_window_op(app, 4); }
+void cui_app_minimize(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_window_op(app, 0); }
+void cui_app_toggle_maximize(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_window_op(app, 1); }
+bool cui_app_is_maximized(cui_app *app) { app = cui__app_or_current(app); return app && cui__plat_window_op(app, 3); }
+void cui_app_drag_window(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_window_op(app, 2); }
 
 void cui_app_set_title(cui_app *app, const char *title) {
     app = cui__app_or_current(app);

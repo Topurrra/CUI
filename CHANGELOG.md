@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- `cui_app_desc.custom_titlebar` (Windows): no system title bar or frame; the app draws its own with `cui_app_minimize`, `cui_app_toggle_maximize`, `cui_app_is_maximized` and `cui_app_drag_window`. The edges still resize, and the shadow, snapping and Alt+Space menu stay. Other platforms keep the system bar (`cui_app_has_custom_titlebar` says which).
 - Document tabs report a double click in `cui_doc_tabs_result.activated`, to rename a tab, say.
 - Code editor `.borderless`: no border, corners or focus ring, drawn on the window background, for an editor that fills a pane.
 - **Color emoji in text**: text draws emoji in place from the emoji font, in headings, table cells, list items, labels and fields, where it used to leave a gap. Sequences stay whole (variation selectors, skin tones, ZWJ families and jobs, keycaps, flags), each about one em wide on the text's baseline. The markdown view turns it on and loads the system emoji font the first time an emoji shows up; any other app turns it on by loading an emoji font or using an emoji component. See [Emoji in text](docs/components-more.md#emoji-in-text).

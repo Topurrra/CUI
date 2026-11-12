@@ -53,6 +53,8 @@ void cui__plat_set_title(cui_app *app, const char *title);
 void cui__plat_set_size(cui_app *app, int w, int h);
 void cui__plat_show(cui_app *app);
 void *cui__plat_native(cui_app *app);
+/* window controls: 0 minimize, 1 toggle maximize, 2 start a drag, 3 is maximized, 4 has a custom title bar */
+bool cui__plat_window_op(cui_app *app, int op);
 const char *cui__plat_name(void);
 double cui__plat_now(void);
 int cui__plat_system_dark(void);                      /* -1 unknown, 0 light, 1 dark */
