@@ -256,6 +256,8 @@ static void page_capture(cui_ctx *ui) {
 
 /* ---- disclosure and feedback ---------------------------------------------- */
 
+static cui_texture canvas_picture(cui_ctx *ui);
+
 static void page_disclosure(cui_ctx *ui) {
     static bool banner = true;
     static bool card1 = true, card2 = false;
@@ -339,6 +341,27 @@ static void page_disclosure(cui_ctx *ui) {
 
     section(ui, "Undo toast", "A draining line shows how long Undo stays.");
     if (cui_button(ui, "Archive 3 conversations", .icon = CUI_ICON_ARCHIVE)) cui_toast(ui, "3 conversations archived", .action = "Undo", .show_timer = true);
+
+    section(ui, "Veil", "Covers a picture, a secret or a spoiler with moving dots, and dissolves when clicked.");
+    {
+        static bool photo, key, spoiler;
+        cui_column(ui, .gap = 12, .pad = 12, .bg = CUI_COLOR_SURFACE, .border = 1, .radius = 16, .width = CUI_FILL, .max_width = 420) {
+            cui_veil(ui, "photo", &photo, .label = "Sensitive image", .hint = "Click to show", .toggle = true, .radius = 10) {
+                cui_image(ui, canvas_picture(ui), .width = CUI_PX(234), .height = CUI_PX(150), .radius = 10);
+            }
+            cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad = 8, .pad_x = 10, .bg = CUI_COLOR_SURFACE_MUTED, .radius = 10, .width = CUI_FILL) {
+                cui_text(ui, "sk-live-", .font = CUI_FONT_MONO, .size = 12.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+                cui_box(ui, .width = CUI_FILL) {
+                    cui_veil(ui, "key", &key, .color = CUI_COLOR_SURFACE) { cui_text(ui, "4f9a82c1e07d55b3a9", .font = CUI_FONT_MONO, .size = 12.5f); }
+                }
+                if (cui_button(ui, key ? "Hide" : "Reveal", .size = CUI_SIZE_SM)) key = !key;
+            }
+            cui_row(ui, .gap = 4, .wrap = true, .align = CUI_ALIGN_CENTER) {
+                cui_text(ui, "Finished it last night. The ending:");
+                cui_veil(ui, "spoiler", &spoiler, .toggle = true, .radius = 4) { cui_text(ui, "the keeper was the narrator"); }
+            }
+        }
+    }
 }
 
 /* ---- docs page with a table of contents ---------------------------------- */

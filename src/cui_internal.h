@@ -644,6 +644,7 @@ struct cui_ctx {
         void *dock;
         void *spot;                /* spotlight card */
         void *reasoning;
+        void *veil;                /* veils nest: each keeps the one around it */
     } building;
     cui__text_fx_fn text_fx;       /* set while a node with a text effect paints */
     void *text_fx_data;

@@ -4394,6 +4394,31 @@ static cui_texture cb_result_image(cui_ctx *ui) {
     made_for = ui;
     return tex;
 }
+/* a picture, a secret and a spoiler; the key is shown, the others covered */
+static bool veil_photo, veil_key = true, veil_spoiler;
+static void body_veil(cui_ctx *ui) {
+    cui_column(ui, .gap = 12, .pad = 12, .bg = CUI_COLOR_SURFACE, .border = 1, .radius = 16, UPTO(420)) {
+        cui_veil(ui, "photo", &veil_photo, .label = "Sensitive image", .hint = "Click to show", .toggle = true, .radius = 10) {
+            cui_image(ui, cb_result_image(ui), .width = CUI_PX(234), .height = CUI_PX(150), .radius = 10);
+        }
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad = 8, .pad_x = 10, .bg = CUI_COLOR_SURFACE_MUTED, .radius = 10, .width = CUI_FILL) {
+            cui_text(ui, "sk-live-", .font = CUI_FONT_MONO, .size = 12.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+            cui_box(ui, .width = CUI_FILL) {
+                cui_veil(ui, "key", &veil_key, .color = CUI_COLOR_SURFACE) { cui_text(ui, "4f9a82c1e07d55b3a9", .font = CUI_FONT_MONO, .size = 12.5f); }
+            }
+            if (cui_button(ui, veil_key ? "Hide" : "Reveal", .size = CUI_SIZE_SM)) veil_key = !veil_key;
+        }
+        cui_row(ui, .gap = 4, .wrap = true, .align = CUI_ALIGN_CENTER) {
+            cui_text(ui, "Finished it last night. The ending:");
+            cui_veil(ui, "spoiler", &veil_spoiler, .toggle = true, .radius = 4) { cui_text(ui, "the keeper was the narrator"); }
+        }
+    }
+}
+static void scene_veil(cui_ctx *ui, int f) {
+    if (f < 0) return;
+    frame_wrap(ui, body_veil);
+}
+
 static bool cb_saved;
 static int cb_scale = 1, cb_type;
 static void cb_result(cui_ctx *ui) {
@@ -4528,7 +4553,7 @@ int main(int argc, char **argv) {
         { "dot-display", scene_dot_display, 420, 200, true, false, CUI_ACCENT_BLUE },
         { "grouped-toolbar", scene_grouped_toolbar, 620, 220, true }, { "format-bar", scene_format_bar, 640, 330, true, false, CUI_ACCENT_GREEN },
         { "live-cursors", scene_live_cursors, 760, 416, true }, { "canvas-controls", scene_canvas_controls, 760, 376, true },
-        { "result-card", scene_result_card, 440, 560, true }, { "selection-bar", scene_selection_bar, 600, 400, true, false, CUI_ACCENT_GREEN },
+        { "result-card", scene_result_card, 440, 560, true }, { "veil", scene_veil, 480, 330, true }, { "selection-bar", scene_selection_bar, 600, 400, true, false, CUI_ACCENT_GREEN },
         { "tw-studio", scene_tw_studio, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-audio", scene_tw_audio, 960, 540, true, false, CUI_ACCENT_NEUTRAL },
         { "tw-markets", scene_tw_markets, 1200, 675, true, false, CUI_ACCENT_NEUTRAL }, { "tw-calendar", scene_tw_calendar, 1200, 675, true, false, CUI_ACCENT_NEUTRAL },
         { "status-tag", scene_status_tag, 620, 270, true }, { "ratio-slider", scene_ratio_slider, 620, 180, true },

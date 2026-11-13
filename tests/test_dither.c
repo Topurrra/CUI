@@ -338,12 +338,115 @@ static void test_area(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+/* veil                                                                     */
+
+typedef struct { bool shown, toggle, changed, pressed; int presses; cui_id veil; } veil_case;
+static void build_veil(cui_ctx *ui, void *u) {
+    veil_case *c = u;
+    cui_veil_opts o;
+    memset(&o, 0, sizeof o);
+    o.toggle = c->toggle;
+    o.label = "Hidden";
+    c->changed = cui_veil_begin_ex(ui, "v", &c->shown, &o);
+    cui_box(ui, .width = CUI_PX(200), .height = CUI_PX(100), .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
+        if (cui_button(ui, "Inside")) c->presses++;
+    }
+    cui_veil_end(ui);
+    c->veil = cui_last_id(ui);
+}
+
+static void test_veil(void) {
+    printf("veil\n");
+    cui_ctx *ui = new_ctx(400, 300, true);
+    veil_case c;
+    memset(&c, 0, sizeof c);
+    run(ui, build_veil, &c, 3);
+    cui_rect r = cui_get_rect(ui, c.veil);
+    CHECK(r.w == 200 && r.h == 100);   /* the content keeps its space */
+    float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
+    /* covered: the click reveals, and the button under the veil does not get it */
+    move(ui, build_veil, &c, cx, cy);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_veil, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_veil, &c, 1);
+    CHECK(c.shown);
+    CHECK(c.changed);
+    CHECK_EQ(c.presses, 0);
+    run(ui, build_veil, &c, 1);
+    CHECK(!c.changed);
+    /* revealed: the content takes clicks, and without toggle the veil stays off */
+    click(ui, build_veil, &c, cx, cy);
+    CHECK_EQ(c.presses, 1);
+    click(ui, build_veil, &c, r.x + 4, r.y + 4);
+    CHECK(c.shown);
+    /* toggle: a click beside the content covers it again */
+    c.toggle = true;
+    click(ui, build_veil, &c, r.x + 4, r.y + 4);
+    CHECK(!c.shown);
+    /* the app hides and shows it too */
+    c.shown = true; run(ui, build_veil, &c, 2);
+    image open = render(ui);
+    c.shown = false; run(ui, build_veil, &c, 2);
+    image shut = render(ui);
+    CHECK(!same(open, shut));
+    free(open.px);
+    /* reduced motion: the noise holds still */
+    run(ui, build_veil, &c, 30);
+    image later = render(ui);
+    CHECK(same(shut, later));
+    free(shut.px); free(later.px);
+    cui_destroy(ui);
+
+    /* the keyboard: Tab to the veil, Enter reveals and Enter covers */
+    ui = new_ctx(400, 300, true);
+    memset(&c, 0, sizeof c);
+    run(ui, build_veil, &c, 3);
+    key(ui, build_veil, &c, CUI_KEY_TAB);
+    key(ui, build_veil, &c, CUI_KEY_ENTER);
+    CHECK(c.shown);
+    key(ui, build_veil, &c, CUI_KEY_ENTER);
+    CHECK(!c.shown);
+    /* covered, the button inside is out of reach: Tab goes past it, and Enter reaches nothing */
+    key(ui, build_veil, &c, CUI_KEY_TAB);
+    key(ui, build_veil, &c, CUI_KEY_ENTER);
+    CHECK_EQ(c.presses, 0);
+    /* revealed, Tab reaches it */
+    c.shown = true;
+    run(ui, build_veil, &c, 2);
+    key(ui, build_veil, &c, CUI_KEY_TAB);
+    key(ui, build_veil, &c, CUI_KEY_ENTER);
+    CHECK_EQ(c.presses, 1);
+    cui_destroy(ui);
+
+    /* with motion: the veil moves while covered, dissolves over about 0.28 s, then holds still */
+    ui = new_ctx(400, 300, false);
+    memset(&c, 0, sizeof c);
+    run(ui, build_veil, &c, 3);
+    image a = render(ui);
+    run(ui, build_veil, &c, 30);
+    image b = render(ui);
+    CHECK(!same(a, b));
+    free(a.px); free(b.px);
+    c.shown = true;
+    run(ui, build_veil, &c, 6);
+    a = render(ui);
+    run(ui, build_veil, &c, 20);
+    b = render(ui);
+    run(ui, build_veil, &c, 30);
+    image cdone = render(ui);
+    CHECK(!same(a, b));
+    CHECK(same(b, cdone));
+    free(a.px); free(b.px); free(cdone.px);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
     test_progress();
     test_meter();
     test_area();
+    test_veil();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

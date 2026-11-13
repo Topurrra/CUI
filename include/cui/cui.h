@@ -2703,6 +2703,30 @@ typedef struct cui_checklist_opts {
 } cui_checklist_opts;
 CUI_API int cui_checklist_ex(cui_ctx *ui, const char *id, cui_check_step *steps, int count, const cui_checklist_opts *opts);
 
+/* Veil: covers what is built inside it (a picture, a secret such as an API key, a spoiler)
+ * with a slowly moving dither in muted tones that keeps its space. A click, or Enter or
+ * Space, reveals it: the veil dissolves dot by dot in about a quarter of a second, and
+ * comes back the same way when *revealed is set to false again. While covered, the content
+ * takes no clicks and no keyboard focus. Reduced motion holds the noise still and reveals at once.
+ *
+ *     static bool shown;
+ *     cui_veil(ui, "photo", &shown, .label = "Sensitive image", .hint = "Click to show", .toggle = true) {
+ *         cui_image(ui, tex, .width = CUI_PX(240), .height = CUI_PX(150));
+ *     }
+ *
+ * cui_veil_begin_ex returns true on the frame a click or a key changed *revealed. */
+typedef struct cui_veil_opts {
+    int _;
+    const char *label;         /* a line in the middle of the veil, e.g. "Sensitive image"; `NULL` for none */
+    const char *hint;          /* a smaller line under it, e.g. "Click to show" */
+    bool toggle;               /* a click on the revealed content covers it again */
+    float radius;              /* corners of the veil, default 0 */
+    cui_color color;           /* the veil's ground, default the muted surface; its dots are a step toward the text color */
+    cui_size width;            /* default: the content's width */
+} cui_veil_opts;
+CUI_API bool cui_veil_begin_ex(cui_ctx *ui, const char *id, bool *revealed, const cui_veil_opts *opts);
+CUI_API void cui_veil_end(cui_ctx *ui);
+
 /* ------------------------------------------------------------------------ */
 /* Pickers                                                                  */
 /* ------------------------------------------------------------------------ */
@@ -5030,6 +5054,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_banner(ui, text, open, ...)     cui_banner_ex((ui), (text), (open), CUI__OPTS(cui_banner_opts, __VA_ARGS__))
 #define cui_countdown(ui, id, seconds, ...) cui_countdown_ex((ui), (id), (seconds), CUI__OPTS(cui_countdown_opts, __VA_ARGS__))
 #define cui_checklist(ui, id, steps, count, ...) cui_checklist_ex((ui), (id), (steps), (count), CUI__OPTS(cui_checklist_opts, __VA_ARGS__))
+#define cui_veil(ui, id, revealed, ...)    CUI__SCOPE(cui_veil_begin_ex((ui), (id), (revealed), CUI__OPTS(cui_veil_opts, __VA_ARGS__)), cui_veil_end(ui))
 #define cui_multi_select(ui, id, items, count, selected, ...) cui_multi_select_ex((ui), (id), (items), (count), (selected), CUI__OPTS(cui_multi_select_opts, __VA_ARGS__))
 #define cui_date_range_picker(ui, id, range, ...) cui_date_range_picker_ex((ui), (id), (range), CUI__OPTS(cui_date_range_opts, __VA_ARGS__))
 #define cui_time_picker(ui, id, hour, minute, ...) cui_time_picker_ex((ui), (id), (hour), (minute), CUI__OPTS(cui_time_opts, __VA_ARGS__))

@@ -536,6 +536,33 @@ The rail fills as you read, and a marker glides to the section in view. Clicking
 
 Keyboard: Tab moves through the entries, and Enter or Space jumps to the focused section.
 
+### Veil
+
+Covers sensitive content, a secret or a spoiler with slowly moving dots in muted tones that keep its space, and dissolves when it is revealed.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/veil-dark.png"><img src="images/components/veil.png" alt="Veil"></picture>
+
+```c
+static bool photo, key, spoiler;
+cui_veil(ui, "photo", &photo, .label = "Sensitive image", .hint = "Click to show", .toggle = true, .radius = 10) {
+    cui_image(ui, tex, .width = CUI_PX(234), .height = CUI_PX(150), .radius = 10);
+}
+cui_veil(ui, "key", &key, .color = CUI_COLOR_SURFACE) { cui_text(ui, api_key, .font = CUI_FONT_MONO); }
+if (cui_button(ui, key ? "Hide" : "Reveal")) key = !key;
+cui_row(ui, .gap = 4) {
+    cui_text(ui, "The ending:");
+    cui_veil(ui, "spoiler", &spoiler, .toggle = true) { cui_text(ui, "the keeper was the narrator"); }
+}
+```
+
+The veil wraps whatever is built inside it and takes exactly its size. Covered, it is an ordered dither of the `color` (the muted surface by default) and a step toward the text color, its density moving slowly like a noise, with an optional `label` and smaller `hint` in the middle. A click reveals the content: the veil's dots turn off in threshold order, a dissolve of about 0.28 seconds, and come back the same way when hidden. While it is covered, or still coming back, the content takes no clicks, and fully covered it takes no keyboard focus either; once revealed, both reach the content again.
+
+`revealed` is your `bool`: a click on the veil sets it, and setting it yourself shows or covers the content, as the Hide button does above. With `toggle` a click on the revealed content (where it is not a control of its own) covers it again. `radius` rounds the veil's corners and `width` sizes it instead of the content. `cui_veil_begin_ex` returns true on the frame a click or a key changed `revealed`, for code that needs to know; `cui_veil_end` closes it. Veils may nest.
+
+The noise moves in steps, a dozen a second, so a covered veil does not redraw every frame. Reduced motion holds the noise still and reveals and covers at once.
+
+Keyboard: Tab focuses the veil, and Enter or Space reveals it or covers it again.
+
 ## Feedback
 
 ### Banner and countdown
