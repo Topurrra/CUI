@@ -640,6 +640,11 @@ static inline float cui__fs(cui_ctx *ui, float size) { return size * ui->theme.f
 static inline cui_color cui__emphasis(cui_ctx *ui) {
     return ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, FOREGROUND) : CUI_C(ui, ACCENT);
 }
+/* selected text behind the glyphs: the accent, or a blue under the neutral accent (a gray
+ * would read as disabled) */
+static inline cui_color cui__selection_color(cui_ctx *ui) {
+    return ui->accent == CUI_ACCENT_NEUTRAL ? cui_alpha(cui_oklch(0.6f, 0.13f, 250, 1), 0.28f) : cui_alpha(CUI_C(ui, ACCENT), 0.26f);
+}
 
 /* ---- user-facing text (cui_strings.c): the app's table (cui_set_strings) or English ---- */
 const char *cui__month_name(cui_ctx *ui, int m);      /* m 0..11, January first */
@@ -770,6 +775,18 @@ void cui__syntax_colors(cui_ctx *ui, cui_color *c);   /* CUI__TK_COUNT colors, b
 /* One line of code in the mono font at (x, y), highlighted when lang is set, stopping past
  * max_x; *in_block carries a block comment to the next line. Returns the x after it. */
 float cui__draw_code_line(cui_ctx *ui, const char *lang, const char *s, int n, bool *in_block, float x, float y, float size, const cui_color *colors, float max_x);
+/* A code block whose text a surrounding view selects (the markdown view). The view sets
+ * from, to and color, which are read when the block paints, so they may change after the
+ * block is built; the block fills in where its text sits, for cui__code_sel_hit. */
+typedef struct cui__code_sel {
+    int from, to;              /* selected bytes of the code */
+    cui_color color;
+    cui_id canvas;             /* set by the block: the node the text is painted in */
+    float size, lh, x0, y0;    /* set by the block: font size, line height, text origin in the canvas */
+} cui__code_sel;
+void cui__code_block_sel(cui_ctx *ui, const char *id, const char *code, const cui_code_opts *o, cui__code_sel *sel);
+/* The byte of code nearest the point (x, y), in the block's latest layout. */
+int cui__code_sel_hit(cui_ctx *ui, const cui__code_sel *sel, const char *code, int len, float x, float y);
 
 /* ---- layered graph layout (cui_graph.c): the dependency graph's layout, for other diagrams too ---- */
 typedef struct { float x, y, w, h; int layer; } cui__layer_box;

@@ -1554,8 +1554,16 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * file name. An image inside a link, [![alt](img)](url), reports .link when clicked.
  *
  * Links use the accent color with an underline that firms up on hover, show
- * their URL as a tooltip, take Tab focus and activate with Enter. Text is not
- * selectable (CUI text has no selection yet); code blocks have a copy button.
+ * their URL as a tooltip, take Tab focus and activate with Enter. Text selects
+ * as on a web page: drag across paragraphs, headings, lists, quotes, callouts,
+ * table cells and code blocks; double click takes a word, triple click a block,
+ * Shift+click extends, and a plain click clears. After a click in the view,
+ * Ctrl+A (Cmd+A) selects everything and Ctrl+C copies the selection as plain
+ * text (a line per block, a tab between table cells, no list or heading
+ * markers). A press on a link that does not move still clicks it; a drag from
+ * a diagram pans it. The selection lasts while the text stays the same.
+ * Set .no_select when the view sits inside something that takes its own clicks.
+ * Code blocks have a copy button.
  * Parsing allocates only from the frame arena (about 16 bytes a line and a
  * few dozen per inline marker), so a long reply re-parses every frame. */
 typedef struct cui_markdown_opts {
@@ -1574,6 +1582,7 @@ typedef struct cui_markdown_opts {
      * it cheap (a hash lookup, not a directory walk); the string must stay valid until the call returns */
     const char *(*resolve_image)(const char *src, void *user);
     void *resolve_user;        /* passed to resolve_image */
+    bool no_select;            /* text does not select: presses on it go to what is under the view */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */
@@ -1594,6 +1603,7 @@ typedef struct cui_markdown_result {
     int task_line;             /* that item's 1 based line in text, 0 when none */
     bool task_checked;         /* the state the box was toggled to */
     float height;              /* height of the view in the latest layout */
+    bool copied;               /* Ctrl+C put the selected text on the clipboard this frame */
 } cui_markdown_result;
 CUI_API cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id, const char *text, const cui_markdown_opts *opts);
 /* Writes a reported task toggle into text ('x' or ' ' between the brackets).

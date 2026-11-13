@@ -5695,7 +5695,7 @@ typedef struct {
     char text[4096];
     int length;             /* 0: strlen */
     float width;            /* 0: fill a 600 point column */
-    bool streaming, no_front_matter;
+    bool streaming, no_front_matter, no_select;
     const char *base_dir;
     const char *(*resolve)(const char *src, void *user);
     cui_markdown_result res;
@@ -5706,7 +5706,8 @@ static void build_md(cui_ctx *ui, void *u) {
     md_test *m = u;
     cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
         m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter,
-                                .base_dir = m->base_dir, .resolve_image = m->resolve, .resolve_user = m);
+                                .base_dir = m->base_dir, .resolve_image = m->resolve, .resolve_user = m,
+                                .no_select = m->no_select);
     }
     if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
     if (m->res.task_offset >= 0) m->toggles++;
@@ -6017,6 +6018,132 @@ static void test_markdown_callout_fold_keys(void) {
     snprintf(both, sizeof both, "intro\n\n%s", twin);
     float moved = md_height_of(ui, &m, both);
     CHECK(moved > shut);
+    cui_destroy(ui);
+}
+
+/* text selection: the pointer goes down at (x0, y0), moves to (x1, y1) and comes up */
+static void md_drag(cui_ctx *ui, md_test *m, float x0, float y0, float x1, float y1) {
+    md_frames(ui, m, 30);   /* far enough from the last click not to count as a double click */
+    cui_input_mouse_move(ui, x0, y0);
+    md_frames(ui, m, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    md_frames(ui, m, 1);
+    for (int k = 1; k <= 4; k++) {
+        cui_input_mouse_move(ui, x0 + (x1 - x0) * (float)k / 4, y0 + (y1 - y0) * (float)k / 4);
+        md_frames(ui, m, 1);
+    }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    md_frames(ui, m, 1);
+}
+/* Ctrl+C: what reached the clipboard, or "-" when nothing did */
+static const char *md_copy(cui_ctx *ui, md_test *m) {
+    snprintf(g_clip, sizeof g_clip, "-");
+    key(ui, build_md, m, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(m->res.copied == (strcmp(g_clip, "-") != 0));
+    return g_clip;
+}
+
+static void test_markdown_select(void) {
+    printf("markdown: selecting and copying text\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    snprintf(m.text, sizeof m.text, "Alpha beta gamma.\n\nDelta epsilon zeta.\n");
+    md_frames(ui, &m, 3);
+    cui_rect r = md_rect(ui);
+    float y1 = r.y + 10, y2 = r.y + r.h - 10, left = r.x + 1, right = r.x + r.w - 2;
+    /* nothing selected copies nothing; text shows the I-beam */
+    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+    cui_input_mouse_move(ui, r.x + 20, y1);
+    md_frames(ui, &m, 2);
+    CHECK(cui_get_cursor(ui) == CUI_CURSOR_TEXT);
+    /* a drag across two paragraphs copies both, a line each, either way round */
+    md_drag(ui, &m, left, y1, right, y2);
+    CHECK(strcmp(md_copy(ui, &m), "Alpha beta gamma.\nDelta epsilon zeta.") == 0);
+    md_drag(ui, &m, right, y2, left, y1);
+    CHECK(strcmp(md_copy(ui, &m), "Alpha beta gamma.\nDelta epsilon zeta.") == 0);
+    /* a drag that ends inside a paragraph stops there */
+    md_drag(ui, &m, left, y1, r.x + 40, y2);
+    static char part[256];
+    snprintf(part, sizeof part, "%s", md_copy(ui, &m));
+    CHECK(strncmp(part, "Alpha beta gamma.\nDe", 20) == 0 && strlen(part) < 30);
+    /* it outlasts frames with the pointer elsewhere */
+    cui_input_mouse_move(ui, r.x + r.w + 50, r.y + r.h + 50);
+    md_frames(ui, &m, 10);
+    CHECK(strcmp(md_copy(ui, &m), part) == 0);
+    /* a plain click clears it */
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 20, y2);
+    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+    /* double click takes a word, triple click the paragraph */
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 3, y1);
+    click_at(ui, build_md, &m, r.x + 3, y1);
+    CHECK(strcmp(md_copy(ui, &m), "Alpha") == 0);
+    md_frames(ui, &m, 30);
+    for (int k = 0; k < 3; k++) click_at(ui, build_md, &m, r.x + 3, y2);
+    CHECK(strcmp(md_copy(ui, &m), "Delta epsilon zeta.") == 0);
+    /* Shift+click extends from where the last click went down */
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, left, y1);
+    md_frames(ui, &m, 30);
+    cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_SHIFT);
+    click_at(ui, build_md, &m, right, y2);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    CHECK(strcmp(md_copy(ui, &m), "Alpha beta gamma.\nDelta epsilon zeta.") == 0);
+    /* new text drops it */
+    snprintf(m.text, sizeof m.text, "Alpha beta gamma!\n\nDelta epsilon zeta.\n");
+    md_frames(ui, &m, 2);
+    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+
+    /* Ctrl+A after a click takes every block: headings, lists, quotes, code, table cells */
+    snprintf(m.text, sizeof m.text, "# Title\n\nAlpha *beta*.\n\n- item one\n\n> quoted\n\n```\ncode line\n```\n\n| h1 | h2 |\n|---|---|\n| c | d |\n");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 20, r.y + 10);
+    key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(strcmp(md_copy(ui, &m), "Title\nAlpha beta.\nitem one\nquoted\ncode line\nc\td") == 0);
+    /* a click outside the view lets go of the keys */
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, 790, 590);
+    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+    /* a drag from the paragraph into the code block */
+    md_drag(ui, &m, r.x + 1, r.y + 60, r.x + r.w - 30, r.y + r.h - 10);
+    snprintf(part, sizeof part, "%s", md_copy(ui, &m));
+    CHECK(strncmp(part, "Alpha beta.\nitem one\nquoted\ncode line", 37) == 0);
+
+    /* links: a click still reports the link; a drag that starts on one selects instead */
+    snprintf(m.text, sizeof m.text, "Read the [guide](https://x.y/g) now.\n\nSecond paragraph.\n");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    cui_vec2 at;
+    md_frames(ui, &m, 30);
+    CHECK(md_find_link(ui, &m, r.y + 10, &at));
+    m.links = 0;
+    click_at(ui, build_md, &m, at.x + 4, at.y);
+    CHECK(m.links == 1 && strcmp(m.last_link, "https://x.y/g") == 0);
+    md_drag(ui, &m, at.x + 4, at.y, r.x + r.w - 2, r.y + r.h - 10);
+    CHECK(m.links == 1);
+    snprintf(part, sizeof part, "%s", md_copy(ui, &m));
+    size_t pl = strlen(part);
+    CHECK(pl > 25 && pl < 40 && strcmp(part + pl - 22, "now.\nSecond paragraph.") == 0);
+
+    /* a press on a diagram never starts a selection */
+    snprintf(m.text, sizeof m.text, "```mermaid\ngraph TD\nA-->B\n```\n\nafter the diagram\n");
+    md_frames(ui, &m, 5);
+    r = md_rect(ui);
+    md_drag(ui, &m, r.x + 20, r.y + 20, r.x + r.w - 2, r.y + r.h - 5);
+    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+    /* .no_select: a drag selects nothing and the pointer stays an arrow */
+    snprintf(m.text, sizeof m.text, "Alpha beta gamma.\n\nDelta epsilon zeta.\n");
+    m.no_select = true;
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    md_drag(ui, &m, r.x + 1, r.y + 10, r.x + r.w - 2, r.y + r.h - 10);
+    CHECK(cui_get_cursor(ui) != CUI_CURSOR_TEXT);
+    key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
     cui_destroy(ui);
 }
 
@@ -8416,6 +8543,7 @@ int main(void) {
     test_markdown_callouts();
     test_markdown_images();
     test_markdown_callout_fold_keys();
+    test_markdown_select();
     test_code_editor();
     test_code_editor_wrap();
     test_code_editor_markdown();

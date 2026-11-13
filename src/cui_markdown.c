@@ -5,7 +5,13 @@
  * still point into the text), inline styles come from a delimiter stack, and
  * each paragraph is wrapped by hand, since one line mixes fonts, into a single
  * painted node with an invisible hit box per link. Code blocks and tables are
- * drawn by cui_code_block and cui_table. Memory comes from the frame arena. */
+ * drawn by cui_code_block and cui_table. Memory comes from the frame arena.
+ *
+ * Selection: every inline block and code block gets a number in document order,
+ * and a position is (block, byte offset into the block's runs joined, a hard
+ * break counting one byte). Those stay put while the text and the callouts'
+ * folds do, at any width. A press, a drag or a shift click asks each block in
+ * turn for the position under the pointer, from its latest rect. */
 #include "cui_internal.h"
 
 
@@ -58,7 +64,7 @@ static bool md_has(md_line L, char c) { return L.len > 0 && memchr(L.s, c, (size
 /* ------------------------------------------------------------------------ */
 
 enum { MS_STRONG = 1, MS_EM = 2, MS_STRIKE = 4, MS_CODE = 8, MS_BREAK = 16 };
-typedef struct { const char *p; int len; uint8_t style; int link; } md_run;
+typedef struct { const char *p; int len; uint8_t style; int link; int at; } md_run;   /* at: offset in the block's text */
 typedef struct { const char *url; int len; bool www, pending, autolink, wiki; } md_link;
 typedef struct { md_run *runs; int nruns; md_link *links; int nlinks; } md_inline;
 
@@ -447,6 +453,7 @@ static md_inline md_parse_inline(cui_ctx *ui, const char *s, int n, bool tail) {
         }
         for (int q = 0; q < 3; q++) cnt[q] += t->post[q];
     }
+    for (int k = 0, at = 0; k < nr; k++) { runs[k].at = at; at += (runs[k].style & MS_BREAK) ? 1 : runs[k].len; }
     out.runs = runs; out.nruns = nr; out.links = links; out.nlinks = nl;
     return out;
 }
@@ -475,7 +482,7 @@ typedef struct {
     float pad;                   /* inline code: padding inside its tint */
 } md_font;
 
-typedef struct { const char *p; int len; float x, w; int line, run, link; uint8_t style, lead; } md_seg;
+typedef struct { const char *p; int len; float x, w; int line, run, link, at; uint8_t style, lead; } md_seg;   /* at: offset in the block's text */
 typedef struct { md_seg *seg; int n, cap; int lines; float widest; } md_lay;
 
 static cui_font md_font_of(const md_font *f, int style) { return (style & MS_CODE) ? f->mono : (style & MS_STRONG) ? f->bold : f->reg; }
@@ -499,7 +506,7 @@ static float md_runs_width(cui_ctx *ui, const md_inline *in, const md_font *f) {
     return CUI_MAX(best, w);
 }
 
-static void md_seg_add(cui_ctx *ui, md_lay *L, const md_inline *in, int run, const char *p, int len, float x, float w) {
+static void md_seg_add(cui_ctx *ui, md_lay *L, const md_inline *in, int run, int off, const char *p, int len, float x, float w) {
     const md_run *R = &in->runs[run];
     if (L->n > 0) {
         md_seg *q = &L->seg[L->n - 1];
@@ -512,7 +519,7 @@ static void md_seg_add(cui_ctx *ui, md_lay *L, const md_inline *in, int run, con
         L->seg = ns; L->cap = ncap;
     }
     md_seg *s = &L->seg[L->n++];
-    s->p = p; s->len = len; s->x = x; s->w = w; s->line = L->lines; s->run = run; s->link = R->link;
+    s->p = p; s->len = len; s->x = x; s->w = w; s->line = L->lines; s->run = run; s->link = R->link; s->at = R->at + off;
     s->style = R->style; s->lead = (R->style & MS_CODE) && p == R->p;
 }
 
@@ -556,7 +563,7 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
             sw = cui__text_width(ui, md_font_of(f, S->style), md_size_of(f, S->style), " ", 1, false);
         }
         if (x > 0 && x + sw + ww > W) { md_finish_line(L, &first, x, W, align); x = 0; sw = 0; }
-        if (sw > 0) { md_seg_add(ui, L, in, sp_run, *sp_p == ' ' ? sp_p : " ", 1, x, sw); x += sw; }
+        if (sw > 0) { md_seg_add(ui, L, in, sp_run, (int)(sp_p - in->runs[sp_run].p), *sp_p == ' ' ? sp_p : " ", 1, x, sw); x += sw; }
         sp_run = -1;
         bool split = ww > W - x;
         while (ri < in->nruns) {
@@ -567,7 +574,7 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
             if (e > bi) {
                 if (!split) {
                     float pw = md_piece_w(ui, f, Q, bi, e);
-                    md_seg_add(ui, L, in, ri, Q->p + bi, e - bi, x, pw);
+                    md_seg_add(ui, L, in, ri, bi, Q->p + bi, e - bi, x, pw);
                     x += pw;
                 } else {
                     cui_font qf = md_font_of(f, Q->style);
@@ -581,7 +588,7 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
                         if (nk <= k) nk = k + 1;
                         float cw = cui__text_width(ui, qf, qs, Q->p + k, nk - k, false);
                         if (x + cw > W && x > 0 && k > chunk) {
-                            md_seg_add(ui, L, in, ri, Q->p + chunk, k - chunk, x0, x - x0);
+                            md_seg_add(ui, L, in, ri, chunk, Q->p + chunk, k - chunk, x0, x - x0);
                             md_finish_line(L, &first, x, W, align);
                             x = 0; x0 = 0; chunk = k;
                         }
@@ -589,7 +596,7 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
                         k = nk;
                     }
                     if (code && e == Q->len) x += f->pad;
-                    md_seg_add(ui, L, in, ri, Q->p + chunk, e - chunk, x0, x - x0);
+                    md_seg_add(ui, L, in, ri, chunk, Q->p + chunk, e - chunk, x0, x - x0);
                 }
             }
             if (e < Q->len) { bi = e; break; }
@@ -597,6 +604,155 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
         }
     }
     if (L->n > first) md_finish_line(L, &first, x, W, align);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Selection                                                                */
+/* ------------------------------------------------------------------------ */
+
+#define MD_SEL_END (1 << 30)   /* a block number past every block: the end of the text */
+#define MD_DRAG_START 4.0f     /* points a press on a link travels before it selects instead */
+
+typedef struct { int block, off; } md_pos;
+static int md_pos_cmp(md_pos a, md_pos b) {
+    if (a.block != b.block) return a.block < b.block ? -1 : 1;
+    return (a.off > b.off) - (a.off < b.off);
+}
+
+enum { MD_BY_CHAR, MD_BY_WORD, MD_BY_BLOCK };
+typedef struct {
+    md_pos anchor, head;        /* equal: nothing selected */
+    md_pos unit0, unit1;        /* the word or block a double or triple click took, kept while dragging */
+    uint32_t text_hash;         /* the text the positions belong to */
+    int text_len;
+    uint8_t unit;               /* MD_BY_* */
+    bool dragging, focused;
+    bool anchored;              /* a click left the anchor in this text: Shift+click extends from it */
+    bool link_drag;             /* a press on a link moved: select from where it went down, next frame */
+} md_sel_state;
+
+typedef struct md_code_sel { cui__code_sel cs; int block; struct md_code_sel *next; } md_code_sel;
+
+/* One frame of selection work, shared by the blocks as they are built and read by their paint. */
+typedef struct {
+    md_sel_state *st;           /* NULL: the view does not select */
+    int seq;                    /* selectable blocks so far, in document order */
+    md_pos lo, hi;              /* the selection in order; final by the time anything paints */
+    cui_color color;
+    bool hover;                 /* the pointer is on the view: look for text under it (I-beam) */
+    bool over_text;
+    /* the probe: the position under (x, y), from each block's latest rect */
+    bool probe, pressing, extend, no_start;
+    float x, y;
+    bool found, band;           /* band: the candidate's rows span y (else it is the last block above y) */
+    float dx;                   /* how far the band candidate is to the side of x */
+    md_pos at;
+    const md_run *runs; int nruns;   /* the candidate's text, for words and blocks */
+    const char *code; int code_len;
+    /* Ctrl+C: the selected text, gathered as the blocks go by */
+    bool copying;
+    char *copy; int copy_len, copy_cap;
+    char sep;                   /* goes before the next block's text: '\n', or '\t' between table cells */
+    md_code_sel *codes;
+    uint32_t hash; bool hashed;  /* the text's hash, once taken this frame */
+} md_sel;
+
+/* x of byte k of a segment, from the segment's left edge */
+static float md_seg_x(cui_ctx *ui, const md_font *f, const md_seg *s, int k) {
+    if (k <= 0) return 0;
+    if (k >= s->len) return s->w;
+    return (s->lead ? f->pad : 0) + cui__text_width(ui, md_font_of(f, s->style), md_size_of(f, s->style), s->p, k, false);
+}
+
+/* The offset in the block's text nearest (lx, ly), relative to the block's top left. */
+static int md_hit_inline(cui_ctx *ui, const md_lay *L, const md_font *f, float lx, float ly) {
+    if (L->n == 0) return 0;
+    int line = (int)floorf(ly / f->lh), first = -1, last = -1;
+    line = CUI_CLAMP(line, 0, L->lines - 1);
+    for (int k = 0; k < L->n; k++) {
+        if (L->seg[k].line < line) continue;
+        if (L->seg[k].line > line) {   /* an empty line between hard breaks sits just before the next text */
+            if (first < 0) return CUI_MAX(0, L->seg[k].at - 1);
+            break;
+        }
+        if (first < 0) first = k;
+        last = k;
+    }
+    if (first < 0) return L->seg[L->n - 1].at + L->seg[L->n - 1].len;
+    if (lx <= L->seg[first].x) return L->seg[first].at;
+    for (int k = first; k <= last; k++) {
+        const md_seg *s = &L->seg[k];
+        if (lx >= s->x + s->w) continue;
+        float acc = 0, dx = lx - s->x - (s->lead ? f->pad : 0);
+        cui_font font = md_font_of(f, s->style);
+        float size = md_size_of(f, s->style);
+        for (int b = 0; b < s->len;) {
+            int nb = cui__utf8_next(s->p, s->len, b);
+            if (nb <= b) nb = b + 1;
+            float cw = cui__text_width(ui, font, size, s->p + b, nb - b, false);
+            if (dx < acc + cw * 0.5f) return s->at + b;
+            acc += cw;
+            b = nb;
+        }
+        return s->at + s->len;
+    }
+    return L->seg[last].at + L->seg[last].len;
+}
+
+/* Offers the block laid out in r to the probe; true when it becomes the candidate. The
+ * block whose rows span the pointer wins, the nearest sideways (table cells share rows);
+ * failing that, the last block above the pointer. */
+static bool md_sel_offer(md_sel *S, cui_rect r) {
+    bool band = S->y >= r.y && S->y < r.y + r.h;
+    float dx = S->x < r.x ? r.x - S->x : S->x >= r.x + r.w ? S->x - (r.x + r.w) : 0;
+    if (S->hover && cui__rect_contains(r, S->x, S->y)) S->over_text = true;
+    if (!S->probe) return false;
+    if (band) {
+        if (S->band && dx >= S->dx) return false;
+        S->band = true; S->dx = dx;
+    } else if (S->band || r.y + r.h > S->y) return false;
+    S->found = true;
+    return true;
+}
+
+/* The part of block blk inside the selection, as [*a, *b); false when none. */
+static bool md_sel_range(const md_sel *S, int blk, int *a, int *b) {
+    if (md_pos_cmp(S->lo, S->hi) >= 0 || blk < S->lo.block || blk > S->hi.block) return false;
+    *a = blk == S->lo.block ? S->lo.off : 0;
+    *b = blk == S->hi.block ? S->hi.off : 0x7FFFFFFF;
+    return *b > *a;
+}
+
+static void md_sel_put(cui_ctx *ui, md_sel *S, const char *p, int n) {
+    if (n <= 0) return;
+    if (S->copy_len + n + 1 > S->copy_cap) {
+        int ncap = CUI_MAX(256, S->copy_cap * 2);
+        while (ncap < S->copy_len + n + 1) ncap *= 2;
+        char *nb = cui__frame_alloc(ui, (size_t)ncap);
+        if (S->copy_len) memcpy(nb, S->copy, (size_t)S->copy_len);
+        S->copy = nb; S->copy_cap = ncap;
+    }
+    memcpy(S->copy + S->copy_len, p, (size_t)n);
+    S->copy_len += n;
+    S->copy[S->copy_len] = 0;
+}
+
+/* Ctrl+C: appends the selected part of block blk (its runs, or plain code). */
+static void md_sel_copy(cui_ctx *ui, md_sel *S, int blk, const md_run *runs, int nruns, const char *code, int code_len) {
+    int a, b;
+    char sep = S->sep;
+    S->sep = '\n';
+    if (!S->copying || !md_sel_range(S, blk, &a, &b)) return;
+    if (S->copy_len > 0) md_sel_put(ui, S, &sep, 1);
+    if (code) { md_sel_put(ui, S, code + a, CUI_MIN(b, code_len) - a); return; }
+    for (int k = 0; k < nruns; k++) {
+        const md_run *R = &runs[k];
+        int n = (R->style & MS_BREAK) ? 1 : R->len;
+        int x0 = CUI_MAX(a, R->at), x1 = CUI_MIN(b, R->at + n);
+        if (x1 <= x0) continue;
+        if (R->style & MS_BREAK) md_sel_put(ui, S, "\n", 1);
+        else md_sel_put(ui, S, R->p + (x0 - R->at), x1 - x0);
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -609,6 +765,8 @@ typedef struct {
     cui_color fg, link_c, code_bg;
     const float *hover, *focus;   /* per link of the block */
     bool underline_rest;          /* links keep a full underline (text on a colored surface) */
+    const md_sel *sel;            /* the view's selection, final when this paints */
+    int block;                    /* this block's number in it */
 } md_paint;
 
 /* Slants the glyphs drawn since v0 around the baseline: a synthesized italic. */
@@ -623,6 +781,8 @@ static void md_paint_inline(cui_ctx *ui, cui_node *n, void *data) {
     const md_font *f = &p->f;
     float fh = cui__font_line_height(ui, f->reg, f->size), asc = cui__font_ascent(ui, f->reg, f->size);
     float th = CUI_MAX(1.0f, f->size / 13.0f);
+    int sa = 0, sb = 0;
+    if (p->sel && !md_sel_range(p->sel, p->block, &sa, &sb)) sb = 0;
     for (int k = 0; k < p->n; k++) {
         const md_seg *s = &p->seg[k];
         float top = n->rect.y + (float)s->line * f->lh;
@@ -635,6 +795,10 @@ static void md_paint_inline(cui_ctx *ui, cui_node *n, void *data) {
         if (s->style & MS_CODE) {
             float ch = f->mono_size * 1.5f;
             cui_draw_rect(ui, (cui_rect){ x, top + (f->lh - ch) * 0.5f, s->w, ch }, CUI_CORNERS(4), p->code_bg);
+        }
+        if (s->at < sb && s->at + s->len > sa) {   /* selected, under the glyphs */
+            float x0 = md_seg_x(ui, f, s, sa - s->at), x1 = md_seg_x(ui, f, s, sb - s->at);
+            if (x1 > x0) cui_draw_rect(ui, (cui_rect){ x + x0, top, x1 - x0, f->lh }, CUI_CORNERS(0), p->sel->color);
         }
         float tx = x + (s->lead ? f->pad : 0);
         int v0 = ui->dl.vtx_count;
@@ -712,6 +876,7 @@ typedef struct {
     int nlines;
     cui_markdown_heading *heads; int nheads;
     cui_markdown_result *res;
+    md_sel *sel;
 } md_ctx;
 
 typedef struct { float w; int depth; bool tight; cui_color fg; } md_box;
@@ -747,11 +912,19 @@ static float md_gap_before(md_ctx *c, const md_box *b, int prev, int kind, int l
 
 static cui_id md_link_id(md_ctx *c, int seq) { return cui__hash(&seq, sizeof seq, c->id ^ 0x3D11Au); }
 
+/* A press that lands on a diagram pans it and never starts a selection. */
+static void md_sel_no_start(md_ctx *c, cui_id id) {
+    md_sel *S = c->sel;
+    if (S->pressing && cui__has_prev_rect(c->ui, id) && cui__rect_contains(cui__prev_rect(c->ui, id), S->x, S->y)) S->no_start = true;
+}
+
 /* Builds a laid out inline block: one painted node, a hit box per link piece. */
 static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cui_color fg, int align, float W) {
     cui_ctx *ui = c->ui;
+    md_sel *S = c->sel;
     md_lay L;
     md_layout(ui, in, f, CUI_MAX(W, 24.0f), align, &L);
+    int blk = S->seq++;
     int base = c->link_seq;
     c->link_seq += in->nlinks;
     float *hover = cui__frame_alloc(ui, sizeof(float) * (size_t)(in->nlinks * 2 + 1)), *focus = hover + in->nlinks;
@@ -777,15 +950,30 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
             c->res->hovered_rect = cui__prev_rect(ui, id);
         }
         if (r.clicked) { c->res->link = url; c->res->link_is_wiki = lk->wiki; }
+        if (r.active && S->st && ui->mdown[CUI_MOUSE_LEFT]) {   /* dragged off its spot: a selection, not a click */
+            float dx = ui->mx - ui->last_click_x, dy = ui->my - ui->last_click_y;
+            if (dx * dx + dy * dy > MD_DRAG_START * MD_DRAG_START) { ui->active = c->id; S->st->link_drag = true; ui->animating = true; }
+        }
         if (!lk->autolink) { ui->last_id = id; cui_tooltip(ui, r.hovered && url ? url : ""); }
     }
-    int leaf = cui__leaf(ui, c->leaf_id, CUI_FILL, CUI_PX((float)L.lines * f->lh));
+    cui_id lid = c->leaf_id;
+    if (!lid && S->st) lid = cui__hash(&blk, sizeof blk, c->id ^ 0x5E1B1u);   /* its rect, to find text under the pointer */
+    int leaf = cui__leaf(ui, lid, CUI_FILL, CUI_PX((float)L.lines * f->lh));
     c->leaf_id = 0;
     md_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->seg = L.seg; p->n = L.n; p->f = *f;
     p->fg = fg; p->link_c = c->custom_color ? fg : c->link_c; p->code_bg = c->code_bg;
     p->hover = hover; p->focus = focus;
     p->underline_rest = c->custom_color;
+    p->sel = S; p->block = blk;
+    if (S->st && (S->hover || S->probe) && cui__has_prev_rect(ui, lid)) {
+        cui_rect r = cui__prev_rect(ui, lid);
+        if (md_sel_offer(S, r)) {
+            S->at.block = blk; S->at.off = md_hit_inline(ui, &L, f, S->x - r.x, S->y - r.y);
+            S->runs = in->runs; S->nruns = in->nruns; S->code = NULL;
+        }
+    }
+    md_sel_copy(ui, S, blk, in->runs, in->nruns, NULL, 0);
     ui->nodes[leaf].paint = md_paint_inline;
     ui->nodes[leaf].paint_data = p;
     if (in->nlinks > 0) {
@@ -1163,8 +1351,27 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
     co.size = c->body;
     const char *cid = cui__frame_printf(ui, "code%d", c->code_seq++);
     float mw;
-    if (!strcmp(lg, "mermaid") && cui__mermaid_block(ui, cid, buf, o, c->body, &mw)) return c->fit ? mw : 0;   /* a diagram */
-    cui_code_block_ex(ui, cid, buf, &co);
+    if (!strcmp(lg, "mermaid") && cui__mermaid_block(ui, cid, buf, o, c->body, &mw)) {   /* a diagram */
+        md_sel_no_start(c, ui->last_id);
+        return c->fit ? mw : 0;
+    }
+    md_sel *S = c->sel;
+    if (!S->st) {
+        cui_code_block_ex(ui, cid, buf, &co);
+        return c->fit ? widest + 42 : 0;
+    }
+    md_code_sel *cs = cui__frame_alloc(ui, sizeof *cs);
+    cs->block = S->seq++;
+    cs->cs.color = S->color;
+    cs->next = S->codes; S->codes = cs;
+    cui__code_block_sel(ui, cid, buf, &co, &cs->cs);
+    if ((S->hover || S->probe) && cui__has_prev_rect(ui, cs->cs.canvas)) {
+        if (md_sel_offer(S, cui__prev_rect(ui, cs->cs.canvas))) {
+            S->at.block = cs->block; S->at.off = cui__code_sel_hit(ui, &cs->cs, buf, o, S->x, S->y);
+            S->code = buf; S->code_len = o; S->runs = NULL;
+        }
+    }
+    md_sel_copy(ui, S, cs->block, NULL, 0, buf, o);
     return c->fit ? widest + 42 : 0;
 }
 
@@ -1689,9 +1896,11 @@ static int md_table(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
         cui_table_row(ui, false);
         for (int k = 0; k < ncols; k++) {
             cui_table_cell(ui);
+            c->sel->sep = k > 0 ? '\t' : '\n';   /* copied cells keep their rows */
             if (k < rowc[r]) md_inline_emit(c, &cells[r * ncols + k], &f, b->fg, align[k], colw[k] - 16);
         }
     }
+    c->sel->sep = '\n';
     cui_table_end(ui);
     if (nat) *nat = natural;
     return j;
@@ -1941,6 +2150,133 @@ static void md_front_matter(md_ctx *c, const md_prop *props, int np, float W) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Selection input                                                          */
+/* ------------------------------------------------------------------------ */
+
+static int md_char_class(unsigned char ch) {   /* 0 space, 1 word, 2 punctuation */
+    if (ch == ' ' || ch == '\t' || ch == '\n') return 0;
+    return (ch >= 0x80 || ch == '_' || md_alnum((char)ch)) ? 1 : 2;
+}
+
+/* The word (or whole block) around the probe's position, from the candidate block's text. */
+static void md_sel_unit(cui_ctx *ui, const md_sel *S, int unit, md_pos *w0, md_pos *w1) {
+    const char *t = S->code;
+    int len = S->code_len;
+    if (!t) {
+        len = 0;
+        for (int k = 0; k < S->nruns; k++) len += (S->runs[k].style & MS_BREAK) ? 1 : S->runs[k].len;
+        char *buf = cui__frame_alloc(ui, (size_t)len + 1);
+        for (int k = 0; k < S->nruns; k++) {
+            const md_run *R = &S->runs[k];
+            if (R->style & MS_BREAK) buf[R->at] = '\n';
+            else memcpy(buf + R->at, R->p, (size_t)R->len);
+        }
+        t = buf;
+    }
+    w0->block = w1->block = S->at.block;
+    if (unit == MD_BY_BLOCK) { w0->off = 0; w1->off = len; return; }
+    int off = CUI_CLAMP(S->at.off, 0, len), k = off;
+    if (len == 0) { w0->off = w1->off = 0; return; }
+    /* just past a word's end still takes that word */
+    if (k >= len || (md_char_class((unsigned char)t[k]) != 1 && k > 0 && md_char_class((unsigned char)t[k - 1]) == 1)) k--;
+    int cls = md_char_class((unsigned char)t[k]), a = k, b = k + 1;
+    while (a > 0 && md_char_class((unsigned char)t[a - 1]) == cls) a--;
+    while (b < len && md_char_class((unsigned char)t[b]) == cls) b++;
+    w0->off = a; w1->off = b;
+}
+
+static uint32_t md_text_hash(md_ctx *c) { return cui__hash(c->src, (size_t)c->len, 0x5E1EC7u); }
+
+static void md_sel_order(md_sel *S) {
+    bool fwd = md_pos_cmp(S->st->anchor, S->st->head) <= 0;
+    S->lo = fwd ? S->st->anchor : S->st->head;
+    S->hi = fwd ? S->st->head : S->st->anchor;
+}
+
+/* Before the blocks: the press, drag and keys, and the selection they paint with. */
+static void md_sel_begin(md_ctx *c, int root) {
+    cui_ctx *ui = c->ui;
+    md_sel *S = c->sel;
+    md_sel_state *st = cui_state(ui, c->id ^ 0x5E1EC7u, sizeof *st);
+    S->st = st;
+    S->color = cui__selection_color(ui);
+    cui__mark_interactive(ui, root, 0);   /* gets the presses the links and boxes on top leave */
+    cui_interact r = cui__interact(ui, c->id, CUI_IF_DRAG);
+    bool has = md_pos_cmp(st->anchor, st->head) != 0;
+    if (has || st->dragging || st->anchored) { S->hash = md_text_hash(c); S->hashed = true; }
+    if (S->hashed && (st->text_len != c->len || st->text_hash != S->hash)) {
+        st->head = st->anchor;   /* the text changed under it */
+        st->dragging = st->anchored = false;
+        has = false;
+    }
+    S->x = ui->mx; S->y = ui->my;
+    S->hover = r.hovered;
+    if (ui->mpressed[CUI_MOUSE_LEFT]) {   /* a press in the view takes the keys and starts over; one elsewhere lets go */
+        bool in_view = cui__has_prev_rect(ui, c->id) && cui__rect_contains(cui__prev_rect(ui, c->id), ui->mx, ui->my);
+        st->focused = r.active || (in_view && ui->hot_layer == ui->current_layer);
+        S->extend = r.active && (ui->mods & CUI_MOD_SHIFT) && st->anchored;
+        if (st->focused && !S->extend) { st->head = st->anchor; has = false; }
+    }
+    if (r.active && ui->mpressed[CUI_MOUSE_LEFT]) {
+        S->probe = S->pressing = true;
+        st->dragging = true;
+        st->unit = S->extend ? MD_BY_CHAR : ui->click_count >= 3 ? MD_BY_BLOCK : ui->click_count == 2 ? MD_BY_WORD : MD_BY_CHAR;
+    } else if (st->link_drag) {
+        st->link_drag = false;
+        if (r.active && ui->mdown[CUI_MOUSE_LEFT]) {
+            S->probe = S->pressing = true;
+            S->x = ui->last_click_x; S->y = ui->last_click_y;
+            st->dragging = true;
+            st->unit = MD_BY_CHAR;
+        }
+    } else if (st->dragging) {
+        if (r.active && ui->mdown[CUI_MOUSE_LEFT]) S->probe = true;
+        else st->dragging = false;
+    }
+    if (st->focused && !ui->edit_prev) {
+        if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_A)) {
+            st->anchor.block = st->anchor.off = 0;
+            st->head.block = MD_SEL_END; st->head.off = 0;
+            st->dragging = false;
+            S->probe = false;
+            has = true;
+        }
+        if (has && cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_C)) S->copying = true;
+    }
+    md_sel_order(S);
+}
+
+/* After the blocks: the probe's answer moves the selection; copy, cursor, code blocks. */
+static void md_sel_end(md_ctx *c) {
+    cui_ctx *ui = c->ui;
+    md_sel *S = c->sel;
+    md_sel_state *st = S->st;
+    if (!st) return;
+    if (S->probe) {
+        md_pos at = { 0, 0 }, w0, w1;   /* above every block: the start */
+        if (S->found) at = S->at;
+        w0 = w1 = at;
+        if (st->unit != MD_BY_CHAR && S->found) md_sel_unit(ui, S, st->unit, &w0, &w1);
+        if (S->pressing && S->no_start) st->dragging = st->anchored = false;
+        else if (S->pressing && !S->extend) { st->anchor = st->unit0 = w0; st->head = st->unit1 = w1; st->anchored = true; }
+        else if (st->unit == MD_BY_CHAR) st->head = at;
+        else if (md_pos_cmp(at, st->unit0) >= 0) { st->anchor = st->unit0; st->head = w1; }
+        else { st->anchor = st->unit1; st->head = w0; }
+    }
+    md_sel_order(S);
+    if (md_pos_cmp(S->lo, S->hi) != 0 || st->dragging || st->anchored) {   /* the text the positions belong to */
+        st->text_len = c->len;
+        st->text_hash = S->hashed ? S->hash : md_text_hash(c);
+    }
+    for (md_code_sel *cs = S->codes; cs; cs = cs->next) {
+        int a, b;
+        if (md_sel_range(S, cs->block, &a, &b)) { cs->cs.from = a; cs->cs.to = b; }
+    }
+    if (S->copying && S->copy_len > 0) { cui_set_clipboard_text(ui, S->copy); c->res->copied = true; }
+    if ((S->hover && S->over_text) || (st->dragging && ui->active == c->id)) cui__set_cursor(ui, CUI_CURSOR_TEXT);
+}
+
+/* ------------------------------------------------------------------------ */
 /* Public                                                                   */
 /* ------------------------------------------------------------------------ */
 
@@ -2001,6 +2337,9 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     rp->w = W;
     rn->paint = md_paint_root;
     rn->paint_data = rp;
+    c.sel = cui__frame_alloc(ui, sizeof *c.sel);
+    c.sel->sep = '\n';
+    if (!o->no_select) md_sel_begin(&c, root);
     cui__open(ui, root);
     cui_push_id(ui, id_str);
 
@@ -2033,6 +2372,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     md_box box = { W, 0, false, c.fg };
     float natural = md_blocks(&c, lines + first, total - first, &box);
     res.headings = c.heads; res.heading_count = c.nheads;
+    md_sel_end(&c);
 
     cui_pop_id(ui);
     cui__close(ui);

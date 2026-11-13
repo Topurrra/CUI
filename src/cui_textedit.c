@@ -708,7 +708,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     p->text = CUI_C(ui, FOREGROUND);
     p->placeholder_color = CUI_C(ui, TEXT_MUTED);
     p->caret = cui__emphasis(ui);
-    p->selection = ui->accent == CUI_ACCENT_NEUTRAL ? cui_alpha(cui_oklch(0.6f, 0.13f, 250, 1), 0.28f) : cui_alpha(CUI_C(ui, ACCENT), 0.26f);
+    p->selection = cui__selection_color(ui);
     p->line_h = line_h;
     if (multiline) {
         cui_rect a = area;

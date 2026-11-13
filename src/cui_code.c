@@ -472,7 +472,45 @@ typedef struct {
     int hl_from, hl_to;
     float size, lh, gutter, pad;
     cui_color colors[TK_COUNT], gutter_c, hl_c;
+    const cui__code_sel *sel;   /* a selection a surrounding view owns, or NULL */
 } cui__code_paint;
+
+/* Width of a piece of one line as the block paints it: a tab is four spaces. */
+static float cui__code_measure(cui_ctx *ui, float size, const char *s, int n) {
+    float x = 0, tab = cui__text_width(ui, CUI_FONT_MONO, size, "    ", 4, true);
+    int st = 0;
+    for (int k = 0; k <= n; k++) {
+        if (k < n && s[k] != '\t') continue;
+        if (k > st) x += cui__text_width(ui, CUI_FONT_MONO, size, s + st, k - st, true);
+        if (k < n) x += tab;
+        st = k + 1;
+    }
+    return x;
+}
+
+int cui__code_sel_hit(cui_ctx *ui, const cui__code_sel *sel, const char *code, int len, float x, float y) {
+    if (!sel->canvas || !cui__has_prev_rect(ui, sel->canvas)) return 0;
+    cui_rect r = cui__prev_rect(ui, sel->canvas);
+    int line = (int)floorf((y - r.y - sel->y0 + 1) / sel->lh), i = 0;
+    if (line < 0) return 0;
+    for (int k = 0; k < line; k++) {
+        const char *nl = memchr(code + i, '\n', (size_t)(len - i));
+        if (!nl) return len;
+        i = (int)(nl - code) + 1;
+    }
+    int e = i;
+    while (e < len && code[e] != '\n') e++;
+    float dx = x - r.x - sel->x0, acc = 0;
+    for (int k = i; k < e;) {
+        int nk = cui__utf8_next(code, e, k);
+        if (nk <= k) nk = k + 1;
+        float cw = cui__code_measure(ui, sel->size, code + k, nk - k);
+        if (dx < acc + cw * 0.5f) return k;
+        acc += cw;
+        k = nk;
+    }
+    return e;
+}
 
 static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     cui__code_paint *p = data;
@@ -489,6 +527,14 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
         while (e < p->len && p->code[e] != '\n') e++;
         if (line >= p->hl_from && line <= p->hl_to && p->hl_from > 0)
             cui_draw_rect(ui, (cui_rect){ r.x, y - 1, r.w, p->lh }, CUI_CORNERS(0), p->hl_c);
+        const cui__code_sel *sel = p->sel;
+        if (sel && sel->to > sel->from && sel->from <= e && sel->to > i) {
+            int a = CUI_MAX(sel->from, i), b = CUI_MIN(sel->to, e);
+            float xa = x0 + cui__code_measure(ui, p->size, p->code + i, a - i);
+            float xb = x0 + cui__code_measure(ui, p->size, p->code + i, b - i);
+            if (sel->to > e && e < p->len) xb += cui__text_width(ui, CUI_FONT_MONO, p->size, " ", 1, true);   /* the line break */
+            if (xb > xa) cui_draw_rect(ui, (cui_rect){ xa, y - 1, xb - xa, p->lh }, CUI_CORNERS(0), sel->color);
+        }
         float ty = y + (p->lh - fh) * 0.5f - 1;
         if (p->line_numbers) {
             const char *ln = cui__frame_printf(ui, "%d", line);
@@ -514,16 +560,22 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
-static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o);
+static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o, cui__code_sel *sel);
 
 /* left to right in any interface: see cui__keep_ltr */
 void cui_code_block_ex(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o) {
     int first = ui->node_count;
-    cui__code_block_ex_body(ui, id_str, code, o);
+    cui__code_block_ex_body(ui, id_str, code, o, NULL);
     cui__keep_ltr(ui, first);
 }
 
-static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o) {
+void cui__code_block_sel(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o, cui__code_sel *sel) {
+    int first = ui->node_count;
+    cui__code_block_ex_body(ui, id_str, code, o, sel);
+    cui__keep_ltr(ui, first);
+}
+
+static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char *code, const cui_code_opts *o, cui__code_sel *sel) {
     cui_code_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
@@ -594,7 +646,8 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
     ss->fade = cui__backdrop(ui);   /* long lines fade out at the edge */
     cui__scroll_begin_ex(ui, id ^ 0x5C0Du, &sb, true);
     if (!(o->max_height > 0 && content_h > o->max_height)) { ui->nodes[cui__current(ui)].h = CUI_FIT; ui->nodes[cui__current(ui)].min_h = 0; }
-    int canvas = cui__leaf(ui, 0, CUI_FILL, CUI_PX(content_h));
+    cui_id canvas_id = sel ? id ^ 0xC0DE5E1u : 0;   /* a selecting view finds the text by its rect */
+    int canvas = cui__leaf(ui, canvas_id, CUI_FILL, CUI_PX(content_h));
     cui_node *cn = &ui->nodes[canvas];
     cn->min_w = maxw + gutter + pad * 2 + 8;   /* at least as wide as the code; the band spans the block */
     cui__code_paint *p = cui__frame_alloc(ui, sizeof *p);
@@ -610,6 +663,11 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
     p->hl_c = cui_alpha(cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.12f : 0.08f);
     cn->paint = cui__paint_code;
     cn->paint_data = p;
+    if (sel) {
+        p->sel = sel;
+        sel->canvas = canvas_id;
+        sel->size = size; sel->lh = lh; sel->x0 = pad + gutter; sel->y0 = pad;
+    }
     cui__scroll_end_ex(ui);
     cui__close(ui);
     ui->last_id = id;

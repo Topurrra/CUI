@@ -1612,6 +1612,36 @@ SCENE(markdown_images) {
             .base_dir = ".", .resolve_image = shot_find_image);
     }
 }
+/* text selected with a drag from a paragraph, over a list, into a code block */
+static void body_markdown_select(cui_ctx *ui) {
+    cui_box(ui, UPTO(520)) {
+        cui_markdown(ui, "notes",
+            "## Release 2.4\n"
+            "\n"
+            "The build is green on every platform. Drag over a note to select it, then copy it with **Ctrl+C**.\n"
+            "\n"
+            "- Tag the release\n"
+            "- Publish the notes\n"
+            "\n"
+            "```sh\n"
+            "git tag v2.4\n"
+            "git push --tags\n"
+            "```\n");
+    }
+}
+static void scene_markdown_select(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        float x0 = 196, y0 = 86, x1 = 112, y1 = 274;
+        if (f == 3) cui_input_mouse_move(ui, x0, y0);
+        if (f == 4) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (f >= 5 && f <= 12) cui_input_mouse_move(ui, x0 + (x1 - x0) * (float)(f - 4) / 8, y0 + (y1 - y0) * (float)(f - 4) / 8);
+        if (f == 13) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (f == 14) cui_input_mouse_leave(ui);
+        return;
+    }
+    frame_wrap(ui, body_markdown_select);
+}
 /* mermaid diagrams in markdown: a flowchart left to right, one top down with edge labels and a
  * decision, and a pie */
 SCENE(mermaid) {
@@ -4710,6 +4740,7 @@ int main(int argc, char **argv) {
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
         { "diff-view", scene_diff_view, 900, 480, true },
+        { "markdown-select", scene_markdown_select, 560, 340, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
