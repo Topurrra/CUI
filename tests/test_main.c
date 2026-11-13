@@ -8949,6 +8949,285 @@ static void test_diff(void) {
     cui_destroy(ui);
 }
 
+/* prepared diffs: the same view from a diff made ahead (on a worker, in an app) */
+typedef struct {
+    const char *a, *b;
+    const cui_diff_prepared *p;
+    int revision;
+    cui_diff_mode mode;
+    int current;
+    bool keys, no_fold;
+    const char *lang;
+    cui_diff_result r;
+} dp_ctx;
+static void build_dp(cui_ctx *ui, void *u) {
+    dp_ctx *d = u;
+    cui_column(ui, .pad = 10) {
+        d->r = cui_diff_view(ui, "dp", d->a, d->b, .prepared = d->p, .revision = d->revision, .mode = d->mode, .current = &d->current,
+                             .keys = d->keys, .no_fold = d->no_fold, .language = d->lang, .height = 300);
+    }
+}
+static bool dp_rows_equal(cui_ctx *x, cui_ctx *y) {
+    static cui_diff_row rx[512], ry[512];
+    int nx = cui_diff_view_rows(x, "dp", rx, 0, 512), ny = cui_diff_view_rows(y, "dp", ry, 0, 512);
+    if (nx != ny || nx <= 0) return false;
+    for (int i = 0; i < nx && i < 512; i++)
+        if (rx[i].kind != ry[i].kind || rx[i].old_line != ry[i].old_line || rx[i].new_line != ry[i].new_line || rx[i].change != ry[i].change ||
+            rx[i].hidden != ry[i].hidden) return false;
+    return true;
+}
+static int dp_vertices(cui_ctx *ui) { return cui_get_draw_data(ui)->vertex_count; }
+static void dp_key(cui_ctx *ui, dp_ctx *d, cui_key k, int mods) {
+    cui_input_key(ui, k, true, mods);
+    run(ui, build_dp, d, 1);
+    cui_input_key(ui, k, false, mods);
+    run(ui, build_dp, d, 1);
+}
+
+static void test_diff_prepared(void) {
+    printf("diff viewer: prepared diffs, revisions, colors from a mid-file start\n");
+    char va[4096], vb[4096];
+    size_t pa = 0, pb = 0;
+    for (int i = 1; i <= 60; i++) {
+        pa += (size_t)snprintf(va + pa, sizeof va - pa, "int line_%d = %d; /* a */\n", i, i);
+        if (i == 20) pb += (size_t)snprintf(vb + pb, sizeof vb - pb, "int line_twenty = 20; /* b */\nint line_20b = 1;\nint line_20c = 2;\n");
+        else if (i == 40) { /* removed */ }
+        else pb += (size_t)snprintf(vb + pb, sizeof vb - pb, "int line_%d = %d; /* a */\n", i, i);
+    }
+    /* the same hunks as cui_diff_compute, and the counts */
+    cui_diff_prepared *p = cui_diff_prepare(va, pa, vb, pb, .language = "c");
+    CHECK(p != NULL);
+    cui_diff_hunk h1[8], h2[8];
+    cui_diff_stats st1, st2;
+    int n1 = cui_diff_compute(va, pa, vb, pb, 0, h1, 8, &st1);
+    int n2 = cui_diff_prepared_hunks(p, h2, 8);
+    cui_diff_prepared_stats(p, &st2);
+    CHECK(n1 == 2 && n2 == 2 && memcmp(h1, h2, sizeof h1[0] * 2) == 0);
+    CHECK(st2.added == st1.added && st2.removed == st1.removed && st2.hunks == 2 && st2.old_lines == 60 && st2.new_lines == 61);
+    CHECK(cui_diff_prepared_hunks(NULL, h2, 8) == 0);
+    cui_diff_prepared_free(NULL);
+
+    /* the texts were copied: ours may go */
+    char ga[4096], gb[4096];
+    memcpy(ga, va, sizeof va);
+    memcpy(gb, vb, sizeof vb);
+    cui_diff_prepared *q = cui_diff_prepare(ga, pa, gb, pb, .language = "c");
+    memset(ga, 'Z', pa);
+    memset(gb, 'Z', pb);
+
+    /* a view from the prepared diff shows what a view of the texts shows, in both modes */
+    cui_ctx *ux = new_ctx(), *uy = new_ctx();
+    dp_ctx x = { NULL, NULL, q, 0, CUI_DIFF_SPLIT, -1, false, false, "c", { 0 } };
+    dp_ctx y = { va, vb, NULL, 0, CUI_DIFF_SPLIT, -1, false, false, "c", { 0 } };
+    run(ux, build_dp, &x, 1);
+    run(uy, build_dp, &y, 1);
+    CHECK(x.r.recomputed && y.r.recomputed);
+    run(ux, build_dp, &x, 3);
+    run(uy, build_dp, &y, 3);
+    CHECK(!x.r.recomputed && !y.r.recomputed);
+    CHECK(x.r.added == 3 && x.r.removed == 2 && x.r.changes == 2 && x.r.folds == 3 && x.r.hidden == 16 + 13 + 17);
+    CHECK(x.r.added == y.r.added && x.r.removed == y.r.removed && x.r.changes == y.r.changes && x.r.folds == y.r.folds &&
+          x.r.hidden == y.r.hidden && x.r.mode == y.r.mode && !x.r.approximate);
+    CHECK(dp_rows_equal(ux, uy));
+    CHECK(dp_vertices(ux) == dp_vertices(uy));   /* drawn alike */
+    x.mode = y.mode = CUI_DIFF_INLINE;
+    run(ux, build_dp, &x, 2);
+    run(uy, build_dp, &y, 2);
+    CHECK(x.r.mode == CUI_DIFF_INLINE && !x.r.recomputed && dp_rows_equal(ux, uy) && dp_vertices(ux) == dp_vertices(uy));
+    x.mode = y.mode = CUI_DIFF_SPLIT;
+    run(ux, build_dp, &x, 2);
+    run(uy, build_dp, &y, 2);
+
+    /* folds open from a click and with E, on the prepared diff too (the view builds its own rows then) */
+    cui_rect vr = rect_of(ux, cui_make_id(ux, "dp"));
+    float row_h = roundf(12 * 1.75f);
+    click_at(ux, build_dp, &x, vr.x + 200, vr.y + 1 + 4 + row_h * 0.5f);
+    CHECK(x.r.folds == 2 && x.r.hidden == 13 + 17 && !x.r.recomputed);
+    static cui_diff_row rows[128];
+    cui_diff_view_rows(ux, "dp", rows, 0, 128);
+    CHECK(rows[0].kind == CUI_DIFF_ROW_SAME && rows[0].old_line == 0);
+    dp_key(ux, &x, CUI_KEY_E, 0);
+    CHECK(x.r.folds == 0);
+    dp_key(ux, &x, CUI_KEY_E, CUI_MOD_SHIFT);
+    CHECK(x.r.folds == 3);   /* back to the diff's own rows */
+    x.no_fold = true;
+    run(ux, build_dp, &x, 2);
+    CHECK(x.r.folds == 0);
+    x.no_fold = false;
+    run(ux, build_dp, &x, 2);
+    CHECK(x.r.folds == 3);
+    cui_destroy(ux);
+    cui_destroy(uy);
+
+    /* the keys without the focus, only with .keys */
+    ux = new_ctx();
+    x.current = -1;
+    x.keys = false;
+    run(ux, build_dp, &x, 3);
+    dp_key(ux, &x, CUI_KEY_N, 0);
+    CHECK(x.current == -1);
+    x.keys = true;
+    dp_key(ux, &x, CUI_KEY_N, 0);
+    CHECK(x.current == 0 && x.r.current == 0);
+    x.current = 1;   /* the caller selects one */
+    run(ux, build_dp, &x, 2);
+    CHECK(x.r.current == 1);
+
+    /* another prepared diff is a new diff, even at the old one's address */
+    cui_diff_prepared_free(q);
+    cui_diff_prepared *q2 = cui_diff_prepare("a\nb\nc\n", 6, "a\nB\nc\nd\n", 8);
+    x.p = q2;
+    run(ux, build_dp, &x, 1);
+    CHECK(x.r.recomputed && x.r.changes == 2 && x.r.added == 2 && x.r.removed == 1 && x.r.current <= 1);
+    run(ux, build_dp, &x, 2);
+    CHECK(!x.r.recomputed);
+    x.p = NULL;   /* back to texts */
+    x.a = va;
+    x.b = vb;
+    run(ux, build_dp, &x, 2);
+    CHECK(x.r.changes == 2 && x.r.added == 3);
+    cui_diff_prepared_free(q2);
+    cui_destroy(ux);
+
+    /* .revision: the texts are not read while it stays the same */
+    ux = new_ctx();
+    char ra[256], rb[256];
+    snprintf(ra, sizeof ra, "one\ntwo\nthree\n");
+    snprintf(rb, sizeof rb, "one\n2\nthree\n");
+    dp_ctx r = { ra, rb, NULL, 7, CUI_DIFF_SPLIT, -1, false, false, NULL, { 0 } };
+    run(ux, build_dp, &r, 1);
+    CHECK(r.r.recomputed && r.r.changes == 1);
+    snprintf(rb, sizeof rb, "one\n2\nthree\nfour\nfive\n");   /* edited, revision the same: not looked at */
+    run(ux, build_dp, &r, 2);
+    CHECK(!r.r.recomputed && r.r.added == 1);
+    r.revision = 8;
+    run(ux, build_dp, &r, 1);
+    CHECK(r.r.recomputed && r.r.added == 3);
+    r.b = ra;
+    r.revision = 0;   /* without one, each frame compares the texts */
+    run(ux, build_dp, &r, 1);
+    CHECK(r.r.recomputed && r.r.changes == 0);
+    run(ux, build_dp, &r, 1);
+    CHECK(!r.r.recomputed);
+    cui_destroy(ux);
+
+    /* empty and missing */
+    ux = new_ctx();
+    cui_diff_prepared *e = cui_diff_prepare("", 0, "", 0);
+    CHECK(e != NULL);
+    dp_ctx ec = { NULL, NULL, e, 0, CUI_DIFF_SPLIT, -1, false, false, NULL, { 0 } };
+    run(ux, build_dp, &ec, 2);
+    CHECK(ec.r.changes == 0 && ec.r.added == 0);
+    cui_diff_prepared_free(e);
+    e = cui_diff_prepare(NULL, 0, "x\ny", 3, .no_words = true, .ignore_eol = true);
+    ec.p = e;
+    run(ux, build_dp, &ec, 2);
+    CHECK(ec.r.changes == 1 && ec.r.added == 2);
+    cui_diff_prepared_free(e);
+    cui_destroy(ux);
+
+    /* word marks: drawn unless the prepare skipped them */
+    cui_diff_prepared *w1 = cui_diff_prepare("    int count = 0;\n", 19, "    int loaded = 0;\n", 19);
+    cui_diff_prepared *w0 = cui_diff_prepare("    int count = 0;\n", 19, "    int loaded = 0;\n", 19, .no_words = true);
+    ux = new_ctx();
+    uy = new_ctx();
+    dp_ctx wc1 = { NULL, NULL, w1, 0, CUI_DIFF_SPLIT, -1, false, false, NULL, { 0 } }, wc0 = wc1;
+    wc0.p = w0;
+    run(ux, build_dp, &wc1, 3);
+    run(uy, build_dp, &wc0, 3);
+    CHECK(wc1.r.changes == 1 && wc0.r.changes == 1 && dp_vertices(ux) > dp_vertices(uy));
+    cui_destroy(ux);
+    cui_destroy(uy);
+    cui_diff_prepared_free(w1);
+    cui_diff_prepared_free(w0);
+
+    /* colors: a view that starts in the middle of a block comment colors it as comment, from the saved state */
+    static char ca[16384], cb[16384], da[16384], db[16384];
+    size_t la = 0, lb = 0, ma = 0, mb = 0;
+    for (int i = 0; i < 200; i++) {
+        const char *open = i == 5 ? "/* a long comment starts here\n" : i == 150 ? "*/ done\n" : NULL;
+        char line[64];
+        snprintf(line, sizeof line, "return %d;\n", i);
+        const char *t = open ? open : line;
+        const char *plain = i == 5 || i == 150 ? line : t;   /* the same text without the comment */
+        la += (size_t)snprintf(ca + la, sizeof ca - la, "%s", t);
+        lb += (size_t)snprintf(cb + lb, sizeof cb - lb, "%s", i == 100 ? "return 100; // changed\n" : t);
+        ma += (size_t)snprintf(da + ma, sizeof da - ma, "%s", plain);
+        mb += (size_t)snprintf(db + mb, sizeof db - mb, "%s", i == 100 ? "return 100; // changed\n" : plain);
+    }
+    cui_diff_prepared *cp = cui_diff_prepare(ca, la, cb, lb, .language = "c", .no_words = true);
+    cui_diff_prepared *np = cui_diff_prepare(da, ma, db, mb, .language = "c", .no_words = true);
+    ux = new_ctx();
+    uy = new_ctx();
+    dp_ctx cc = { NULL, NULL, cp, 0, CUI_DIFF_INLINE, -1, false, false, NULL, { 0 } }, nc = cc;
+    nc.p = np;
+    run(ux, build_dp, &cc, 3);
+    run(uy, build_dp, &nc, 3);
+    CHECK(cc.r.changes == 1);
+    cc.current = nc.current = 0;   /* scroll to the change: line 100, in the middle of the comment in one text only */
+    run(ux, build_dp, &cc, 4);
+    run(uy, build_dp, &nc, 4);
+    unsigned c1[32], c2[32];
+    int k1 = ced_text_colors(ux, c1, 32), k2 = ced_text_colors(uy, c2, 32);
+    CHECK(k1 > 0 && k2 > 0 && k1 < k2);   /* inside the comment: one color for the code (the second text has keywords and numbers) */
+    /* and the view of the texts agrees */
+    cui_destroy(uy);
+    uy = new_ctx();
+    dp_ctx tc = { ca, cb, NULL, 0, CUI_DIFF_INLINE, 0, false, false, "c", { 0 } };
+    run(uy, build_dp, &tc, 5);
+    unsigned c3[32];
+    int k3 = ced_text_colors(uy, c3, 32);
+    CHECK(k3 == k1 && ced_colors_within(c3, k3, c1, k1));
+    cui_destroy(ux);
+    cui_destroy(uy);
+    cui_diff_prepared_free(cp);
+    cui_diff_prepared_free(np);
+
+    /* an indented line inside a block comment is drawn (its token starts with the indentation) */
+    {
+        const char *w1a = "/*\n * abcdefghij klmnop\n */\nx\n", *w1b = "/*\n * abcdefghij klmnop\n */\ny\n";
+        const char *w0a = "/*\n *\n */\nx\n", *w0b = "/*\n *\n */\ny\n";
+        cui_diff_prepared *k1 = cui_diff_prepare(w1a, strlen(w1a), w1b, strlen(w1b), .language = "c");
+        cui_diff_prepared *k0 = cui_diff_prepare(w0a, strlen(w0a), w0b, strlen(w0b), .language = "c");
+        ux = new_ctx();
+        uy = new_ctx();
+        dp_ctx kc1 = { NULL, NULL, k1, 0, CUI_DIFF_SPLIT, -1, false, true, NULL, { 0 } }, kc0 = kc1;
+        kc0.p = k0;
+        run(ux, build_dp, &kc1, 3);
+        run(uy, build_dp, &kc0, 3);
+        CHECK(dp_vertices(ux) > dp_vertices(uy) + 20);
+        cui_destroy(ux);
+        cui_destroy(uy);
+        cui_diff_prepared_free(k1);
+        cui_diff_prepared_free(k0);
+    }
+
+    /* many lines: rows are runs, not an array */
+    enum { BIGN = 60000 };
+    char *ba = malloc((size_t)BIGN * 12 + 1), *bb = malloc((size_t)BIGN * 12 + 64);
+    size_t xa = 0, xb = 0;
+    for (int i = 0; i < BIGN; i++) {
+        xa += (size_t)sprintf(ba + xa, "line %05d\n", i);
+        if (i % 1000 == 500) xb += (size_t)sprintf(bb + xb, "line %05d edited\n", i);
+        else xb += (size_t)sprintf(bb + xb, "line %05d\n", i);
+    }
+    cui_diff_prepared *bp = cui_diff_prepare(ba, xa, bb, xb);
+    free(ba);
+    free(bb);
+    ux = new_ctx();
+    dp_ctx bc = { NULL, NULL, bp, 0, CUI_DIFF_SPLIT, -1, false, false, NULL, { 0 } };
+    run(ux, build_dp, &bc, 3);
+    CHECK(bc.r.changes == 60 && bc.r.added == 60 && bc.r.removed == 60 && bc.r.folds == 61);
+    int total = cui_diff_view_rows(ux, "dp", NULL, 0, 0);
+    CHECK(total == 60 + 61 + 59 * 6 + 3 + 3);   /* the changed rows, the folds, the 6 context rows between two changes, 3 at each end */
+    static cui_diff_row far[8];
+    cui_diff_view_rows(ux, "dp", far, total - 8, 8);
+    CHECK(far[7].kind == CUI_DIFF_ROW_FOLD && far[7].old_line + far[7].hidden == BIGN && far[7].new_line + far[7].hidden == BIGN);   /* the last row folds the end of the texts */
+    cui_destroy(ux);
+    cui_diff_prepared_free(bp);
+    cui_diff_prepared_free(p);
+}
+
 /* ---- knob, fader and level meter ---- */
 typedef struct { float knob, freq, pan, fader, levels[2]; cui_rect kr, fr, lr, pr, vr; bool cleared; } dial_ctx;
 static void build_dials(cui_ctx *ui, void *u) {
@@ -10261,6 +10540,7 @@ int main(void) {
     test_code_editor_replace_all();
     test_code_editor_shared();
     test_diff();
+    test_diff_prepared();
     test_dials();
     test_candles();
     test_month();

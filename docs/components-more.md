@@ -971,7 +971,27 @@ Split mode puts the old text on the left and the new on the right, rows aligned 
 
 Unchanged stretches keep `.context` lines (3) next to each change and fold the rest into a "42 unchanged lines" row that opens on a click (`.no_fold` shows everything). With the view focused, N or Alt+Down goes to the next change and P or Alt+Up to the previous one, E opens every fold and Shift+E folds them again, arrows and Page Up/Down scroll, and clicking a change selects it. `.current` is read and written, so buttons only have to change the number; the result also has the `+added -removed` summary, the change count and whether the texts were diffed again this frame.
 
-The texts are copied and diffed only when one of them changes, and only the rows in sight are built. The diff is Myers' shortest edit script in linear memory; lines with no match in the other text are set aside first, which keeps large diffs fast and exact. Texts that would need a very long search (many repeated lines, rewritten throughout) stop after about 16 million steps and show the rest as replaced, still a correct diff, flagged by `r.approximate`. `cui_diff_compute` returns the hunks without a view, `cui_diff_words` the changed words of two lines, and `cui_diff_view_rows` the rows as shown, for line comments.
+The texts are copied and diffed only when one of them changes, and only the rows in sight are built. Give the texts a `.revision` (any number you change when either text changes) and the view does not read them at all in a frame where it stays the same; without one it compares them with its copy every frame, which is fine for a few thousand lines and costs milliseconds for megabytes. The diff is Myers' shortest edit script in linear memory; lines with no match in the other text are set aside first, which keeps large diffs fast and exact. Texts that would need a very long search (many repeated lines, rewritten throughout) stop after about 16 million steps and show the rest as replaced, still a correct diff, flagged by `r.approximate`. `cui_diff_compute` returns the hunks without a view, `cui_diff_words` the changed words of two lines, and `cui_diff_view_rows` the rows as shown, for line comments.
+
+#### Big texts: prepare the diff on a worker
+
+Diffing on the UI thread in the frame the texts arrive costs about 100 ms for two 10 MB texts. For files that size make the diff on a worker with `cui_diff_prepare` and hand the result to the view:
+
+```c
+/* worker thread: pure, touches no cui_ctx */
+cui_diff_prepared *p = cui_diff_prepare(old_text, old_len, new_text, new_len, .language = "c");
+/* ... store p, wake the UI thread ... */
+
+/* UI thread, every frame */
+cui_diff_result r = cui_diff_view(ui, "diff", NULL, NULL, .prepared = p, .current = &change, .height = -1);
+
+/* when the diff is replaced or the view is gone, after a frame that no longer shows it */
+cui_diff_prepared_free(p);
+```
+
+A prepared diff holds everything the view needs apart from drawing: both texts (copied, so free yours at once), the line diff, the word marks inside changed lines, the rows with the default folds (side by side and inline), and, for `.language`, the syntax state at the start of every line. A frame then finds the rows in sight by binary search over runs of rows (the cost does not grow with the length of the text), colors each visible line from its own saved state (a row in the middle of a block comment or a markdown fence is colored right, and nothing is scanned from the top), and never reads the texts. The view shows the prepared diff while `.prepared` is that pointer; a different pointer is a different diff. It never frees it: keep it alive while shown, free it afterwards. `.language` on the view overrides the colors (without the saved states, lines then start outside any comment); the language of the prepare is the default. `cui_diff_prepared_stats` and `cui_diff_prepared_hunks` give the counts and the changes without a view, `.no_words` skips the word marks, `.keys` takes N, P, E and the arrows without the view having focus (for a view that is the only thing on screen).
+
+Measured headless on two C-like texts of 10 MB (105k lines, 2951 changes) and 100 MB (1.05 million lines, 29520 changes), Release build, `cui_bench_diff`: preparing takes about 150 ms for 10 MB and 1.6 s for 100 MB on a worker. The frame the diff arrives in takes about 2.6 ms at either size (4 ms when the glyphs are not in the atlas yet), idle, scrolling, next change and mode switch frames under 1 ms (worst 1.3), colors included. The view of the texts themselves with `.revision` costs the same per frame, but diffs on the UI thread in its first frame (about 150 ms at 10 MB; without `.revision` its idle frames cost 8 ms). Memory beyond the texts' copies is about 2.5 MB per 10 MB. Lines are drawn up to 1024 bytes (the rest is reachable with the sideways scroll up to that), the line diff stops after about 16 million steps (`approximate`), and past about 800 thousand rows (roughly an 80 MB text) the scroll position, a float in pixels, is rounded to 2 pixels or more, so the last rows are placed a little coarsely.
 
 ## Tool panels
 

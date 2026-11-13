@@ -65,6 +65,12 @@ if(WIN32)
     target_link_libraries(cui_bench_editor PRIVATE psapi)
 endif()
 
+add_executable(cui_bench_diff bench_diff.c)   # the diff viewer over big texts (10 and 100 MB)
+target_link_libraries(cui_bench_diff PRIVATE cui::cui)
+if(WIN32)
+    target_link_libraries(cui_bench_diff PRIVATE psapi)
+endif()
+
 add_executable(cui_component_shots component_shots.c)
 target_link_libraries(cui_component_shots PRIVATE cui::cui)
 

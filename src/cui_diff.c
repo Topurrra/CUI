@@ -11,6 +11,7 @@
 #define CUI__DIFF_WORD_TOKENS 512           /* nor lines with more words than this */
 #define CUI__DIFF_WORD_RANGES 64            /* marks kept per line */
 #define CUI__DIFF_DRAW_MAX    1024          /* bytes of a line that are drawn */
+#define CUI__DIFF_CONTEXT     3             /* unchanged lines kept beside each change */
 #define CUI__DIFF_FOLD_MIN    3             /* a stretch folds when it hides this many lines */
 #define CUI__DIFF_SPLIT_MIN   560.0f        /* narrower than this, split shows inline */
 #define CUI__DIFF_INSET       4.0f          /* above the first row and below the last */
@@ -431,7 +432,33 @@ static bool cui__df_words(cui__dmyers *M, const char *a, int an, const char *b, 
 /* The diff of two texts                                                    */
 /* ------------------------------------------------------------------------ */
 
+/* The rows are not stored one by one (a text of a million lines has a million rows) but as runs: a run
+ * of unchanged lines, one fold, or one change block. The row at an index is worked out from its run, found
+ * by binary search; a frame looks up only the rows in view. Building the runs takes time in the number of
+ * changes, not of lines. */
+enum { CUI__DS_SAME, CUI__DS_FOLD, CUI__DS_CHANGE };
 typedef struct {
+    int row0, rows;                  /* the first row, and how many rows the run takes */
+    int a, b;                        /* the first old and new line */
+    int na, nb;                      /* same: na lines; fold: na hidden lines; change: the block's lines */
+    int aux;                         /* fold: the gap it hides; change: the block */
+    uint8_t kind;
+} cui__dseg;
+
+typedef struct {
+    cui__dseg *segs; int nsegs, scap;
+    int nrows, nchanges;
+    int *change_row;                 /* first row of each change */
+    int folds, hidden;               /* fold rows and the lines they hide */
+    bool ready;
+} cui__dmap;
+
+typedef struct cui__diff cui__diff;
+static bool cui__dm_build(const cui_allocator *A, cui__dmap *m, const cui__diff *D, bool split, int context, bool nofold,
+                          const uint8_t *expanded, int nexpanded);
+static void cui__dm_free(const cui_allocator *A, cui__dmap *m);
+
+struct cui__diff {
     const cui_allocator *A;
     char *text[2]; size_t len[2];          /* copies of the texts */
     cui__dline *lines[2]; int n[2];
@@ -442,9 +469,13 @@ typedef struct {
     int *rfirst[2]; uint8_t *rcount[2];
     cui__drange *ranges; int nranges, rcap;
     int maxcols[2];                         /* the widest line, in columns */
-    /* syntax: whether line i starts inside a block comment */
-    uint8_t *inblock[2]; uint32_t lang_hash; bool lang_ready;
-} cui__diff;
+    /* syntax: the tokenizer's state at the start of line i (an open block comment, a markdown fence...), so a
+     * row is colored from its own line, never from the top of the text */
+    int32_t *lstate[2]; uint32_t lang_hash; bool lang_ready;
+    uint32_t serial;                        /* set by the first view that draws it: tells one diff from another */
+    char lang_name[32];                     /* the language the states are for */
+    cui__dmap map[2];                       /* the rows with the default folds: inline, side by side */
+};
 
 static void cui__df_clear(cui__diff *D) {
     const cui_allocator *A = D->A;
@@ -453,10 +484,11 @@ static void cui__df_clear(cui__diff *D) {
         cui__df_free(A, D->lines[s]);
         cui__df_free(A, D->rfirst[s]);
         cui__df_free(A, D->rcount[s]);
-        cui__df_free(A, D->inblock[s]);
+        cui__df_free(A, D->lstate[s]);
     }
     cui__df_free(A, D->blocks);
     cui__df_free(A, D->ranges);
+    for (int m = 0; m < 2; m++) cui__dm_free(A, &D->map[m]);
     memset(D, 0, sizeof *D);
     D->A = A;
 }
@@ -504,8 +536,66 @@ static bool cui__df_myers_lines(cui__dmyers *M, int *const ids[2], const int n[2
     return ok;
 }
 
+/* Whether a block comment is open after s[0, n) when one was open before (in): a quick scan that follows the
+ * tokenizer (strings end at the line end; a line without a '/' cannot open one). */
+static bool cui__df_scan_line(const cui__lang *L, const char *s, int n, bool in) {
+    if (!in && !memchr(s, '/', (size_t)n)) return false;
+    size_t lc = L->line_comment ? strlen(L->line_comment) : 0;
+    int i = 0;
+    while (i < n) {
+        if (in) {
+            while (i < n && !(s[i] == '*' && i + 1 < n && s[i + 1] == '/')) i++;
+            if (i < n) { i += 2; in = false; }
+            continue;
+        }
+        char c = s[i];
+        if (lc && (size_t)(n - i) >= lc && strncmp(s + i, L->line_comment, lc) == 0) break;
+        if (c == '/' && i + 1 < n && s[i + 1] == '*') { in = true; continue; }
+        if (c == '"' || c == '\'' || (c == '`' && L->backtick)) {
+            i++;
+            while (i < n && s[i] != c) { if (s[i] == '\\' && i + 1 < n) i++; i++; }
+            if (i < n) i++;
+            continue;
+        }
+        i++;
+    }
+    return in;
+}
+
+/* The syntax state at the start of every line, for the language (kept for the next call with the same one).
+ * Lines are scanned as far as they are drawn. A language with nothing that runs over lines has no states.
+ * False when out of memory. */
+static bool cui__df_lang_states(cui__diff *D, const char *lang) {
+    uint32_t h = lang ? cui__df_hash(lang, (int)strlen(lang), 2166136261u) : 0;
+    if (D->lang_ready && D->lang_hash == h) return true;
+    for (int s = 0; s < 2; s++) { cui__df_free(D->A, D->lstate[s]); D->lstate[s] = NULL; }
+    D->lang_ready = true;
+    D->lang_hash = h;
+    D->lang_name[0] = 0;
+    if (!lang) return true;
+    snprintf(D->lang_name, sizeof D->lang_name, "%s", lang);
+    bool json = !strcmp(lang, "json");
+    cui__lang L = cui__lang_for(json ? NULL : lang);
+    if (L.plain || (!L.multi && !L.mode && !L.block_comments)) return true;
+    for (int s = 0; s < 2; s++) {
+        D->lstate[s] = cui__df_alloc(D->A, sizeof(int32_t) * (size_t)D->n[s]);
+        if (!D->lstate[s]) { D->lang_ready = false; return false; }
+        int st = L.markdown ? CUI__MD_START : 0;
+        for (int i = 0; i < D->n[s]; i++) {
+            D->lstate[s][i] = st;
+            const cui__dline *l = &D->lines[s][i];
+            const char *line = D->text[s] + l->off;
+            int n = (int)CUI_MIN(l->len, (uint32_t)CUI__DIFF_DRAW_MAX);
+            if (L.multi) cui__tokenize_st(&L, line, n, &st, NULL, 0);
+            else if (L.mode) { bool block = st != 0; cui__tokenize(&L, json, line, n, &block, NULL, 0); st = block; }
+            else st = cui__df_scan_line(&L, line, n, st != 0);
+        }
+    }
+    return true;
+}
+
 /* Diffs a and b into D (cleared first). False only when out of memory. */
-static bool cui__df_compute(cui__diff *D, const char *a, size_t an, const char *b, size_t bn, bool ignore_eol, bool words) {
+static bool cui__df_compute(cui__diff *D, const char *a, size_t an, const char *b, size_t bn, bool ignore_eol, bool words, const char *lang) {
     cui__df_clear(D);
     const cui_allocator *A = D->A;
     D->ignore_eol = ignore_eol;
@@ -605,6 +695,8 @@ static bool cui__df_compute(cui__diff *D, const char *a, size_t an, const char *
     }
     cui__df_myers_free(&M);
     for (int s = 0; s < 2; s++) { cui__df_free(A, ids[s]); cui__df_free(A, chg[s]); cui__df_free(A, blank[s]); }
+    if (ok && lang) ok = cui__df_lang_states(D, lang);
+    if (ok) for (int m = 0; m < 2; m++) cui__dm_build(A, &D->map[m], D, m == 0, CUI__DIFF_CONTEXT, false, NULL, 0);   /* if it fails the view builds its own */
     if (!ok) {
         cui__df_clear(D);
         D->failed = true;
@@ -622,7 +714,7 @@ int cui_diff_compute(const char *old_text, size_t old_len, const char *new_text,
     memset(&D, 0, sizeof D);
     D.A = &cui__df_std;
     if (stats) memset(stats, 0, sizeof *stats);
-    if (!cui__df_compute(&D, old_text, old_len, new_text, new_len, (flags & CUI_DIFF_IGNORE_EOL) != 0, false)) return -1;
+    if (!cui__df_compute(&D, old_text, old_len, new_text, new_len, (flags & CUI_DIFF_IGNORE_EOL) != 0, false, NULL)) return -1;
     for (int k = 0; k < D.nblocks && k < cap && hunks; k++) {
         hunks[k].old_start = D.blocks[k].a0; hunks[k].old_count = D.blocks[k].na;
         hunks[k].new_start = D.blocks[k].b0; hunks[k].new_count = D.blocks[k].nb;
@@ -668,19 +760,71 @@ bool cui_diff_words(const char *old_line, int old_len, const char *new_line, int
 }
 
 /* ------------------------------------------------------------------------ */
+/* Prepared diffs                                                           */
+/* ------------------------------------------------------------------------ */
+
+struct cui_diff_prepared { cui__diff D; };
+
+cui_diff_prepared *cui_diff_prepare_ex(const char *old_text, size_t old_len, const char *new_text, size_t new_len, const cui_diff_prepare_opts *o) {
+    cui_diff_prepare_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_diff_prepared *p = malloc(sizeof *p);
+    if (!p) return NULL;
+    memset(p, 0, sizeof *p);
+    p->D.A = &cui__df_std;
+    const char *lang = o->language && o->language[0] && strlen(o->language) < sizeof p->D.lang_name ? o->language : NULL;
+    if (!cui__df_compute(&p->D, old_text, old_len, new_text, new_len, o->ignore_eol, !o->no_words, lang)) {
+        cui__df_clear(&p->D);
+        free(p);
+        return NULL;
+    }
+    return p;
+}
+
+void cui_diff_prepared_free(cui_diff_prepared *p) {
+    if (!p) return;
+    cui__df_clear(&p->D);
+    free(p);
+}
+
+void cui_diff_prepared_stats(const cui_diff_prepared *p, cui_diff_stats *st) {
+    if (!st) return;
+    memset(st, 0, sizeof *st);
+    if (!p) return;
+    st->added = p->D.added;
+    st->removed = p->D.removed;
+    st->hunks = p->D.nblocks;
+    st->old_lines = p->D.n[0];
+    st->new_lines = p->D.n[1];
+    st->approximate = p->D.approx;
+}
+
+int cui_diff_prepared_hunks(const cui_diff_prepared *p, cui_diff_hunk *hunks, int cap) {
+    if (!p) return 0;
+    for (int k = 0; k < p->D.nblocks && k < cap && hunks; k++) {
+        hunks[k].old_start = p->D.blocks[k].a0; hunks[k].old_count = p->D.blocks[k].na;
+        hunks[k].new_start = p->D.blocks[k].b0; hunks[k].new_count = p->D.blocks[k].nb;
+    }
+    return p->D.nblocks;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Rows                                                                     */
 /* ------------------------------------------------------------------------ */
 
 typedef struct { int a, b, change, gap, hidden; uint8_t kind; } cui__drow;   /* a, b: line indexes or -1 */
 
 typedef struct {
-    cui__diff D;
-    cui__drow *rows; int nrows, rcap;
-    int *change_row;                 /* first row of each change */
+    cui__diff D;                     /* the diff of texts passed to the view (not when it is given a prepared one) */
+    cui__dmap own;                   /* rows with folds the default map has not: opened ones, another context */
+    const cui__dmap *m;              /* the rows shown: own, or the diff's default map */
     uint8_t *expanded; int nexpanded;   /* per equal stretch (gap), shown in full */
     bool rows_valid, rows_split, rows_nofold;
     int rows_context;
-    int folds, hidden;               /* fold rows and the lines they hide */
+    int hint;                        /* the run of the last lookup */
+    uint32_t serial;                 /* of the diff the rows are for */
+    int revision;                    /* of the texts diffed into D (0: unknown) */
 } cui__diff_cache;
 
 typedef struct {
@@ -692,74 +836,139 @@ typedef struct {
     double max_w;
 } cui__diff_state;
 
+static uint32_t cui__df_serial;      /* the views' count of diffs seen (one thread draws) */
+
 static void cui__diff_dtor(cui_ctx *ui, void *data) {
     cui__diff_state *s = data;
     if (!s->c) return;
     cui__df_clear(&s->c->D);
-    cui__free(ui, s->c->rows);
-    cui__free(ui, s->c->change_row);
+    cui__dm_free(&ui->alloc, &s->c->own);
     cui__free(ui, s->c->expanded);
     cui__free(ui, s->c);
     s->c = NULL;
 }
 
-static bool cui__dr_push(cui_ctx *ui, cui__diff_cache *c, int kind, int a, int b, int change) {
-    if (c->nrows >= c->rcap) {
-        int ncap = c->rcap ? c->rcap * 2 : 256;
-        cui__drow *nr = cui__realloc(ui, c->rows, sizeof(cui__drow) * (size_t)ncap);
-        if (!nr) return false;
-        c->rows = nr; c->rcap = ncap;
-    }
-    cui__drow *r = &c->rows[c->nrows++];
-    r->kind = (uint8_t)kind; r->a = a; r->b = b; r->change = change; r->gap = -1; r->hidden = 0;
+static void cui__dm_free(const cui_allocator *A, cui__dmap *m) {
+    cui__df_free(A, m->segs);
+    cui__df_free(A, m->change_row);
+    memset(m, 0, sizeof *m);
+}
+
+static bool cui__dm_push(const cui_allocator *A, cui__dmap *m, int kind, int row, int rows, int a, int b, int na, int nb, int aux) {
+    if (rows <= 0) return true;
+    if (!cui__df_reserve(A, (void **)&m->segs, &m->scap, m->nsegs + 1, sizeof(cui__dseg))) return false;
+    cui__dseg *g = &m->segs[m->nsegs++];
+    g->kind = (uint8_t)kind; g->row0 = row; g->rows = rows; g->a = a; g->b = b; g->na = na; g->nb = nb; g->aux = aux;
     return true;
 }
 
-static void cui__dr_build(cui_ctx *ui, cui__diff_cache *c, bool split, int context, bool nofold) {
-    const cui__diff *D = &c->D;
-    c->nrows = 0;
-    c->folds = c->hidden = 0;
-    cui__free(ui, c->change_row);
-    c->change_row = D->nblocks ? cui__alloc(ui, sizeof(int) * (size_t)D->nblocks) : NULL;
-    bool ok = !D->nblocks || c->change_row;
-    int i = 0, j = 0;
+/* The rows of D: unchanged lines (with `context` kept beside each change), folds of the stretches longer than
+ * that (unless expanded), and the changes, side by side or inline. False when out of memory (m is then empty). */
+static bool cui__dm_build(const cui_allocator *A, cui__dmap *m, const cui__diff *D, bool split, int context, bool nofold,
+                          const uint8_t *expanded, int nexpanded) {
+    cui__dm_free(A, m);
+    m->nchanges = D->nblocks;
+    m->change_row = D->nblocks ? cui__df_alloc(A, sizeof(int) * (size_t)D->nblocks) : NULL;
+    bool ok = !D->nblocks || m->change_row;
+    int row = 0, i = 0, j = 0;
     for (int g = 0; g <= D->nblocks && ok; g++) {
         /* the equal stretch before block g (or after the last one) */
         int ea1 = g < D->nblocks ? D->blocks[g].a0 : D->n[0];
-        int len = ea1 - i;
+        int len = CUI_MAX(0, ea1 - i);
         int keep_top = g > 0 ? context : 0, keep_bot = g < D->nblocks ? context : 0;
         int hide = len - keep_top - keep_bot;
-        bool fold = !nofold && hide >= CUI__DIFF_FOLD_MIN && !(g < c->nexpanded && c->expanded[g]);
-        for (int t = 0; t < len && ok; t++) {
-            if (fold && t == keep_top) {
-                ok = cui__dr_push(ui, c, CUI_DIFF_ROW_FOLD, i + t, j + t, -1);
-                if (ok) { c->rows[c->nrows - 1].gap = g; c->rows[c->nrows - 1].hidden = hide; c->folds++; c->hidden += hide; }
-                t += hide - 1;
-                continue;
-            }
-            ok = cui__dr_push(ui, c, CUI_DIFF_ROW_SAME, i + t, j + t, -1);
+        bool fold = !nofold && hide >= CUI__DIFF_FOLD_MIN && !(g < nexpanded && expanded[g]);
+        if (fold) {
+            ok = cui__dm_push(A, m, CUI__DS_SAME, row, keep_top, i, j, keep_top, 0, -1);
+            row += keep_top;
+            ok = ok && cui__dm_push(A, m, CUI__DS_FOLD, row, 1, i + keep_top, j + keep_top, hide, 0, g);
+            row += 1;
+            m->folds++; m->hidden += hide;
+            ok = ok && cui__dm_push(A, m, CUI__DS_SAME, row, keep_bot, i + keep_top + hide, j + keep_top + hide, keep_bot, 0, -1);
+            row += keep_bot;
+        } else {
+            ok = cui__dm_push(A, m, CUI__DS_SAME, row, len, i, j, len, 0, -1);
+            row += len;
         }
         i += len; j += len;
         if (g == D->nblocks || !ok) break;
         const cui__dblock *B = &D->blocks[g];
-        c->change_row[g] = c->nrows;
-        if (split) {
-            int nr = CUI_MAX(B->na, B->nb);
-            for (int t = 0; t < nr && ok; t++) {
-                int kind = t < B->na && t < B->nb ? CUI_DIFF_ROW_CHANGED : t < B->na ? CUI_DIFF_ROW_REMOVED : CUI_DIFF_ROW_ADDED;
-                ok = cui__dr_push(ui, c, kind, t < B->na ? B->a0 + t : -1, t < B->nb ? B->b0 + t : -1, g);
-            }
-        } else {
-            for (int t = 0; t < B->na && ok; t++) ok = cui__dr_push(ui, c, CUI_DIFF_ROW_REMOVED, B->a0 + t, -1, g);
-            for (int t = 0; t < B->nb && ok; t++) ok = cui__dr_push(ui, c, CUI_DIFF_ROW_ADDED, -1, B->b0 + t, g);
-        }
+        int rows = split ? CUI_MAX(B->na, B->nb) : B->na + B->nb;
+        m->change_row[g] = row;
+        ok = cui__dm_push(A, m, CUI__DS_CHANGE, row, rows, B->a0, B->b0, B->na, B->nb, g);
+        row += rows;
         i += B->na; j += B->nb;
     }
-    if (!ok) c->nrows = c->folds = c->hidden = 0;
+    if (!ok) { cui__dm_free(A, m); return false; }
+    m->nrows = row;
+    m->ready = true;
+    return true;
+}
+
+/* the rows for the view's mode and folds: the diff's own when they are the default ones, else built here */
+static void cui__dr_build(cui_ctx *ui, cui__diff_cache *c, const cui__diff *D, bool split, int context, bool nofold) {
+    bool open = false;
+    for (int g = 0; g < c->nexpanded && !open; g++) open = c->expanded[g] != 0;
+    const cui__dmap *def = &D->map[split ? 0 : 1];
+    if (context == CUI__DIFF_CONTEXT && !nofold && !open && def->ready) {
+        c->m = def;
+    } else {
+        cui__dm_build(&ui->alloc, &c->own, D, split, context, nofold, c->expanded, c->nexpanded);
+        c->m = &c->own;
+    }
+    c->hint = 0;
     c->rows_valid = true;
     c->rows_split = split;
     c->rows_context = context;
     c->rows_nofold = nofold;
+}
+
+/* row i (0 <= i < nrows) */
+static void cui__dr_get(cui__diff_cache *c, int i, cui__drow *r) {
+    const cui__dmap *m = c->m;
+    int k = c->hint;
+    if (k < 0 || k >= m->nsegs) k = 0;
+    const cui__dseg *g = &m->segs[k];
+    if (i < g->row0 || i >= g->row0 + g->rows) {
+        int lo = 0, hi = m->nsegs - 1;
+        if (k + 1 < m->nsegs && i >= m->segs[k + 1].row0 && i < m->segs[k + 1].row0 + m->segs[k + 1].rows) lo = hi = k + 1;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (m->segs[mid].row0 <= i) lo = mid; else hi = mid - 1;
+        }
+        k = lo;
+        g = &m->segs[k];
+    }
+    c->hint = k;
+    int t = i - g->row0;
+    r->gap = -1; r->hidden = 0; r->change = -1;
+    if (g->kind == CUI__DS_SAME) { r->kind = CUI_DIFF_ROW_SAME; r->a = g->a + t; r->b = g->b + t; }
+    else if (g->kind == CUI__DS_FOLD) { r->kind = CUI_DIFF_ROW_FOLD; r->a = g->a; r->b = g->b; r->gap = g->aux; r->hidden = g->na; }
+    else {
+        r->change = g->aux;
+        if (c->rows_split) {
+            r->kind = t < g->na && t < g->nb ? CUI_DIFF_ROW_CHANGED : t < g->na ? CUI_DIFF_ROW_REMOVED : CUI_DIFF_ROW_ADDED;
+            r->a = t < g->na ? g->a + t : -1;
+            r->b = t < g->nb ? g->b + t : -1;
+        } else if (t < g->na) { r->kind = CUI_DIFF_ROW_REMOVED; r->a = g->a + t; r->b = -1; }
+        else { r->kind = CUI_DIFF_ROW_ADDED; r->a = -1; r->b = g->b + t - g->na; }
+    }
+}
+
+/* the first row showing old line top_a (or, with none, new line top_b) or a later one */
+static int cui__dr_row_for(const cui__diff_cache *c, int top_a, int top_b) {
+    const cui__dmap *m = c->m;
+    for (int k = 0; k < m->nsegs; k++) {
+        const cui__dseg *g = &m->segs[k];
+        int lo = top_a >= 0 ? g->a : g->b;
+        int top = top_a >= 0 ? top_a : top_b;
+        int n = g->kind == CUI__DS_CHANGE && top_a < 0 ? g->nb : g->na;
+        if (lo + n <= top) continue;
+        if (g->kind == CUI__DS_SAME) return g->row0 + CUI_MAX(0, top - lo);
+        if (g->kind == CUI__DS_CHANGE) return g->row0 + CUI_CLAMP(top - lo, 0, g->rows - 1);
+        return g->row0;
+    }
+    return CUI_MAX(0, m->nrows - 1);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -827,7 +1036,9 @@ static void cui__diff_paint_text(cui_ctx *ui, const cui__diff_common *c, const c
         for (int k = 0; k < sd->ntok; k++) {
             const char *s = sd->text + sd->toks[k].start;
             int len = sd->toks[k].len;
-            if (s[0] != ' ') cui__draw_text_line(ui, CUI_FONT_MONO, size, px, ty, c->colors[sd->toks[k].kind], s, len, true);
+            bool blank = true;   /* a comment that runs over lines starts with its indentation, in one token */
+            for (int q = 0; q < len && blank; q++) blank = s[q] == ' ';
+            if (!blank) cui__draw_text_line(ui, CUI_FONT_MONO, size, px, ty, c->colors[sd->toks[k].kind], s, len, true);
             px += cui__text_width(ui, CUI_FONT_MONO, size, s, len, true);
         }
         /* text past the last token (more tokens than the tokenizer keeps) */
@@ -968,9 +1179,40 @@ static void cui__paint_diff_head(cui_ctx *ui, cui_node *n, void *data) {
 /* The view                                                                 */
 /* ------------------------------------------------------------------------ */
 
+/* one frame of the diff view: what its phases share */
+typedef struct {
+    cui_ctx *ui;
+    const cui_diff_opts *o;
+    cui_diff_result *res;
+    cui_id id, lid, sid;                /* the view, its rows, its scroll area */
+    cui__diff_state *s;
+    cui__diff_cache *c;
+    const cui__diff *D;                 /* the diff shown: the caller's prepared one, or the cache's own */
+    const char *lang;                   /* for highlighting, or NULL */
+    cui__lang L; bool json, syn, states;   /* the language, whether it colors, and whether D has its line states */
+    float size, row_h, cw, gutter;      /* text size, row height, column width, line number width */
+    cui_rect prev; bool known;          /* the view, last frame (known: it has one) */
+    bool split, nofold;
+    int context;
+    cui_scroll_state *ss;
+    int nrows, nchanges;
+    float header_h, content_h, height, view_h, view_w;
+    cui_interact lr;
+    int hover_row;
+    bool rebuild;                       /* a fold opened or closed: rebuild the rows */
+} cui__dvf;
+
+/* the width of mono text: columns times the column width, measured only when it has more than ASCII */
+static float cui__df_tw(cui_ctx *ui, float size, float cw, const char *s, int n) {
+    for (int i = 0; i < n; i++) if ((uint8_t)s[i] >= 0x80) return cui__text_width(ui, CUI_FONT_MONO, size, s, n, true);
+    return cw * (float)n;
+}
+
 /* Display copy of a line for one side of a row: tabs to 4 column stops,
- * control characters to spaces, the marks moved along. */
-static void cui__diff_side_fill(cui_ctx *ui, const cui__diff *D, int side, int line, const char *lang, cui__diff_side *out) {
+ * control characters to spaces, the marks moved along, the syntax colors from the
+ * line's own start state. */
+static void cui__diff_side_fill(cui_ctx *ui, const cui__dvf *f, int side, int line, cui__diff_side *out) {
+    const cui__diff *D = f->D;
     const cui__dline *l = &D->lines[side][line];
     const char *src = D->text[side] + l->off;
     int n = (int)l->len;
@@ -979,14 +1221,14 @@ static void cui__diff_side_fill(cui_ctx *ui, const cui__diff *D, int side, int l
         for (int k = 0; k < 3 && n > 0 && ((uint8_t)src[n] & 0xC0) == 0x80; k++) n--;   /* at a character boundary */
     }
     int tabs = 0;
-    for (int i = 0; i < n; i++) if (src[i] == '\t') tabs++;
+    for (int i = 0; i < n; i++) if (src[i] == '	') tabs++;
     char *dst = cui__frame_alloc(ui, (size_t)n + (size_t)tabs * 3 + 1);
     int *map = cui__frame_alloc(ui, sizeof(int) * ((size_t)n + 1));
     int o = 0, col = 0;
     for (int i = 0; i < n; i++) {
         map[i] = o;
         uint8_t ch = (uint8_t)src[i];
-        if (ch == '\t') { int to = (col / 4 + 1) * 4; while (col < to) { dst[o++] = ' '; col++; } continue; }
+        if (ch == '	') { int to = (col / 4 + 1) * 4; while (col < to) { dst[o++] = ' '; col++; } continue; }
         dst[o++] = ch < 0x20 || ch == 0x7F ? ' ' : (char)ch;
         if ((ch & 0xC0) != 0x80) col++;
     }
@@ -1013,11 +1255,13 @@ static void cui__diff_side_fill(cui_ctx *ui, const cui__diff *D, int side, int l
     }
     /* line ending tags */
     if (l->mark & CUI__DL_EOL_TAG) out->tag = l->eol == 2 ? "CRLF" : l->eol == 1 ? "LF" : "No newline at end of file";
-    /* syntax */
-    if (lang && o > 0) {
-        bool block = D->inblock[side] && D->inblock[side][line];
+    /* syntax: from the state this line starts in (without the saved states, a line starts outside any comment) */
+    if (f->syn && o > 0) {
+        int st = f->states && D->lstate[side] ? D->lstate[side][line] : (f->L.markdown && line == 0 ? CUI__MD_START : 0);
         cui__tok tk[256];
-        int nt = cui__tokenize_lang(lang, dst, o, &block, tk, 256);
+        int nt;
+        if (f->L.multi) nt = cui__tokenize_st(&f->L, dst, o, &st, tk, 256);
+        else { bool block = st != 0; nt = cui__tokenize(&f->L, f->json, dst, o, &block, tk, 256); }
         cui__tok *keep = cui__frame_alloc(ui, sizeof *keep * (size_t)(nt > 0 ? nt : 1));
         memcpy(keep, tk, sizeof *keep * (size_t)nt);
         out->toks = keep;
@@ -1025,49 +1269,28 @@ static void cui__diff_side_fill(cui_ctx *ui, const cui__diff *D, int side, int l
     }
 }
 
-/* which lines start inside a block comment, for the language */
-static void cui__diff_lang(cui_ctx *ui, cui__diff *D, const char *lang) {
-    uint32_t h = lang ? cui__df_hash(lang, (int)strlen(lang), 2166136261u) : 0;
-    if (D->lang_ready && D->lang_hash == h) return;
-    D->lang_ready = true;
-    D->lang_hash = h;
-    if (!lang) return;
-    cui__tok tk[256];
-    for (int s = 0; s < 2; s++) {
-        if (!D->inblock[s]) D->inblock[s] = cui__df_alloc(D->A, (size_t)D->n[s]);
-        if (!D->inblock[s]) return;
-        bool block = false;
-        for (int i = 0; i < D->n[s]; i++) {
-            D->inblock[s][i] = block;
-            const cui__dline *l = &D->lines[s][i];
-            int n = (int)CUI_MIN(l->len, (uint32_t)CUI__DIFF_DRAW_MAX);
-            cui__tokenize_lang(lang, D->text[s] + l->off, n, &block, tk, 256);   /* the copy ends in a terminator */
-        }
-    }
-    (void)ui;
-}
+static int cui__diff_row_of_change(const cui__diff_cache *c, int k) { return c->m->change_row && k >= 0 && k < c->m->nchanges ? c->m->change_row[k] : 0; }
 
-static int cui__diff_row_of_change(const cui__diff_cache *c, int k) { return c->change_row && k >= 0 && k < c->D.nblocks ? c->change_row[k] : 0; }
-
-static int cui__diff_row_end(const cui__diff_cache *c, int k) {
-    const cui__dblock *B = &c->D.blocks[k];
-    return cui__diff_row_of_change(c, k) + (c->rows_split ? CUI_MAX(B->na, B->nb) : B->na + B->nb);
+static int cui__diff_row_end(const cui__dvf *f, int k) {
+    const cui__dblock *B = &f->D->blocks[k];
+    return cui__diff_row_of_change(f->c, k) + (f->c->rows_split ? CUI_MAX(B->na, B->nb) : B->na + B->nb);
 }
 
 int cui_diff_view_rows(cui_ctx *ui, const char *id_str, cui_diff_row *rows, int first, int cap) {
     cui_id id = cui_make_id(ui, id_str);
     cui__diff_state *s = cui_state(ui, id ^ CUI__DIFF_SALT, sizeof *s);
     if (!s->c || !s->c->rows_valid) return 0;
-    const cui__diff_cache *c = s->c;
-    for (int i = 0; rows && i < cap && first >= 0 && first + i < c->nrows; i++) {
-        const cui__drow *r = &c->rows[first + i];
-        rows[i].kind = (cui_diff_row_kind)r->kind;
-        rows[i].old_line = r->a;
-        rows[i].new_line = r->b;
-        rows[i].change = r->change;
-        rows[i].hidden = r->hidden;
+    cui__diff_cache *c = s->c;
+    for (int i = 0; rows && i < cap && first >= 0 && first + i < c->m->nrows; i++) {
+        cui__drow r;
+        cui__dr_get(c, first + i, &r);
+        rows[i].kind = (cui_diff_row_kind)r.kind;
+        rows[i].old_line = r.a;
+        rows[i].new_line = r.b;
+        rows[i].change = r.change;
+        rows[i].hidden = r.hidden;
     }
-    return c->nrows;
+    return c->m->nrows;
 }
 
 static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, const char *old_text, const char *new_text, const cui_diff_opts *o);
@@ -1080,51 +1303,62 @@ cui_diff_result cui_diff_view_ex(cui_ctx *ui, const char *id_str, const char *ol
     return r;
 }
 
-/* one frame of the diff view: what its phases share */
-typedef struct {
-    cui_ctx *ui;
-    const cui_diff_opts *o;
-    cui_diff_result *res;
-    cui_id id, lid, sid;                /* the view, its rows, its scroll area */
-    cui__diff_state *s;
-    cui__diff_cache *c;
-    cui__diff *D;
-    const char *lang;                   /* for highlighting, or NULL */
-    float size, row_h, cw, gutter;      /* text size, row height, column width, line number width */
-    cui_rect prev; bool known;          /* the view, last frame (known: it has one) */
-    bool split, nofold;
-    int context;
-    cui_scroll_state *ss;
-    int nrows, nchanges;
-    float header_h, content_h, height, view_h, view_w;
-    cui_interact lr;
-    int hover_row;
-    bool rebuild;                       /* a fold opened or closed: rebuild the rows */
-} cui__dvf;
 
-/* diff again only when a text (or how lines compare) changed */
-static void cui__dvf_rediff(cui__dvf *f, const char *old_text, const char *new_text) {
+
+/* where the diff comes from: the prepared one the caller passes, or a diff of the texts made here (again only
+ * when a text changes: told by .revision, else by comparing them with the copy). Notes a diff not seen before. */
+static void cui__dvf_source(cui__dvf *f, const char *old_text, const char *new_text) {
     cui_ctx *ui = f->ui;
+    const cui_diff_opts *o = f->o;
     cui__diff_cache *c = f->c;
-    cui__diff *D = f->D;
     cui__diff_state *s = f->s;
-    if (!old_text) old_text = "";
-    if (!new_text) new_text = "";
-    size_t ol = strlen(old_text), nl = strlen(new_text);
-    if (ol > CUI__DIFF_MAX_LEN) ol = CUI__DIFF_MAX_LEN;
-    if (nl > CUI__DIFF_MAX_LEN) nl = CUI__DIFF_MAX_LEN;
-    bool same = D->text[0] && D->text[1] && D->len[0] == ol && D->len[1] == nl && D->ignore_eol == f->o->ignore_eol &&
-                memcmp(D->text[0], old_text, ol) == 0 && memcmp(D->text[1], new_text, nl) == 0;
-    if (same) return;
-    cui__df_compute(D, old_text, ol, new_text, nl, f->o->ignore_eol, true);
-    f->res->recomputed = true;
-    c->rows_valid = false;
-    cui__free(ui, c->expanded);
-    c->expanded = D->nblocks + 1 > 0 ? cui__alloc(ui, (size_t)D->nblocks + 1) : NULL;
-    c->nexpanded = c->expanded ? D->nblocks + 1 : 0;
-    if (c->expanded) memset(c->expanded, 0, (size_t)c->nexpanded);
-    if (s->current >= D->nblocks) s->current = D->nblocks - 1;
-    s->max_w = 0;
+    const char *lang = o->language && o->language[0] ? o->language : NULL;
+    if (o->prepared) {
+        const cui__diff *D = &o->prepared->D;
+        if (c->D.text[0] || c->D.text[1]) cui__df_clear(&c->D);   /* the copy of a text diffed here earlier */
+        if (!D->serial) ((cui__diff *)D)->serial = ++cui__df_serial;
+        f->D = D;
+        if (!lang && D->lang_name[0]) lang = D->lang_name;
+    } else {
+        cui__diff *D = &c->D;
+        if (!old_text) old_text = "";
+        if (!new_text) new_text = "";
+        bool same = o->revision && c->revision == o->revision && D->text[0] && D->text[1] && D->ignore_eol == o->ignore_eol;
+        if (!same) {
+            size_t ol = strlen(old_text), nl = strlen(new_text);
+            if (ol > CUI__DIFF_MAX_LEN) ol = CUI__DIFF_MAX_LEN;
+            if (nl > CUI__DIFF_MAX_LEN) nl = CUI__DIFF_MAX_LEN;
+            same = D->text[0] && D->text[1] && D->len[0] == ol && D->len[1] == nl && D->ignore_eol == o->ignore_eol &&
+                   memcmp(D->text[0], old_text, ol) == 0 && memcmp(D->text[1], new_text, nl) == 0;
+            if (!same) {
+                cui__df_compute(D, old_text, ol, new_text, nl, o->ignore_eol, true, lang);
+                D->serial = ++cui__df_serial;
+            }
+        }
+        c->revision = o->revision;
+        if (lang) cui__df_lang_states(D, lang);
+        f->D = D;
+    }
+    f->lang = lang;
+    if (lang) {
+        f->json = !strcmp(lang, "json");
+        f->L = cui__lang_for(f->json ? NULL : lang);
+        f->syn = !f->L.plain;
+        f->states = f->D->lang_ready && f->D->lang_hash == cui__df_hash(lang, (int)strlen(lang), 2166136261u);
+    }
+    const cui__diff *D = f->D;
+    if (D->serial != c->serial) {
+        c->serial = D->serial;
+        f->res->recomputed = true;
+        c->rows_valid = false;
+        cui__free(ui, c->expanded);
+        c->expanded = cui__alloc(ui, (size_t)D->nblocks + 1);
+        c->nexpanded = c->expanded ? D->nblocks + 1 : 0;
+        if (c->expanded) memset(c->expanded, 0, (size_t)c->nexpanded);
+        if (s->current >= D->nblocks) s->current = D->nblocks - 1;
+        if (o->prepared && s->current >= 0) s->goto_pending = true;   /* a new diff arrived: show the selected change */
+        s->max_w = 0;
+    }
 }
 
 /* the rows, rebuilt when the diff, the mode or a fold changes; the line at the top stays in
@@ -1134,19 +1368,13 @@ static void cui__dvf_rows(cui__dvf *f) {
     cui_scroll_state *ss = f->ss;
     if (!(!c->rows_valid || c->rows_split != f->split || c->rows_context != f->context || c->rows_nofold != f->nofold)) return;
     int top_a = -1, top_b = -1;
-    if (c->rows_valid && c->nrows > 0 && !f->res->recomputed) {
-        int ti = CUI_CLAMP((int)((ss->y - CUI__DIFF_INSET) / f->row_h), 0, c->nrows - 1);
-        top_a = c->rows[ti].a; top_b = c->rows[ti].b;
+    if (c->rows_valid && c->m->nrows > 0 && !f->res->recomputed) {
+        cui__drow r;
+        cui__dr_get(c, CUI_CLAMP((int)((ss->y - CUI__DIFF_INSET) / f->row_h), 0, c->m->nrows - 1), &r);
+        top_a = r.a; top_b = r.b;
     }
-    cui__dr_build(f->ui, c, f->split, f->context, f->nofold);
-    if (top_a >= 0 || top_b >= 0) {
-        int ti = 0;
-        for (; ti < c->nrows; ti++) {
-            const cui__drow *r = &c->rows[ti];
-            if ((top_a >= 0 && r->a >= top_a) || (top_a < 0 && r->b >= top_b)) break;
-        }
-        ss->y = ss->ty = (float)CUI_MIN(ti, CUI_MAX(0, c->nrows - 1)) * f->row_h;
-    }
+    cui__dr_build(f->ui, c, f->D, f->split, f->context, f->nofold);
+    if (top_a >= 0 || top_b >= 0) ss->y = ss->ty = (float)cui__dr_row_for(c, top_a, top_b) * f->row_h;
 }
 
 /* the change the caller selects through o->current, when it set a new one */
@@ -1175,11 +1403,14 @@ static void cui__dvf_pointer(cui__dvf *f) {
         int ri = (int)floorf(fy);
         if (fy >= 0 && ri < f->nrows) f->hover_row = ri;
     }
-    if (f->hover_row >= 0 && c->rows[f->hover_row].kind == CUI_DIFF_ROW_FOLD) cui__set_cursor(ui, CUI_CURSOR_HAND);
-    if (f->lr.clicked && f->hover_row >= 0) {
-        const cui__drow *r = &c->rows[f->hover_row];
-        if (r->kind == CUI_DIFF_ROW_FOLD && r->gap >= 0 && r->gap < c->nexpanded) { c->expanded[r->gap] = 1; f->rebuild = true; }
-        else if (r->change >= 0) f->s->current = r->change;
+    if (f->hover_row >= 0) {
+        cui__drow r;
+        cui__dr_get(c, f->hover_row, &r);
+        if (r.kind == CUI_DIFF_ROW_FOLD) cui__set_cursor(ui, CUI_CURSOR_HAND);
+        if (f->lr.clicked) {
+            if (r.kind == CUI_DIFF_ROW_FOLD && r.gap >= 0 && r.gap < c->nexpanded) { c->expanded[r.gap] = 1; f->rebuild = true; }
+            else if (r.change >= 0) f->s->current = r.change;
+        }
     }
 }
 
@@ -1241,7 +1472,7 @@ static void cui__dvf_goto(cui__dvf *f) {
     bool laid_out = ss->view_h > 0 && fabsf(ss->content_h - CUI_MAX(f->content_h, ss->view_h)) < 1.0f;
     if (s->goto_pending && s->current >= 0 && s->current < f->nchanges && !laid_out) ui->animating = true;
     else if (s->goto_pending && s->current >= 0 && s->current < f->nchanges) {
-        int r0 = cui__diff_row_of_change(f->c, s->current), r1 = cui__diff_row_end(f->c, s->current);
+        int r0 = cui__diff_row_of_change(f->c, s->current), r1 = cui__diff_row_end(f, s->current);
         float top = CUI__DIFF_INSET + (float)r0 * row_h, bottom = CUI__DIFF_INSET + (float)r1 * row_h;
         bool seen = top >= ss->ty && bottom <= ss->ty + view_h;
         if (!seen) {
@@ -1260,7 +1491,7 @@ static cui__diff_common *cui__dvf_common(cui__dvf *f, cui_color bg, bool dark) {
     cui__diff_common *cm = cui__frame_alloc(ui, sizeof *cm);
     memset(cm, 0, sizeof *cm);
     cm->size = f->size; cm->row_h = f->row_h; cm->cw = f->cw; cm->gutter = f->gutter;
-    cm->split = f->split; cm->syntax = f->lang != NULL;
+    cm->split = f->split; cm->syntax = f->syn;
     cui_color fg = CUI_C(ui, FOREGROUND), danger = CUI_C(ui, DANGER), success = CUI_C(ui, SUCCESS);
     cm->fg = fg;
     cm->muted = CUI_C(ui, TEXT_MUTED);
@@ -1278,7 +1509,7 @@ static cui__diff_common *cui__dvf_common(cui__dvf *f, cui_color bg, bool dark) {
     cm->marker = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     cm->line = CUI_C(ui, BORDER);
     cm->bg = bg;
-    if (f->lang) cui__syntax_colors(ui, cm->colors);
+    if (f->syn) cui__syntax_colors(ui, cm->colors);
     return cm;
 }
 
@@ -1302,7 +1533,9 @@ static void cui__dvf_build_header(cui__dvf *f, cui__diff_common *cm) {
 static void cui__dvf_build_row(cui__dvf *f, cui__diff_common *cm, int i) {
     cui_ctx *ui = f->ui;
     cui__diff_state *s = f->s;
-    const cui__drow *r = &f->c->rows[i];
+    cui__drow rr;
+    cui__dr_get(f->c, i, &rr);
+    const cui__drow *r = &rr;
     cui__diff_rowp *p = cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
     p->c = cm;
@@ -1312,19 +1545,19 @@ static void cui__dvf_build_row(cui__dvf *f, cui__diff_common *cm, int i) {
     p->hover = i == f->hover_row ? s->hover : 0;
     if (r->kind != CUI_DIFF_ROW_FOLD) {
         if (f->split) {
-            if (r->a >= 0) cui__diff_side_fill(ui, f->D, 0, r->a, f->lang, &p->side[0]);
-            if (r->b >= 0) cui__diff_side_fill(ui, f->D, 1, r->b, f->lang, &p->side[1]);
+            if (r->a >= 0) cui__diff_side_fill(ui, f, 0, r->a, &p->side[0]);
+            if (r->b >= 0) cui__diff_side_fill(ui, f, 1, r->b, &p->side[1]);
             p->side[0].tone = r->a < 0 ? 3 : r->kind == CUI_DIFF_ROW_SAME ? 0 : 1;
             p->side[1].tone = r->b < 0 ? 3 : r->kind == CUI_DIFF_ROW_SAME ? 0 : 2;
             for (int t = 0; t < 2; t++)
-                if (p->side[t].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__text_width(ui, CUI_FONT_MONO, f->size, p->side[t].text, p->side[t].len, true));
+                if (p->side[t].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__df_tw(ui, f->size, f->cw, p->side[t].text, p->side[t].len));
         } else {
             int sd = r->a >= 0 ? 0 : 1;
-            cui__diff_side_fill(ui, f->D, sd, sd ? r->b : r->a, f->lang, &p->side[0]);
+            cui__diff_side_fill(ui, f, sd, sd ? r->b : r->a, &p->side[0]);
             p->side[0].num = r->a >= 0 ? r->a + 1 : 0;
             p->side[1].num = r->b >= 0 ? r->b + 1 : 0;
             p->side[0].tone = r->kind == CUI_DIFF_ROW_REMOVED ? 1 : r->kind == CUI_DIFF_ROW_ADDED ? 2 : 0;
-            if (p->side[0].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__text_width(ui, CUI_FONT_MONO, f->size, p->side[0].text, p->side[0].len, true));
+            if (p->side[0].len > 0) s->max_w = CUI_MAX(s->max_w, (double)cui__df_tw(ui, f->size, f->cw, p->side[0].text, p->side[0].len));
         }
     }
     int rn = cui__leaf(ui, 0, CUI_FILL, CUI_PX(f->row_h));
@@ -1410,11 +1643,8 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
     }
     cui__diff_cache *c = f.c = s->c;
     if (!c) return res;
-    cui__diff *D = f.D = &c->D;
-
-    cui__dvf_rediff(&f, old_text, new_text);
-    f.lang = o->language && o->language[0] ? o->language : NULL;
-    if (f.lang) cui__diff_lang(ui, D, f.lang);
+    cui__dvf_source(&f, old_text, new_text);
+    const cui__diff *D = f.D;
 
     /* geometry */
     f.size = cui__fs(ui, o->size > 0 ? o->size : 12);
@@ -1433,7 +1663,7 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
 
     f.ss = cui_state(ui, f.sid, sizeof *f.ss);
     cui__dvf_rows(&f);
-    f.nrows = c->nrows;
+    f.nrows = c->m->nrows;
 
     /* the selected change */
     f.nchanges = D->nblocks;
@@ -1449,15 +1679,17 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
 
     /* input */
     cui__dvf_pointer(&f);
-    if (ui->focus == f.lid) cui__dvf_keys(&f);
+    if (ui->focus == f.lid || o->keys) cui__dvf_keys(&f);
     if (f.rebuild) {
-        cui__dr_build(ui, c, f.split, f.context, f.nofold);
-        f.nrows = c->nrows;
+        cui__dr_build(ui, c, D, f.split, f.context, f.nofold);
+        f.nrows = c->m->nrows;
         f.content_h = (float)f.nrows * f.row_h + 2 * CUI__DIFF_INSET;
         f.hover_row = -1;
     }
     cui__dvf_goto(&f);
-    cui__tween(ui, &s->hover, f.hover_row >= 0 && c->rows[f.hover_row].kind == CUI_DIFF_ROW_FOLD ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
+    bool over_fold = false;
+    if (f.hover_row >= 0) { cui__drow hr; cui__dr_get(c, f.hover_row, &hr); over_fold = hr.kind == CUI_DIFF_ROW_FOLD; }
+    cui__tween(ui, &s->hover, over_fold ? 1.0f : 0.0f, CUI__T_HIGHLIGHT);
     if (f.hover_row >= 0) s->hover_row = f.hover_row;
 
     /* build */
@@ -1490,7 +1722,7 @@ static cui_diff_result cui__diff_view_ex_body(cui_ctx *ui, const char *id_str, c
     res.current_changed = s->current != before_current;
     res.mode = f.split ? CUI_DIFF_SPLIT : CUI_DIFF_INLINE;
     res.approximate = D->approx;
-    res.folds = c->folds;
-    res.hidden = c->hidden;
+    res.folds = c->m->folds;
+    res.hidden = c->m->hidden;
     return res;
 }

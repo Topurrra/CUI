@@ -1906,7 +1906,15 @@ CUI_API void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *qu
  * With the view focused: N or Alt+Down goes to the next change, P or Alt+Up to
  * the previous one, arrows and Page Up/Down scroll, E opens every fold and
  * Shift+E folds them again, Esc clears the selected change. A click on a
- * change selects it. Only the rows in sight are built. */
+ * change selects it. Only the rows in sight are built.
+ *
+ * Big texts: the view diffs texts passed to it on the UI thread, which is fine
+ * for files of a few thousand lines and too slow for megabytes (two 10 MB texts
+ * take about 100 ms). For those, diff on a worker with cui_diff_prepare (below)
+ * and pass the result as .prepared: the frame then only draws the rows in sight
+ * (colors included) and never reads the texts. Passing texts with a .revision
+ * (a number you change when they change) also stops the view comparing them
+ * with its copy every frame. */
 typedef enum cui_diff_mode { CUI_DIFF_SPLIT = 0, CUI_DIFF_INLINE = 1 } cui_diff_mode;
 typedef struct cui_diff_opts {
     int _;
@@ -1921,6 +1929,13 @@ typedef struct cui_diff_opts {
     cui_size width;             /* default fill */
     float height;               /* default: the rows, up to 420; negative fills the space */
     float size;                 /* font size, default 12 */
+    const struct cui_diff_prepared *prepared;   /* a diff made by cui_diff_prepare: shown instead of diffing the texts (which may be NULL).
+                                                 * Keep it alive while it is shown; it is never freed by the view. A new pointer is a new diff, and shows the selected change.
+                                                 * .language, .ignore_eol are those of the prepare; .language here overrides the colors only. */
+    int revision;               /* texts only: nonzero, a number you change when either text changes; the view then does not read them in
+                                 * frames where it stays the same */
+    bool keys;                  /* take the keys (N, P, Alt+Up/Down, arrows, E...) without the view having the focus, for a view that is
+                                 * the only one on screen */
 } cui_diff_opts;
 typedef struct cui_diff_result {
     int added, removed;         /* lines */
@@ -1951,6 +1966,33 @@ typedef struct cui_diff_row {
 } cui_diff_row;
 CUI_API int cui_diff_view_rows(cui_ctx *ui, const char *id, cui_diff_row *rows, int first, int cap);
 
+/* A diff made ahead, on any thread. cui_diff_prepare does all the work of showing a diff except drawing it:
+ * the line diff, word marks inside changed lines, and for .language the syntax state at the start of every
+ * line (so a row is colored from its own line, whatever comment or fence it is inside). It touches no
+ * cui_ctx and no shared state, so run it on a worker, then pass the result to cui_diff_view as .prepared.
+ * Copies both texts (UTF-8, they need not end in a terminator), so you may free yours at once. Returns NULL
+ * when out of memory. A prepared diff is read only: any number of threads may read it, a view draws it on
+ * one. Free it with cui_diff_prepared_free once no view shows it (not before the frame after you pass a
+ * different one). Two 10 MB texts of 105k lines with 2700 changes prepare in about 130 ms and take about
+ * 25 MB beyond the texts' copies; 100 MB texts take about 2 s.
+ *
+ *     // worker:                                  // UI thread, every frame:
+ *     p = cui_diff_prepare(a, al, b, bl,          cui_diff_view(ui, "diff", NULL, NULL, .prepared = p, .height = -1);
+ *                          .language = "c");
+ */
+typedef struct cui_diff_prepared cui_diff_prepared;
+typedef struct cui_diff_prepare_opts {
+    int _;
+    bool ignore_eol;            /* "
+" equals "
+", and a missing final newline does not count */
+    const char *language;       /* syntax colors for the view, as .language there (kept up to 31 bytes of the name) */
+    bool no_words;              /* skip the word marks (cheaper; the view then shows whole changed lines only) */
+} cui_diff_prepare_opts;
+CUI_API cui_diff_prepared *cui_diff_prepare_ex(const char *old_text, size_t old_len, const char *new_text, size_t new_len, const cui_diff_prepare_opts *opts);
+#define cui_diff_prepare(old_text, old_len, new_text, new_len, ...) cui_diff_prepare_ex((old_text), (old_len), (new_text), (new_len), CUI__OPTS(cui_diff_prepare_opts, __VA_ARGS__))
+CUI_API void cui_diff_prepared_free(cui_diff_prepared *p);
+
 /* The same diff without a view. Old lines [old_start, old_start + old_count)
  * became new lines [new_start, new_start + new_count), 0 based; a pure
  * insertion has old_count 0 and goes before old line old_start. Writes up to
@@ -1965,6 +2007,9 @@ typedef struct cui_diff_stats {
 enum { CUI_DIFF_IGNORE_EOL = 1 };   /* flags */
 CUI_API int cui_diff_compute(const char *old_text, size_t old_len, const char *new_text, size_t new_len, unsigned flags,
                              cui_diff_hunk *hunks, int cap, cui_diff_stats *stats);
+/* A prepared diff's counts, and its change blocks as cui_diff_compute writes them (copies up to cap, returns how many there are). */
+CUI_API void cui_diff_prepared_stats(const cui_diff_prepared *p, cui_diff_stats *stats);
+CUI_API int cui_diff_prepared_hunks(const cui_diff_prepared *p, cui_diff_hunk *hunks, int cap);
 /* Word marks between two versions of one line, as byte ranges (a length of -1
  * reads up to the terminator). Returns false when the lines have too little in
  * common for marks to help, or a line is very long (over 2000 bytes). */
