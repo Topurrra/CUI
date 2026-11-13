@@ -816,6 +816,39 @@ static void test_nested_textarea_wheel(void) {
     cui_destroy(ui);
 }
 
+/** A page whose canvas has zoom controls floating over it. */
+static void build_canvas_rail_page(cui_ctx *ui, void *user) {
+    cui_id *anchor = user;
+    static cui_node_view view;
+    cui_scroll(ui, .id = "page", .height = CUI_PX(180), .width = CUI_PX(320)) {
+        *anchor = cui_box_begin(ui, &(cui_box){ .id = "art", .width = CUI_PX(300), .height = CUI_PX(240) });
+        cui_box_end(ui);
+        cui_canvas_controls(ui, "zoom", &view);
+        cui_box(ui, .height = CUI_PX(400)) {}
+    }
+}
+
+/** The wheel over floating controls scrolls the page both ways: overlay nodes are not wheel targets. */
+static void test_canvas_rail_wheel(void) {
+    printf("canvas controls: the wheel over the rail scrolls the page\n");
+    cui_ctx *ui = new_ctx();
+    cui_id anchor = 0;
+    run(ui, build_canvas_rail_page, &anchor, 3);
+    cui_scroll_to(ui, "page", 40);
+    run(ui, build_canvas_rail_page, &anchor, 2);
+    cui_rect a = rect_of(ui, anchor);
+    cui_input_mouse_move(ui, a.x + a.w - 20, a.y + a.h / 2);
+    run(ui, build_canvas_rail_page, &anchor, 1);
+    cui_input_scroll(ui, 0, 1);
+    run(ui, build_canvas_rail_page, &anchor, 2);
+    CHECK(rect_of(ui, anchor).y > a.y + 1);
+    a = rect_of(ui, anchor);
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_canvas_rail_page, &anchor, 2);
+    CHECK(rect_of(ui, anchor).y < a.y - 1);
+    cui_destroy(ui);
+}
+
 /** A mixed wheel event scrolls the text vertically and the page horizontally. */
 static void test_nested_textarea_mixed_wheel(void) {
     printf("text area: mixed-axis wheel and Shift routing\n");
@@ -8069,6 +8102,7 @@ int main(void) {
     test_textarea_and_clear();
     test_nested_textarea_wheel();
     test_nested_textarea_mixed_wheel();
+    test_canvas_rail_wheel();
     test_number_edit_commit();
     test_searchable_select_reopen();
     test_more_actions();

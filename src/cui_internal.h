@@ -237,6 +237,7 @@ enum {
     CUI_NF_KEEP_W      = 1 << 17,  /* never shrinks below its preferred width (its siblings give way) */
     CUI_NF_ADAPTIVE    = 1 << 18,  /* rearranges itself when narrow: min_w is its minimum, not its content */
     CUI_NF_OVERLAY     = 1 << 19   /* absolute: painted and hit tested after the flow children, over them */
+    /* bits 20 and up are the hit-only CUI_HIT_* flags: a hit records its node's flags in the same word */
 };
 
 struct cui_node;
@@ -389,8 +390,10 @@ typedef struct cui_hit {
     int order;
 } cui_hit;
 
-/* Hit-only flags for controls whose wheel range is separate from layout scroll. */
-enum { CUI_HIT_WHEEL_UP = 1 << 19, CUI_HIT_WHEEL_DOWN = 1 << 20 };
+/* Hit-only flags for controls whose wheel range is separate from layout scroll.
+ * They share cui_hit.flags with the CUI_NF_* node flags, so they sit above all of them. */
+enum { CUI_HIT_WHEEL_UP = 1 << 20, CUI_HIT_WHEEL_DOWN = 1 << 21 };
+typedef char cui__hit_flags_above_node_flags[(unsigned)CUI_HIT_WHEEL_UP > (unsigned)CUI_NF_OVERLAY ? 1 : -1];
 
 /* A vertical delta reserved for one hit while the normal route handles X. */
 enum { CUI__VERTICAL_WHEEL_STATE = 0x57484559u };
