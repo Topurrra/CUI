@@ -220,6 +220,12 @@ SCENE(feedback) {
         cui_row(ui, .gap = 14, .wrap = true, .align = CUI_ALIGN_CENTER) { cui_spinner(ui, 18); cui_spinner(ui, 24); cui_skeleton(ui, CUI_PX(180), 12); }
     }
 }
+SCENE(dither_progress) {
+    cui_column(ui, .gap = 22, UPTO(560)) {
+        cui_progress(ui, 0.62f, .label = "Exporting clip.mp4", .show_value = true, .dither = true);
+        cui_progress(ui, 0, .label = "Syncing library", .indeterminate = true, .dither = true);
+    }
+}
 SCENE(badges) {
     cui_column(ui, .gap = 16) {
         cui_row(ui, .gap = 8, .wrap = true) {
@@ -4413,6 +4419,7 @@ int main(int argc, char **argv) {
         { "menu", scene_menu, 300, 290, true }, { "dialog", scene_dialog, 620, 340, true },
         { "toast", scene_toast, 420, 220, true }, { "tooltip", scene_tooltip, 260, 150, false },
         { "alerts", scene_alerts, 620, 210, true }, { "feedback", scene_feedback, 520, 220, false },
+        { "dither-progress", scene_dither_progress, 620, 150, true, false, CUI_ACCENT_NEUTRAL },
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },

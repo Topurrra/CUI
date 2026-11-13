@@ -681,14 +681,60 @@ void cui_spinner(cui_ctx *ui, float size) {
     cui__spinner_node(ui, size > 0 ? size : 20, CUI_C(ui, TEXT_SECONDARY));
 }
 
-typedef struct { float value; bool indeterminate; cui_color track, fill; double time; } cui__progress_paint;
+typedef struct { float value; bool indeterminate, dither; cui_color track, fill; double time; float drift; } cui__progress_paint;
+
+#define CUI__DITHER_FALL 60.0f       /* points past the edge of a dither progress fill where the dots thin out */
+#define CUI__DITHER_DRIFT 10.0f      /* cells a second the pattern moves forward */
+
+/* The dither progress bar: solid up to the value, then dots that thin out over CUI__DITHER_FALL,
+ * drifting forward; indeterminate, a gaussian band of dots sweeping the track. */
+static void cui__paint_progress_dither(cui_ctx *ui, cui_node *n, const cui__progress_paint *p) {
+    cui_rect r = n->rect;
+    float rad = r.h * 0.5f;
+    cui__dither d;
+    memset(&d, 0, sizeof d);
+    d.color = p->fill;
+    d.origin = (cui_vec2){ r.x, r.y };
+    d.shape = r;
+    d.radius = CUI_CORNERS(rad);
+    if (p->indeterminate) {
+        /* the band's center runs from a quarter width before the track to a quarter after it */
+        float c = ui->theme.motion > 0 ? r.x + r.w * ((float)fmod(p->time * 0.42, 1.5) - 0.25f) : r.x + r.w * 0.5f;
+        if (n->rtl) c = r.x + r.w - (c - r.x);
+        float sigma = CUI_MIN(110.0f, r.w * 0.22f), reach = 1.8f * sigma;
+        enum { SEGS = 24 };
+        float prev = 0;
+        for (int i = 0; i <= SEGS; i++) {
+            float x = c - reach + 2 * reach * (float)i / SEGS, u = (x - c) / sigma;
+            float k = CUI_MIN(1.0f, 1.08f * expf(-1.6f * u * u));
+            float x0 = x - 2 * reach / SEGS;   /* the shape cut keeps the dots on the track */
+            if (i > 0 && x > r.x && x0 < r.x + r.w) cui__draw_dither_rect(ui, &d, (cui_rect){ x0, r.y, x - x0, r.h }, prev, k, false);
+            prev = k;
+        }
+        if (ui->theme.motion > 0) ui->animating = true;
+        return;
+    }
+    if (p->value <= 0) return;
+    /* the solid part ends on a whole dot, so the dissolve starts on the grid */
+    float cell = 2, e = roundf(r.w * cui__clampf(p->value, 0, 1) / cell) * cell;
+    float peak = cui__clampf(p->value * 20, 0, 1);   /* the dots grow in over the first 5% instead of showing at 0 */
+    d.phase.x = n->rtl ? p->drift : -p->drift;
+    if (!n->rtl) {
+        cui__draw_dither_rect(ui, &d, (cui_rect){ r.x, r.y, e, r.h }, 1, 1, false);
+        cui__draw_dither_rect(ui, &d, (cui_rect){ r.x + e, r.y, CUI__DITHER_FALL, r.h }, peak, 0, false);
+    } else {
+        cui__draw_dither_rect(ui, &d, (cui_rect){ r.x + r.w - e, r.y, e, r.h }, 1, 1, false);
+        cui__draw_dither_rect(ui, &d, (cui_rect){ r.x + r.w - e - CUI__DITHER_FALL, r.y, CUI__DITHER_FALL, r.h }, 0, peak, false);
+    }
+}
 
 static void cui__paint_progress(cui_ctx *ui, cui_node *n, void *data) {
     cui__progress_paint *p = data;
     cui_rect r = n->rect;
     float rad = r.h * 0.5f;
     cui_draw_rect(ui, r, CUI_CORNERS(rad), p->track);
-    if (p->indeterminate) {
+    if (p->dither) cui__paint_progress_dither(ui, n, p);
+    else if (p->indeterminate) {
         float t = (float)fmod(p->time * 0.75, 1.0);
         float w = r.w * 0.35f;
         float x = r.x - w + (r.w + w) * (t * t * (3 - 2 * t));
@@ -731,7 +777,7 @@ void cui_progress_ex(cui_ctx *ui, float value, const cui_progress_opts *o) {
         }
         cui__close(ui);
     }
-    float h = o->height > 0 ? o->height : 6;
+    float h = o->height > 0 ? o->height : o->dither ? 8 : 6;
     int i = cui__leaf(ui, 0, col ? CUI_FILL : (o->width.kind ? o->width : CUI_FILL), CUI_PX(h));
     /* full width bars stretch; a bar with its own width centers in a row like its siblings */
     ui->nodes[i].self_align = (!col && o->width.kind) ? CUI__ALIGN_NOSTRETCH : CUI_ALIGN_STRETCH;
@@ -741,6 +787,15 @@ void cui_progress_ex(cui_ctx *ui, float value, const cui_progress_opts *o) {
     p->time = ui->time;
     p->track = CUI_C(ui, CONTROL_TRACK);
     p->fill = o->tone ? cui__tone_color(ui, o->tone) : CUI_C(ui, CONTROL_ON);
+    p->dither = o->dither;
+    if (o->dither) {
+        if (!o->tone) p->fill = cui__emphasis(ui);
+        /* the drift steps a whole cell at a time, so it needs a frame only on each step */
+        bool drifting = !o->indeterminate && ui->theme.motion > 0 && shown > 0 && shown < 1;
+        double steps = floor(ui->time * CUI__DITHER_DRIFT);
+        p->drift = drifting ? (float)fmod(steps, 8.0) : 0;   /* the pattern repeats every 8 cells */
+        if (drifting) cui__wakeup_after(ui, (float)((steps + 1) / CUI__DITHER_DRIFT - ui->time));
+    }
     ui->nodes[i].paint = cui__paint_progress;
     ui->nodes[i].paint_data = p;
     if (col) cui__close(ui);

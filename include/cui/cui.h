@@ -844,7 +844,17 @@ CUI_API bool cui_alert_ex(cui_ctx *ui, const char *title, const cui_alert_opts *
 /* Feedback and display                                                     */
 /* ------------------------------------------------------------------------ */
 
-typedef struct cui_progress_opts { int _; bool indeterminate; cui_tone tone; float height; const char *label; bool show_value; cui_size width; } cui_progress_opts;
+typedef struct cui_progress_opts {
+    int _;
+    bool indeterminate;        /* no value: a segment (or with `dither`, a soft band of dots) travels the track */
+    cui_tone tone;
+    float height;              /* points, default 6 (8 with `dither`) */
+    const char *label;         /* a row above the bar with this name */
+    bool show_value;           /* a whole percentage at the end of that row */
+    cui_size width;
+    bool dither;               /* drawn in dots: the fill dissolves over 60 points past its edge, and the
+                                * pattern drifts forward while the bar is not full; reduced motion holds it still */
+} cui_progress_opts;
 CUI_API void cui_progress_ex(cui_ctx *ui, float value, const cui_progress_opts *opts);
 CUI_API void cui_spinner(cui_ctx *ui, float size);
 CUI_API void cui_skeleton(cui_ctx *ui, cui_size width, float height);

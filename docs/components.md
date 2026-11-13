@@ -526,6 +526,15 @@ cui_gauge(ui, "CPU", 0.42f, 130);
 
 None of these returns anything or takes the pointer. `cui_progress` takes a fraction from 0 to 1, clamped, and glides to a new value. With `indeterminate` the value is ignored and a short segment travels along the track. Options: `label` and `show_value`, which add a row above the bar with the name and a whole percentage, `tone`, `height` in points (6) and `width`. `cui_meter` takes an amount, a limit and a unit as text, prints them as "18.4 / 20 GB", and turns amber above 75% and red above 90% of the limit. `cui_spinner` takes its size in points, and 0 means 20. `cui_skeleton` takes a width and a height in points (14 when 0). `cui_gauge` takes a label, a fraction from 0 to 1 and a size in points (140 when 0).
 
+With `dither` the bar is drawn in dots on an 8×8 ordered dither: solid up to the value, then thinning out over the 60 points past its edge, the pattern drifting slowly forward so the edge looks alive. Indeterminate, a soft band of dots sweeps the track instead of a segment. The dots take the emphasis color (the accent, or the text color under the neutral accent) unless a `tone` is set, and the default height is 8 points. The drift moves a whole dot at a time and asks for a frame only then, ten times a second; it stops when the bar is empty or full, and reduced motion holds it still and parks the indeterminate band in the middle.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dither-progress-dark.png"><img src="images/components/dither-progress.png" alt="Dither progress"></picture>
+
+```c
+cui_progress(ui, 0.62f, .label = "Exporting clip.mp4", .show_value = true, .dither = true);
+cui_progress(ui, 0, .label = "Syncing library", .indeterminate = true, .dither = true);
+```
+
 ## Badge, avatar and keycap
 
 Small labels: a badge for a status or a count, an avatar for a person, and a keycap for a keyboard key.

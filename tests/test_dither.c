@@ -141,9 +141,84 @@ static void test_primitive(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+/* dither progress                                                          */
+
+typedef struct { float value; bool indeterminate; } prog_case;
+static void build_prog(cui_ctx *ui, void *u) {
+    prog_case *c = u;
+    cui_progress(ui, c->value, .dither = true, .indeterminate = c->indeterminate, .width = CUI_PX(400));
+}
+/* bright pixels along the middle of the bar, in [x0, x1) of its width */
+static int bright(image im, cui_rect bar, float f0, float f1) {
+    int n = 0;
+    for (float x = bar.x + bar.w * f0; x < bar.x + bar.w * f1; x += 1) n += at(im, x, bar.y + bar.h * 0.5f)[0] > 200;
+    return n;
+}
+
+static void test_progress(void) {
+    printf("dither progress\n");
+    cui_ctx *ui = new_ctx(480, 80, true);
+    prog_case c = { 0, false };
+    run(ui, build_prog, &c, 3);
+    image im = render(ui);
+    cui_rect bar = { 20, 20, 400, 8 };
+    CHECK_EQ(bright(im, bar, 0, 1), 0);   /* 0% shows no dots */
+    free(im.px);
+    c.value = 1;
+    run(ui, build_prog, &c, 3);
+    im = render(ui);
+    CHECK(bright(im, bar, 0.02f, 0.98f) >= 384);   /* full */
+    free(im.px);
+    c.value = 0.5f;
+    run(ui, build_prog, &c, 3);
+    im = render(ui);
+    CHECK(bright(im, bar, 0.02f, 0.48f) >= 182);   /* solid up to the value */
+    CHECK(bright(im, bar, 0.5f, 0.65f) > 0);       /* dots past it */
+    CHECK_EQ(bright(im, bar, 0.67f, 1), 0);        /* nothing 60 points past the edge */
+    image still = im;
+    /* reduced motion: the pattern holds still */
+    run(ui, build_prog, &c, 30);
+    im = render(ui);
+    CHECK(same(im, still));
+    free(im.px);
+    /* right to left: the bar sits at the right of the column, its fill starting at the right */
+    g_rtl = true;
+    run(ui, build_prog, &c, 3);
+    im = render(ui);
+    cui_rect rbar = { 480 - 20 - 400, 20, 400, 8 };
+    CHECK(bright(im, rbar, 0.52f, 0.98f) >= 182);
+    CHECK_EQ(bright(im, rbar, 0, 0.33f), 0);
+    free(im.px);
+    g_rtl = false;
+    free(still.px);
+    cui_destroy(ui);
+
+    /* with motion the dots drift forward a cell every tenth of a second */
+    ui = new_ctx(480, 80, false);
+    run(ui, build_prog, &c, 90);
+    im = render(ui);
+    run(ui, build_prog, &c, 6);
+    image later = render(ui);
+    CHECK(!same(im, later));
+    CHECK(bright(later, bar, 0.02f, 0.48f) >= 182);   /* the solid part does not move */
+    free(im.px); free(later.px);
+    /* indeterminate: a band of dots, somewhere on the track, that moves */
+    prog_case ind = { 0, true };
+    run(ui, build_prog, &ind, 30);
+    im = render(ui);
+    CHECK(bright(im, bar, 0, 1) > 10);
+    run(ui, build_prog, &ind, 10);
+    later = render(ui);
+    CHECK(!same(im, later));
+    free(im.px); free(later.px);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
+    test_progress();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

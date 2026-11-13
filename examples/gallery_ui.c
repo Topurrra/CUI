@@ -458,6 +458,8 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_heading(ui, "Progress", 4);
             cui_progress(ui, 0.68f, .label = "Uploading assets", .show_value = true);
             cui_progress(ui, 0.0f, .label = "Indexing", .indeterminate = true);
+            cui_progress(ui, 0.42f, .label = "Exporting clip.mp4", .show_value = true, .dither = true);
+            cui_progress(ui, 0.0f, .label = "Syncing library", .indeterminate = true, .dither = true);
             cui_meter(ui, "Storage", 18.4f, 20, "GB");
             cui_row(ui, .gap = 16, .wrap = true) {
                 cui_spinner(ui, 16);
