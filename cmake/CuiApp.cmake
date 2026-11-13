@@ -1,5 +1,6 @@
 # cui_app_target(<target>): what a window app built on CUI wants.
-#   - Windows: no console window, and int main(void) stays the entry point
+#   - Windows: no console window, and int main(void) stays the entry point; MinGW links
+#     its own runtime pieces in, so the exe needs no DLLs from the compiler
 #   - release builds keep only the library code the app calls, which is what makes a
 #     small app about 250 KB instead of about 1 MB (see docs/integration.md)
 function(cui_app_target name)
@@ -9,6 +10,12 @@ function(cui_app_target name)
             target_link_options(${name} PRIVATE /ENTRY:mainCRTStartup)
         else()
             target_link_options(${name} PRIVATE -mwindows)
+        endif()
+        if(MINGW)
+            # libgcc and winpthread go into the exe: thread-local variables (stb_image's, an
+            # app's) otherwise need libwinpthread-1.dll, which Windows looks for along PATH
+            # when the app starts, and which other machines do not have
+            target_link_options(${name} PRIVATE -static)
         endif()
     endif()
     if(APPLE)
