@@ -471,6 +471,55 @@ void cui__draw_triangles(cui_ctx *ui, const cui_cvert *src, int nv, const uint32
     for (int i = 0; i < ni; i++) ix[i] = base + idx[i];
 }
 
+/* ---- ordered dither ---- */
+
+void cui__draw_dither_mesh(cui_ctx *ui, const cui__dither *d, const cui__dvert *src, int nv, const uint32_t *idx, int ni) {
+    cui_color c = cui_color_of(ui, d->color);
+    if (nv <= 0 || ni <= 0 || c.a == 0) return;
+    cui_xform x = cui__xf(ui);
+    float s = ui->scale * x.scale;
+    /* whole pixel cells on a whole pixel origin: a pixel center is never on a cell edge, so
+     * both renderers pick the same cell for every pixel */
+    float cell = CUI_MAX(1.0f, roundf((d->cell > 0 ? d->cell : 2.0f) * s));
+    float gx = roundf(d->origin.x * s + x.ox), gy = roundf(d->origin.y * s + x.oy);
+    float phx = roundf(d->phase.x), phy = roundf(d->phase.y);
+    float cx = 0, cy = 0, hw = 1e6f, hh = 1e6f;
+    cui_corners rr = { 0, 0, 0, 0 };
+    if (d->shape.w > 0 && d->shape.h > 0) {
+        hw = d->shape.w * 0.5f * s; hh = d->shape.h * 0.5f * s;
+        cx = (d->shape.x + d->shape.w * 0.5f) * s + x.ox; cy = (d->shape.y + d->shape.h * 0.5f) * s + x.oy;
+        float m = CUI_MIN(hw, hh);
+        rr.tl = CUI_MIN(d->radius.tl * s, m); rr.tr = CUI_MIN(d->radius.tr * s, m);
+        rr.br = CUI_MIN(d->radius.br * s, m); rr.bl = CUI_MIN(d->radius.bl * s, m);
+    }
+    c = cui__xa(c, x.alpha);
+    float fl = cui__clampf(d->floor, 0, 1);
+    cui__set_texture(ui, 0);
+    uint32_t base;
+    cui_vertex *v = cui__reserve(ui, nv, ni, &base);
+    for (int i = 0; i < nv; i++) {
+        float px = src[i].x * s + x.ox, py = src[i].y * s + x.oy;
+        v[i].x = px; v[i].y = py;
+        v[i].u = (px - gx) / cell + phx; v[i].v = (py - gy) / cell + phy;
+        v[i].lx = px - cx; v[i].ly = py - cy; v[i].hw = hw; v[i].hh = hh;
+        v[i].r_tl = rr.tl; v[i].r_tr = rr.tr; v[i].r_br = rr.br; v[i].r_bl = rr.bl;
+        v[i].border = fl;
+        v[i].mode = CUI_SHADE_DITHER;
+        v[i].color = cui__rgba(255, 255, 255, (int)(cui__clampf(src[i].density, 0, 1) * 255.0f + 0.5f));
+        v[i].border_color = c;
+    }
+    uint32_t *ix = cui__idx(ui, ni);
+    for (int i = 0; i < ni; i++) ix[i] = base + idx[i];
+}
+
+void cui__draw_dither_rect(cui_ctx *ui, const cui__dither *d, cui_rect r, float d0, float d1, bool vertical) {
+    if (r.w <= 0 || r.h <= 0 || (d0 <= 0 && d1 <= 0)) return;
+    cui__dvert v[4] = { { r.x, r.y, d0 }, { r.x + r.w, r.y, vertical ? d0 : d1 },
+                        { r.x + r.w, r.y + r.h, d1 }, { r.x, r.y + r.h, vertical ? d1 : d0 } };
+    static const uint32_t idx[6] = { 0, 1, 2, 0, 2, 3 };
+    cui__draw_dither_mesh(ui, d, v, 4, idx, 6);
+}
+
 void cui__draw_text_at(cui_ctx *ui, cui_font font, float size, float x, float y, cui__text_anchor anchor, cui_color color, const char *s, bool tab) {
     float w = cui__text_width(ui, font, size, s, -1, tab);
     float fh = cui__font_line_height(ui, font, size);

@@ -4820,7 +4820,8 @@ CUI_API float cui_animate_spring(cui_ctx *ui, cui_id id, float target, float dur
 /* ------------------------------------------------------------------------ */
 
 /* Vertex shading modes. See docs/rendering.md for the reference shader. */
-enum { CUI_SHADE_TEXT = 0, CUI_SHADE_RRECT = 1, CUI_SHADE_SHADOW = 2, CUI_SHADE_IMAGE = 3, CUI_SHADE_SOLID = 4 };
+enum { CUI_SHADE_TEXT = 0, CUI_SHADE_RRECT = 1, CUI_SHADE_SHADOW = 2, CUI_SHADE_IMAGE = 3, CUI_SHADE_SOLID = 4,
+       CUI_SHADE_DITHER = 5   /* ordered dither: dots of border_color where border <= threshold(u, v) < color.a */ };
 
 typedef struct cui_vertex {
     float x, y;            /* position in pixels */

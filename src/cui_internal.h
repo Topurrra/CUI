@@ -11,7 +11,7 @@
  *   hashing                          cui_core.c
  *   animation                        cui_core.c (springs, tweens) and the motion tokens
  *   fonts and text                   cui_text.c, cui_draw.c
- *   draw list                        cui_draw.c
+ *   draw list                        cui_draw.c (and the ordered dither primitive)
  *   layout tree                      cui_layout.c (cui_node, building and laying out the tree)
  *   per id state                     cui_core.c (cui_state, garbage collection)
  *   interaction                      cui_core.c (hit testing, focus, cui__interact)
@@ -214,6 +214,24 @@ void cui__draw_elevation(cui_ctx *ui, cui_rect r, cui_corners radius, cui_elevat
 /* Raw triangles with per vertex colors (points). */
 typedef struct cui_cvert { float x, y; cui_color c; } cui_cvert;
 void cui__draw_triangles(cui_ctx *ui, const cui_cvert *v, int nv, const uint32_t *idx, int ni);
+/* Ordered dither (CUI_SHADE_DITHER): dots of one color on a grid of square cells, a cell on
+ * where floor <= its 8x8 Bayer threshold < the density there. Density is given per vertex and
+ * runs linearly between them, so a falling edge, a band or a fade is a few quads, not a dot
+ * per rectangle. The renderers do the per pixel test, so a dot is never blended: it is the
+ * color or nothing, and lower densities are always a subset of higher ones. */
+typedef struct cui__dither {
+    cui_color color;           /* the dots; theme tokens work */
+    float cell;                /* side of a dot in points, 0 = 2 (rounded to whole pixels) */
+    cui_vec2 origin;           /* points: the grid is anchored here, so dots move with their shape */
+    cui_vec2 phase;            /* whole cells: shifts the pattern (a drift or a moving noise) */
+    float floor;               /* cells with a threshold below this stay off: a dissolve from 0 to 1 */
+    cui_rect shape;            /* the dots are cut to this rounded rectangle; zero size: no cut */
+    cui_corners radius;        /* corners of `shape` */
+} cui__dither;
+typedef struct cui__dvert { float x, y, density; } cui__dvert;   /* points; density 0..1 */
+void cui__draw_dither_mesh(cui_ctx *ui, const cui__dither *d, const cui__dvert *v, int nv, const uint32_t *idx, int ni);
+/* a rectangle whose density runs from d0 to d1, left to right, or top to bottom when vertical */
+void cui__draw_dither_rect(cui_ctx *ui, const cui__dither *d, cui_rect r, float d0, float d1, bool vertical);
 
 /* ---- layout tree ---- */
 enum {
