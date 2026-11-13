@@ -686,6 +686,7 @@ int cui__utc_offset(int64_t t);                           /* minutes east of UTC
 void cui__widgets_begin_frame(cui_ctx *ui);
 void cui__widgets_end_frame(cui_ctx *ui);   /* toasts, tooltips */
 void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text);   /* hover by rect, for things that are not interactive */
+void cui__spinner_node(cui_ctx *ui, float size, cui_color c);   /* the arc spinner (cui_widgets.c), also in buttons */
 void cui__overlay_end_frame(cui_ctx *ui);
 float cui__control_height(cui_ctx *ui, cui_control_size s);
 cui_popup *cui__popup_get(cui_ctx *ui, cui_id id, bool create);

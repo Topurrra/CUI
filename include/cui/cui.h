@@ -856,7 +856,44 @@ typedef struct cui_progress_opts {
                                 * pattern drifts forward while the bar is not full; reduced motion holds it still */
 } cui_progress_opts;
 CUI_API void cui_progress_ex(cui_ctx *ui, float value, const cui_progress_opts *opts);
-CUI_API void cui_spinner(cui_ctx *ui, float size);
+/* Spinner: says that something is happening, for as long as you call it. `size` is its
+ * height in points (20 when 0). The default style is a ring with a sweeping arc; the others
+ * are drawn in dots on an 8x8 ordered dither, one point a dot below 32 points tall and two
+ * from there, and each fits a kind of wait:
+ *
+ *     cui_spinner(ui, 20);                                        the ring
+ *     cui_spinner(ui, 14, .style = CUI_SPINNER_COMET);            inline, in a button or a chip
+ *     cui_spinner(ui, 56, .style = CUI_SPINNER_RADAR);            searching a network
+ *     cui_spinner(ui, 32, .style = CUI_SPINNER_UPLOAD, .color = CUI_COLOR_ACCENT);
+ *
+ * A dither spinner asks for a frame only when its dots move (12 to 30 times a second by
+ * style) and only while it is on screen; reduced motion holds each style on a still frame. */
+typedef enum cui_spinner_style {
+    CUI_SPINNER_ARC = 0,       /* a ring with an arc sweeping round it */
+    CUI_SPINNER_COMET,         /* a ring of dots with a head and a tail that thins out dot by dot */
+    CUI_SPINNER_DOT_MATRIX,    /* a 5x5 grid of dots with a wave running through it, for dense layouts */
+    CUI_SPINNER_FILL_DRAIN,    /* a tile that fills from the bottom, then dissolves: a step of a job */
+    CUI_SPINNER_RADAR,         /* a sweep round a dial; points light up as it passes: searching, scanning */
+    CUI_SPINNER_RIPPLE,        /* rings spreading from a dot: connecting, pairing, waiting for the other side */
+    CUI_SPINNER_UPLOAD,        /* chevrons streaming up: sending */
+    CUI_SPINNER_DOWNLOAD,      /* chevrons streaming down: receiving */
+    CUI_SPINNER_TRANSFER,      /* both, side by side: syncing both ways */
+    CUI_SPINNER_ORBIT,         /* two dots circling, their trails dissolving: syncing */
+    CUI_SPINNER_BOUNCE,        /* three bouncing dots with short trails: typing, a chat reply */
+    CUI_SPINNER_SCAN,          /* a scan line reading a page: indexing, importing */
+    CUI_SPINNER_PULSE,         /* a soft disc breathing in density: recording, live */
+    CUI_SPINNER_SPIRAL,        /* three arms turning: a long, calm background wait */
+    CUI_SPINNER_PLASMA         /* slow moving noise in a tile: generating an image or audio */
+} cui_spinner_style;
+typedef struct cui_spinner_opts {
+    int _;
+    cui_spinner_style style;
+    cui_color color;           /* default the secondary text color for the ring, the text color for dots */
+    cui_color track;           /* the dots' base (a comet's ring, a dot matrix's dots), default `color` at 12% */
+} cui_spinner_opts;
+/* most styles are square; upload and download are 25/32 as wide as tall, transfer 50/32, bounce 40/28, scan 28/32 */
+CUI_API void cui_spinner_ex(cui_ctx *ui, float size, const cui_spinner_opts *opts);
+CUI_API void (cui_spinner)(cui_ctx *ui, float size);   /* the ring; the macro below calls cui_spinner_ex */
 CUI_API void cui_skeleton(cui_ctx *ui, cui_size width, float height);
 
 typedef struct cui_badge_opts {
@@ -4972,6 +5009,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_toast(ui, title, ...)           cui_toast_ex((ui), (title), CUI__OPTS(cui_toast_opts, __VA_ARGS__))
 #define cui_alert(ui, title, ...)           cui_alert_ex((ui), (title), CUI__OPTS(cui_alert_opts, __VA_ARGS__))
 #define cui_progress(ui, value, ...)        cui_progress_ex((ui), (value), CUI__OPTS(cui_progress_opts, __VA_ARGS__))
+#define cui_spinner(ui, size, ...)          cui_spinner_ex((ui), (size), CUI__OPTS(cui_spinner_opts, __VA_ARGS__))
 #define cui_badge(ui, text, ...)            cui_badge_ex((ui), (text), CUI__OPTS(cui_badge_opts, __VA_ARGS__))
 #define cui_avatar(ui, name, ...)           cui_avatar_ex((ui), (name), CUI__OPTS(cui_avatar_opts, __VA_ARGS__))
 #define cui_empty_state(ui, title, ...)     cui_empty_state_ex((ui), (title), CUI__OPTS(cui_empty_opts, __VA_ARGS__))

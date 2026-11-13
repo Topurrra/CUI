@@ -294,7 +294,7 @@ static void cui__paint_spinner(cui_ctx *ui, cui_node *n, void *data) {
     cui__draw_spinner(ui, ctr, r - 1.0f, CUI_MAX(1.5f, r * 0.22f), c);
 }
 
-static void cui__spinner_node(cui_ctx *ui, float size, cui_color c) {
+void cui__spinner_node(cui_ctx *ui, float size, cui_color c) {
     int i = cui__leaf(ui, 0, CUI_PX(size), CUI_PX(size));
     cui_color *d = cui__frame_alloc(ui, sizeof(cui_color));
     *d = c;
@@ -677,7 +677,7 @@ void cui_card_end(cui_ctx *ui) { cui__close(ui); }
 /* Feedback                                                                 */
 /* ------------------------------------------------------------------------ */
 
-void cui_spinner(cui_ctx *ui, float size) {
+void (cui_spinner)(cui_ctx *ui, float size) {
     cui__spinner_node(ui, size > 0 ? size : 20, CUI_C(ui, TEXT_SECONDARY));
 }
 

@@ -226,6 +226,52 @@ SCENE(dither_progress) {
         cui_progress(ui, 0, .label = "Syncing library", .indeterminate = true, .dither = true);
     }
 }
+/* every dither spinner style in a tile with what it is for, then the inline sizes */
+typedef struct { const char *name, *use; cui_spinner_style style; float size; } ds_tile;
+static void ds_tiles(cui_ctx *ui, const ds_tile *t, int n) {
+    cui_box(ui, .dir = CUI_GRID, .columns = 3, .min_column_width = 200, .gap = 12, UPTO(740)) {
+        for (int k = 0; k < n; k++)
+            cui_column(ui, .width = CUI_FILL, .pad = 14, .gap = 6, .align = CUI_ALIGN_CENTER, .radius = 14, .border = 1, .bg = CUI_COLOR_BACKGROUND) {
+                cui_column(ui, .height = CUI_PX(72), .justify = CUI_JUSTIFY_CENTER) { cui_spinner(ui, t[k].size, .style = t[k].style); }
+                cui_text(ui, t[k].name, .font = CUI_FONT_MEDIUM, .size = 13);
+                cui_text(ui, t[k].use, .size = 12, .color = CUI_COLOR_TEXT_MUTED, .align = CUI_TEXT_CENTER, .width = CUI_FILL);
+            }
+    }
+}
+static void ds_inline(cui_ctx *ui) {
+    cui_row(ui, .gap = 14, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER, .wrap = true, UPTO(740)) {
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 14, .pad_y = 8, .radius = 10, .bg = CUI_COLOR_FOREGROUND) {
+            cui_spinner(ui, 14, .style = CUI_SPINNER_COMET, .color = CUI_COLOR_BACKGROUND);
+            cui_text(ui, "Saving\xe2\x80\xa6", .font = CUI_FONT_MEDIUM, .size = 13, .color = CUI_COLOR_BACKGROUND);
+        }
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 11, .pad_y = 6, .radius = 999, .border = 1, .bg = CUI_COLOR_SURFACE) {
+            cui_spinner(ui, 14, .style = CUI_SPINNER_ORBIT);
+            cui_text(ui, "Syncing 24 files", .size = 12.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+        cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 11, .pad_y = 6, .radius = 999, .border = 1, .bg = CUI_COLOR_SURFACE) {
+            cui_spinner(ui, 14, .style = CUI_SPINNER_RIPPLE);
+            cui_text(ui, "Connecting", .size = 12.5f, .color = CUI_COLOR_TEXT_SECONDARY);
+        }
+    }
+}
+SCENE(dither_spinners) {
+    static const ds_tile t[] = {
+        { "Comet ring", "A head with a tail that thins out dot by dot.", CUI_SPINNER_COMET, 56 },
+        { "Dot matrix", "Busy states in dense layouts; a wave runs through a 5\xc3\x97" "5 grid.", CUI_SPINNER_DOT_MATRIX, 56 },
+        { "Fill and drain", "Steps in a job: fills from the bottom, then dissolves away.", CUI_SPINNER_FILL_DRAIN, 52 },
+        { "Radar sweep", "Searching or scanning; found points light up as it passes.", CUI_SPINNER_RADAR, 64 },
+        { "Ripple", "Connecting, pairing or waiting for the other side.", CUI_SPINNER_RIPPLE, 64 },
+        { "Transfer", "Chevrons stream up for sending, down for receiving.", CUI_SPINNER_TRANSFER, 64 },
+        { "Orbit", "Syncing; two dots circle and leave trails that dissolve.", CUI_SPINNER_ORBIT, 60 },
+        { "Bouncing dots", "Typing and chat waits; each dot leaves a short trail.", CUI_SPINNER_BOUNCE, 56 },
+        { "Document scan", "Indexing or importing: a scan line reads the page.", CUI_SPINNER_SCAN, 64 },
+        { "Pulse", "Recording or live: a soft disc breathes in density.", CUI_SPINNER_PULSE, 56 },
+        { "Spiral", "A calm indefinite wait for long background work.", CUI_SPINNER_SPIRAL, 64 },
+        { "Plasma", "Generating images or audio: slow moving noise in a tile.", CUI_SPINNER_PLASMA, 56 },
+    };
+    ds_tiles(ui, t, (int)(sizeof t / sizeof t[0]));
+    ds_inline(ui);
+}
 static cui_id pm_bar;   /* the first meter's bar, for the pointer */
 static void pm_meter(cui_ctx *ui, const char *id, bool gray) {
     static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };
@@ -4477,6 +4523,7 @@ int main(int argc, char **argv) {
         { "toast", scene_toast, 420, 220, true }, { "tooltip", scene_tooltip, 260, 150, false },
         { "alerts", scene_alerts, 620, 210, true }, { "feedback", scene_feedback, 520, 220, false },
         { "dither-progress", scene_dither_progress, 620, 150, true, false, CUI_ACCENT_NEUTRAL },
+        { "dither-spinners", scene_dither_spinners, 800, 860, true, false, CUI_ACCENT_NEUTRAL },
         { "pattern-meter", scene_pattern_meter_hover, 660, 280, true },
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },

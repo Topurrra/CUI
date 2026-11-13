@@ -524,7 +524,7 @@ cui_skeleton(ui, CUI_PCT(60), 12);             /* shimmering placeholder */
 cui_gauge(ui, "CPU", 0.42f, 130);
 ```
 
-None of these returns anything or takes the pointer. `cui_progress` takes a fraction from 0 to 1, clamped, and glides to a new value. With `indeterminate` the value is ignored and a short segment travels along the track. Options: `label` and `show_value`, which add a row above the bar with the name and a whole percentage, `tone`, `height` in points (6) and `width`. `cui_meter` takes an amount, a limit and a unit as text, prints them as "18.4 / 20 GB", and turns amber above 75% and red above 90% of the limit. `cui_spinner` takes its size in points, and 0 means 20. `cui_skeleton` takes a width and a height in points (14 when 0). `cui_gauge` takes a label, a fraction from 0 to 1 and a size in points (140 when 0).
+None of these returns anything or takes the pointer. `cui_progress` takes a fraction from 0 to 1, clamped, and glides to a new value. With `indeterminate` the value is ignored and a short segment travels along the track. Options: `label` and `show_value`, which add a row above the bar with the name and a whole percentage, `tone`, `height` in points (6) and `width`. `cui_meter` takes an amount, a limit and a unit as text, prints them as "18.4 / 20 GB", and turns amber above 75% and red above 90% of the limit. `cui_spinner` takes its size in points, and 0 means 20; its `style` option draws it in dots instead (see [Dither spinners](#dither-spinners)) and `color` sets the ring's color. `cui_skeleton` takes a width and a height in points (14 when 0). `cui_gauge` takes a label, a fraction from 0 to 1 and a size in points (140 when 0).
 
 With `dither` the bar is drawn in dots on an 8×8 ordered dither: solid up to the value, then thinning out over the 60 points past its edge, the pattern drifting slowly forward so the edge looks alive. Indeterminate, a soft band of dots sweeps the track instead of a segment. The dots take the emphasis color (the accent, or the text color under the neutral accent) unless a `tone` is set, and the default height is 8 points. The drift moves a whole dot at a time and asks for a frame only then, ten times a second; it stops when the bar is empty or full, and reduced motion holds it still and parks the indeterminate band in the middle.
 
@@ -552,6 +552,28 @@ Parts follow each other from the start of the bar, parted by one dot of the surf
 Returns the part being shown, hovered or chosen with the keys, or -1. Up to 32 parts are drawn.
 
 Keyboard: Tab focuses the bar. Left and Right step through the parts (mirrored right to left), Home and End go to the first and last, and Escape clears the choice.
+
+## Dither spinners
+
+Spinners drawn in dots on an 8×8 ordered dither, each shaped for a kind of wait: a ring for anything, a radar for searching, chevrons for transfers, a page being read for an import. They take the theme's text color on whatever is behind them, so they sit as well in a primary button or a status chip as on a page.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dither-spinners-dark.png"><img src="images/components/dither-spinners.png" alt="Dither spinners"></picture>
+
+```c
+cui_spinner(ui, 56, .style = CUI_SPINNER_COMET);
+cui_spinner(ui, 64, .style = CUI_SPINNER_RADAR);
+cui_spinner(ui, 32, .style = CUI_SPINNER_UPLOAD, .color = CUI_COLOR_ACCENT);
+cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 14, .pad_y = 8, .radius = 10, .bg = CUI_COLOR_FOREGROUND) {
+    cui_spinner(ui, 14, .style = CUI_SPINNER_COMET, .color = CUI_COLOR_BACKGROUND);   /* inline, in dark ink */
+    cui_text(ui, "Saving…", .color = CUI_COLOR_BACKGROUND);
+}
+```
+
+`cui_spinner` takes its height in points (20 when 0) and the same options as the plain ring. The styles: `CUI_SPINNER_COMET`, a ring with a head and a tail that thins out dot by dot; `CUI_SPINNER_DOT_MATRIX`, a 5×5 grid with a wave running through it; `CUI_SPINNER_FILL_DRAIN`, a tile that fills from the bottom and dissolves, for the steps of a job; `CUI_SPINNER_RADAR`, a sweep round a dial that lights up points as it passes; `CUI_SPINNER_RIPPLE`, rings spreading from a dot, for connecting or waiting on the other side; `CUI_SPINNER_UPLOAD` and `CUI_SPINNER_DOWNLOAD`, chevrons streaming up or down, and `CUI_SPINNER_TRANSFER`, both side by side; `CUI_SPINNER_ORBIT`, two dots circling with trails; `CUI_SPINNER_BOUNCE`, three bouncing dots with short trails, for typing and chat replies; `CUI_SPINNER_SCAN`, a scan line reading a page; `CUI_SPINNER_PULSE`, a soft disc breathing in density, for recording or live; `CUI_SPINNER_SPIRAL`, three arms turning, for a long calm wait; and `CUI_SPINNER_PLASMA`, slow noise in a tile, for generating an image or audio.
+
+Most styles are square. Upload and download are 25/32 as wide as they are tall, transfer 50/32, bounce 40/28 and scan 28/32. Under 32 points tall a dot is one point, so a 14 point spinner in a button or a chip stays sharp; from 32 points it is two. `color` sets the dots (the text color by default), and `track` the faint base some styles draw under them (a comet's ring, a dot matrix's dots, a plasma's tile), by default `color` at 12%. Transfer's second lane, and the edges of fill and drain and of the scanned page, are steps of `color` too.
+
+A dither spinner keeps no state and asks for a frame only when its dots move: 30 times a second for comet, orbit and bounce, 24 for radar, 20 for fill and drain and spiral, 15 for dot matrix, the transfers, scan and pulse, and 12 for ripple and plasma. A spinner that is scrolled away or covered paints nothing and asks for nothing. Trails are worked out from where the dots were over the last half second, so they look the same at any frame rate. Reduced motion holds each style on a still frame that still reads as busy: the comet's head at the top right, the fill half full, the scan line mid page.
 
 ## Badge, avatar and keycap
 

@@ -480,6 +480,29 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_skeleton(ui, CUI_PCT(90), 12);
             cui_skeleton(ui, CUI_PCT(60), 12);
         }
+        cui_card(ui, .gap = 14) {
+            cui_heading(ui, "Dither spinners", 4);
+            cui_row(ui, .gap = 20, .wrap = true, .align = CUI_ALIGN_CENTER) {
+                static const cui_spinner_style styles[] = { CUI_SPINNER_COMET, CUI_SPINNER_DOT_MATRIX, CUI_SPINNER_FILL_DRAIN, CUI_SPINNER_RADAR,
+                                                            CUI_SPINNER_RIPPLE, CUI_SPINNER_TRANSFER, CUI_SPINNER_ORBIT, CUI_SPINNER_BOUNCE,
+                                                            CUI_SPINNER_SCAN, CUI_SPINNER_PULSE, CUI_SPINNER_SPIRAL, CUI_SPINNER_PLASMA };
+                for (int k = 0; k < (int)(sizeof styles / sizeof styles[0]); k++) cui_spinner(ui, 40, .style = styles[k]);
+            }
+            cui_row(ui, .gap = 10, .wrap = true, .align = CUI_ALIGN_CENTER) {
+                cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 14, .pad_y = 8, .radius = 10, .bg = CUI_COLOR_FOREGROUND) {
+                    cui_spinner(ui, 14, .style = CUI_SPINNER_COMET, .color = CUI_COLOR_BACKGROUND);
+                    cui_text(ui, "Saving\xe2\x80\xa6", .font = CUI_FONT_MEDIUM, .color = CUI_COLOR_BACKGROUND);
+                }
+                cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 11, .pad_y = 6, .radius = 999, .border = 1, .bg = CUI_COLOR_SURFACE) {
+                    cui_spinner(ui, 14, .style = CUI_SPINNER_ORBIT);
+                    cui_text(ui, "Syncing 24 files", .color = CUI_COLOR_TEXT_SECONDARY);
+                }
+                cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .pad_x = 11, .pad_y = 6, .radius = 999, .border = 1, .bg = CUI_COLOR_SURFACE) {
+                    cui_spinner(ui, 14, .style = CUI_SPINNER_RIPPLE);
+                    cui_text(ui, "Connecting", .color = CUI_COLOR_TEXT_SECONDARY);
+                }
+            }
+        }
     }
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_card(ui, .gap = 14) {

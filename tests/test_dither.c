@@ -492,6 +492,154 @@ static void test_veil(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+/* spinners                                                                 */
+
+typedef struct { cui_spinner_style style; float size; cui_color color; bool legacy; float top; } spin_case;
+static void build_spin(cui_ctx *ui, void *u) {
+    spin_case *c = u;
+    if (c->top > 0) cui_box(ui, .height = CUI_PX(c->top)) {}
+    cui_row(ui) {
+        cui_box(ui, .id = "spin") {
+            if (c->legacy) (cui_spinner)(ui, c->size);
+            else cui_spinner(ui, c->size, .style = c->style, .color = c->color);
+        }
+    }
+}
+/* pixels in r that differ from the background, and those outside r that do */
+static void lit_count(image im, cui_rect r, int *in, int *out) {
+    *in = *out = 0;
+    const unsigned char *bg = at(im, 2, 2);
+    for (int y = 0; y < im.h; y++)
+        for (int x = 0; x < im.w; x++) {
+            const unsigned char *p = at(im, (float)x, (float)y);
+            if (abs(p[0] - bg[0]) + abs(p[1] - bg[1]) + abs(p[2] - bg[2]) < 24) continue;
+            if (cui__rect_contains(r, x + 0.5f, y + 0.5f)) (*in)++;
+            else (*out)++;
+        }
+}
+
+static void test_spinners(void) {
+    printf("spinners\n");
+    /* the ring is the spinner it was, through the macro and through the function */
+    cui_ctx *ui = new_ctx(200, 120, true);
+    spin_case c = { CUI_SPINNER_ARC, 20, { 0 }, false, 0 };
+    run(ui, build_spin, &c, 2);
+    image a = render(ui);
+    cui_destroy(ui);
+    ui = new_ctx(200, 120, true);
+    c.legacy = true;
+    run(ui, build_spin, &c, 2);
+    image b = render(ui);
+    CHECK(same(a, b));
+    free(a.px); free(b.px);
+    cui_destroy(ui);
+
+    /* every dither style draws dots inside its box and nowhere else, at a full and an inline size,
+     * and holds still under reduced motion without asking for frames */
+    static const float sizes[2] = { 56, 14 };
+    static const int widths[2][15] = { { 56, 56, 56, 56, 56, 56, 44, 44, 88, 56, 80, 49, 56, 56, 56 },
+                                       { 14, 14, 14, 14, 14, 14, 11, 11, 22, 14, 20, 12, 14, 14, 14 } };
+    for (int si = 0; si < 2; si++)
+        for (int st = CUI_SPINNER_COMET; st <= CUI_SPINNER_PLASMA; st++) {
+            ui = new_ctx(200, 120, true);
+            spin_case sc = { (cui_spinner_style)st, sizes[si], { 0 }, false, 0 };
+            run(ui, build_spin, &sc, 2);
+            cui_rect r = cui__prev_rect(ui, cui_make_id(ui, "spin"));
+            CHECK_EQ((int)r.w, widths[si][st]);
+            CHECK_EQ((int)r.h, (int)sizes[si]);
+            image im = render(ui);
+            int in, out;
+            lit_count(im, r, &in, &out);
+            if (in == 0 || out != 0) printf("  style %d at %g: %d in, %d out\n", st, sizes[si], in, out);
+            CHECK(in > 0);
+            CHECK_EQ(out, 0);
+            CHECK(cui_next_wakeup(ui) < 0);
+            run(ui, build_spin, &sc, 40);
+            image later = render(ui);
+            CHECK(same(im, later));
+            free(im.px); free(later.px);
+            cui_destroy(ui);
+        }
+
+    /* inline sizes draw one point dots: some 2x2 pixel blocks are not one color */
+    ui = new_ctx(200, 120, true);
+    c = (spin_case){ CUI_SPINNER_COMET, 14, { 0 }, false, 0 };
+    cui_set_viewport(ui, 200, 120, 2);
+    run(ui, build_spin, &c, 2);
+    {
+        const cui_draw_data *dd = cui_get_draw_data(ui);
+        image im = { malloc((size_t)dd->width_px * dd->height_px * 4), dd->width_px, dd->height_px };
+        cui_sw_render(g_sw, dd, im.px, im.w, im.h, im.w * 4, CUI_SW_RGBA);
+        /* at scale 2 a one point dot is two pixels wide: colors change only between even and odd
+         * pixels, and on both kinds of even boundary (two point dots would change on one only) */
+        int odd = 0, even[2] = { 0, 0 };
+        for (int y = 0; y < im.h; y++)
+            for (int x = 1; x < im.w; x++) {
+                bool diff = at(im, (float)x - 1, (float)y)[0] != at(im, (float)x, (float)y)[0];
+                if (x & 1) odd += diff;
+                else even[(x >> 1) & 1] += diff;
+            }
+        CHECK_EQ(odd, 0);
+        CHECK(even[0] > 0 && even[1] > 0);
+        free(im.px);
+    }
+    cui_destroy(ui);
+
+    /* the color option: dots in the danger color */
+    ui = new_ctx(200, 120, true);
+    c = (spin_case){ CUI_SPINNER_PULSE, 56, CUI_COLOR_DANGER, false, 0 };
+    run(ui, build_spin, &c, 2);
+    {
+        image im = render(ui);
+        cui_rect r = cui__prev_rect(ui, cui_make_id(ui, "spin"));
+        int red = 0;
+        for (float y = r.y; y < r.y + r.h; y++)
+            for (float x = r.x; x < r.x + r.w; x++) red += at(im, x, y)[0] > at(im, x, y)[1] + 60;
+        CHECK(red > 20);
+        free(im.px);
+    }
+    cui_destroy(ui);
+
+    /* with motion: a wakeup at the next step, not every frame, and dots that move */
+    static const float fps[15] = { 0, 30, 15, 20, 24, 12, 15, 15, 15, 30, 30, 15, 15, 20, 12 };
+    for (int st = CUI_SPINNER_COMET; st <= CUI_SPINNER_PLASMA; st++) {
+        ui = new_ctx(200, 120, false);
+        spin_case sc = { (cui_spinner_style)st, 56, { 0 }, false, 0 };
+        run(ui, build_spin, &sc, 30);
+        float w = cui_next_wakeup(ui);
+        CHECK(w >= 0 && w <= 1.0f / fps[st] + 1e-4f);
+        image im = render(ui);
+        run(ui, build_spin, &sc, 15);
+        image later = render(ui);
+        if (same(im, later)) printf("  style %d does not move\n", st);
+        CHECK(!same(im, later));
+        free(im.px); free(later.px);
+        cui_destroy(ui);
+    }
+
+    /* a spinner below the window paints nothing and asks for no frames */
+    ui = new_ctx(200, 120, false);
+    c = (spin_case){ CUI_SPINNER_COMET, 56, { 0 }, false, 400 };
+    run(ui, build_spin, &c, 10);
+    CHECK(cui_next_wakeup(ui) < 0);
+    cui_destroy(ui);
+
+    /* no state: trails come from the time alone, so a context that jumped to the same time agrees */
+    image imgs[2];
+    for (int k = 0; k < 2; k++) {
+        ui = new_ctx(200, 120, false);
+        c = (spin_case){ CUI_SPINNER_ORBIT, 56, { 0 }, false, 0 };
+        g_dt = k ? 37.0f / 60.0f : 1.0f / 60.0f;
+        run(ui, build_spin, &c, k ? 1 : 37);
+        g_dt = 1.0f / 60.0f;
+        imgs[k] = render(ui);
+        cui_destroy(ui);
+    }
+    CHECK(same(imgs[0], imgs[1]));
+    free(imgs[0].px); free(imgs[1].px);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
@@ -500,6 +648,7 @@ int main(void) {
     test_meter();
     test_area();
     test_veil();
+    test_spinners();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
