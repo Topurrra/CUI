@@ -26,6 +26,16 @@ typedef struct {
     bool ok;
 } cui__ed_wc;
 
+/* Markdown: the multi-line state (open fence, front matter, HTML comment) at the start of
+ * every line, found by tokenizing from line 0 and kept across frames. Like the wrap cache it
+ * is made again only from the first line that changed, and stops as soon as a line after
+ * the edit starts in the state it did before. */
+typedef struct {
+    uint64_t *h; int *st; int n, cap;   /* line hashes; st[i] is the state before line i, st[n] after the last */
+    uint64_t hash; int len;
+    bool ok;
+} cui__ed_mc;
+
 typedef struct {
     cui_edit_state ed;          /* first: caret, anchor and undo history, as in every text field */
     double sy;                  /* scroll, points */
@@ -43,6 +53,7 @@ typedef struct {
     int pend_a, pend_c, pend_line, pend_col;
     float focus_t;
     cui__ed_wc *wc;             /* wrap cache, only while `.wrap` is on */
+    cui__ed_mc *mc;             /* markdown line states, only for that language */
     int aff_pos;                /* a caret at this byte, on a row boundary, shows at the end of the row above (End, a click past the end) */
 } cui__ed_state;
 
@@ -207,12 +218,17 @@ static int cui__ed_line_rows(const cui__ed *E, int line) {
     return cui__ed_wrap_walk(E, ls, le, NULL, 0);
 }
 
-static void cui__ed_wc_dtor(cui_ctx *ui, void *data) {
-    cui__ed_state *st = data;
+static void cui__ed_wc_free(cui_ctx *ui, cui__ed_state *st) {
     if (!st->wc) return;
     cui__free(ui, st->wc->l); cui__free(ui, st->wc->pre); cui__free(ui, st->wc);
     st->wc = NULL;
 }
+static void cui__ed_mc_free(cui_ctx *ui, cui__ed_state *st) {
+    if (!st->mc) return;
+    cui__free(ui, st->mc->h); cui__free(ui, st->mc->st); cui__free(ui, st->mc);
+    st->mc = NULL;
+}
+static void cui__ed_dtor(cui_ctx *ui, void *data) { cui__ed_wc_free(ui, data); cui__ed_mc_free(ui, data); }
 
 /* Bring the cache up to date with the text: line hashes tell which lines are the
  * same as before (an edit leaves a run of lines at the top and one at the bottom
@@ -567,6 +583,46 @@ static bool cui__ed_block_state(const cui__ed *E, const cui__lang *L, int upto) 
     return in;
 }
 
+/* The markdown state at the start of each line (see cui__ed_mc), brought up to date. */
+static void cui__ed_md_sync(cui__ed *E) {
+    cui_ctx *ui = E->ui;
+    cui__ed_state *st = E->st;
+    if (!st->mc) { st->mc = cui__alloc(ui, sizeof *st->mc); memset(st->mc, 0, sizeof *st->mc); }
+    cui__ed_mc *mc = st->mc;
+    int nl = E->nl;
+    uint64_t H = cui__ed_hash(E->buf, E->len);
+    if (mc->ok && mc->len == E->len && mc->hash == H && mc->n == nl) return;
+    uint64_t *nh = cui__frame_alloc(ui, sizeof *nh * (size_t)nl);
+    for (int i = 0; i < nl; i++) nh[i] = cui__ed_hash(E->buf + E->ls[i], cui__ed_end(E, i) - E->ls[i]);
+    int on = mc->n, p = 0, q = 0;
+    if (mc->ok) {
+        int m = CUI_MIN(on, nl);
+        while (p < m && mc->h[p] == nh[p]) p++;
+        while (q < m - p && mc->h[on - 1 - q] == nh[nl - 1 - q]) q++;
+    }
+    int *old = cui__frame_alloc(ui, sizeof(int) * (size_t)(on + 1));
+    if (on > 0 || mc->ok) memcpy(old, mc->st, sizeof(int) * (size_t)(on + 1));
+    CUI__GROW(ui, mc->h, 0, mc->cap, nl + 1);
+    int cap = mc->cap;
+    mc->st = cui__realloc(ui, mc->st, sizeof(int) * (size_t)cap);
+    memcpy(mc->h, nh, sizeof *nh * (size_t)nl);
+    cui__tok *toks = cui__frame_alloc(ui, sizeof *toks * (size_t)(E->maxlen + 2));
+    int *sts = mc->st;
+    sts[0] = CUI__MD_START;
+    int i = p;
+    for (; i < nl; i++) {
+        if (mc->ok && q > 0 && i >= nl - q && sts[i] == old[i - nl + on]) {   /* the same from here on */
+            memcpy(sts + i, old + (i - nl + on), sizeof(int) * (size_t)(nl - i + 1));
+            i = nl + 1;
+            break;
+        }
+        int state = sts[i];
+        cui__tokenize_md(E->buf + E->ls[i], cui__ed_end(E, i) - E->ls[i], &state, toks, E->maxlen + 2);
+        sts[i + 1] = state;
+    }
+    mc->n = nl; mc->ok = true; mc->len = E->len; mc->hash = H;
+}
+
 /* ---- painting ---- */
 
 typedef struct {
@@ -575,6 +631,7 @@ typedef struct {
     int base, first, count, nl;
     const int *ls;              /* starts of the lines in view and the one after */
     bool in_block, json, empty, focused, show_line, ro;
+    const int *mst;             /* markdown: the state before each line in view */
     cui__lang lang;
     int tab, cursor, anchor, caret_line, caret_col;
     int br_line[2], br_col[2];
@@ -631,7 +688,9 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
         int ls = R->ls - p->base, le = R->le - p->base;
         int nn = le - ls;
         if (nn + 1 > tok_cap) { tok_cap = nn + 1; toks = cui__frame_alloc(ui, sizeof *toks * (size_t)tok_cap); }
-        int nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
+        int nt;
+        if (p->lang.markdown) { int ms = p->mst[k]; nt = cui__tokenize_md(s + ls, nn, &ms, toks, tok_cap); }
+        else nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
         int t0 = 0;
         for (int j = 0; j < R->n; j++) {
             bool last = j == R->n - 1;
@@ -779,7 +838,9 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         int nn = stop - ls;
         if (nn + 1 > tok_cap) { tok_cap = nn + 1; toks = cui__frame_alloc(ui, sizeof *toks * (size_t)tok_cap); }
         bool was_block = block;
-        int nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
+        int nt;
+        if (p->lang.markdown) { int ms = p->mst[k]; nt = cui__tokenize_md(s + ls, nn, &ms, toks, tok_cap); }
+        else nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
         int pos = ls, col = 0;
         for (int t = 0; t < nt; t++) {
             int a = ls + toks[t].start, b = a + toks[t].len;
@@ -1442,6 +1503,10 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
     }
     p->lang = *L; p->json = json;
     p->in_block = cui__ed_block_state(E, L, first);
+    if (L->markdown) {
+        cui__ed_md_sync(E);
+        p->mst = E->st->mc->st + first;
+    }
     p->tab = E->tab;
     p->cursor = e->cursor; p->anchor = e->anchor;
     p->caret_line = f->caret_line; p->caret_col = f->caret_vcol;
@@ -1562,6 +1627,8 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     f.lang_kind = cui__ed_lang_kind(o->lang);
     bool json = o->lang && !strcmp(o->lang, "json");
     cui__lang L = cui__lang_for(json ? NULL : o->lang);
+    if (!L.markdown) cui__ed_mc_free(ui, st);
+    if (o->wrap || L.markdown) cui__state_set_dtor(ui, f.id ^ CUI__ED_SALT, cui__ed_dtor);
 
     f.size = cui__fs(ui, o->size > 0 ? o->size : 13);
     f.lh = roundf(f.size * 1.6f);
@@ -1581,9 +1648,8 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     if (o->wrap) {
         E.wrap = true;
         E.wcols = CUI_MAX(8, (int)floorf((f.code_w - CUI__ED_BAR) / f.cw));   /* the bar's zone stays free of text */
-        cui__state_set_dtor(ui, f.id ^ CUI__ED_SALT, cui__ed_wc_dtor);
         cui__ed_wrap_sync(&E);
-    } else if (st->wc) cui__ed_wc_dtor(ui, st);
+    } else cui__ed_wc_free(ui, st);
     f.content_h = (double)(E.wrap ? cui__ed_total_rows(&E) : E.nl) * f.lh;
     f.max_sy = CUI_MAX(0.0, f.content_h - f.view_h);
 

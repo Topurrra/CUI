@@ -6942,6 +6942,75 @@ static void test_code_editor_wrap(void) {
     free(big);
 }
 
+/* the distinct colors of the text drawn last frame (glyph quads), packed */
+static int ced_text_colors(cui_ctx *ui, unsigned *out, int cap) {
+    const cui_draw_data *d = cui_get_draw_data(ui);
+    int n = 0;
+    for (int i = 0; i < d->vertex_count; i++) {
+        if (d->vertices[i].mode != CUI_SHADE_TEXT) continue;
+        cui_color c = d->vertices[i].color;
+        unsigned k = (unsigned)c.r << 24 | (unsigned)c.g << 16 | (unsigned)c.b << 8 | c.a;
+        int j = 0;
+        while (j < n && out[j] != k) j++;
+        if (j == n && n < cap) out[n++] = k;
+    }
+    return n;
+}
+static bool ced_colors_within(const unsigned *a, int na, const unsigned *b, int nb) {
+    for (int i = 0; i < na; i++) {
+        int j = 0;
+        while (j < nb && b[j] != a[i]) j++;
+        if (j == nb) return false;
+    }
+    return true;
+}
+
+/* markdown: an editor scrolled into the middle of a fence colors the body as fence body, since the
+ * state is found from the first line, not from the first visible one */
+static void test_code_editor_markdown(void) {
+    printf("code editor: markdown state from line 0\n");
+    static ced_ctx c;
+    static char fenced[2048], plain[2048];
+    strcpy(fenced, "```\n");
+    strcpy(plain, "text\n");
+    for (int i = 0; i < 80; i++) { strcat(fenced, "# heading\n"); strcat(plain, "# heading\n"); }
+    strcat(fenced, "```\n");
+    unsigned top[16], mid[16], ctl[16];
+    int ntop, nmid, nctl;
+
+    cui_ctx *ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.lang = "md";
+    snprintf(c.buf, sizeof c.buf, "%s", fenced);
+    cui_code_editor_goto(ui, "ed", 1, 1);   /* focused, as after the jump below */
+    run(ui, build_ced, &c, 3);
+    ntop = ced_text_colors(ui, top, 16);
+    cui_code_editor_goto(ui, "ed", 50, 1);
+    run(ui, build_ced, &c, 3);
+    CHECK(c.r.line == 50);
+    nmid = ced_text_colors(ui, mid, 16);
+    CHECK(nmid > 0 && ced_colors_within(mid, nmid, top, ntop));
+    /* an edit above the view moves the fence's end: the lines below follow */
+    ced_sel(ui, &c, 0, 0);
+    type(ui, &build_ced, &c, "x");
+    cui_code_editor_goto(ui, "ed", 50, 1);
+    run(ui, build_ced, &c, 3);
+    nmid = ced_text_colors(ui, mid, 16);
+    CHECK(c.r.line == 50 && !ced_colors_within(mid, nmid, top, ntop));   /* "x```" is not a fence: headings now */
+    cui_destroy(ui);
+
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.lang = "md";
+    snprintf(c.buf, sizeof c.buf, "%s", plain);
+    run(ui, build_ced, &c, 3);
+    cui_code_editor_goto(ui, "ed", 50, 1);
+    run(ui, build_ced, &c, 3);
+    nctl = ced_text_colors(ui, ctl, 16);
+    CHECK(!ced_colors_within(ctl, nctl, top, ntop));   /* outside a fence the same lines are headings */
+    cui_destroy(ui);
+}
+
 /* diff viewer ---------------------------------------------------------- */
 
 /* the lines of a text, each with its line ending, for checking scripts */
@@ -8349,6 +8418,7 @@ int main(void) {
     test_markdown_callout_fold_keys();
     test_code_editor();
     test_code_editor_wrap();
+    test_code_editor_markdown();
     test_diff();
     test_dials();
     test_candles();
