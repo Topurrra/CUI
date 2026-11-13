@@ -775,6 +775,7 @@ void cui__plat_present(cui_app *app, const void *bgra, int width, int height, in
     bmi->bmiHeader.biPlanes = 1;
     bmi->bmiHeader.biBitCount = 32;
     bmi->bmiHeader.biCompression = BI_RGB;
+    SetDIBitsToDevice(w->hdc, 0, 0, (DWORD)width, (DWORD)height, 0, 0, 0, (UINT)height, bgra, bmi, DIB_RGB_COLORS);
     if (first) cui__win32_activate(w);
 }
 
