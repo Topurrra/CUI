@@ -894,11 +894,13 @@ static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *t
     int drow = cui__node_new(ui, 0);
     ui->nodes[drow].dir = CUI_ROW; ui->nodes[drow].h = CUI_PX(28); ui->nodes[drow].align = CUI_ALIGN_CENTER;
     cui__open(ui, drow);
+    int day_step = dw >= 18 ? 1 : (int)ceilf(18.0f / dw);   /* narrow days: a number every few days, so they do not overlap */
     for (int dd = 0; dd < days; dd++) {
         cui_date cd = cui_date_from_days(base + dd);
         bool is_today = dd == o->today && o->today > 0;
         int dc = cui__node_new(ui, 0);
         ui->nodes[dc].w = CUI_PX(dw); ui->nodes[dc].dir = CUI_ROW; ui->nodes[dc].justify = CUI_JUSTIFY_CENTER;
+        if (dd % day_step) continue;
         cui__open(ui, dc);
         int wd = (first_wd + dd) % 7;
         int dt = cui__text_node(ui, cui__frame_printf(ui, "%d", cd.day), -1, is_today ? CUI_FONT_MEDIUM : CUI_FONT_BODY, cui__fs(ui, ui->theme.text_xs),

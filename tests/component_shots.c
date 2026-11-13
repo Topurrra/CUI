@@ -1704,6 +1704,80 @@ SCENE(mermaid_cycles) {
             "```\n");
     }
 }
+/* mermaid: back edges stay outside the forward edges, top down and left to right */
+SCENE(mermaid_back) {
+    cui_box(ui, UPTO(880)) {
+        cui_markdown(ui, "notes",
+            "```mermaid\n"
+            "graph TD\n"
+            "  A[Start] --> B{Valid?}\n"
+            "  B -- yes --> C[Process]\n"
+            "  B -- no --> D[Fix input]\n"
+            "  D --> B\n"
+            "  C --> E[Save]\n"
+            "  E --> F{More?}\n"
+            "  F -- yes --> A\n"
+            "  F -- no --> G[Done]\n"
+            "```\n"
+            "\n"
+            "```mermaid\n"
+            "graph TD; A-->B; B-->C; C-->A; B-->D\n"
+            "```\n"
+            "\n"
+            "```mermaid\n"
+            "graph LR\n"
+            "  A[Start] --> B{Valid?}\n"
+            "  B -- yes --> C[Process]\n"
+            "  B -- no --> D[Fix input]\n"
+            "  D --> B\n"
+            "  C --> E[Save]\n"
+            "  E --> F{More?}\n"
+            "  F -- yes --> A\n"
+            "  F -- no --> G[Done]\n"
+            "```\n");
+    }
+}
+/* mermaid in a narrow pane: a wide diagram shrinks to the width (no sideways scrolling) and gets an
+ * expand button in its corner; a gantt chart and a pie chart shrink to fit too */
+static const char *const mm_narrow_md =
+    "```mermaid\n"
+    "graph LR\n"
+    "  A[Receive order] --> B{In stock?}\n"
+    "  B -- yes --> C[Pack items] --> D[Ship]\n"
+    "  B -- no --> E[Back order]\n"
+    "  E --> B\n"
+    "  D --> F[Notify customer]\n"
+    "```\n"
+    "\n"
+    "```mermaid\n"
+    "gantt\n"
+    "    dateFormat YYYY-MM-DD\n"
+    "    Design      :done, des, 2024-03-01, 20d\n"
+    "    Build       :active, bld, after des, 30d\n"
+    "    Review      :crit, rev, after bld, 10d\n"
+    "```\n"
+    "\n"
+    "```mermaid\n"
+    "pie title Pets\n"
+    "    \"Dogs\" : 386\n"
+    "    \"Cats\" : 85\n"
+    "```\n";
+SCENE(mermaid_narrow) {
+    cui_box(ui, .width = CUI_PX(360)) { cui_markdown(ui, "notes", mm_narrow_md); }
+}
+/* the expanded view of the same diagram, opened with a click on its button */
+#define MM_BTN_X 366
+#define MM_BTN_Y 171
+static void scene_mermaid_expand_at(cui_ctx *ui, int f, float x, float y) {
+    if (f < 0) return;
+    if (f == 8) cui_input_mouse_move(ui, x, y);
+    if (f == 10) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    if (f == 11) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    frame_wrap(ui, body_mermaid_narrow);
+}
+static void scene_mermaid_expand(cui_ctx *ui, int f) { scene_mermaid_expand_at(ui, f, MM_BTN_X, MM_BTN_Y); }
+/* the same in a wide window: the whole diagram shows at once */
+static void scene_mermaid_expand_wide(cui_ctx *ui, int f) { scene_mermaid_expand_at(ui, f, 366, 91); }
 /* diff viewer: two versions of a config loader. The mode toggle and the
  * selected change are static and wired to the view, so the live page keeps
  * them; folds open on a click and stay open. */
@@ -4631,8 +4705,8 @@ int main(int argc, char **argv) {
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
-        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true }, { "markdown-images", scene_markdown_images, 560, 600, true },
-        { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true },
+        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true },{ "markdown-images", scene_markdown_images, 560, 600, true },
+        { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true }, { "mermaid-back", scene_mermaid_back, 920, 1000, true }, { "mermaid-narrow", scene_mermaid_narrow, 420, 760, true }, { "mermaid-expand", scene_mermaid_expand, 420, 760, true }, { "mermaid-expand-wide", scene_mermaid_expand_wide, 1000, 600, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
         { "diff-view", scene_diff_view, 900, 480, true },

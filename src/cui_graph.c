@@ -307,6 +307,99 @@ static uint32_t cui__gv_key(const cui_graph_node *nodes, int n, const cui_graph_
     return h;
 }
 
+/* Ordering the boxes of each layer. Every edge of the expanded graph runs between adjacent
+ * layers (a long edge has a waypoint in each layer it crosses, and a cycle's edge that the caller
+ * reversed is such an edge too), so crossings can be counted per pair of layers. */
+typedef struct { const cui__layer_box *box; int nv, layers, ns; const int *sa, *sb; } cui__lo;
+#define CUI__LO_MULTI 1500   /* segments up to which both starting orders are tried (the count is quadratic) */
+
+/* sorts each layer by pos and rewrites pos as the rank in its layer */
+static void cui__lo_rank(const cui__lo *lo, float *pos, int *order) {
+    for (int L = 0; L < lo->layers; L++) {
+        int c = 0;
+        for (int v = 0; v < lo->nv; v++) if (lo->box[v].layer == L) order[c++] = v;
+        for (int a = 1; a < c; a++) { int x = order[a], b2 = a - 1; while (b2 >= 0 && pos[order[b2]] > pos[x]) { order[b2 + 1] = order[b2]; b2--; } order[b2 + 1] = x; }
+        for (int r = 0; r < c; r++) pos[order[r]] = (float)r;
+    }
+}
+
+/* crossings between segments that join the same two adjacent layers */
+static int cui__lo_cross(const cui__lo *lo, const float *pos) {
+    int total = 0;
+    for (int i = 0; i < lo->ns; i++) {
+        int u = lo->sa[i], v = lo->sb[i];
+        if (lo->box[v].layer == lo->box[u].layer + 1) { /* as is */ }
+        else if (lo->box[u].layer == lo->box[v].layer + 1) { int t = u; u = v; v = t; }
+        else continue;
+        for (int j = i + 1; j < lo->ns; j++) {
+            int x = lo->sa[j], y = lo->sb[j];
+            if (lo->box[y].layer == lo->box[x].layer + 1) { /* as is */ }
+            else if (lo->box[x].layer == lo->box[y].layer + 1) { int t = x; x = y; y = t; }
+            else continue;
+            if (lo->box[x].layer != lo->box[u].layer) continue;
+            if ((pos[u] - pos[x]) * (pos[v] - pos[y]) < 0) total++;
+        }
+    }
+    return total;
+}
+
+/* Swaps neighbours in a layer while that removes crossings with the layers on both sides. */
+static void cui__lo_transpose(cui_ctx *ui, const cui__lo *lo, float *pos) {
+    int nv = lo->nv;
+    int *nst = cui__frame_alloc(ui, sizeof(int) * (size_t)(nv + 1)), *nb = cui__frame_alloc(ui, sizeof(int) * (size_t)(2 * lo->ns + 1));
+    int *fill = cui__frame_alloc(ui, sizeof(int) * (size_t)nv), *ls = cui__frame_alloc(ui, sizeof(int) * (size_t)(lo->layers + 1));
+    int *lay = cui__frame_alloc(ui, sizeof(int) * (size_t)nv);
+    memset(nst, 0, sizeof(int) * (size_t)(nv + 1));
+    memset(ls, 0, sizeof(int) * (size_t)(lo->layers + 1));
+    for (int k = 0; k < lo->ns; k++)
+        if (abs(lo->box[lo->sa[k]].layer - lo->box[lo->sb[k]].layer) == 1) { nst[lo->sa[k] + 1]++; nst[lo->sb[k] + 1]++; }
+    for (int v = 0; v < nv; v++) nst[v + 1] += nst[v];
+    for (int v = 0; v < nv; v++) fill[v] = nst[v];
+    for (int k = 0; k < lo->ns; k++)
+        if (abs(lo->box[lo->sa[k]].layer - lo->box[lo->sb[k]].layer) == 1) { nb[fill[lo->sa[k]]++] = lo->sb[k]; nb[fill[lo->sb[k]]++] = lo->sa[k]; }
+    for (int v = 0; v < nv; v++) ls[lo->box[v].layer + 1]++;
+    for (int L = 0; L < lo->layers; L++) ls[L + 1] += ls[L];
+    for (int v = 0; v < nv; v++) lay[ls[lo->box[v].layer] + (int)pos[v]] = v;
+    for (int pass = 0; pass < 24; pass++) {
+        bool moved = false;
+        for (int L = 0; L < lo->layers; L++)
+            for (int i = ls[L]; i + 1 < ls[L + 1]; i++) {
+                int a = lay[i], b = lay[i + 1], ab = 0, ba = 0;   /* crossings as they stand, and swapped */
+                for (int p = nst[a]; p < nst[a + 1]; p++)
+                    for (int q = nst[b]; q < nst[b + 1]; q++) {
+                        int x = nb[p], y = nb[q];
+                        if (x == y || lo->box[x].layer != lo->box[y].layer) continue;
+                        if (pos[x] > pos[y]) ab++; else ba++;
+                    }
+                if (ba < ab) { lay[i] = b; lay[i + 1] = a; float t = pos[a]; pos[a] = pos[b]; pos[b] = t; moved = true; }
+            }
+        if (!moved) break;
+    }
+}
+
+/* one ordering: the mean position of neighbours, a few sweeps, then neighbour swaps */
+static void cui__lo_start(cui_ctx *ui, const cui__lo *lo, float *pos, bool reversed) {
+    size_t vv = (size_t)lo->nv;
+    float *sum = cui__frame_alloc(ui, sizeof(float) * vv);
+    int *deg = cui__frame_alloc(ui, sizeof(int) * vv), *order = cui__frame_alloc(ui, sizeof(int) * vv);
+    int *cnt = cui__frame_alloc(ui, sizeof(int) * (size_t)lo->layers);
+    memset(cnt, 0, sizeof(int) * (size_t)lo->layers);
+    for (int v = 0; v < lo->nv; v++) pos[v] = (float)cnt[lo->box[v].layer]++;
+    if (reversed) for (int v = 0; v < lo->nv; v++) pos[v] = (float)(cnt[lo->box[v].layer] - 1) - pos[v];
+    for (int sweep = 0; sweep < 8; sweep++) {
+        memset(sum, 0, sizeof(float) * vv); memset(deg, 0, sizeof(int) * vv);
+        for (int k = 0; k < lo->ns; k++) {
+            int a = lo->sa[k], b = lo->sb[k];
+            if (lo->box[a].layer == lo->box[b].layer) continue;
+            sum[b] += pos[a]; deg[b]++;
+            sum[a] += pos[b]; deg[a]++;
+        }
+        for (int v = 0; v < lo->nv; v++) if (deg[v]) pos[v] = pos[v] * 0.25f + 0.75f * sum[v] / deg[v];
+        cui__lo_rank(lo, pos, order);
+    }
+    cui__lo_transpose(ui, lo, pos);
+}
+
 /* Layers: an edge points from a layer to a later one; edges that close a cycle (found by a depth
  * first walk) are left out of this. An edge that skips layers gets a waypoint in each layer it
  * crosses, so it is routed between the nodes instead of through them. Then each layer is ordered
@@ -393,28 +486,18 @@ bool cui__layered_layout(cui_ctx *ui, cui__layered *g, const float *bw, const fl
         }
         sa[ns] = prev; sb[ns] = et[k]; ns++;
     }
-    /* order within layers: by the mean position of neighbours, a few sweeps */
+    /* order within layers, from two starting orders (as listed, and reversed); the one with fewer
+     * crossings wins */
     size_t vv = (size_t)nv;
-    float *pos = cui__frame_alloc(ui, sizeof(float) * vv), *sum = cui__frame_alloc(ui, sizeof(float) * vv);
-    int *deg = cui__frame_alloc(ui, sizeof(int) * vv), *order = cui__frame_alloc(ui, sizeof(int) * vv);
-    int *cnt = cui__frame_alloc(ui, sizeof(int) * (size_t)layers);
-    memset(cnt, 0, sizeof(int) * (size_t)layers);
-    for (int v = 0; v < nv; v++) pos[v] = (float)cnt[g->box[v].layer]++;
-    for (int sweep = 0; sweep < 8; sweep++) {
-        memset(sum, 0, sizeof(float) * vv); memset(deg, 0, sizeof(int) * vv);
-        for (int k = 0; k < ns; k++) {
-            if (g->box[sa[k]].layer == g->box[sb[k]].layer) continue;
-            sum[sb[k]] += pos[sa[k]]; deg[sb[k]]++;
-            sum[sa[k]] += pos[sb[k]]; deg[sa[k]]++;
-        }
-        for (int v = 0; v < nv; v++) if (deg[v]) pos[v] = pos[v] * 0.25f + 0.75f * sum[v] / deg[v];
-        for (int L = 0; L < layers; L++) {
-            int c = 0;
-            for (int v = 0; v < nv; v++) if (g->box[v].layer == L) order[c++] = v;
-            for (int a = 1; a < c; a++) { int x = order[a], b2 = a - 1; while (b2 >= 0 && pos[order[b2]] > pos[x]) { order[b2 + 1] = order[b2]; b2--; } order[b2 + 1] = x; }
-            for (int r = 0; r < c; r++) pos[order[r]] = (float)r;
-        }
+    float *pos = cui__frame_alloc(ui, sizeof(float) * vv);
+    cui__lo lo = { g->box, nv, layers, ns, sa, sb };
+    cui__lo_start(ui, &lo, pos, false);
+    if (ns <= CUI__LO_MULTI) {
+        float *alt = cui__frame_alloc(ui, sizeof(float) * vv);
+        cui__lo_start(ui, &lo, alt, true);
+        if (cui__lo_cross(&lo, alt) < cui__lo_cross(&lo, pos)) memcpy(pos, alt, sizeof(float) * vv);
     }
+    int *order = cui__frame_alloc(ui, sizeof(int) * vv);
     /* coordinates: layers side by side (or stacked), each layer centered on the longest; a
      * waypoint spans its layer's thickness, so its edge runs straight across the layer */
     float *lsize = cui__frame_alloc(ui, sizeof(float) * (size_t)layers), *lthick = cui__frame_alloc(ui, sizeof(float) * (size_t)layers);

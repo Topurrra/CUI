@@ -1528,7 +1528,9 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * direction, the usual node shapes, link styles and labels, chains, &,
  * subgraphs) laid out like cui_graph_view, pie charts (a donut chart) and
  * gantt charts with dateFormat YYYY-MM-DD (a read only cui_gantt); other
- * diagrams and text that does not parse stay code. Quotes that start with
+ * diagrams and text that does not parse stay code. A diagram wider than its
+ * column shrinks to fit (no sideways scrolling) and, when small, gets an
+ * expand button that opens it at full size in a dialog. Quotes that start with
  * [!type] Title are callouts (note, tip, warning...; [!type]- and [!type]+ fold;
  * a fold remembers its state by the callout's type, title and text, so adding
  * a callout above another does not swap them).

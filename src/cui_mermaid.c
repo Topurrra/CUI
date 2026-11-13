@@ -22,7 +22,8 @@
 #define CUI__MM_MAX_DAYS   3660
 #define CUI__MM_MAX_H      520.0f  /* taller diagrams scroll inside this height */
 #define CUI__MM_PAD        16.0f
-#define CUI__MM_MIN_ZOOM   0.55f   /* below this a wide diagram scrolls sideways instead */
+#define CUI__MM_MIN_ZOOM   0.25f   /* a wide diagram shrinks to its width, but not below this */
+#define CUI__MM_READABLE   0.7f    /* below this scale the view offers an expanded one */
 #define CUI__MM_LOOP       22.0f   /* how far a loop on one node stands out */
 
 enum { CUI__MM_NONE, CUI__MM_FLOW, CUI__MM_PIE, CUI__MM_GANTT };
@@ -36,6 +37,9 @@ typedef struct { int title, parent; float x, y, w, h; bool shown; } cui__mm_grou
 
 /* strings of one diagram, NUL terminated; offset 0 is the empty string */
 typedef struct { char *s; int used, cap; } cui__mm_pool;
+
+/* how a diagram sits in its view; mode 1 while a drag pans it */
+typedef struct { float zoom, px, py, last_x, last_y; int mode; } cui__mm_cam;
 
 typedef struct {
     bool init;
@@ -58,10 +62,13 @@ typedef struct {
     bool flip;                   /* BT or RL: the layers run the other way */
     float x0, y0, bw, bh;        /* the drawn area, in layout units */
     float fs, lfs;               /* node and edge label text sizes */
-    float fit_w, zoom, px, py, panel_h;
+    float fit_w, panel_h;
+    cui__mm_cam cam;             /* the inline view: scale and where the diagram's corner is */
+    cui__mm_cam big;             /* the same in the expanded view */
     bool pan, wheel;
-    int mode;
-    float last_x, last_y;
+    bool expand;                 /* the fitted scale is too small to read: show the expand button */
+    bool big_open;
+    float big_z0;                /* the scale the expanded view opened at; its size follows */
     /* pie */
     float *values;
     const char **names;
@@ -1063,40 +1070,50 @@ static void cui__mm_end(cui_ctx *ui, int head, cui_vec2 tip, float dx, float dy,
     }
 }
 
-static void cui__mm_paint_edges(cui_ctx *ui, const cui__mm_paint *p, cui_rect r) {
+/* Edge k as one polyline on screen (a curve between each pair of boxes it passes; the join from
+ * a waypoint's top to its bottom is the straight line between two curves); returns the point count. The line stops where an end's mark starts.
+ * out holds 18 points per box the edge passes. */
+static int cui__mm_edge_poly(const cui__mm_paint *p, cui_rect r, int k, cui_vec2 *out) {
     const cui__mm_state *s = p->s;
     bool td = s->g.top_down;
     float z = p->zoom, sign = s->flip ? -1.0f : 1.0f;
     float ax = td ? 0 : sign, ay = td ? sign : 0;   /* the layers' direction on screen */
     float a = 8 * CUI_MAX(z, 0.6f);
+    int head = (s->seg[k] >> 2) & 3, tail = (s->seg[k] >> 4) & 3;
+    int from = s->g.from[k], to = s->g.to[k], prev = from, n = 0;
+    float so = s->poff[2 * k], eo = s->poff[2 * k + 1];
+    for (int w = 0; w <= s->g.rlen[k]; w++) {
+        int nxt = w < s->g.rlen[k] ? s->g.route[s->g.rstart[k] + w] : to;
+        cui_vec2 s0 = cui__mm_port(p, r, prev, true, prev == from ? so : 0), e0 = cui__mm_port(p, r, nxt, false, nxt == to ? eo : 0);
+        if (prev == from && tail) { s0.x += ax * (a - 1); s0.y += ay * (a - 1); }
+        if (nxt == to && head) { e0.x -= ax * (a - 1); e0.y -= ay * (a - 1); }
+        float bend = (td ? fabsf(e0.y - s0.y) : fabsf(e0.x - s0.x)) * 0.5f + 4 * z;
+        cui_vec2 c1 = { s0.x + ax * bend, s0.y + ay * bend }, c2 = { e0.x - ax * bend, e0.y - ay * bend };
+        for (int i = 0; i <= 16; i++) {
+            float t = i / 16.0f, u = 1 - t;
+            out[n].x = u * u * u * s0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * e0.x;
+            out[n++].y = u * u * u * s0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * e0.y;
+        }
+        prev = nxt;
+    }
+    return n;
+}
+
+static void cui__mm_paint_edges(cui_ctx *ui, const cui__mm_paint *p, cui_rect r) {
+    const cui__mm_state *s = p->s;
+    bool td = s->g.top_down;
+    float z = p->zoom, sign = s->flip ? -1.0f : 1.0f;
+    float ax = td ? 0 : sign, ay = td ? sign : 0;
+    float a = 8 * CUI_MAX(z, 0.6f);
+    cui_vec2 *pts = cui__frame_alloc(ui, sizeof(cui_vec2) * 18 * (size_t)(2 + s->g.nv - s->nn - s->nlab));
     for (int k = 0; k < s->g.ne; k++) {
         int style = s->seg[k] & 3, head = (s->seg[k] >> 2) & 3, tail = (s->seg[k] >> 4) & 3;
         if (style == CUI__MML_HIDDEN) continue;
         float th = style == CUI__MML_THICK ? 2.75f : 1.35f;
-        int from = s->g.from[k], to = s->g.to[k], prev = from;
-        float so = s->poff[2 * k], eo = s->poff[2 * k + 1];
-        for (int w = 0; w <= s->g.rlen[k]; w++) {
-            int nxt = w < s->g.rlen[k] ? s->g.route[s->g.rstart[k] + w] : to;
-            cui_vec2 s0 = cui__mm_port(p, r, prev, true, prev == from ? so : 0), e0 = cui__mm_port(p, r, nxt, false, nxt == to ? eo : 0);
-            /* the line stops where an end's mark starts */
-            if (prev == from && tail) { s0.x += ax * (a - 1); s0.y += ay * (a - 1); }
-            if (nxt == to && head) { e0.x -= ax * (a - 1); e0.y -= ay * (a - 1); }
-            float bend = (td ? fabsf(e0.y - s0.y) : fabsf(e0.x - s0.x)) * 0.5f + 4 * z;
-            cui_vec2 c1 = { s0.x + ax * bend, s0.y + ay * bend }, c2 = { e0.x - ax * bend, e0.y - ay * bend }, pts[17];
-            for (int i = 0; i <= 16; i++) {
-                float t = i / 16.0f, u = 1 - t;
-                pts[i].x = u * u * u * s0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * e0.x;
-                pts[i].y = u * u * u * s0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * e0.y;
-            }
-            cui__mm_stroke(ui, pts, 17, th, p->edge, style, z);
-            if (nxt != to) {   /* straight across a waypoint's layer */
-                cui_vec2 across[2] = { e0, cui__mm_port(p, r, nxt, true, 0) };
-                cui__mm_stroke(ui, across, 2, th, p->edge, style, z);
-            }
-            prev = nxt;
-        }
-        if (head) cui__mm_end(ui, head, cui__mm_port(p, r, to, false, eo), ax, ay, a, p->edge, p->panel, 1.35f);
-        if (tail) cui__mm_end(ui, tail, cui__mm_port(p, r, from, true, so), -ax, -ay, a, p->edge, p->panel, 1.35f);
+        int from = s->g.from[k], to = s->g.to[k];
+        cui__mm_stroke(ui, pts, cui__mm_edge_poly(p, r, k, pts), th, p->edge, style, z);
+        if (head) cui__mm_end(ui, head, cui__mm_port(p, r, to, false, s->poff[2 * k + 1]), ax, ay, a, p->edge, p->panel, 1.35f);
+        if (tail) cui__mm_end(ui, tail, cui__mm_port(p, r, from, true, s->poff[2 * k]), -ax, -ay, a, p->edge, p->panel, 1.35f);
     }
 }
 
@@ -1241,69 +1258,68 @@ static void cui__paint_mermaid(cui_ctx *ui, cui_node *n, void *data) {
     cui_pop_clip(ui);
 }
 
-/* the scale that fits the width (but not below CUI__MM_MIN_ZOOM), and a height up to CUI__MM_MAX_H */
+/* the scale that fits the width (never below CUI__MM_MIN_ZOOM, never above 1), and a height up to
+ * CUI__MM_MAX_H. Below CUI__MM_READABLE the text is small: the view gets an expand button. */
 static void cui__mm_fit(cui__mm_state *s, float W) {
     s->fit_w = W;
     float z = s->bw > 0 ? (W - 2 * CUI__MM_PAD) / s->bw : 1;
-    s->zoom = CUI_CLAMP(z, CUI__MM_MIN_ZOOM, 1.0f);
-    s->panel_h = CUI_MIN(s->bh * s->zoom + 2 * CUI__MM_PAD, CUI__MM_MAX_H);
-    s->wheel = s->bh * s->zoom + 2 * CUI__MM_PAD > CUI__MM_MAX_H + 0.5f;
-    s->pan = s->wheel || s->bw * s->zoom + 2 * CUI__MM_PAD > W + 0.5f;
-    s->px = s->py = 1e9f;   /* the top left corner, once clamped */
+    s->cam.zoom = CUI_CLAMP(z, CUI__MM_MIN_ZOOM, 1.0f);
+    s->expand = z < CUI__MM_READABLE;
+    s->panel_h = CUI_MIN(s->bh * s->cam.zoom + 2 * CUI__MM_PAD, CUI__MM_MAX_H);
+    s->wheel = s->bh * s->cam.zoom + 2 * CUI__MM_PAD > CUI__MM_MAX_H + 0.5f;
+    s->pan = s->wheel || s->bw * s->cam.zoom + 2 * CUI__MM_PAD > W + 0.5f;
+    s->cam.px = s->cam.py = 1e9f;   /* the top left corner, once clamped */
 }
-static void cui__mm_clamp(cui__mm_state *s, float W) {
-    float cw = s->bw * s->zoom, ch = s->bh * s->zoom, P = CUI__MM_PAD;
-    s->px = cw + 2 * P <= W ? (W - cw) * 0.5f : CUI_CLAMP(s->px, W - P - cw, P);
-    s->py = ch + 2 * P <= s->panel_h ? (s->panel_h - ch) * 0.5f : CUI_CLAMP(s->py, s->panel_h - P - ch, P);
+/* a diagram smaller than the view sits in the middle, a bigger one stops at its edges */
+static void cui__mm_clamp(const cui__mm_state *s, cui__mm_cam *c, float W, float H) {
+    float cw = s->bw * c->zoom, ch = s->bh * c->zoom, P = CUI__MM_PAD;
+    c->px = cw + 2 * P <= W ? (W - cw) * 0.5f : CUI_CLAMP(c->px, W - P - cw, P);
+    c->py = ch + 2 * P <= H ? (H - ch) * 0.5f : CUI_CLAMP(c->py, H - P - ch, P);
 }
 
 static void cui__paint_mm_wheel(cui_ctx *ui, cui_node *n, void *data) { cui__paint_wheel_hit(ui, *(cui_id *)data, n->rect); }
 
-static void cui__mm_flow_view(cui_ctx *ui, cui_id id, cui__mm_state *s, float *natural) {
-    bool has = cui__has_prev_rect(ui, id);
-    cui_rect R = cui__prev_rect(ui, id);
-    float W = has && R.w > 0 ? R.w : 600;
-    if (!has) ui->animating = true;   /* fit once the width is known */
-    if (fabsf(W - s->fit_w) > 0.5f) cui__mm_fit(s, W);
-    *natural = s->bw + 2 * CUI__MM_PAD;
-    cui_id wid = id ^ 0x3E7B2u;
-    /* a diagram bigger than its panel pans with a drag, and with the wheel when taller */
-    if (s->pan && has) {
-        cui_interact bi = cui__interact(ui, id, CUI_IF_DRAG);
-        if (s->wheel && ui->scroll_target == wid && (ui->scroll_dy != 0 || ui->scroll_dx != 0)) {
-            if (ui->mods & CUI_MOD_PRIMARY) {
-                float nz = CUI_CLAMP(s->zoom * powf(1.12f, ui->scroll_dy), 0.3f, 2.0f);
-                float mx = ui->mx - R.x, my = ui->my - R.y;
-                float gx = (mx - s->px) / s->zoom, gy = (my - s->py) / s->zoom;
-                s->zoom = nz; s->px = mx - gx * nz; s->py = my - gy * nz;
-            } else if (ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT)) s->px += (ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy) * 40;
-            else s->py += ui->scroll_dy * 40;
-            ui->scroll_dx = ui->scroll_dy = 0;
-        }
-        if (bi.hovered && ui->mpressed[0] && s->mode == 0) { s->mode = 1; s->last_x = ui->mx; s->last_y = ui->my; }
-        if (s->mode) {
-            if (ui->mdown[0]) {
-                s->px += ui->mx - s->last_x; s->py += ui->my - s->last_y;
-                s->last_x = ui->mx; s->last_y = ui->my;
-                cui__set_cursor(ui, CUI_CURSOR_MOVE);
-            } else s->mode = 0;
-        }
+/* Drag pans; the wheel scrolls, and Ctrl or Cmd with the wheel zooms about the pointer. R is the
+ * view's rect from the last frame, wid the id of its wheel node. */
+static void cui__mm_cam_input(cui_ctx *ui, cui__mm_cam *c, cui_id id, cui_id wid, cui_rect R, bool wheel, float zmin, float zmax) {
+    cui_interact bi = cui__interact(ui, id, CUI_IF_DRAG);
+    if (wheel && ui->scroll_target == wid && (ui->scroll_dy != 0 || ui->scroll_dx != 0)) {
+        if (ui->mods & CUI_MOD_PRIMARY) {
+            float nz = CUI_CLAMP(c->zoom * powf(1.12f, ui->scroll_dy), zmin, zmax);
+            float mx = ui->mx - R.x, my = ui->my - R.y;
+            float gx = (mx - c->px) / c->zoom, gy = (my - c->py) / c->zoom;
+            c->zoom = nz; c->px = mx - gx * nz; c->py = my - gy * nz;
+        } else if (ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT)) c->px += (ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy) * 40;
+        else c->py += ui->scroll_dy * 40;
+        ui->scroll_dx = ui->scroll_dy = 0;
     }
-    cui__mm_clamp(s, W);
+    if (bi.hovered && ui->mpressed[0] && c->mode == 0) { c->mode = 1; c->last_x = ui->mx; c->last_y = ui->my; }
+    if (c->mode) {
+        if (ui->mdown[0]) {
+            c->px += ui->mx - c->last_x; c->py += ui->my - c->last_y;
+            c->last_x = ui->mx; c->last_y = ui->my;
+            cui__set_cursor(ui, CUI_CURSOR_MOVE);
+        } else c->mode = 0;
+    }
+}
+
+/* The panel the diagram is painted in, h points high. A wheel node on top catches the wheel; an
+ * expand button sits in the top right corner. Returns true when that button is clicked. */
+static bool cui__mm_surface(cui_ctx *ui, cui_id id, const cui__mm_state *s, const cui__mm_cam *c, float h, bool pan, bool wheel, bool expand) {
     int en = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[en];
     nd->w = CUI_FILL;
-    nd->h = CUI_PX(s->panel_h);
+    nd->h = CUI_PX(h);
     cui_color panel = ui->mode == CUI_THEME_DARK ? cui_mix(CUI_C(ui, BACKGROUND), CUI_C(ui, SURFACE), 0.45f) : CUI_C(ui, SURFACE_MUTED);
     nd->bg = panel;
     nd->border = 1; nd->border_color = CUI_C(ui, BORDER);
     nd->radius = CUI_CORNERS(ui->theme.radius_panel);
     nd->flags |= CUI_NF_CLIP;
     nd->direction = CUI_DIRECTION_LTR;
-    if (s->pan) cui__mark_interactive(ui, en, CUI_IF_DRAG);
+    if (pan) cui__mark_interactive(ui, en, CUI_IF_DRAG);
     cui__mm_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->s = s;
-    p->px = s->px; p->py = s->py; p->zoom = s->zoom;
+    p->px = c->px; p->py = c->py; p->zoom = c->zoom;
     p->panel = panel;
     p->edge = cui_mix(CUI_C(ui, TEXT_MUTED), CUI_C(ui, BORDER_STRONG), 0.35f);
     p->node_fill = CUI_C(ui, SURFACE);
@@ -1315,16 +1331,90 @@ static void cui__mm_flow_view(cui_ctx *ui, cui_id id, cui__mm_state *s, float *n
     p->group_text = CUI_C(ui, TEXT_SECONDARY);
     nd->paint = cui__paint_mermaid;
     nd->paint_data = p;
-    if (s->wheel) {
+    bool clicked = false;
+    if (wheel || expand) {
         cui__open(ui, en);
-        int wheel = cui__node_new(ui, 0);
-        ui->nodes[wheel].w = CUI_FILL; ui->nodes[wheel].h = CUI_FILL;
-        ui->nodes[wheel].paint = cui__paint_mm_wheel;
-        cui_id *wp = cui__frame_alloc(ui, sizeof *wp);
-        *wp = wid;
-        ui->nodes[wheel].paint_data = wp;
+        ui->nodes[en].dir = CUI_STACK;
+        if (wheel) {
+            int node = cui__node_new(ui, 0);
+            ui->nodes[node].w = CUI_FILL; ui->nodes[node].h = CUI_FILL;
+            ui->nodes[node].paint = cui__paint_mm_wheel;
+            cui_id *wp = cui__frame_alloc(ui, sizeof *wp);
+            *wp = id ^ 0x3E7B2u;
+            ui->nodes[node].paint_data = wp;
+        }
+        if (expand) {
+            int row = cui__node_new(ui, 0);
+            ui->nodes[row].dir = CUI_ROW; ui->nodes[row].w = CUI_FILL; ui->nodes[row].justify = CUI_JUSTIFY_END;
+            ui->nodes[row].pad[0] = ui->nodes[row].pad[1] = ui->nodes[row].pad[2] = ui->nodes[row].pad[3] = 6;
+            cui__open(ui, row);
+            cui_push_id_int(ui, (int)(id & 0x7fffffff));
+            cui_button_opts bo;
+            memset(&bo, 0, sizeof bo);
+            bo.variant = CUI_BUTTON_GHOST; bo.size = CUI_SIZE_SM; bo.tooltip = "Expand diagram"; bo.color = CUI_C(ui, TEXT_MUTED);
+            clicked = cui_icon_button_ex(ui, CUI_ICON_MAXIMIZE, &bo);
+            cui_pop_id(ui);
+            cui__close(ui);
+        }
         cui__close(ui);
     }
+    return clicked;
+}
+
+/* The expanded view: sized to the diagram at its opening scale, up to 90% of the window each way.
+ * It opens at the scale that fits (but between 0.7 and 1), centered; a drag pans it and Ctrl with
+ * the wheel zooms. Esc, the close button and a click outside close it (the dialog does that).
+ * What the dialog adds around the view: 50 points across, 130 down. */
+static void cui__mm_big_room(const cui_ctx *ui, float *w, float *h) {
+    *w = CUI_MAX(ui->vw * 0.9f - 50, 160.0f);
+    *h = CUI_MAX(ui->vh * 0.9f - 130, 120.0f);
+}
+static float cui__mm_big_zoom(const cui_ctx *ui, const cui__mm_state *s) {
+    float rw, rh;
+    cui__mm_big_room(ui, &rw, &rh);
+    float fit = CUI_MIN((rw - 2 * CUI__MM_PAD) / CUI_MAX(s->bw, 1.0f), (rh - 2 * CUI__MM_PAD) / CUI_MAX(s->bh, 1.0f));
+    return CUI_CLAMP(fit, 0.7f, 1.0f);
+}
+
+static void cui__mm_big_view(cui_ctx *ui, cui_id id, cui__mm_state *s) {
+    if (!s->big_open) return;
+    float rw, rh;
+    cui__mm_big_room(ui, &rw, &rh);
+    float W = CUI_MIN(s->bw * s->big_z0 + 2 * CUI__MM_PAD, rw), H = CUI_MIN(s->bh * s->big_z0 + 2 * CUI__MM_PAD, rh);
+    W = CUI_MAX(W, 160.0f); H = CUI_MAX(H, 120.0f);
+    const char *title = "Diagram";   /* the first node's label names it */
+    if (s->nn > 0) {
+        const char *l = s->pool + s->node[0].label;
+        if (l[0] && strlen(l) <= 48 && !strchr(l, '\n')) title = l;
+    }
+    cui_dialog_opts d;
+    memset(&d, 0, sizeof d);
+    d.width = W + 50;
+    if (!cui_dialog_begin(ui, title, &s->big_open, &d)) return;
+    cui_id bid = id ^ 0x3E7C4u;
+    if (cui__has_prev_rect(ui, bid)) cui__mm_cam_input(ui, &s->big, bid, bid ^ 0x3E7B2u, cui__prev_rect(ui, bid), true, 0.1f, 4.0f);
+    else ui->animating = true;
+    cui__mm_clamp(s, &s->big, W, H);
+    cui__mm_surface(ui, bid, s, &s->big, H, true, true, false);
+    cui_dialog_end(ui);
+}
+
+static void cui__mm_flow_view(cui_ctx *ui, cui_id id, cui__mm_state *s, float *natural) {
+    bool has = cui__has_prev_rect(ui, id);
+    cui_rect R = cui__prev_rect(ui, id);
+    float W = has && R.w > 0 ? R.w : 600;
+    if (!has) ui->animating = true;   /* fit once the width is known */
+    if (fabsf(W - s->fit_w) > 0.5f) cui__mm_fit(s, W);
+    *natural = s->bw + 2 * CUI__MM_PAD;
+    /* a diagram bigger than its panel pans with a drag, and with the wheel when taller */
+    if (s->pan && has) cui__mm_cam_input(ui, &s->cam, id, id ^ 0x3E7B2u, R, s->wheel, 0.3f, 2.0f);
+    cui__mm_clamp(s, &s->cam, W, s->panel_h);
+    if (cui__mm_surface(ui, id, s, &s->cam, s->panel_h, s->pan, s->wheel, s->expand) && !s->big_open) {
+        s->big_open = true;
+        s->big_z0 = cui__mm_big_zoom(ui, s);
+        s->big = (cui__mm_cam){ s->big_z0, 1e9f, 1e9f, 0, 0, 0 };
+    }
+    cui__mm_big_view(ui, id, s);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1359,7 +1449,7 @@ static void cui__mm_gantt_view(cui_ctx *ui, cui_id id, const char *id_str, cui__
     int days = s->days;
     float dw = 30, fs = cui__fs(ui, ui->theme.text_sm);
     for (int pass = 0; pass < 2; pass++) {
-        dw = CUI_CLAMP((W - list - 2) / (float)days, 8.0f, 30.0f);
+        dw = CUI_CLAMP((W - list - 2) / (float)days, 2.0f, 30.0f);   /* shrinks to the width instead of scrolling */
         for (int k = 0; k < s->ntasks; k++)
             if (s->tasks[k].milestone) {
                 float lw = cui__text_width(ui, CUI_FONT_MEDIUM, fs, s->tasks[k].name, -1, false) + 80;
@@ -1411,5 +1501,55 @@ bool cui__mermaid_block(cui_ctx *ui, const char *id_str, const char *src, int le
     default: return false;
     }
     ui->last_id = id;
+    return true;
+}
+
+/* For tests: lays out a flowchart and counts where one routed edge crosses another and where an
+ * edge runs through a box that is not one of its ends. False when src is not a flowchart. */
+bool cui__mermaid_probe(cui_ctx *ui, const char *src, int len, float body, int *crossings, int *box_hits) {
+    cui__mm_state s;
+    memset(&s, 0, sizeof s);
+    s.fs = cui__fs(ui, body * 0.95f); s.lfs = cui__fs(ui, body * 0.85f);
+    cui__mm_parse(ui, &s, src, len);
+    *crossings = *box_hits = 0;
+    if (s.kind != CUI__MM_FLOW) { cui__mm_release(ui, &s); return false; }
+    cui__mm_paint pp = { &s, 0, 0, 1.0f };
+    cui_rect r = { 0, 0, 0, 0 };
+    int ne = s.g.ne, per = 18 * (2 + s.g.nv - s.nn - s.nlab);
+    cui_vec2 *pts = cui__frame_alloc(ui, sizeof(cui_vec2) * (size_t)per * (size_t)CUI_MAX(1, ne));
+    int *cnt = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, ne));
+    for (int k = 0; k < ne; k++) cnt[k] = cui__mm_edge_poly(&pp, r, k, pts + (size_t)k * (size_t)per);
+    for (int k = 0; k < ne; k++) {
+        const cui_vec2 *a = pts + (size_t)k * (size_t)per;
+        for (int v = 0; v < s.nn + s.nlab; v++) {
+            if (v == s.g.from[k] || v == s.g.to[k]) continue;
+            const cui__layer_box *b = &s.g.box[v];
+            float x0 = b->x - s.x0 + 3, y0 = b->y - s.y0 + 3, x1 = b->x - s.x0 + b->w - 3, y1 = b->y - s.y0 + b->h - 3;
+            for (int i = 0; i < cnt[k]; i++)
+                if (a[i].x > x0 && a[i].x < x1 && a[i].y > y0 && a[i].y < y1) { (*box_hits)++; break; }
+        }
+        for (int j = k + 1; j < ne; j++) {
+            const cui_vec2 *c = pts + (size_t)j * (size_t)per;
+            for (int i = 0; i + 1 < cnt[k]; i++)
+                for (int m = 0; m + 1 < cnt[j]; m++) {
+                    float d1x = a[i + 1].x - a[i].x, d1y = a[i + 1].y - a[i].y, d2x = c[m + 1].x - c[m].x, d2y = c[m + 1].y - c[m].y;
+                    float den = d1x * d2y - d1y * d2x;
+                    if (fabsf(den) < 1e-6f) continue;
+                    float t = ((c[m].x - a[i].x) * d2y - (c[m].y - a[i].y) * d2x) / den;
+                    float u = ((c[m].x - a[i].x) * d1y - (c[m].y - a[i].y) * d1x) / den;
+                    if (t > 0 && t < 1 && u > 0 && u < 1) (*crossings)++;
+                }
+        }
+    }
+    cui__mm_release(ui, &s);
+    return true;
+}
+
+/* For tests: the state of the flowchart drawn under id_str: its scale, whether it offers the
+ * expand button, whether the expanded view is open, and the width it would need at scale 1. */
+bool cui__mermaid_view_info(cui_ctx *ui, const char *id_str, float *zoom, bool *expand, bool *big_open, float *natural) {
+    const cui__mm_state *s = cui_state(ui, cui_make_id(ui, id_str) ^ 0x3E7A1u, sizeof(cui__mm_state));
+    if (s->kind != CUI__MM_FLOW) return false;
+    *zoom = s->cam.zoom; *expand = s->expand; *big_open = s->big_open; *natural = s->bw + 2 * CUI__MM_PAD;
     return true;
 }

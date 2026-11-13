@@ -5,6 +5,7 @@
 #include <cui/cui_render.h>
 
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -180,6 +181,79 @@ static void test_caps(void) {
     cui_destroy(ui);
 }
 
+/* Back edges are routed beside the forward edges: no routed edge crosses another or runs through a
+ * box that is not its end, top down and left to right, for flowcharts with cycles. */
+static void test_crossings(void) {
+    printf("mermaid: cycles are routed without crossings\n");
+    cui_ctx *ui = new_ctx();
+    static const char *const body[] = {
+        "  A[Start] --> B{Valid?}\n  B -- yes --> C[Process]\n  B -- no --> D[Fix input]\n  D --> B\n  C --> E[Save]\n  E --> F{More?}\n  F -- yes --> A\n  F -- no --> G[Done]\n",
+        "  A-->B; B-->C; C-->A; B-->D\n",
+        "  A-->B-->C-->D; D-->A\n",
+        "  A-->B-->C-->D; D-->B\n",
+        "  A-->B; A-->C; B-->D; C-->D; D-->A\n",
+        "  A-->B-->C; C-->B; C-->A\n",
+        "  S --> W{Ready?}\n  W -->|no| T --> W\n  W -->|yes| R((Run))\n  R --> X --> S\n",
+        "  A-->B; B-->A\n",
+    };
+    static const char *const heads[] = { "graph TD\n", "graph LR\n", "graph BT\n", "graph RL\n" };
+    for (int h = 0; h < 4; h++)
+        for (int k = 0; k < (int)(sizeof body / sizeof body[0]); k++) {
+            static char src[1024];
+            int cr, hit, n = snprintf(src, sizeof src, "%s%s", heads[h], body[k]);
+            bool ok = cui__mermaid_probe(ui, src, n, 13, &cr, &hit);
+            if (!ok || cr || hit) printf("  %d crossings, %d box hits: %s\n", cr, hit, src);
+            CHECK(ok && cr == 0 && hit == 0);
+        }
+    cui_destroy(ui);
+}
+
+/* A diagram wider than its column shrinks to the width (no sideways scrolling) and offers an
+ * expanded view when the text would be small; Esc closes it. */
+static void test_fit(void) {
+    printf("mermaid: wide diagrams fit the width, small ones expand\n");
+    cui_ctx *ui = new_ctx();
+    float zoom, natural;
+    bool expand, big;
+    /* 600 points of room (the column is 640 with a pad of 20): about 1.0 fits, and 0.3 is a big shrink */
+    mm_run a = { "graph LR\n  A --> B", 0, false, 0 };
+    mm_frames(ui, &a, 4);
+    CHECK(cui__mermaid_view_info(ui, "d", &zoom, &expand, &big, &natural));
+    CHECK(zoom == 1.0f && !expand && !big);
+    static char wide[600];
+    int o = snprintf(wide, sizeof wide, "graph LR\n");
+    for (int k = 0; k < 7; k++) o += snprintf(wide + o, sizeof wide - (size_t)o, "  Step%d[Stage number %d] --> Step%d\n", k, k, k + 1);
+    mm_run w = { wide, 0, false, 0 };
+    mm_frames(ui, &w, 4);
+    CHECK(w.ok && cui__mermaid_view_info(ui, "d", &zoom, &expand, &big, &natural));
+    float panel = cui_get_rect(ui, cui_make_id(ui, "d")).w, want = (panel - 32.0f) / (natural - 32.0f);   /* natural has the padding in it */
+   CHECK(natural > 1000);
+    CHECK(fabsf(zoom - want) < 0.01f && zoom < 0.55f && zoom >= 0.25f);   /* it used to stop at 0.55 and scroll */
+    CHECK(expand && !big);
+    /* the button is in the top right corner; a click opens the expanded view, Esc closes it */
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "d"));
+    cui_input_mouse_move(ui, r.x + r.w - 6 - 14, r.y + 6 + 14);
+    mm_frames(ui, &w, 3);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    mm_frames(ui, &w, 2);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    mm_frames(ui, &w, 3);
+    CHECK(cui__mermaid_view_info(ui, "d", &zoom, &expand, &big, &natural) && big);
+    cui_input_key(ui, CUI_KEY_ESCAPE, true, 0);
+    mm_frames(ui, &w, 1);
+    cui_input_key(ui, CUI_KEY_ESCAPE, false, 0);
+    mm_frames(ui, &w, 3);
+    CHECK(cui__mermaid_view_info(ui, "d", &zoom, &expand, &big, &natural) && !big);
+    /* an even wider one stops at the floor */
+    static char huge[2000];
+    o = snprintf(huge, sizeof huge, "graph LR\n");
+    for (int k = 0; k < 40; k++) o += snprintf(huge + o, sizeof huge - (size_t)o, "  S%d[Stage %d] --> S%d\n", k, k, k + 1);
+    w.src = huge;
+    mm_frames(ui, &w, 4);
+    CHECK(w.ok && cui__mermaid_view_info(ui, "d", &zoom, &expand, &big, &natural) && zoom == 0.25f && expand);
+    cui_destroy(ui);
+}
+
 static unsigned g_rng = 0x9E3779B9u;
 static unsigned rnd(void) { g_rng ^= g_rng << 13; g_rng ^= g_rng >> 17; g_rng ^= g_rng << 5; return g_rng; }
 
@@ -228,6 +302,8 @@ int main(void) {
     test_accepts();
     test_falls_back();
     test_caps();
+    test_crossings();
+    test_fit();
     test_random();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);

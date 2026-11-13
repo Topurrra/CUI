@@ -795,5 +795,10 @@ bool cui__layered_layout(cui_ctx *ui, cui__layered *g, const float *w, const flo
 /* Builds the diagram in src (len bytes) under id, body the markdown's text size; false, with
  * nothing built, when src is not a diagram it draws. *natural gets the width it would like. */
 bool cui__mermaid_block(cui_ctx *ui, const char *id, const char *src, int len, float body, float *natural);
+/* For tests: lays out the flowchart in src and counts where routed edges cross each other and
+ * where an edge runs through a box that is not one of its ends. False for anything else. */
+bool cui__mermaid_probe(cui_ctx *ui, const char *src, int len, float body, int *crossings, int *box_hits);
+/* For tests: the scale, expand button and expanded view of the flowchart built under id. */
+bool cui__mermaid_view_info(cui_ctx *ui, const char *id, float *zoom, bool *expand, bool *big_open, float *natural);
 
 #endif /* CUI_INTERNAL_H */
