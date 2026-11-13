@@ -1642,6 +1642,37 @@ static void scene_markdown_select(cui_ctx *ui, int f) {
     }
     frame_wrap(ui, body_markdown_select);
 }
+/* everything selected with Ctrl+A: a callout's title, a table's header and a diagram's labels too */
+static void body_markdown_select_all(cui_ctx *ui) {
+    cui_box(ui, UPTO(520)) {
+        cui_markdown(ui, "notes",
+            "Sprint notes, ready to copy with **Ctrl+C**.\n"
+            "\n"
+            "> [!tip] Ship on Friday\n"
+            "> Freeze the branch on Thursday.\n"
+            "\n"
+            "| Task | Owner |\n"
+            "|---|---|\n"
+            "| Docs | Ana |\n"
+            "\n"
+            "```mermaid\n"
+            "graph LR\n"
+            "A[Plan]-->|review|B[Build]-->C[Ship]\n"
+            "```\n");
+    }
+}
+static void scene_markdown_select_all(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        if (f == 3) cui_input_mouse_move(ui, 100, 47);
+        if (f == 4) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (f == 5) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (f == 8) { cui_input_key(ui, CUI_KEY_A, true, CUI_MOD_PRIMARY); cui_input_key(ui, CUI_KEY_A, false, CUI_MOD_PRIMARY); }
+        if (f == 9) cui_input_mouse_leave(ui);
+        return;
+    }
+    frame_wrap(ui, body_markdown_select_all);
+}
 /* mermaid diagrams in markdown: a flowchart left to right, one top down with edge labels and a
  * decision, and a pie */
 SCENE(mermaid) {
@@ -4741,6 +4772,7 @@ int main(int argc, char **argv) {
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
+        { "markdown-select-all", scene_markdown_select_all, 560, 340, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },

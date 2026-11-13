@@ -6108,7 +6108,7 @@ static void test_markdown_select(void) {
     md_frames(ui, &m, 30);
     click_at(ui, build_md, &m, r.x + 20, r.y + 10);
     key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
-    CHECK(strcmp(md_copy(ui, &m), "Title\nAlpha beta.\nitem one\nquoted\ncode line\nc\td") == 0);
+    CHECK(strcmp(md_copy(ui, &m), "Title\nAlpha beta.\nitem one\nquoted\ncode line\nh1\th2\nc\td") == 0);
     /* a click outside the view lets go of the keys */
     md_frames(ui, &m, 30);
     click_at(ui, build_md, &m, 790, 590);
@@ -6134,12 +6134,12 @@ static void test_markdown_select(void) {
     size_t pl = strlen(part);
     CHECK(pl > 25 && pl < 40 && strcmp(part + pl - 22, "now.\nSecond paragraph.") == 0);
 
-    /* a press on a diagram never starts a selection */
+    /* a drag that starts in a diagram that does not pan selects from its labels on */
     snprintf(m.text, sizeof m.text, "```mermaid\ngraph TD\nA-->B\n```\n\nafter the diagram\n");
     md_frames(ui, &m, 5);
     r = md_rect(ui);
     md_drag(ui, &m, r.x + 20, r.y + 20, r.x + r.w - 2, r.y + r.h - 5);
-    CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+    CHECK(strcmp(md_copy(ui, &m), "A\nB\nafter the diagram") == 0);
     /* .no_select: a drag selects nothing and the pointer stays an arrow */
     snprintf(m.text, sizeof m.text, "Alpha beta gamma.\n\nDelta epsilon zeta.\n");
     m.no_select = true;
@@ -6149,6 +6149,99 @@ static void test_markdown_select(void) {
     CHECK(cui_get_cursor(ui) != CUI_CURSOR_TEXT);
     key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
     CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+    cui_destroy(ui);
+}
+
+/* selection of callout titles, table headers and diagram labels */
+static void test_markdown_select_labels(void) {
+    printf("markdown: selecting callout titles, table headers and diagram labels\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    static char part[512];
+    memset(&m, 0, sizeof m);
+    /* Ctrl+A copies callout titles, header cells and diagram labels in document order */
+    snprintf(m.text, sizeof m.text,
+             "Intro.\n\n> [!tip] Callout title\n> Callout body.\n\n| h1 | h2 |\n|---|---|\n| c | d |\n\n"
+             "```mermaid\ngraph LR\nA[Start]-->|go|B[End]\n```\n\n"
+             "```mermaid\npie\n\"Dogs\" : 82\n\"Cats\" : 18\n```\n\n"
+             "```mermaid\ngantt\ndateFormat YYYY-MM-DD\nDesign : 2024-01-01, 3d\nBuild : 3d\n```\n\nOutro.\n");
+    md_frames(ui, &m, 5);
+    cui_rect r = md_rect(ui);
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 20, r.y + 10);
+    key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(strcmp(md_copy(ui, &m), "Intro.\nCallout title\nCallout body.\nh1\th2\nc\td\nStart\nEnd\ngo\nDogs 82%\nCats 18%\nDesign\nBuild\nOutro.") == 0);
+
+    /* a drag from a paragraph across a callout title into its body */
+    snprintf(m.text, sizeof m.text, "Intro paragraph.\n\n> [!tip] Callout title\n> Body text that runs on.\n\nAfter.\n");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    md_drag(ui, &m, r.x + 1, r.y + 10, r.x + 60, r.y + r.h - 50);
+    snprintf(part, sizeof part, "%s", md_copy(ui, &m));
+    CHECK(strncmp(part, "Intro paragraph.\nCallout title\nBo", 33) == 0 && strlen(part) < 50);
+
+    /* a selection that starts at the very end of a block keeps the line break after it */
+    snprintf(m.text, sizeof m.text, "Alpha.\n\nDelta epsilon.\n");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    md_drag(ui, &m, r.x + r.w - 2, r.y + 10, r.x + r.w - 2, r.y + r.h - 10);
+    CHECK(strcmp(md_copy(ui, &m), "\nDelta epsilon.") == 0);
+
+    /* a click on a foldable callout's header toggles it; a drag on it selects the title instead */
+    snprintf(m.text, sizeof m.text, "> [!note]- Folded title here\n> Hidden body.\n");
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    float closed_h = r.h, hy = r.y + r.h * 0.5f;
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 60, hy);
+    md_frames(ui, &m, 3);
+    CHECK(md_rect(ui).h > closed_h + 10);
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 60, hy);
+    md_frames(ui, &m, 3);
+    CHECK(fabsf(md_rect(ui).h - closed_h) < 1);
+    md_drag(ui, &m, r.x + 40, hy, r.x + r.w - 40, hy);
+    md_frames(ui, &m, 3);
+    CHECK(fabsf(md_rect(ui).h - closed_h) < 1);
+    snprintf(part, sizeof part, "%s", md_copy(ui, &m));
+    CHECK(strlen(part) > 4 && strstr("Folded title here", part) != NULL);
+
+    /* a double click on a flowchart node's label selects that label */
+    snprintf(m.text, sizeof m.text, "```mermaid\ngraph TD\nA[Alpha]-->B[Beta]\n```\n");
+    md_frames(ui, &m, 5);
+    r = md_rect(ui);
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + r.w * 0.5f, r.y + 35);
+    click_at(ui, build_md, &m, r.x + r.w * 0.5f, r.y + 35);
+    CHECK(strcmp(md_copy(ui, &m), "Alpha") == 0);
+
+    /* a tall diagram pans with a drag, and double clicks still select its labels */
+    {
+        int n = snprintf(m.text, sizeof m.text, "Above.\n\n```mermaid\ngraph TD\n");
+        for (int k = 0; k < 14; k++) n += snprintf(m.text + n, sizeof m.text - (size_t)n, "N%d-->N%d\n", k, k + 1);
+        snprintf(m.text + n, sizeof m.text - (size_t)n, "```\n\nBelow.\n");
+    }
+    md_frames(ui, &m, 5);
+    r = md_rect(ui);
+    float cx = r.x + r.w * 0.5f;
+    float ys[2] = { -1, -1 };   /* where N1's label is, before and after the pan */
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 1) {   /* the drag pans: nothing selects */
+            md_drag(ui, &m, cx + 120, r.y + 300, cx + 120, r.y + 240);
+            CHECK(strcmp(md_copy(ui, &m), "-") == 0);
+        }
+        for (float y = r.y + 60; y < r.y + 300 && ys[pass] < 0; y += 6) {
+            md_frames(ui, &m, 30);
+            click_at(ui, build_md, &m, cx, y);
+            click_at(ui, build_md, &m, cx, y);
+            if (strcmp(md_copy(ui, &m), "N1") == 0) ys[pass] = y;
+        }
+    }
+    CHECK(ys[0] > 0 && ys[1] > 0 && fabsf(ys[0] - ys[1] - 60) < 8);
+    /* a selection dragged from above to below the diagram takes its labels */
+    md_drag(ui, &m, r.x + 1, r.y + 10, r.x + r.w - 2, r.y + r.h - 10);
+    snprintf(part, sizeof part, "%s", md_copy(ui, &m));
+    CHECK(strncmp(part, "Above.\nN0\nN1\nN2\n", 16) == 0 && strlen(part) > 26 && strcmp(part + strlen(part) - 10, "N14\nBelow.") == 0);
     cui_destroy(ui);
 }
 
@@ -8549,6 +8642,7 @@ int main(void) {
     test_markdown_images();
     test_markdown_callout_fold_keys();
     test_markdown_select();
+    test_markdown_select_labels();
     test_code_editor();
     test_code_editor_wrap();
     test_code_editor_markdown();

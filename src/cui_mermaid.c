@@ -53,6 +53,7 @@ typedef struct {
     int nn;
     int *lab;                    /* label of each edge label box */
     int nlab;
+    int *order, *rank;           /* the node and edge label boxes in reading order, and each box's place in it */
     uint8_t *seg;                /* per laid out edge: style, head << 2, tail << 4 */
     float *poff;                 /* per laid out edge: where it leaves and enters its boxes, off their sides' middles */
     cui__mm_edge *loop;          /* edges from a node to itself, drawn as loops beside it */
@@ -82,8 +83,8 @@ typedef struct {
 static void cui__mm_release(cui_ctx *ui, cui__mm_state *s) {
     cui__layered_free(ui, &s->g);
     cui__free(ui, s->pool); cui__free(ui, s->node); cui__free(ui, s->lab); cui__free(ui, s->seg);
-    cui__free(ui, s->poff); cui__free(ui, s->loop);
-    s->poff = NULL; s->loop = NULL; s->nloop = 0;
+    cui__free(ui, s->poff); cui__free(ui, s->loop); cui__free(ui, s->order);
+    s->poff = NULL; s->loop = NULL; s->nloop = 0; s->order = s->rank = NULL;
     cui__free(ui, s->group); cui__free(ui, s->values); cui__free(ui, (void *)s->names); cui__free(ui, s->tasks);
     s->pool = NULL; s->node = NULL; s->lab = NULL; s->seg = NULL; s->group = NULL;
     s->values = NULL; s->names = NULL; s->tasks = NULL;
@@ -629,6 +630,32 @@ static bool cui__mm_ports(cui_ctx *ui, cui__mm_state *s) {
     return true;
 }
 
+/* Whether box a reads before box b: nodes before edge labels, then layer by layer as drawn
+ * (a flipped chart's last layer comes first), then across the layer. */
+static bool cui__mm_reads_before(const cui__mm_state *s, int a, int b) {
+    bool la = a >= s->nn, lb = b >= s->nn;
+    if (la != lb) return lb;
+    const cui__layer_box *A = &s->g.box[a], *B = &s->g.box[b];
+    if (A->layer != B->layer) return s->flip ? A->layer > B->layer : A->layer < B->layer;
+    return s->g.top_down ? A->x + A->w * 0.5f < B->x + B->w * 0.5f : A->y + A->h * 0.5f < B->y + B->h * 0.5f;
+}
+
+/* The order the markdown view's selection reads the labels in; once per text, so a plain
+ * insertion sort will do. */
+static bool cui__mm_reading_order(cui_ctx *ui, cui__mm_state *s) {
+    int nb = s->nn + s->nlab;
+    s->order = cui__alloc(ui, sizeof(int) * 2 * (size_t)CUI_MAX(1, nb));
+    if (!s->order) return false;
+    s->rank = s->order + nb;
+    for (int v = 0; v < nb; v++) {
+        int k = v;
+        while (k > 0 && cui__mm_reads_before(s, v, s->order[k - 1])) { s->order[k] = s->order[k - 1]; k--; }
+        s->order[k] = v;
+    }
+    for (int k = 0; k < nb; k++) s->rank[s->order[k]] = k;
+    return true;
+}
+
 /* Copies the parsed chart into state and lays it out: an edge with a label runs through a box
  * of its own for the label, so labels get their place in a layer like nodes. */
 static bool cui__mm_build_flow(cui_ctx *ui, cui__mm_state *s, const cui__mm_flow *f) {
@@ -709,7 +736,7 @@ static bool cui__mm_build_flow(cui_ctx *ui, cui__mm_state *s, const cui__mm_flow
         x0 = CUI_MIN(x0, G->x); y0 = CUI_MIN(y0, G->y); x1 = CUI_MAX(x1, G->x + G->w); y1 = CUI_MAX(y1, G->y + G->h);
     }
     s->x0 = x0; s->y0 = y0; s->bw = x1 - x0; s->bh = y1 - y0;
-    return true;
+    return cui__mm_reading_order(ui, s);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -973,7 +1000,20 @@ typedef struct {
     const cui__mm_state *s;
     float px, py, zoom;
     cui_color edge, node_fill, node_edge, text, label_text, panel, group_fill, group_edge, group_text;
+    const cui__mermaid_sel *sel;   /* the markdown view's selection of the labels, or NULL */
 } cui__mm_paint;
+
+/* Whether label k is (partly) inside the markdown view's selection; labels highlight whole. */
+static bool cui__mm_sel_on(const cui__mermaid_sel *m, int k) {
+    if (!m || k < 0 || k >= m->count || m->to <= m->from) return false;
+    int a = m->at[k], b = m->at[k + 1] - 1;
+    return b > a && m->from < b && m->to > a;
+}
+
+/* The selection tint behind a label's text of size w by h centered on (cx, cy). */
+static void cui__mm_sel_tint(cui_ctx *ui, const cui__mermaid_sel *m, float cx, float cy, float w, float h, float z) {
+    cui_draw_rect(ui, (cui_rect){ cx - w * 0.5f - 2 * z, cy - h * 0.5f, w + 4 * z, h }, CUI_CORNERS(2 * z), m->color);
+}
 
 static cui_vec2 cui__mm_pt(const cui__mm_paint *p, cui_rect r, float x, float y) {
     return (cui_vec2){ r.x + p->px + (x - p->s->x0) * p->zoom, r.y + p->py + (y - p->s->y0) * p->zoom };
@@ -1125,8 +1165,11 @@ static void cui__mm_paint_loops(cui_ctx *ui, const cui__mm_paint *p, cui_rect r)
     const cui__mm_state *s = p->s;
     bool td = s->g.top_down;
     float z = p->zoom, a = 8 * CUI_MAX(z, 0.6f);
+    int sel_k = s->nn + s->nlab;   /* labelled loops follow the boxes in the selection's text */
     for (int k = 0; k < s->nloop; k++) {
         const cui__mm_edge *e = &s->loop[k];
+        bool sel_on = e->label > 0 && cui__mm_sel_on(p->sel, sel_k);
+        if (e->label > 0) sel_k++;
         if (e->style == CUI__MML_HIDDEN) continue;
         const cui__layer_box *b = &s->g.box[e->from];
         int side = td ? 1 : 0;
@@ -1154,6 +1197,7 @@ static void cui__mm_paint_loops(cui_ctx *ui, const cui__mm_paint *p, cui_rect r)
             float cx = td ? apex.x + 6 * z + lw * 0.5f : apex.x, cy = td ? apex.y : apex.y - 3 * z - lh * 0.5f;
             cui_rect lr = { cx - lw * 0.5f - 6 * z, cy - lh * 0.5f - 3 * z, lw + 12 * z, lh + 6 * z };
             cui_draw_rect(ui, lr, CUI_CORNERS(4 * z), p->panel);
+            if (sel_on) cui__mm_sel_tint(ui, p->sel, cx, cy, lw, lh, z);
             cui__mm_text(ui, s->pool + e->label, cx, cy, lfs, p->label_text);
         }
     }
@@ -1246,14 +1290,17 @@ static void cui__paint_mermaid(cui_ctx *ui, cui_node *n, void *data) {
         cui_vec2 o = cui__mm_pt(p, r, b->x, b->y);
         cui_rect br = { o.x, o.y, b->w * z, b->h * z };
         if (br.x > r.x + r.w || br.y > r.y + r.h || br.x + br.w < r.x || br.y + br.h < r.y) continue;
+        const char *t = s->pool + (v < s->nn ? s->node[v].label : s->lab[v - s->nn]);
+        float fs = (v < s->nn ? s->fs : s->lfs) * z, cx = br.x + br.w * 0.5f, cy = br.y + br.h * 0.5f;
         if (v < s->nn) {
             cui__mm_shape(ui, p, s->node[v].shape, br);
-            float dy = s->node[v].shape == CUI__MMS_DB ? 4 * z : 0;
-            cui__mm_text(ui, s->pool + s->node[v].label, br.x + br.w * 0.5f, br.y + br.h * 0.5f + dy, s->fs * z, p->text);
-        } else {
-            cui_draw_rect(ui, br, CUI_CORNERS(4 * z), p->panel);
-            cui__mm_text(ui, s->pool + s->lab[v - s->nn], br.x + br.w * 0.5f, br.y + br.h * 0.5f, s->lfs * z, p->label_text);
+            if (s->node[v].shape == CUI__MMS_DB) cy += 4 * z;
+        } else cui_draw_rect(ui, br, CUI_CORNERS(4 * z), p->panel);
+        if (cui__mm_sel_on(p->sel, s->rank[v])) {
+            float th, tw = cui__mm_label_size(ui, t, fs, &th);
+            cui__mm_sel_tint(ui, p->sel, cx, cy, tw, th, z);
         }
+        cui__mm_text(ui, t, cx, cy, fs, v < s->nn ? p->text : p->label_text);
     }
     cui_pop_clip(ui);
 }
@@ -1305,7 +1352,8 @@ static void cui__mm_cam_input(cui_ctx *ui, cui__mm_cam *c, cui_id id, cui_id wid
 
 /* The panel the diagram is painted in, h points high. A wheel node on top catches the wheel; an
  * expand button sits in the top right corner. Returns true when that button is clicked. */
-static bool cui__mm_surface(cui_ctx *ui, cui_id id, const cui__mm_state *s, const cui__mm_cam *c, float h, bool pan, bool wheel, bool expand) {
+static bool cui__mm_surface(cui_ctx *ui, cui_id id, const cui__mm_state *s, const cui__mm_cam *c, float h, bool pan, bool wheel, bool expand,
+                            const cui__mermaid_sel *sel) {
     int en = cui__node_new(ui, id);
     cui_node *nd = &ui->nodes[en];
     nd->w = CUI_FILL;
@@ -1329,6 +1377,7 @@ static bool cui__mm_surface(cui_ctx *ui, cui_id id, const cui__mm_state *s, cons
     p->group_fill = cui_alpha(CUI_C(ui, FOREGROUND), 0.035f);
     p->group_edge = CUI_C(ui, BORDER);
     p->group_text = CUI_C(ui, TEXT_SECONDARY);
+    p->sel = sel;
     nd->paint = cui__paint_mermaid;
     nd->paint_data = p;
     bool clicked = false;
@@ -1395,11 +1444,120 @@ static void cui__mm_big_view(cui_ctx *ui, cui_id id, cui__mm_state *s) {
     if (cui__has_prev_rect(ui, bid)) cui__mm_cam_input(ui, &s->big, bid, bid ^ 0x3E7B2u, cui__prev_rect(ui, bid), true, 0.1f, 4.0f);
     else ui->animating = true;
     cui__mm_clamp(s, &s->big, W, H);
-    cui__mm_surface(ui, bid, s, &s->big, H, true, true, false);
+    cui__mm_surface(ui, bid, s, &s->big, H, true, true, false, NULL);
     cui_dialog_end(ui);
 }
 
-static void cui__mm_flow_view(cui_ctx *ui, cui_id id, cui__mm_state *s, float *natural) {
+/* ------------------------------------------------------------------------ */
+/* The labels as text, for the markdown view's selection                    */
+/* ------------------------------------------------------------------------ */
+
+/* Room for count labels of bytes bytes in all, from the frame arena. */
+static void cui__mm_sel_alloc(cui_ctx *ui, cui__mermaid_sel *m, int count, int bytes) {
+    m->text = cui__frame_alloc(ui, (size_t)(bytes + count + 1));
+    m->at = cui__frame_alloc(ui, sizeof(int) * (size_t)(count + 1));
+    m->rect = cui__frame_alloc(ui, sizeof(cui_rect) * (size_t)CUI_MAX(1, count));
+    m->count = m->len = 0;
+    m->at[0] = 0;
+}
+
+/* Appends a label, a then (when there is one) a space and b, on a line of its own. */
+static void cui__mm_sel_add(cui__mermaid_sel *m, const char *a, const char *b) {
+    if (m->count > 0) m->text[m->len++] = '\n';
+    m->at[m->count] = m->len;
+    for (const char *q = a; q && *q; q++) m->text[m->len++] = *q == '\n' ? ' ' : *q;   /* a label's own lines join */
+    if (b && *b) {
+        m->text[m->len++] = ' ';
+        for (const char *q = b; *q; q++) m->text[m->len++] = *q == '\n' ? ' ' : *q;
+    }
+    m->text[m->len] = 0;
+    m->count++;
+    m->at[m->count] = m->len + 1;   /* as if a line break followed: label k ends at at[k + 1] - 1 */
+}
+
+/* A flowchart's labels: the boxes in reading order, then the loops' labels; where each box
+ * sits in the panel laid out at R last frame, through the camera c. */
+static void cui__mm_flow_sel(cui_ctx *ui, const cui__mm_state *s, const cui__mm_cam *c, cui__mermaid_sel *m, cui_rect R, bool has) {
+    int nb = s->nn + s->nlab, count = nb, bytes = 0;
+    for (int v = 0; v < nb; v++) bytes += (int)strlen(s->pool + (v < s->nn ? s->node[v].label : s->lab[v - s->nn])) + 1;
+    for (int k = 0; k < s->nloop; k++)
+        if (s->loop[k].label > 0) { count++; bytes += (int)strlen(s->pool + s->loop[k].label) + 1; }
+    cui__mm_sel_alloc(ui, m, count, bytes);
+    cui__mm_paint p;
+    memset(&p, 0, sizeof p);
+    p.s = s; p.px = c->px; p.py = c->py; p.zoom = c->zoom;
+    for (int k = 0; k < nb; k++) {
+        int v = s->order[k];
+        cui__mm_sel_add(m, s->pool + (v < s->nn ? s->node[v].label : s->lab[v - s->nn]), NULL);
+        const cui__layer_box *b = &s->g.box[v];
+        cui_vec2 o = cui__mm_pt(&p, R, b->x, b->y);
+        if (has) m->rect[k] = (cui_rect){ o.x, o.y, b->w * c->zoom, b->h * c->zoom };
+    }
+    for (int k = 0; k < s->nloop; k++)   /* drawn beside their node: copied, not hit */
+        if (s->loop[k].label > 0) cui__mm_sel_add(m, s->pool + s->loop[k].label, NULL);
+}
+
+typedef struct { const cui__mermaid_sel *sel; int label; } cui__mm_label_paint;
+
+/* Under a label's text node in the pie's legend or the gantt's task list: the selection tint. */
+static void cui__mm_paint_label_sel(cui_ctx *ui, cui_node *n, void *data) {
+    const cui__mm_label_paint *p = data;
+    if (!cui__mm_sel_on(p->sel, p->label)) return;
+    float w = cui__text_width(ui, n->font, n->font_size, n->text, n->text_len, (n->flags & CUI_NF_TABULAR) != 0);
+    cui_draw_rect(ui, (cui_rect){ n->rect.x, n->rect.y, CUI_MIN(w, n->rect.w), n->rect.h }, CUI_CORNERS(2), p->sel->color);
+}
+
+/* Ties text node t, which another component built, to label k: it gets an id, so its rect
+ * is known next frame, and paints the tint under its text. */
+static void cui__mm_sel_node(cui_ctx *ui, cui__mermaid_sel *m, cui_id id, int t, int k, int part) {
+    int key = k * 2 + part;
+    cui_id nid = cui__hash(&key, sizeof key, id ^ 0x5E1Au);
+    cui__mm_label_paint *lp = cui__frame_alloc(ui, sizeof *lp);
+    lp->sel = m; lp->label = k;
+    ui->nodes[t].id = nid;
+    ui->nodes[t].paint = cui__mm_paint_label_sel;
+    ui->nodes[t].paint_data = lp;
+    if (!cui__has_prev_rect(ui, nid)) return;
+    cui_rect r = cui__prev_rect(ui, nid), *u = &m->rect[k];
+    if (u->w <= 0) { *u = r; return; }
+    float x0 = CUI_MIN(u->x, r.x), y0 = CUI_MIN(u->y, r.y);
+    float x1 = CUI_MAX(u->x + u->w, r.x + r.w), y1 = CUI_MAX(u->y + u->h, r.y + r.h);
+    *u = (cui_rect){ x0, y0, x1 - x0, y1 - y0 };
+}
+
+/* A pie's labels: each legend line, name and share ("Dogs 82%"), found among the nodes the
+ * donut chart built from node first on. */
+static void cui__mm_pie_sel(cui_ctx *ui, cui_id id, const cui__mm_state *s, cui__mermaid_sel *m, int first) {
+    int *name_n = cui__frame_alloc(ui, sizeof(int) * 2 * (size_t)s->nval), *val_n = name_n + s->nval, bytes = 0;
+    for (int k = 0, i = first; k < s->nval; k++) {
+        name_n[k] = cui__find_text_node(ui, i, s->names[k], -1);
+        val_n[k] = name_n[k] >= 0 ? cui__find_text_node(ui, name_n[k] + 1, NULL, 0) : -1;
+        if (val_n[k] >= 0) i = val_n[k] + 1;
+        bytes += (int)strlen(s->names[k]) + 2 + (val_n[k] >= 0 ? ui->nodes[val_n[k]].text_len : 0);
+    }
+    cui__mm_sel_alloc(ui, m, s->nval, bytes);
+    for (int k = 0; k < s->nval; k++) {
+        cui__mm_sel_add(m, s->names[k], val_n[k] >= 0 ? ui->nodes[val_n[k]].text : NULL);
+        if (name_n[k] >= 0) cui__mm_sel_node(ui, m, id, name_n[k], k, 0);
+        if (val_n[k] >= 0) cui__mm_sel_node(ui, m, id, val_n[k], k, 1);
+    }
+}
+
+/* A gantt's labels: its task names, from the task list the gantt built from node first on. */
+static void cui__mm_gantt_sel(cui_ctx *ui, cui_id id, const cui__mm_state *s, cui__mermaid_sel *m, int first) {
+    int bytes = 0;
+    for (int k = 0; k < s->ntasks; k++) bytes += (int)strlen(s->tasks[k].name) + 1;
+    cui__mm_sel_alloc(ui, m, s->ntasks, bytes);
+    for (int k = 0, i = first; k < s->ntasks; k++) {
+        cui__mm_sel_add(m, s->tasks[k].name, NULL);
+        int t = cui__find_text_node(ui, i, s->tasks[k].name, -1);
+        if (t < 0) continue;
+        cui__mm_sel_node(ui, m, id, t, k, 0);
+        i = t + 1;
+    }
+}
+
+static void cui__mm_flow_view(cui_ctx *ui, cui_id id, cui__mm_state *s, float *natural, cui__mermaid_sel *sel) {
     bool has = cui__has_prev_rect(ui, id);
     cui_rect R = cui__prev_rect(ui, id);
     float W = has && R.w > 0 ? R.w : 600;
@@ -1409,7 +1567,8 @@ static void cui__mm_flow_view(cui_ctx *ui, cui_id id, cui__mm_state *s, float *n
     /* a diagram bigger than its panel pans with a drag, and with the wheel when taller */
     if (s->pan && has) cui__mm_cam_input(ui, &s->cam, id, id ^ 0x3E7B2u, R, s->wheel, 0.3f, 2.0f);
     cui__mm_clamp(s, &s->cam, W, s->panel_h);
-    if (cui__mm_surface(ui, id, s, &s->cam, s->panel_h, s->pan, s->wheel, s->expand) && !s->big_open) {
+    if (sel) cui__mm_flow_sel(ui, s, &s->cam, sel, R, has);
+    if (cui__mm_surface(ui, id, s, &s->cam, s->panel_h, s->pan, s->wheel, s->expand, sel) && !s->big_open) {
         s->big_open = true;
         s->big_z0 = cui__mm_big_zoom(ui, s);
         s->big = (cui__mm_cam){ s->big_z0, 1e9f, 1e9f, 0, 0, 0 };
@@ -1425,7 +1584,7 @@ static void cui__mm_title(cui_ctx *ui, const cui__mm_state *s, float body) {
     if (s->title > 0 && s->pool[s->title]) cui__label_text(ui, s->pool + s->title, CUI_FONT_MEDIUM, cui__fs(ui, body), CUI_C(ui, FOREGROUND));
 }
 
-static void cui__mm_pie_view(cui_ctx *ui, cui_id id, const char *id_str, cui__mm_state *s, float body, float *natural) {
+static void cui__mm_pie_view(cui_ctx *ui, cui_id id, const char *id_str, cui__mm_state *s, float body, float *natural, cui__mermaid_sel *sel) {
     int col = cui__node_new(ui, id);
     ui->nodes[col].dir = CUI_COLUMN; ui->nodes[col].w = CUI_FILL; ui->nodes[col].gap = 10;
     cui__open(ui, col);
@@ -1434,13 +1593,15 @@ static void cui__mm_pie_view(cui_ctx *ui, cui_id id, const char *id_str, cui__mm
     memset(&co, 0, sizeof co);
     co.height = 180;
     cui_push_id(ui, id_str);
+    int first = ui->node_count;
     cui_donut_chart_ex(ui, "pie", s->values, s->names, s->nval, &co);
+    if (sel) cui__mm_pie_sel(ui, id, s, sel, first);
     cui_pop_id(ui);
     cui__close(ui);
     *natural = 420;
 }
 
-static void cui__mm_gantt_view(cui_ctx *ui, cui_id id, const char *id_str, cui__mm_state *s, float body, float *natural) {
+static void cui__mm_gantt_view(cui_ctx *ui, cui_id id, const char *id_str, cui__mm_state *s, float body, float *natural, cui__mermaid_sel *sel) {
     cui_rect R = cui__prev_rect(ui, id);
     float W = cui__has_prev_rect(ui, id) && R.w > 0 ? R.w : 600;
     bool slim = W < 480;
@@ -1469,7 +1630,9 @@ static void cui__mm_gantt_view(cui_ctx *ui, cui_id id, const char *id_str, cui__
     go.row_height = 34;
     go.read_only = true;
     cui_push_id(ui, id_str);
+    int first = ui->node_count;
     cui_gantt_ex(ui, "gantt", t, s->ntasks, s->origin, days, &go);
+    if (sel) cui__mm_gantt_sel(ui, id, s, sel, first);
     cui_pop_id(ui);
     cui__close(ui);
     *natural = 231 + 2 + days * 30.0f;
@@ -1479,7 +1642,7 @@ static void cui__mm_gantt_view(cui_ctx *ui, cui_id id, const char *id_str, cui__
 /* Entry from the markdown view                                             */
 /* ------------------------------------------------------------------------ */
 
-bool cui__mermaid_block(cui_ctx *ui, const char *id_str, const char *src, int len, float body, float *natural) {
+bool cui__mermaid_block(cui_ctx *ui, const char *id_str, const char *src, int len, float body, float *natural, cui__mermaid_sel *sel) {
     *natural = 0;
     if (!src || len <= 0 || len > CUI__MM_MAX_SRC) return false;
     cui_id id = cui_make_id(ui, id_str), sid = id ^ 0x3E7A1u;
@@ -1495,9 +1658,9 @@ bool cui__mermaid_block(cui_ctx *ui, const char *id_str, const char *src, int le
         s->fit_w = -1;
     }
     switch (s->kind) {
-    case CUI__MM_FLOW: cui__mm_flow_view(ui, id, s, natural); break;
-    case CUI__MM_PIE: cui__mm_pie_view(ui, id, id_str, s, body, natural); break;
-    case CUI__MM_GANTT: cui__mm_gantt_view(ui, id, id_str, s, body, natural); break;
+    case CUI__MM_FLOW: cui__mm_flow_view(ui, id, s, natural, sel); break;
+    case CUI__MM_PIE: cui__mm_pie_view(ui, id, id_str, s, body, natural, sel); break;
+    case CUI__MM_GANTT: cui__mm_gantt_view(ui, id, id_str, s, body, natural, sel); break;
     default: return false;
     }
     ui->last_id = id;

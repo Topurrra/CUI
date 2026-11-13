@@ -120,6 +120,16 @@ int cui__text_node(cui_ctx *ui, const char *text, int len, cui_font font, float 
     return i;
 }
 
+int cui__find_text_node(cui_ctx *ui, int from, const char *text, int len) {
+    if (text && len < 0) len = (int)strlen(text);
+    for (int i = CUI_MAX(from, 0); i < ui->node_count; i++) {
+        const cui_node *n = &ui->nodes[i];
+        if (!(n->flags & CUI_NF_TEXT)) continue;
+        if (!text || (n->text_len == len && !memcmp(n->text, text, (size_t)len))) return i;
+    }
+    return -1;
+}
+
 int cui__float_begin(cui_ctx *ui, cui_id id, int z, cui_id anchor, int placement, float offset) {
     /* Keep the opening parent for direction inheritance, without linking its layout. */
     int saved_depth = ui->parent_depth;

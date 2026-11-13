@@ -27,7 +27,7 @@ static void mm_frames(cui_ctx *ui, mm_run *m, int frames) {
     for (int f = 0; f < frames; f++) {
         cui_begin_frame(ui, 1.0f / 60.0f);
         cui_column(ui, .pad = 20, .width = CUI_PX(640)) {
-            m->ok = cui__mermaid_block(ui, "d", m->src, m->len > 0 ? m->len : (int)strlen(m->src), 13, &m->natural);
+            m->ok = cui__mermaid_block(ui, "d", m->src, m->len > 0 ? m->len : (int)strlen(m->src), 13, &m->natural, NULL);
         }
         cui_end_frame(ui);
     }

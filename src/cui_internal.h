@@ -353,6 +353,9 @@ int cui__leaf(cui_ctx *ui, cui_id id, cui_size w, cui_size h);
  * content minimum in a narrower container (never stretched). */
 void cui__soft_width(cui_node *n, cui_size requested, float def);
 int cui__text_node(cui_ctx *ui, const char *text, int len, cui_font font, float size, cui_color color, bool wrap);
+/* The first text node from index from on whose text is text (len bytes, -1: up to the NUL; text
+ * NULL: any text), or -1: for a view that marks up text another component built */
+int cui__find_text_node(cui_ctx *ui, int from, const char *text, int len);
 void cui__layout(cui_ctx *ui);
 void cui__paint(cui_ctx *ui);
 int cui__float_begin(cui_ctx *ui, cui_id id, int z, cui_id anchor, int placement, float offset);
@@ -809,9 +812,22 @@ bool cui__layered_layout(cui_ctx *ui, cui__layered *g, const float *w, const flo
                          const cui_graph_edge *edges, int ne, bool top_down, float gap_layer, float gap_node, int max_boxes);
 
 /* ---- mermaid diagrams (cui_mermaid.c): fenced mermaid blocks in the markdown view ---- */
+/* A diagram's labels as text, for the markdown view's selection: flowchart nodes in reading
+ * order (layer by layer, then across), then edge labels; a pie's legend lines ("Dogs 82%");
+ * a gantt's task names. The view sets from, to and color, read when the diagram paints, so
+ * they may change after it is built; the diagram fills in the rest, in frame memory. */
+typedef struct cui__mermaid_sel {
+    int from, to;              /* selected bytes of text: labels they touch highlight whole */
+    cui_color color;
+    char *text; int len;       /* the labels, a line each */
+    int count;                 /* labels */
+    int *at;                   /* count + 1 offsets: label k is text[at[k]] up to at[k + 1] - 1 */
+    cui_rect *rect;            /* where label k was in the latest layout; zero width when unknown */
+} cui__mermaid_sel;
 /* Builds the diagram in src (len bytes) under id, body the markdown's text size; false, with
- * nothing built, when src is not a diagram it draws. *natural gets the width it would like. */
-bool cui__mermaid_block(cui_ctx *ui, const char *id, const char *src, int len, float body, float *natural);
+ * nothing built, when src is not a diagram it draws. *natural gets the width it would like.
+ * sel, when not NULL, gets the labels. */
+bool cui__mermaid_block(cui_ctx *ui, const char *id, const char *src, int len, float body, float *natural, cui__mermaid_sel *sel);
 /* For tests: lays out the flowchart in src and counts where routed edges cross each other and
  * where an edge runs through a box that is not one of its ends. False for anything else. */
 bool cui__mermaid_probe(cui_ctx *ui, const char *src, int len, float body, int *crossings, int *box_hits);

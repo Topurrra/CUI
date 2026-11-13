@@ -1557,13 +1557,17 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  *
  * Links use the accent color with an underline that firms up on hover, show
  * their URL as a tooltip, take Tab focus and activate with Enter. Text selects
- * as on a web page: drag across paragraphs, headings, lists, quotes, callouts,
- * table cells and code blocks; double click takes a word, triple click a block,
- * Shift+click extends, and a plain click clears. After a click in the view,
- * Ctrl+A (Cmd+A) selects everything and Ctrl+C copies the selection as plain
- * text (a line per block, a tab between table cells, no list or heading
- * markers). A press on a link that does not move still clicks it; a drag from
- * a diagram pans it. The selection lasts while the text stays the same.
+ * as on a web page: drag across paragraphs, headings, lists, quotes, callout
+ * titles and bodies, table header and body cells and code blocks; double click
+ * takes a word, triple click a block, Shift+click extends, and a plain click
+ * clears. After a click in the view, Ctrl+A (Cmd+A) selects everything and
+ * Ctrl+C copies the selection as plain text (a line per block, a tab between
+ * table cells, no list or heading markers). A diagram's labels count as one
+ * block, a line per label in reading order (flowchart nodes then edge labels,
+ * pie legend lines, gantt task names): a selection across it highlights them,
+ * and a double click selects one. A press on a link or a fold header that does
+ * not move still clicks it; a drag from a diagram that pans pans it. The
+ * selection lasts while the text stays the same.
  * Set .no_select when the view sits inside something that takes its own clicks.
  * Code blocks have a copy button.
  * Parsing allocates only from the frame arena (about 16 bytes a line and a
