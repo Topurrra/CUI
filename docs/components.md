@@ -264,9 +264,13 @@ cui_date today = cui_date_today();
 
 Weeks start on Monday. Today has a ring, the selected day is filled.
 
-Both return true on the frame a day is clicked. `due` is your `cui_date`: a year, a month from 1 to 12 and a day. A year of 0 means no date: the picker then shows `placeholder`, or "Pick a date", and the calendar opens on the current month. The picker writes the date and closes. The library keeps only the month in view, under `id`. It starts at the month of the value and after that follows the month buttons, so changing the value from code does not turn the page. `cui_date_today` takes no context and reads the local date from the system clock. For a start and an end, use the date range picker.
+The title opens the months of the year, and the year at the top of the months opens twelve years at a time, so a distant date takes a few clicks: the year, the month, then the day. The arrows turn a month, a year or twelve years, whichever is shown. Choosing a year shows its months, choosing a month shows its days, and the calendar keeps its size throughout.
 
-Keyboard: Enter or Space on the field opens the calendar and Esc closes it. Inside, Tab moves through the month buttons and the days, and Enter picks the focused day.
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/calendar-months-dark.png"><img src="images/components/calendar-months.png" alt="Calendar showing the months of 2026"></picture>
+
+Both return true on the frame a day is clicked. `due` is your `cui_date`: a year, a month from 1 to 12 and a day. A year of 0 means no date: the picker then shows `placeholder`, or "Pick a date", and the calendar opens on the current month. The picker writes the date and closes. The library keeps only the month in view and whether days, months or years are shown, under `id`. It starts at the month of the value and after that follows the buttons, so changing the value from code does not turn the page. A calendar that was hidden, such as the picker's when it closes, opens on the days again. `cui_date_today` takes no context and reads the local date from the system clock. For a start and an end, use the date range picker.
+
+Keyboard: Enter or Space on the field opens the calendar and Esc closes it. Inside, Tab moves through the title, the arrows and the days, months or years, and Enter picks the focused one. After a month or a year is chosen, the focus is on the title.
 
 ## Number field
 

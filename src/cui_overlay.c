@@ -987,7 +987,10 @@ static int cui__weekday(int y, int m, int d) {
     return (w + 6) % 7;
 }
 
-typedef struct { int view_y, view_m; bool init; } cui__cal_state;
+/* What the calendar shows: days, then a click on the title for the months of
+ * the year, then a click on the year for twelve years at a time. */
+enum { CUI__CAL_DAYS, CUI__CAL_MONTHS, CUI__CAL_YEARS };
+typedef struct { int view_y, view_m; bool init; int mode, year0; uint64_t built; } cui__cal_state;   /* built: the last frame it was shown */
 
 /* What the calendar's build phases share. */
 typedef struct {
@@ -999,23 +1002,136 @@ typedef struct {
     bool changed;
 } cui__calendar_build;
 
-/** The title and the month buttons. */
+/** The title, a button that changes the view, with a chevron after it. */
+static bool cui__calendar_title(cui_ctx *ui, cui__calendar_build *b, const char *text, const char *icon, const char *tip) {
+    cui_id tid = cui__hash_str("#title", b->id);
+    cui_interact r = cui__interact(ui, tid, CUI_IF_FOCUSABLE);
+    float hv = cui__hover_fade(ui, tid, r.hovered, CUI__T_HOVER);
+    float h = cui__control_height(ui, CUI_SIZE_SM);
+    int n = cui__node_new(ui, tid);
+    cui_node *tn = &ui->nodes[n];
+    tn->dir = CUI_ROW; tn->align = CUI_ALIGN_CENTER; tn->gap = 4;
+    tn->h = CUI_PX(h);
+    tn->pad[1] = 4; tn->pad[3] = 6;
+    tn->radius = CUI_CORNERS(CUI__R_CONTROL(ui, h));
+    tn->bg = cui_alpha(CUI_C(ui, HOVER), hv * 1.4f);
+    cui__mark_interactive(ui, n, CUI_IF_FOCUSABLE);
+    if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    cui__open(ui, n);
+    int ht = cui__text_node(ui, text, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body + 1), CUI_C(ui, FOREGROUND), false);
+    ui->nodes[ht].line_height = 1.3f;
+    ui->nodes[ht].flags |= CUI_NF_TABULAR;
+    cui__icon_node(ui, icon, 14, CUI_C(ui, TEXT_MUTED));
+    cui__close(ui);
+    if (r.focus_visible) {
+        float *fa = cui__frame_alloc(ui, sizeof(float));
+        *fa = 1;
+        ui->nodes[n].paint_data = fa;
+        ui->nodes[n].paint = cui__paint_focus_ring_node;
+        ui->nodes[n].flags |= CUI_NF_PAINT_AFTER;
+    }
+    ui->last_id = tid;
+    cui_tooltip(ui, tip);
+    return r.clicked;
+}
+
+/** The title and the buttons that turn the page: a month, a year or twelve years. */
 static void cui__calendar_head(cui_ctx *ui, cui__calendar_build *b) {
     cui__cal_state *st = b->st;
     int head = cui__node_new(ui, 0);
-    ui->nodes[head].dir = CUI_ROW; ui->nodes[head].gap = 2; ui->nodes[head].pad[3] = 6;
+    ui->nodes[head].dir = CUI_ROW; ui->nodes[head].gap = 2; ui->nodes[head].align = CUI_ALIGN_CENTER;
     cui__open(ui, head);
-    int ht = cui__text_node(ui, cui__frame_printf(ui, "%s %d", cui__month_name(ui, st->view_m - 1), st->view_y), -1,
-                            CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_body + 1), CUI_C(ui, FOREGROUND), false);
-    ui->nodes[ht].line_height = 1.3f;
-    ui->nodes[ht].w = CUI_FILL;
+    const char *text, *icon = CUI_ICON_CHEVRON_DOWN, *tip, *prev, *next;
+    int step;
+    if (st->mode == CUI__CAL_YEARS) {
+        text = cui__frame_printf(ui, "%d \xe2\x80\x93 %d", st->year0, st->year0 + 11);
+        icon = CUI_ICON_CHEVRON_UP; tip = "Back to the days"; prev = "Earlier years"; next = "Later years"; step = 12;
+    } else if (st->mode == CUI__CAL_MONTHS) {
+        text = cui__frame_printf(ui, "%d", st->view_y);
+        tip = "Choose a year"; prev = "Previous year"; next = "Next year"; step = 12;
+    } else {
+        text = cui__frame_printf(ui, "%s %d", cui__month_name(ui, st->view_m - 1), st->view_y);
+        tip = "Choose a month and year"; prev = "Previous month"; next = "Next month"; step = 1;
+    }
+    if (cui__calendar_title(ui, b, text, icon, tip)) {
+        if (st->mode == CUI__CAL_DAYS) st->mode = CUI__CAL_MONTHS;
+        else if (st->mode == CUI__CAL_MONTHS) { st->mode = CUI__CAL_YEARS; st->year0 = st->view_y - ((st->view_y % 12) + 12) % 12; }
+        else st->mode = CUI__CAL_DAYS;
+    }
+    int fill = cui__node_new(ui, 0);
+    ui->nodes[fill].w = CUI_FILL;
     cui_button_opts bo;
     memset(&bo, 0, sizeof bo);
     bo.size = CUI_SIZE_SM;
-    bo.tooltip = "Previous month";
-    if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_LEFT, &bo)) { if (--st->view_m < 1) { st->view_m = 12; st->view_y--; } }
-    bo.tooltip = "Next month";
-    if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_RIGHT, &bo)) { if (++st->view_m > 12) { st->view_m = 1; st->view_y++; } }
+    int turn = 0;   /* the arrows keep their ids in every view, so the focus stays on them */
+    bo.tooltip = prev;
+    if (cui__icon_button_id(ui, cui__hash_str("#prev", b->id), CUI_ICON_CHEVRON_LEFT, &bo)) turn = -1;
+    bo.tooltip = next;
+    if (cui__icon_button_id(ui, cui__hash_str("#next", b->id), CUI_ICON_CHEVRON_RIGHT, &bo)) turn = 1;
+    if (turn && st->mode == CUI__CAL_YEARS) st->year0 += turn * step;
+    else if (turn && st->mode == CUI__CAL_MONTHS) st->view_y += turn;
+    else if (turn) {
+        st->view_m += turn;
+        if (st->view_m < 1) { st->view_m = 12; st->view_y--; }
+        if (st->view_m > 12) { st->view_m = 1; st->view_y++; }
+    }
+    cui__close(ui);
+}
+
+/** Twelve months or twelve years in four rows, as tall as the days so the calendar keeps its size. */
+static void cui__calendar_picks(cui_ctx *ui, cui__calendar_build *b) {
+    cui__cal_state *st = b->st;
+    bool years = st->mode == CUI__CAL_YEARS;
+    float days_h = cui__fs(ui, ui->theme.text_sm) * 2.0f + 6 * b->cs + 6 * 2;
+    float gap = 4, slot_h = (days_h - 3 * gap) / 4, pill_h = CUI_MIN(36, slot_h);
+    cui_box gb;
+    memset(&gb, 0, sizeof gb);
+    gb.dir = CUI_GRID; gb.columns = 3; gb.gap = gap;
+    int grid = cui__node_new(ui, 0);
+    cui__apply_box(ui, &ui->nodes[grid], &gb);
+    cui__open(ui, grid);
+    for (int k = 0; k < 12; k++) {
+        int y = years ? st->year0 + k : st->view_y, m = years ? 0 : k + 1;
+        int key = years ? -y : y * 100 + m;   /* apart from the days' keys */
+        cui_id pid = cui__hash(&key, sizeof key, b->id ^ 0x9E3779B9u);
+        cui_interact r = cui__interact(ui, pid, CUI_IF_FOCUSABLE);
+        float hv = cui__hover_fade(ui, pid, r.hovered, CUI__T_HOVER);
+        bool sel = b->value && b->value->year == y && (years || b->value->month == m);
+        bool now = b->today.year == y && (years || b->today.month == m);
+        int slot = cui__node_new(ui, 0);
+        ui->nodes[slot].h = CUI_PX(slot_h);
+        ui->nodes[slot].justify = CUI_JUSTIFY_CENTER;
+        cui__open(ui, slot);
+        int c = cui__node_new(ui, pid);
+        cui_node *cn = &ui->nodes[c];
+        cn->h = CUI_PX(pill_h);
+        cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER; cn->justify = CUI_JUSTIFY_CENTER;
+        cn->radius = CUI_CORNERS(pill_h / 2);
+        cn->bg = sel ? CUI_C(ui, CONTROL_ON) : cui_alpha(CUI_C(ui, HOVER), hv * 1.4f);
+        if (now && !sel) { cn->border = 1; cn->border_color = CUI_C(ui, BORDER_STRONG); }
+        cui__mark_interactive(ui, c, CUI_IF_FOCUSABLE);
+        if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+        cui__open(ui, c);
+        const char *label = years ? cui__frame_printf(ui, "%d", y) : cui__month_short(ui, k);
+        int t = cui__text_node(ui, label, -1, (sel || now) ? CUI_FONT_MEDIUM : CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body),
+                               sel ? CUI_C(ui, CONTROL_GLYPH) : CUI_C(ui, FOREGROUND), false);
+        ui->nodes[t].line_height = 1.0f;
+        ui->nodes[t].flags |= CUI_NF_TABULAR;
+        cui__close(ui);
+        if (r.focus_visible) {
+            float *fa = cui__frame_alloc(ui, sizeof(float));
+            *fa = 1;
+            ui->nodes[c].paint_data = fa;
+            ui->nodes[c].paint = cui__paint_focus_ring_node;
+            ui->nodes[c].flags |= CUI_NF_PAINT_AFTER;
+        }
+        cui__close(ui);
+        if (r.clicked) {
+            if (years) { st->view_y = y; st->mode = CUI__CAL_MONTHS; }
+            else { st->view_m = m; st->mode = CUI__CAL_DAYS; }
+            if (r.keyboard_activate) ui->focus = cui__hash_str("#title", b->id);   /* the keys go on from the title */
+        }
+    }
     cui__close(ui);
 }
 
@@ -1092,6 +1208,8 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
         cui_date base = (value && value->year) ? *value : b.today;
         st->view_y = base.year; st->view_m = base.month; st->init = true;
     }
+    if (st->built + 1 != ui->frame) st->mode = CUI__CAL_DAYS;   /* hidden last frame: it opens on the days again */
+    st->built = ui->frame;
     cui_push_id(ui, id_str);
     /* 34px day cells, down to 28 when the parent is narrow (phones) */
     cui_rect cpr = cui__prev_rect(ui, id);
@@ -1104,7 +1222,8 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     ui->nodes[col].flags |= CUI_NF_ADAPTIVE;
     cui__open(ui, col);
     cui__calendar_head(ui, &b);
-    cui__calendar_days(ui, &b);
+    if (st->mode == CUI__CAL_DAYS) cui__calendar_days(ui, &b);
+    else cui__calendar_picks(ui, &b);
     cui__close(ui);
     cui_pop_id(ui);
     return b.changed;

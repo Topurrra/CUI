@@ -116,6 +116,21 @@ static void scene_calendar(cui_ctx *ui, int f) {
         cui_card(ui, .pad = 16) { cui_calendar(ui, "cal", &d_date); }
     }
 }
+/* the months of the year, after a click on the calendar's title */
+static void scene_calendar_months(cui_ctx *ui, int f) {
+    static cui_date d = { 2026, 11, 14 };
+    if (f < 0) {
+        f = -f - 1;
+        if (f == 3) cui_input_mouse_move(ui, 80, 59);
+        if (f == 4) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        if (f == 5) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        if (f == 6) cui_input_mouse_move(ui, 300, 340);
+        return;
+    }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = frame_pad(ui), .align = CUI_ALIGN_START) {
+        cui_card(ui, .pad = 16) { cui_calendar(ui, "cal", &d); }
+    }
+}
 SCENE(tabs) {
     const char *t[] = { "Overview", "Analytics", "Reports", "Settings" };
     cui_column(ui, UPTO(520), .gap = 20) {
@@ -4392,7 +4407,7 @@ int main(int argc, char **argv) {
         { "toggles", scene_toggles, 680, 150, true }, { "slider", scene_slider, 480, 170, true },
         { "inputs", scene_inputs, 680, 230, true }, { "textarea", scene_textarea, 540, 200, false },
         { "pickers", scene_pickers, 680, 130, false }, { "select", scene_select_open, 320, 330, true },
-        { "calendar", scene_calendar, 340, 360, true }, { "tabs", scene_tabs, 580, 160, true },
+        { "calendar", scene_calendar, 340, 360, true }, { "calendar-months", scene_calendar_months, 340, 360, true }, { "tabs", scene_tabs, 580, 160, true },
         { "navigation", scene_navigation, 620, 200, false }, { "sidebar", scene_sidebar, 260, 210, true },
         { "menu", scene_menu, 300, 290, true }, { "dialog", scene_dialog, 620, 340, true },
         { "toast", scene_toast, 420, 220, true }, { "tooltip", scene_tooltip, 260, 150, false },

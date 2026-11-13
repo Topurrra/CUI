@@ -40,6 +40,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - **Sankey** nodes are slim (6 points) and colored by meaning, with the new `node_colors` option and the palette or neutral gray for the rest. Flows fade from their source's color to their target's, hovering a node or a flow lights its whole path upstream and downstream, and labels sit beside the nodes as the name over the value and share, with no plates over the flows.
 - **Gantt chart** bars are colored by state (done, active, planned) with their progress inside and a percentage at the end; planned bars are dashed and tinted. A new `state` field on `cui_gantt_task` sets it, and its zero value works it out from the progress and `today`. Dependencies are soft curves with small arrowheads, today is an accent line with a "Today" chip, weekends are faintly shaded, and a milestone is an outlined diamond with its name and date.
 - **Uptime bars**: healthy days are a slightly softer green, so incidents stand out more.
+- **Calendar and date picker**: the title opens the months of the year, and the year opens twelve years at a time, so a distant year takes a few clicks instead of a click per month. The arrows turn a month, a year or twelve years, the calendar keeps its size, and the picker opens on the days again ([#27](https://github.com/yappologistic/CUI/issues/27)).
 - The voice orb (`cui_voice_orb`) is deprecated in favor of the voice components. It keeps working, but it has left the gallery and the docs site.
 
 ### Fixed

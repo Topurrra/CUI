@@ -7293,6 +7293,100 @@ static void test_strings(void) {
     cui_destroy(ui);
 }
 
+/* ---- calendar: months and years ---- */
+/* the draw without texture coordinates, which depend on the order glyphs entered the atlas */
+static uint64_t shape_hash(cui_ctx *ui) {
+    const cui_draw_data *d = cui_get_draw_data(ui);
+    uint64_t h = 1469598103934665603ull;
+    for (int i = 0; i < d->vertex_count; i++) {
+        cui_vertex v = d->vertices[i];
+        v.u = v.v = 0;
+        const unsigned char *b = (const unsigned char *)&v;
+        for (size_t k = 0; k < sizeof v; k++) h = (h ^ b[k]) * 1099511628211ull;
+    }
+    return h;
+}
+typedef struct { cui_date d; bool changed; } calpick_ctx;
+static void build_calpick(cui_ctx *ui, void *u) {
+    calpick_ctx *c = u;
+    cui_column(ui, .pad = 10) { if (cui_calendar(ui, "cal", &c->d)) c->changed = true; }
+}
+static void tab_n(cui_ctx *ui, build_fn fn, void *u, int n) { for (int i = 0; i < n; i++) key(ui, fn, u, CUI_KEY_TAB, 0); }
+/** The title opens the months, the year opens twelve years, and a choice goes back down to the days. */
+static void test_calendar_years(void) {
+    printf("calendar: months and years from the title\n");
+    cui_ctx *ui = new_ctx();
+    calpick_ctx c = { { 2026, 11, 14 }, false };
+    run(ui, build_calpick, &c, 3);
+    cui_id cal = cui_make_id(ui, "cal");
+    cui_rect days = rect_of(ui, cal);
+    uint64_t days_hash = shape_hash(ui);
+    tab_n(ui, build_calpick, &c, 1);                 /* the title */
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* the months of 2026 */
+    run(ui, build_calpick, &c, 2);
+    cui_rect months = rect_of(ui, cal);
+    CHECK(shape_hash(ui) != days_hash);
+    CHECK_NEAR(months.w, days.w, 0.01);              /* the same size in every view */
+    CHECK_NEAR(months.h, days.h, 0.01);
+    tab_n(ui, build_calpick, &c, 5);                 /* previous, next, Jan, Feb, Mar */
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* March 2026, the value unchanged */
+    CHECK(!c.changed);
+    CHECK(c.d.year == 2026 && c.d.month == 11 && c.d.day == 14);
+    click_at(ui, build_calpick, &c, 400, 400);       /* drop the focus ring */
+    run(ui, build_calpick, &c, 2);
+    uint64_t march = shape_hash(ui);
+    {
+        cui_ctx *ref = new_ctx();
+        calpick_ctx rc = { { 2026, 3, 0 }, false };  /* a calendar that opens on March 2026 with no day chosen */
+        run(ref, build_calpick, &rc, 3);
+        CHECK(shape_hash(ref) == march);
+        cui_destroy(ref);
+    }
+    /* the years: two Enters on the title, a page back, then 2010, May and the 15th */
+    tab_n(ui, build_calpick, &c, 1);
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* months */
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* 2016 to 2027 */
+    tab_n(ui, build_calpick, &c, 1);
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* earlier: 2004 to 2015 */
+    tab_n(ui, build_calpick, &c, 8);                 /* next, 2004 ... 2010 */
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* the months of 2010, the focus on the title */
+    tab_n(ui, build_calpick, &c, 7);                 /* previous, next, Jan ... May */
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);    /* May 2010 */
+    CHECK(!c.changed);
+    tab_n(ui, build_calpick, &c, 2 + 20);            /* previous, next, then 1 May 2010 is a Saturday: the 15th is the 20th day cell */
+    key(ui, build_calpick, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.changed);
+    CHECK(c.d.year == 2010 && c.d.month == 5 && c.d.day == 15);
+    cui_destroy(ui);
+}
+
+typedef struct { cui_date d; cui_id field; } dpick_ctx;
+static void build_dpick(cui_ctx *ui, void *u) {
+    dpick_ctx *c = u;
+    cui_column(ui, .pad = 10) { cui_date_picker(ui, "dp", &c->d); c->field = cui_last_id(ui); }
+}
+/** A picker that closes in the months view opens on the days again. */
+static void test_date_picker_reopens_on_days(void) {
+    printf("date picker: opens on the days again\n");
+    cui_ctx *ui = new_ctx();
+    dpick_ctx c = { { 2026, 11, 14 }, 0 };
+    run(ui, build_dpick, &c, 3);
+    cui_vec2 f = center(rect_of(ui, c.field));
+    click_at(ui, build_dpick, &c, f.x, f.y);
+    run(ui, build_dpick, &c, 30);
+    uint64_t opened = shape_hash(ui);
+    tab_n(ui, build_dpick, &c, 1);                   /* from the field to the calendar's title */
+    key(ui, build_dpick, &c, CUI_KEY_ENTER, 0);
+    run(ui, build_dpick, &c, 30);
+    CHECK(shape_hash(ui) != opened);                 /* the months */
+    key(ui, build_dpick, &c, CUI_KEY_ESCAPE, 0);
+    run(ui, build_dpick, &c, 30);
+    click_at(ui, build_dpick, &c, f.x, f.y);
+    run(ui, build_dpick, &c, 30);
+    CHECK(shape_hash(ui) == opened);
+    cui_destroy(ui);
+}
+
 /* ---- month calendar ---- */
 typedef struct { cui_date month, sel; const cui_month_event *ev; int n; cui_month_result r; cui_rect gr; float w; } mc_ctx;
 static void build_mc(cui_ctx *ui, void *u) {
@@ -8113,6 +8207,8 @@ int main(void) {
     test_swipe();
     test_date_math();
     test_strings();
+    test_calendar_years();
+    test_date_picker_reopens_on_days();
     test_pickers();
     test_disclosure();
     test_confirm_popover_keyboard();
