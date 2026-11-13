@@ -1549,9 +1549,11 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * up; |300 sets the width. A relative path is looked up in .base_dir, or by
  * .resolve_image, which maps the name to a full path (an Obsidian embed is
  * found by file name anywhere in the vault). Each file is decoded once and
- * its texture kept in CUI state. A missing, undecodable or http(s) image (no
- * networking here) shows a quiet line with an image icon and the alt text or
- * file name. An image inside a link, [![alt](img)](url), reports .link when clicked.
+ * its texture kept in CUI state. The view never touches the network: an
+ * http(s) or data: image goes to .resolve_image as written, which may return
+ * a local copy the app fetched (NULL until then). A missing, undecodable or
+ * unresolved remote image shows a quiet line with an image icon and the alt
+ * text or file name. An image inside a link, [![alt](img)](url), reports .link when clicked.
  *
  * Links use the accent color with an underline that firms up on hover, show
  * their URL as a tooltip, take Tab focus and activate with Enter. Text selects
@@ -1578,7 +1580,8 @@ typedef struct cui_markdown_opts {
     bool no_front_matter;      /* hide a leading YAML front matter block instead of showing it as collapsed properties */
     const char *base_dir;      /* folder relative image paths are found in; NULL: the working directory */
     /* maps an image name (the src of ![alt](src), the file of ![[file.png]], percent escapes decoded) to
-     * a full file path, or NULL to fall back to base_dir. Called every frame for every image, so keep
+     * a full file path, or NULL to fall back to base_dir. Web (http, https) and data: sources come as
+     * written; return a local copy, or NULL for the placeholder. Called every frame for every image, so keep
      * it cheap (a hash lookup, not a directory walk); the string must stay valid until the call returns */
     const char *(*resolve_image)(const char *src, void *user);
     void *resolve_user;        /* passed to resolve_image */

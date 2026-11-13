@@ -5921,6 +5921,7 @@ static int md_resolves;
 static const char *md_resolve_pic(const char *src, void *user) {
     (void)user;
     md_resolves++;
+    if (strcmp(src, "https://example.com/fetched.png?v=2") == 0) return "cui_md_big.png";   /* the app's downloaded copy */
     return strcmp(src, "pic.png") == 0 ? "cui_md_big.png" : NULL;
 }
 static void test_markdown_images(void) {
@@ -5946,6 +5947,10 @@ static void test_markdown_images(void) {
     md_resolves = 0;
     CHECK(fabsf(md_height_of(ui, &m, "![[pic.png|100]]") - 50) < 0.5f && md_resolves > 0);
     CHECK_NEAR(md_height_of(ui, &m, "![[cui_md_small.png]]"), 20, 0.5);
+    /* a web image reaches the resolver as written; its local copy draws, no copy keeps the placeholder */
+    CHECK_NEAR(md_height_of(ui, &m, "![w](https://example.com/fetched.png?v=2)"), 150, 0.5);
+    float pending = md_height_of(ui, &m, "![w](https://example.com/not-yet.png)");
+    CHECK(pending > 10 && pending < 40);
     m.resolve = NULL;
     /* a missing file, an unsupported source and a remote image show a quiet line, not a picture */
     float line = md_height_of(ui, &m, "![a missing one](nothing_here.png)");

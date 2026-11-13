@@ -1135,9 +1135,14 @@ static int md_hexval(char c) {
     return c >= '0' && c <= '9' ? c - '0' : md_lc(c) >= 'a' && md_lc(c) <= 'f' ? md_lc(c) - 'a' + 10 : -1;
 }
 
-/* The file an image source names, or NULL (remote images are never fetched). */
+/* The file an image source names, or NULL (remote images are never fetched here; the resolver may map them to a local copy). */
 static const char *md_image_path(md_ctx *c, const md_img *m) {
-    if (md_is_remote(m->src, m->src_len)) return NULL;
+    if (md_is_remote(m->src, m->src_len)) {   /* only the app can fetch it: its resolver may return a downloaded copy */
+        if (!c->resolve_image) return NULL;
+        const char *src = cui__frame_strdup(c->ui, m->src, m->src_len);
+        const char *r = c->resolve_image(src, c->resolve_user);
+        return r && r[0] ? cui__frame_strdup(c->ui, r, (int)strlen(r)) : NULL;
+    }
     char *src = cui__frame_alloc(c->ui, (size_t)m->src_len + 1);
     int o = 0;
     for (int k = 0; k < m->src_len; k++) {   /* %20 and friends */
