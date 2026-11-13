@@ -53,6 +53,11 @@ endif()
 
 add_executable(cui_bench bench.c ../examples/gallery_ui.c ../examples/gallery_more.c)
 target_link_libraries(cui_bench PRIVATE cui::cui)
+add_executable(cui_bench_editor bench_editor.c)   # the code editor over big texts (1 to 100 MB)
+target_link_libraries(cui_bench_editor PRIVATE cui::cui)
+if(WIN32)
+    target_link_libraries(cui_bench_editor PRIVATE psapi)
+endif()
 
 add_executable(cui_component_shots component_shots.c)
 target_link_libraries(cui_component_shots PRIVATE cui::cui)

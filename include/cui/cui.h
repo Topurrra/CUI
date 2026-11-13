@@ -1755,7 +1755,8 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
  * indentation, the gutter numbers each line once and nothing scrolls sideways.
  * Up and Down move by row, Home and End go to the row's start and end. Only
  * the lines in view are tokenized and drawn, so files of tens of thousands
- * of lines stay fast, wrapped or not. An edit that would not fit in the capacity is refused
+ * of lines stay fast, wrapped or not; with `.revision` (and `.plain`) so do files of a
+ * hundred megabytes. An edit that would not fit in the capacity is refused
  * whole (r.refused). Keys when focused: arrows, Ctrl+arrows by word, Home
  * (first character, then column 0), End, Page Up/Down, Ctrl+Home/End;
  * Shift extends; Ctrl+A; Ctrl+C/X/V (the whole line without a selection);
@@ -1783,6 +1784,10 @@ typedef struct cui_code_editor_opts {
     const cui_text_mark *marks;   /* ranges to highlight (search results, regex matches), sorted by start */
     int mark_count;            /* number of `marks` */
     bool borderless;           /* no border, corners or focus ring, on the window background: an editor that fills a pane */
+    bool plain;                /* no syntax colors and no bracket matching, whatever `lang` says: for huge files */
+    int revision;              /* big files: nonzero promises the text changes only through the editor while it stays the same,
+                                * so the editor keeps its line index between frames instead of reading the whole text each
+                                * frame. Change it whenever your code writes the buffer (loading a file, replacing all). */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */

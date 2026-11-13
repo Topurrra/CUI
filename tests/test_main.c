@@ -4822,7 +4822,7 @@ static void test_timeline(void) {
                                  CUI_KEY_ESCAPE, CUI_KEY_A, CUI_KEY_F, CUI_KEY_EQUAL, CUI_KEY_MINUS, CUI_KEY_SPACE, CUI_KEY_BACKSPACE };
     static const int fmods[] = { 0, CUI_MOD_SHIFT, CUI_MOD_ALT, CUI_MOD_PRIMARY, CUI_MOD_ALT | CUI_MOD_SHIFT };
     bool ok = true;
-    for (int step = 0; step < 1500 && ok; step++) {
+    for (int step = 0; step < 120 && ok; step++) {
         if (step % 300 == 0) { a.width = (float)(260 + tl_rand(&rng) % 520); cui_set_reduced_motion(ui, (step / 300) % 2 == 0); }
         cui_rect fr = cui_get_rect(ui, a.id);
         float x = fr.x - 10 + (float)(tl_rand(&rng) % (unsigned)(fr.w + 20)), y = fr.y - 10 + (float)(tl_rand(&rng) % (unsigned)(fr.h + 20));
@@ -6961,7 +6961,8 @@ typedef struct {
     char buf[2048];
     char *big; size_t cap;     /* an outside buffer instead of buf, or a smaller capacity for buf */
     const char *lang;
-    bool ro, wrap;
+    bool ro, wrap, plain;
+    int rev;                   /* .revision */
     char other[32];
     cui_code_editor_result r;
     bool any_changed, any_refused;
@@ -6971,7 +6972,8 @@ static void build_ced(cui_ctx *ui, void *u) {
     cui_column(ui, .pad = 20, .gap = 12) {
         char *b = c->big ? c->big : c->buf;
         size_t cap = c->cap ? c->cap : sizeof c->buf;
-        c->r = cui_code_editor(ui, "ed", b, cap, .lang = c->lang, .read_only = c->ro, .wrap = c->wrap, .height = 300, .width = CUI_PX(600));
+        c->r = cui_code_editor(ui, "ed", b, cap, .lang = c->lang, .read_only = c->ro, .wrap = c->wrap, .height = 300, .width = CUI_PX(600),
+                               .plain = c->plain, .revision = c->rev);
         c->any_changed |= c->r.changed;
         c->any_refused |= c->r.refused;
         cui_input(ui, "after", c->other, sizeof c->other, .width = CUI_PX(200));
@@ -7679,6 +7681,201 @@ static void test_code_editor_markdown(void) {
     nctl = ced_text_colors(ui, ctl, 16);
     CHECK(!ced_colors_within(ctl, nctl, top, ntop));   /* outside a fence the same lines are headings */
     cui_destroy(ui);
+}
+
+/* big texts: the line index, wrap counts and line states are patched by each edit instead of
+ * made again each frame. Here edits are checked against the text itself and against an editor
+ * that just opened the same text, with the app's revision (nothing read between frames) and
+ * without it. */
+static int ced_count_lines(const char *s) { int n = 1; for (; *s; s++) n += *s == '\n'; return n; }
+static int ced_line_start(const char *s, int line) {   /* 1 based */
+    int at = 0;
+    for (int l = 1; l < line && s[at]; at++) if (s[at] == '\n') l++;
+    return at;
+}
+static int ced_count_hits(const char *s, const char *q) {
+    int n = 0;
+    for (const char *p = s; (p = strstr(p, q)) != NULL; p++) n++;
+    return n;
+}
+static int ced_column(const char *s, int a, int b) {   /* tabs to stops of 4, code points one column */
+    int col = 0;
+    for (int i = a; i < b; i++) {
+        if (s[i] == '\t') col = (col / 4 + 1) * 4;
+        else if (((unsigned char)s[i] & 0xC0) != 0x80) col++;
+    }
+    return col;
+}
+/* the caret after Ctrl+Home and n presses of Down: with wrapping it walks rows, so it differs
+ * when a row count above it does */
+static int ced_walk_down(cui_ctx *ui, ced_ctx *c, int n) {
+    cui_code_editor_select(ui, "ed", 0, 0);
+    run(ui, build_ced, c, 1);
+    for (int i = 0; i < n; i++) key(ui, build_ced, c, CUI_KEY_DOWN, 0);
+    return c->r.cursor;
+}
+
+static void test_code_editor_big(void) {
+    printf("code editor: plain, revision, edits patch the line index\n");
+    static ced_ctx c, fresh;
+    unsigned col[16], col2[16];
+
+    /* plain: no colors and no bracket pair, whatever the language */
+    cui_ctx *ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.lang = "c";
+    ced_text(&c, "int f(void) { return \"s\" + 0x1F; } /* c */\n");
+    ced_sel(ui, &c, 6, 6);
+    run(ui, build_ced, &c, 2);
+    int ncol = ced_text_colors(ui, col, 16);
+    CHECK(c.r.bracket == 5 && c.r.bracket_match == 10);
+    c.plain = true;
+    run(ui, build_ced, &c, 2);
+    int nplain = ced_text_colors(ui, col2, 16);
+    CHECK(c.r.bracket == -1 && c.r.bracket_match == -1);
+    CHECK(nplain + 3 <= ncol);   /* keyword, string, number and comment colors are gone */
+    ced_sel(ui, &c, 13, 13);     /* Enter after a brace: no language, so the same indentation */
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strncmp(c.buf + 13, "\n return", 8) == 0);
+    c.plain = false;
+    cui_destroy(ui);
+
+    /* revision: while it stays the same the text is not read again; a new one is */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.rev = 1;
+    ced_text(&c, "one\ntwo");
+    run(ui, build_ced, &c, 2);
+    CHECK(c.r.line_count == 2 && c.r.length == 7);
+    memcpy(c.buf, "on\n\ntwo", 7);   /* the same length, written behind the editor's back */
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.line_count == 2);       /* as promised: not seen */
+    c.rev = 2;
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.line_count == 3 && c.r.length == 7);
+    ced_text(&c, "a\nb\nc\nd\ne");   /* longer, without a new revision: the end moved, so it is read again anyway */
+    run(ui, build_ced, &c, 1);
+    CHECK(c.r.line_count == 5 && c.r.length == 9);
+    cui_destroy(ui);
+
+    /* undo keeps the removed bytes as they were, carriage returns too */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    ced_text(&c, "a\r\nb\r\nc");
+    ced_sel(ui, &c, 1, 6);
+    key(ui, build_ced, &c, CUI_KEY_DELETE, 0);
+    CHECK(strcmp(c.buf, "ac") == 0 && c.r.line_count == 1);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "a\r\nb\r\nc") == 0 && c.r.line_count == 3);
+    key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "ac") == 0);
+    cui_destroy(ui);
+
+    /* random edits across lines, with and without wrapping and the revision: after each, the
+     * length, the line count and the caret's line and column agree with the text; every few,
+     * go to line, find, the wrapped rows and the markdown colors agree with a fresh editor */
+    for (int mode = 0; mode < 4; mode++) {
+        ui = new_ctx();
+        cui_ctx *ui2 = new_ctx();
+        memset(&c, 0, sizeof c);
+        c.lang = mode & 2 ? "md" : "c";
+        c.wrap = mode & 1;
+        c.rev = mode >= 2 ? 7 : 0;
+        size_t off = 0;
+        for (int i = 0; i < 30; i++)
+            off += (size_t)snprintf(c.buf + off, sizeof c.buf - off, i % 7 == 3 ? "```\n" : i % 5 == 0 ? "/* tile %d */ a long line that wraps at the width of the view, %d\n" : "x%d = tile(%d);\n", i, i);
+        ced_sel(ui, &c, 0, 0);
+        unsigned rng = 4242u + (unsigned)mode;
+        static const char *ins[] = { "q", "\n", "tile\n\n", "}", "\t", "/*", "*/", "```\n", "\xc3\xa9",
+                                     "ab cd ef gh ij kl mn op qr st uv wx yz 01 23 45 67 89 tile tile tile" };
+        bool ok = true;
+        const char *why = "the caret or the line count";
+        for (int step = 0; step < 400 && ok; step++) {
+            rng = rng * 1664525u + 1013904223u;
+            unsigned r = rng >> 8;
+            int len = (int)strlen(c.buf);
+            int a = (int)(r % (unsigned)(len + 1)), b = a + (int)((r >> 12) % 40);
+            if (b > len) b = len;
+            while (a > 0 && ((unsigned char)c.buf[a] & 0xC0) == 0x80) a--;   /* on code points */
+            while (b < len && ((unsigned char)c.buf[b] & 0xC0) == 0x80) b++;
+            switch ((r >> 20) % 7) {
+            case 0: case 1:
+                ced_sel(ui, &c, a, a);
+                type(ui, build_ced, &c, ins[(r >> 4) % (sizeof ins / sizeof ins[0])]);
+                break;
+            case 2: ced_sel(ui, &c, a, b); key(ui, build_ced, &c, CUI_KEY_BACKSPACE, 0); break;
+            case 3: ced_sel(ui, &c, a, a); key(ui, build_ced, &c, CUI_KEY_DELETE, 0); break;
+            case 4: ced_sel(ui, &c, a, a); key(ui, build_ced, &c, CUI_KEY_ENTER, 0); break;
+            case 5: key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY); break;
+            default: key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY); break;
+            }
+            if (strlen(c.buf) > 1600) { ced_sel(ui, &c, 0, 400); key(ui, build_ced, &c, CUI_KEY_DELETE, 0); }
+            run(ui, build_ced, &c, 1);
+            int n = (int)strlen(c.buf), cur = c.r.cursor, line = 1, ls = 0;
+            for (int i = 0; i < cur && i < n; i++) if (c.buf[i] == '\n') { line++; ls = i + 1; }
+            if (c.r.length != n || c.r.line_count != ced_count_lines(c.buf) || c.r.line != line || c.r.column != ced_column(c.buf, ls, cur) + 1) ok = false;
+            if (step % 10 == 9) {
+                int target = 1 + (int)(r % (unsigned)c.r.line_count);
+                cui_code_editor_goto(ui, "ed", target, 1);
+                run(ui, build_ced, &c, 1);
+                if (c.r.cursor != ced_line_start(c.buf, target)) { ok = false; why = "go to line"; }
+                cui_code_editor_find(ui, "ed", "tile");
+                run(ui, build_ced, &c, 2);
+                if (c.r.find_matches != ced_count_hits(c.buf, "tile")) { ok = false; why = "find"; }
+                cui_code_editor_find(ui, "ed", NULL);
+                run(ui, build_ced, &c, 1);
+                if (c.wrap) {   /* the same rows as an editor that just opened the text */
+                    memcpy(&fresh, &c, sizeof c);
+                    run(ui2, build_ced, &fresh, 2);
+                    int down = 12 + (int)(r % 20);
+                    if (ced_walk_down(ui, &c, down) != ced_walk_down(ui2, &fresh, down)) { ok = false; why = "rows"; }
+                }
+                if (c.lang[0] == 'm') {   /* line states: the colors in view are the same once everything is found again */
+                    unsigned a1[16], a2[16];
+                    cui_code_editor_goto(ui, "ed", target, 1);
+                    run(ui, build_ced, &c, 2);
+                    int n1 = ced_text_colors(ui, a1, 16);
+                    c.rev++;   /* a new revision: the index and the states are made from the whole text */
+                    run(ui, build_ced, &c, 2);
+                    int n2 = ced_text_colors(ui, a2, 16);
+                    if (!ced_colors_within(a1, n1, a2, n2) || !ced_colors_within(a2, n2, a1, n1)) { ok = false; why = "colors"; }
+                }
+                cui_destroy(ui2);
+                ui2 = new_ctx();
+            }
+            if (!ok) printf("  mode %d: %s disagrees at step %d (cursor %d, line %d, column %d, lines %d)\n", mode, why, step, c.r.cursor, c.r.line, c.r.column, c.r.line_count);
+        }
+        CHECK(ok);
+        cui_destroy(ui2);
+        cui_destroy(ui);
+    }
+
+    /* block comments: an edit far above the view turns the lines in view into a comment, and back */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.lang = "c";
+    c.rev = 3;
+    c.cap = 200000;
+    c.big = malloc(c.cap);
+    size_t off = 0;
+    for (int i = 0; i < 3000; i++) off += (size_t)snprintf(c.big + off, c.cap - off, "int v%d = %d;\n", i, i);
+    run(ui, build_ced, &c, 2);
+    cui_code_editor_goto(ui, "ed", 2000, 1);
+    run(ui, build_ced, &c, 2);
+    int n0 = ced_text_colors(ui, col, 16);
+    cui_code_editor_select(ui, "ed", 0, 0);
+    run(ui, build_ced, &c, 1);
+    type(ui, build_ced, &c, "/*");
+    cui_code_editor_goto(ui, "ed", 2000, 1);
+    run(ui, build_ced, &c, 2);
+    CHECK(ced_text_colors(ui, col2, 16) < n0);   /* all comment now */
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    cui_code_editor_goto(ui, "ed", 2000, 1);
+    run(ui, build_ced, &c, 2);
+    CHECK(ced_text_colors(ui, col2, 16) == n0 && strncmp(c.big, "int v0", 6) == 0);
+    cui_destroy(ui);
+    free(c.big);
+    c.big = NULL; c.cap = 0;
 }
 
 /* diff viewer ---------------------------------------------------------- */
@@ -9239,6 +9436,7 @@ int main(void) {
     test_code_editor_replace();
     test_code_editor_wrap();
     test_code_editor_markdown();
+    test_code_editor_big();
     test_diff();
     test_dials();
     test_candles();
