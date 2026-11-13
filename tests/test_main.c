@@ -7943,6 +7943,7 @@ static void test_code_editor_mdwrite(void) {
 #undef MD_ENTER
     /* small API pieces that go with it */
     CHECK(strcmp(cui_key_name(CUI_KEY_BACKSLASH), "\\") == 0);
+    CHECK(strcmp(cui_key_name(CUI_KEY_GRAVE), "`") == 0);
     c.ro = false; c.lang = "md";
     ced_text(&c, "a");
     ced_sel(ui, &c, 0, 0);

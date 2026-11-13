@@ -155,7 +155,7 @@ void cui_terminal_printf(cui_terminal_buffer *t, const char *fmt, ...) {
 
 typedef struct { cui_color fg, bg; bool has_fg, has_bg, bold, dim, italic, underline, inverse; } cui__tm_style;
 
-static cui_color cui__tm_palette(cui_ctx *ui, int k) {
+cui_color cui__tm_palette(cui_ctx *ui, int k) {
     /* tuned per mode so every color reads on the panel */
     static const uint32_t light[16] = { 0x27272a, 0xc4302b, 0x2e7d32, 0x9a6700, 0x1f5fbf, 0x8e3fb0, 0x0f7c84, 0x71717a,
                                         0x52525b, 0xe5484d, 0x30a46c, 0xb08300, 0x3e7bfa, 0xab4aba, 0x12a4ad, 0x18181b };
@@ -165,7 +165,7 @@ static cui_color cui__tm_palette(cui_ctx *ui, int k) {
     return cui__rgba((v >> 16) & 255, (v >> 8) & 255, v & 255, 255);
 }
 
-static cui_color cui__tm_256(cui_ctx *ui, int n) {
+cui_color cui__tm_256(cui_ctx *ui, int n) {
     if (n < 16) return cui__tm_palette(ui, n);
     if (n < 232) {
         n -= 16;
@@ -240,7 +240,7 @@ typedef struct {
 static int cui__tm_rows(uint32_t cols, int width_cols) { return cols == 0 ? 1 : (int)((cols + (uint32_t)width_cols - 1) / (uint32_t)width_cols); }
 
 /* block elements U+2580..U+2593: half and eighth blocks, and the three shades */
-static void cui__tm_block(cui_ctx *ui, int k, cui_rect c, cui_color col) {
+void cui__tm_block(cui_ctx *ui, int k, cui_rect c, cui_color col) {
     float s = ui->scale > 0 ? ui->scale : 1;
     /* whole device pixels, so neighbouring cells meet without seams */
     float x0 = floorf(c.x * s + 0.5f) / s, x1 = floorf((c.x + c.w) * s + 0.5f) / s;

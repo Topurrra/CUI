@@ -265,7 +265,7 @@ typedef enum cui_key {
     CUI_KEY_MINUS, CUI_KEY_EQUAL, CUI_KEY_COMMA, CUI_KEY_PERIOD, CUI_KEY_SLASH,
     CUI_KEY_F1, CUI_KEY_F2, CUI_KEY_F3, CUI_KEY_F4, CUI_KEY_F5, CUI_KEY_F6,
     CUI_KEY_F7, CUI_KEY_F8, CUI_KEY_F9, CUI_KEY_F10, CUI_KEY_F11, CUI_KEY_F12,
-    CUI_KEY_BACKSLASH,
+    CUI_KEY_BACKSLASH, CUI_KEY_GRAVE,   /* ` and ~ */
     CUI_KEY_COUNT
 } cui_key;
 
@@ -1617,6 +1617,7 @@ CUI_API bool cui_file_picker_ex(cui_ctx *ui, const char *id, bool *open, char *o
 #define cui_path_bar(ui, id, segs, n, ...) cui_path_bar_ex((ui), (id), (segs), (n), CUI__OPTS(cui_path_bar_opts, __VA_ARGS__))
 #define cui_file_browser(ui, id, path, cap, ...) cui_file_browser_ex((ui), (id), (path), (cap), CUI__OPTS(cui_file_browser_opts, __VA_ARGS__))
 #define cui_terminal(ui, id, t, ...) cui_terminal_ex((ui), (id), (t), CUI__OPTS(cui_terminal_opts, __VA_ARGS__))
+#define cui_vt_view(ui, id, vt, ...) cui_vt_view_ex((ui), (id), (vt), CUI__OPTS(cui_vt_opts, __VA_ARGS__))
 #define cui_file_picker(ui, id, open, out, cap, ...) cui_file_picker_ex((ui), (id), (open), (out), (cap), CUI__OPTS(cui_file_picker_opts, __VA_ARGS__))
 
 /* ------------------------------------------------------------------------ */
@@ -3609,6 +3610,86 @@ typedef struct cui_terminal_result {
     bool interrupt;            /* Ctrl+C with nothing selected */
 } cui_terminal_result;
 CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_terminal_buffer *t, const cui_terminal_opts *opts);
+
+/* ---- Terminal screen (VT) ---- */
+/* A terminal emulator and its view, for a real shell or any program that moves the cursor (PowerShell, cmd,
+ * vim, less, htop): the screen is a grid of character cells that your program writes the output of a
+ * pseudo console or a pty into, and the view sends every key back as the bytes a terminal sends. Unlike
+ * `cui_terminal` it keeps no line of input of its own: the program echoes, edits and completes.
+ *
+ *     cui_vt *vt = cui_vt_create(80, 24, 5000);                       // once; 5000 lines of scrollback
+ *     cui_vt_write(vt, out, n);                                       // output as it arrives, any size, any split
+ *     cui_vt_result r = cui_vt_view(ui, "shell", vt, .focus = first);
+ *     if (r.input_len) send_to_program(r.input, r.input_len);        // keys, wheel
+ *     if (r.paste) send_to_program(r.paste, r.paste_len);            // see below
+ *     if (r.resized) resize_program(r.cols, r.rows);                  // the view changed size
+ *     char reply[64]; size_t n = cui_vt_reply(vt, reply, sizeof reply);   // answers to the program's queries: send them too
+ *
+ * Understood: cursor movement, erase, insert and delete (characters and lines), scrolling regions, 16, 256
+ * and true colors, bold, dim, italic, underline, inverse, strike, wide characters, the alternate screen
+ * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2),
+ * cursor position and device attribute reports. Not understood (skipped): mouse reporting, hyperlinks,
+ * images, character sets.
+ *
+ * Memory is fixed: two grids of 8 bytes per cell, and a scrollback ring of `lines * 48` cells (lines are
+ * stored without their blank right end). Scrolling moves no cell data. Writing never allocates and parses
+ * several hundred MB/s, so feed output in slices (a few ms of work a frame) and ask for another frame while
+ * more waits. Idle, the view costs nothing: no blinking, no timers.
+ *
+ * The view takes keyboard focus on a click (or with `.focus`), sends Tab to the program, and keeps what it
+ * sent from every other component (read `cui_vt_focused` before your own shortcuts). Ctrl+C copies a
+ * selection, otherwise it is Ctrl+C for the program; Ctrl+Shift+C always copies; Ctrl+V and Ctrl+Shift+V
+ * and a right click without a selection paste (a right click with one copies it): the text comes back in
+ * `paste`, valid until the next clipboard call, for you to write (with ESC [ 200 ~ before and ESC [ 201 ~
+ * after when `paste_bracketed` is set; turn line breaks into \r first). Shift+PageUp, Shift+PageDown,
+ * Shift+Home and Shift+End and the wheel move through the scrollback; on the alternate screen the wheel
+ * sends arrow keys. Drag, double click and triple click select. */
+enum {
+    CUI_VT_BOLD = 1 << 24, CUI_VT_DIM = 1 << 25, CUI_VT_ITALIC = 1 << 26, CUI_VT_UNDERLINE = 1 << 27,
+    CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29
+};
+typedef struct cui_vt cui_vt;
+typedef struct cui_vt_cell {
+    uint32_t ch;                   /* code point, 0 for an empty cell */
+    int32_t fg, bg;                /* -1 default, 0..255 palette, 0x1000000 | 0xRRGGBB true color */
+    int attrs;                     /* CUI_VT_* */
+} cui_vt_cell;
+CUI_API cui_vt *cui_vt_create(int cols, int rows, int scrollback_lines);     /* NULL when out of memory */
+CUI_API void cui_vt_destroy(cui_vt *vt);
+CUI_API void cui_vt_write(cui_vt *vt, const char *data, size_t len);
+CUI_API void cui_vt_resize(cui_vt *vt, int cols, int rows);                   /* the view does this itself; call it for a view-less screen */
+CUI_API size_t cui_vt_reply(cui_vt *vt, char *out, size_t cap);               /* takes the pending answers (up to cap bytes) */
+CUI_API const char *cui_vt_title(const cui_vt *vt);                           /* set by the program with OSC 0 or 2; "" if never */
+CUI_API void cui_vt_size(const cui_vt *vt, int *cols, int *rows);
+CUI_API void cui_vt_cursor(const cui_vt *vt, int *x, int *y);
+CUI_API bool cui_vt_alt_screen(const cui_vt *vt);
+CUI_API bool cui_vt_app_cursor(const cui_vt *vt);
+CUI_API bool cui_vt_bracketed_paste(const cui_vt *vt);
+CUI_API int cui_vt_scrollback_count(const cui_vt *vt);
+CUI_API size_t cui_vt_memory(const cui_vt *vt);                               /* bytes held */
+/* One screen row as text with its blank right end cut: row 0 is the top of the live screen, -1 the newest scrollback line. Returns the length. */
+CUI_API size_t cui_vt_line_text(const cui_vt *vt, int row, char *out, size_t cap);
+CUI_API bool cui_vt_cell_at(const cui_vt *vt, int x, int y, cui_vt_cell *out);
+typedef struct cui_vt_opts {
+    int _;
+    cui_size width, height;        /* default fill */
+    float size;                    /* font size, default 13 */
+    bool focus;                    /* take the keyboard now (once, when you open it) */
+    bool no_input;                 /* show only: no keys, no paste */
+} cui_vt_opts;
+typedef struct cui_vt_result {
+    const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */
+    int input_len;
+    const char *paste;             /* text to paste, or NULL */
+    int paste_len;
+    bool paste_bracketed;          /* the program asked for bracketed paste */
+    bool focused;
+    bool resized;                  /* the grid changed to cols x rows: tell the program */
+    bool copied;                   /* a selection went to the clipboard */
+    int cols, rows;
+} cui_vt_result;
+CUI_API cui_vt_result cui_vt_view_ex(cui_ctx *ui, const char *id, cui_vt *vt, const cui_vt_opts *opts);
+CUI_API bool cui_vt_focused(cui_ctx *ui, const char *id);                     /* the view with this id has the keyboard (id as given to cui_vt_view, in the same id scope) */
 
 /* ---- Emoji ----
  * Color emoji come from an emoji font: the system's (cui_emoji_font_load_system, which

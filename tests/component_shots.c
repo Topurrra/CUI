@@ -2649,6 +2649,51 @@ SCENE(terminal) {
         if (r.command && r.command[0]) cui_terminal_printf(&g_term, "%s: command not found\n", r.command);
     }
 }
+/* A shell session on a VT screen: colors, a box drawn with line characters, a progress bar, true color, the cursor. */
+static void vt_demo_fill(cui_vt *vt) {
+#define BX_H "\xe2\x94\x80"
+#define BX_V "\xe2\x94\x82"
+    const char *clear = "\x1b[2J\x1b[H";
+    cui_vt_write(vt, clear, strlen(clear));
+    static const char *const lines[] = {
+        "\x1b[1;32mfield@notes\x1b[0m:\x1b[1;34m~/fieldnotes\x1b[0m$ git status -sb\r\n",
+        "## main...origin/main [ahead 2]\r\n",
+        " \x1b[31mM\x1b[0m src/cui_vt.c\r\n",
+        "\x1b[32mA\x1b[0m  tests/test_vt.c\r\n",
+        "\x1b[31m??\x1b[0m notes/draft.md\r\n",
+        "\x1b[1;32mfield@notes\x1b[0m:\x1b[1;34m~/fieldnotes\x1b[0m$ cmake --build build -j8\r\n",
+        "[ 62%] \x1b[36m\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\x1b[90m\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\x1b[0m Building C object src/cui_vt.c.o\r\n",
+        "\x1b[1msrc/cui_vt.c:214:9: \x1b[35mwarning:\x1b[0m\x1b[1m unused variable 'n'\x1b[0m\r\n",
+        "\x1b[2m  214 |     int n = 0;\x1b[0m\r\n",
+        "\r\n",
+        "\xe2\x94\x8c" BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xac" BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xac" BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\x90\r\n",
+        BX_V " \x1b[1mfile\x1b[0m     " BX_V " \x1b[1msize\x1b[0m  " BX_V " \x1b[1mstatus\x1b[0m   " BX_V "\r\n",
+        "\xe2\x94\x9c" BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xbc" BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xbc" BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xa4\r\n",
+        BX_V " cui_vt.c " BX_V " 41 KB " BX_V " \x1b[33mmodified\x1b[0m " BX_V "\r\n",
+        BX_V " test_vt.c" BX_V " 18 KB " BX_V " \x1b[32mnew\x1b[0m      " BX_V "\r\n",
+        "\xe2\x94\x94" BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xb4" BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\xb4" BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H BX_H "\xe2\x94\x98\r\n",
+        "\r\n",
+    };
+    for (int i = 0; i < (int)(sizeof lines / sizeof lines[0]); i++) cui_vt_write(vt, lines[i], (size_t)strlen(lines[i]));
+    char b[64];
+    for (int i = 0; i < 40; i++) {
+        snprintf(b, sizeof b, "\x1b[48;2;%d;%d;%dm \x1b[0m", 40 + i * 5, 120 - i * 2, 255 - i * 5);
+        cui_vt_write(vt, b, strlen(b));
+    }
+    const char *prompt = "\r\n\x1b[1;32mfield@notes\x1b[0m:\x1b[1;34m~/fieldnotes\x1b[0m$ ";
+    cui_vt_write(vt, prompt, strlen(prompt));
+#undef BX_H
+#undef BX_V
+}
+SCENE(vt_terminal) {
+    static cui_vt *vt;
+    static int frames;
+    if (!vt) vt = cui_vt_create(90, 20, 0);
+    cui_box(ui, UPTO(820)) {
+        cui_vt_view(ui, "vt", vt, .height = CUI_PX(400), .no_input = true);
+    }
+    if (++frames == 3) vt_demo_fill(vt);      /* once the grid has the size of its view */
+}
 SCENE(emoji_picker) {
     static char recent[256] = "\xf0\x9f\x91\x8d \xf0\x9f\x8e\x89 \xe2\x9c\x85 \xf0\x9f\x98\x82 \xf0\x9f\x9a\x80 \xf0\x9f\x91\x80 \xe2\x9d\xa4\xef\xb8\x8f \xf0\x9f\x99\x8f";
     static int tone = 0;
@@ -4944,7 +4989,7 @@ int main(int argc, char **argv) {
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
         { "markdown-select-all", scene_markdown_select_all, 560, 340, true },
-        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
+        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "vt-terminal", scene_vt_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
         { "timeline-editor", scene_timeline_editor, 960, 660, true },

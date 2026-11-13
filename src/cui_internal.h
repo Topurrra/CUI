@@ -400,6 +400,11 @@ cui_rect cui__xform_rect(cui_ctx *ui, cui_rect r);
 void cui__paint_add_hit(cui_ctx *ui, cui_id id, cui_rect r, uint32_t flags);
 /* From a paint callback: the wheel over r (inside the current clip) goes to id, ahead of any scroll area under it. */
 void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r);
+/* Terminal colors and block elements, shared by the terminal (cui_terminal.c) and the VT view (cui_vt.c):
+ * the 16 ANSI colors tuned for the theme, the 256 color palette, and U+2580..U+2593 drawn as rectangles (k = code point - 0x2580). */
+cui_color cui__tm_palette(cui_ctx *ui, int k);
+cui_color cui__tm_256(cui_ctx *ui, int n);
+void cui__tm_block(cui_ctx *ui, int k, cui_rect c, cui_color col);
 
 /* ---- per id state ---- */
 typedef struct cui_state_entry {

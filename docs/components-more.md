@@ -1044,6 +1044,38 @@ Long lines wrap at the panel width. Each line keeps its count of characters, so 
 
 Drag over the output to select, and press Ctrl+C (Cmd+C on macOS) to copy it without the color codes. With nothing selected, Ctrl+C clears the input, prints `^C` and sets `interrupt`. Ctrl+L clears the screen, Up and Down walk back through the last 32 commands, and clicking the output puts the caret at the prompt. `.no_input = true` leaves just the output. `.size` sets the text size (13 by default) and a `.height` of -1 fills the parent.
 
+### VT terminal
+
+A real terminal for a shell: PowerShell, cmd, bash, vim, less, htop, anything that moves the cursor. The screen is a grid of cells driven by the escape sequences the program writes, and the view sends every key back as the bytes a terminal sends. Use [Terminal](#terminal) for build logs and REPLs that print lines and let CUI own the input line; use this when a program owns the screen and the line.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/vt-terminal-dark.png"><img src="images/components/vt-terminal.png" alt="VT terminal"></picture>
+
+```c
+static cui_vt *vt;
+vt = cui_vt_create(80, 24, 5000);                              /* once: 5000 lines of scrollback */
+
+cui_vt_write(vt, out, n);                                      /* program output, any size, any split */
+
+cui_vt_result r = cui_vt_view(ui, "shell", vt, .focus = just_opened);
+if (r.resized) resize_pty(r.cols, r.rows);                     /* the view changed size: tell the program */
+if (r.input_len) write_pty(r.input, r.input_len);              /* keys, and the wheel on the alternate screen */
+if (r.paste) write_pty(r.paste, r.paste_len);                  /* with ESC [ 200 ~ ... ESC [ 201 ~ round it when r.paste_bracketed */
+
+char reply[64];
+size_t n2 = cui_vt_reply(vt, reply, sizeof reply);             /* answers to the program's queries (cursor position...) */
+if (n2) write_pty(reply, n2);
+```
+
+Where the bytes come from is yours: a pseudo console (ConPTY), a pty, a serial port or a socket. The screen never allocates while writing and parses about 100 MB a second in the benchmark (`cui_test_vt` prints the speed), so feed it in slices of a few milliseconds a frame and ask for another frame while more waits (`cui_request_redraw`): a program that prints a million lines slows the screen's catching up, never the window. Idle, the view costs nothing: no blinking cursor, no timers.
+
+**What is understood.** Printable text in UTF-8 (wide characters take two cells), carriage return, line feed, backspace, tab; cursor movement and positioning, save and restore; erase in line and display, insert and delete characters and lines, scroll up and down, scrolling regions; colors (16, 256 and 24-bit), bold, dim, italic, underline, inverse and strike; the alternate screen (`?1049`, `?47`), autowrap, cursor visibility, application cursor keys, bracketed paste; window titles (`cui_vt_title`); and the reports a program asks for (cursor position, device attributes), which `cui_vt_reply` hands back. Sequences it does not know are skipped without printing. Not supported: mouse reporting, hyperlinks, images, character sets other than UTF-8, blinking text. Characters the font does not have (such as CJK) show as blanks; the box drawing characters `─ │ ┌ ┐ ╔ ═ ╬` and friends and the block characters are drawn as cells rather than taken from the font, so lines meet without gaps.
+
+**Memory is fixed.** Two grids at 8 bytes a cell (the second one only once a program uses the alternate screen), and a scrollback ring of `lines * 48` cells where each line is stored without its blank right end, so a long session never grows (`cui_vt_memory` tells how much). Scrolling rotates a small table of row numbers and moves no cell data. When the view changes size the grid follows it (the program redraws; lines already in the scrollback keep their width).
+
+**Keys.** The view takes the keyboard on a click or with `.focus`, keeps Tab for the program (Shift+Tab sends the back tab), and takes every key it sends away from the rest of the frame, so a shortcut of yours does not also fire; read `cui_vt_focused(ui, "shell")` (in the same id scope) before your own shortcuts and skip the ones a shell uses. Ctrl+letter sends the control character (Ctrl+C is the interrupt), Alt+letter sends Escape first, the arrows, Home, End, Delete, Page Up and Down and F1 to F12 send the usual sequences with their modifiers. Ctrl+C copies when there is a selection (Ctrl+Shift+C always does, Cmd+C on macOS), otherwise it interrupts. Ctrl+V, Ctrl+Shift+V, Cmd+V and a right click without a selection paste: the text comes back in `paste` for you to write, with line breaks turned into `\r` (the Enter key) first. Drag selects, double click selects a word, triple click a line; a right click with a selection copies it. Shift+Page Up, Shift+Page Down, Shift+Home, Shift+End and the wheel scroll through the history, and typing returns to the live screen. On the alternate screen (vim, less) the wheel sends arrow keys instead. `.no_input = true` shows the screen without taking keys, `.size` sets the text size (13 by default), `.width` and `.height` default to filling the parent.
+
+`CUI_KEY_GRAVE` (the backtick key) joined the key enum for shortcuts like Ctrl+`.
+
 ### Hex viewer
 
 The bytes of a file or of memory in hex and ASCII, for binary tools, emulators and debuggers.

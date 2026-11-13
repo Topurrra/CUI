@@ -205,6 +205,7 @@ static cui_key cui__sdl_key(SDL_Keycode k) {
     case SDLK_PERIOD: return CUI_KEY_PERIOD;
     case SDLK_SLASH: return CUI_KEY_SLASH;
     case SDLK_BACKSLASH: return CUI_KEY_BACKSLASH;
+    case SDLK_BACKQUOTE: return CUI_KEY_GRAVE;
     default: return CUI_KEY_NONE;
     }
 }
