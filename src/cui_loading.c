@@ -162,7 +162,7 @@ static void cui__dspin_ripple(cui__dspin_grid *g) {
         }
 }
 
-/* chevrons streaming up (dir 1) or down (dir -1) in a lane centered at cx, fading at both ends */
+/* chevrons pointing and streaming up (dir 1) or down (dir -1) in a lane centered at cx, fading at both ends */
 static void cui__dspin_lane(cui__dspin_grid *g, float cx, int dir, int layer) {
     float s = g->h / 32.0f, half = 6 * s, period = 9 * s, band = 2.6f * s, shift = g->t * 13 * s;
     for (int y = 0; y < g->h; y++) {
@@ -171,7 +171,7 @@ static void cui__dspin_lane(cui__dspin_grid *g, float cx, int dir, int layer) {
         for (int x = 0; x < g->w; x++) {
             float ax = fabsf(x - cx);
             if (ax > half) continue;
-            float v = fmodf(yy + ax * 1.1f + shift, period);
+            float v = fmodf(yy - ax * 1.1f + shift, period);
             if (v < 0) v += period;
             if (v < band) cui__dspin_set(g, layer, x, y, fade);
         }
