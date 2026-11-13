@@ -1273,6 +1273,23 @@ typedef struct cui_status_button_opts {
 } cui_status_button_opts;
 CUI_API bool cui_status_button_ex(cui_ctx *ui, const char *label, cui_status status, const cui_status_button_opts *opts);
 
+/* Status spinner: a dither ring while the status is busy that resolves when the work ends: it
+ * fills to a disc in the success color with a check, or the danger color with a cross, holds
+ * it for a moment and dissolves away. It keeps its space throughout. Returns true while it
+ * shows something, so an app can stop calling it after a result.
+ *
+ *     cui_status_spinner(ui, "save", saving ? CUI_STATUS_BUSY : ok ? CUI_STATUS_SUCCESS : CUI_STATUS_ERROR);
+ *
+ * Idle shows nothing. Reduced motion shows the ring still and the result at once. */
+typedef struct cui_status_spinner_opts {
+    int _;
+    float size;                /* points, default 20 */
+    cui_color color;           /* the ring while busy, default the text color */
+    bool keep;                 /* the check or cross stays instead of dissolving away */
+} cui_status_spinner_opts;
+CUI_API bool cui_status_spinner_ex(cui_ctx *ui, const char *id, cui_status status, const cui_status_spinner_opts *opts);
+#define cui_status_spinner(ui, id, status, ...) cui_status_spinner_ex((ui), (id), (status), CUI__OPTS(cui_status_spinner_opts, __VA_ARGS__))
+
 /* Reactions: icon pills with counts. Clicking toggles `active` and adjusts
  * the count. Returns the index that changed, or -1. */
 typedef struct cui_reaction {

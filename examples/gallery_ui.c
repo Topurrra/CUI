@@ -502,6 +502,17 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
                     cui_text(ui, "Connecting", .color = CUI_COLOR_TEXT_SECONDARY);
                 }
             }
+            /* a job that takes two seconds and then succeeds or fails, in turn */
+            static double started = -1;
+            static int runs;
+            double since = cui_time(ui) - started;
+            cui_status st = started < 0 ? CUI_STATUS_IDLE : since < 2 ? CUI_STATUS_BUSY : runs % 2 ? CUI_STATUS_SUCCESS : CUI_STATUS_ERROR;
+            cui_row(ui, .gap = 10, .align = CUI_ALIGN_CENTER) {
+                if (cui_button(ui, "Upload", .size = CUI_SIZE_SM, .disabled = st == CUI_STATUS_BUSY)) { started = cui_time(ui); runs++; }
+                cui_status_spinner(ui, "upload", st, .size = 18);
+                cui_text(ui, st == CUI_STATUS_BUSY ? "Uploading" : st == CUI_STATUS_SUCCESS ? "Uploaded" : st == CUI_STATUS_ERROR ? "Upload failed" : "",
+                         .color = CUI_COLOR_TEXT_SECONDARY);
+            }
         }
     }
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {

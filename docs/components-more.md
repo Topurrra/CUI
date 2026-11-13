@@ -628,6 +628,24 @@ The undo toast is `cui_toast` with two options. Call `cui_toast` once, on the fr
 
 Keyboard: the Undo button takes Tab, and Enter or Space presses it.
 
+### Status spinner
+
+A dither spinner for work that ends: a ring while it runs, then a disc with a check or a cross that holds for a moment and dissolves away.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/status-spinner-dark.png"><img src="images/components/status-spinner.png" alt="Status spinner"></picture>
+
+```c
+cui_status st = uploading ? CUI_STATUS_BUSY : upload_ok ? CUI_STATUS_SUCCESS : CUI_STATUS_ERROR;
+cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+    cui_status_spinner(ui, "upload", st, .size = 16);
+    cui_text(ui, uploading ? "Uploading" : upload_ok ? "Uploaded" : "Upload failed");
+}
+```
+
+It takes the same `cui_status` as the status button. While the status is `CUI_STATUS_BUSY` it is the comet ring of the [dither spinners](components.md#dither-spinners). When the status turns to `CUI_STATUS_SUCCESS` a disc in the success color dissolves in over 0.35 seconds with a check cut out of it in the background color; `CUI_STATUS_ERROR` does the same in the danger color with a cross. The result holds until 1.8 seconds after the change, then dissolves away over 0.6 seconds. `keep` holds it for as long as you call it. `CUI_STATUS_IDLE` shows nothing. It keeps its space throughout, so the text beside it does not move.
+
+Returns true while it shows something, so after a result you can stop calling it once it returns false. The id keeps the time of the last change; a status that changes again starts over. Options: `size` in points (20) and `color` for the ring. It asks for 30 frames a second while the ring turns and while the disc dissolves in or away, one frame at the end of the hold, and none after that. Under reduced motion the ring holds still, and the result shows at once and goes at once when the hold and the dissolve would have ended.
+
 ## Data
 
 ### Data grid and filter bar

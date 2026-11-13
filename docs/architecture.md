@@ -69,7 +69,7 @@ Components are grouped by family, one family per file, so a change to one compon
 | `cui_ai.c`, `cui_voice.c`, `cui_social.c`, `cui_media.c`, `cui_photo.c`, `cui_emoji.c` | AI, voice, conversation, media and image components |
 | `cui_chrome.c`, `cui_dock.c`, `cui_tools.c`, `cui_nodes.c`, `cui_curves.c` | app chrome, docking, tool panels, node and curve editors |
 | `cui_canvas.c` | canvas and bars: the format bar, live cursors and the presence pill, canvas controls, the result card, the selection bar |
-| `cui_loading.c` | loading animations in dots: the dither styles of the spinner |
+| `cui_loading.c` | loading animations in dots: the dither styles of the spinner and the status spinner |
 | `cui_actions.c`, `cui_extras.c`, `cui_disclosure.c`, `cui_motion.c`, `cui_tour.c`, `cui_files.c` | the rest, by family |
 
 ## The core ideas

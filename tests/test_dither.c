@@ -640,6 +640,101 @@ static void test_spinners(void) {
     free(imgs[0].px); free(imgs[1].px);
 }
 
+/* ------------------------------------------------------------------------ */
+/* status spinner                                                           */
+
+typedef struct { cui_status status; bool keep, shown; } status_case;
+static void build_status(cui_ctx *ui, void *u) {
+    status_case *c = u;
+    cui_row(ui) { cui_box(ui, .id = "st") { c->shown = cui_status_spinner(ui, "s", c->status, .size = 56, .keep = c->keep); } }
+}
+/* pixels in the spinner's box near the success (k 1) or danger (k 2) color, or near the background (k 0) */
+static int status_px(cui_ctx *ui, image im, int k) {
+    cui_rect r = cui__prev_rect(ui, cui_make_id(ui, "st"));
+    cui_color want = k == 1 ? cui_color_of(ui, CUI_COLOR_SUCCESS) : k == 2 ? cui_color_of(ui, CUI_COLOR_DANGER) : cui_color_of(ui, CUI_COLOR_BACKGROUND);
+    int n = 0;
+    for (float y = r.y; y < r.y + r.h; y++)
+        for (float x = r.x; x < r.x + r.w; x++) {
+            const unsigned char *p = at(im, x, y);
+            n += abs(p[0] - want.r) + abs(p[1] - want.g) + abs(p[2] - want.b) < 12;
+        }
+    return n;
+}
+
+static void test_status_spinner(void) {
+    printf("status spinner\n");
+    cui_ctx *ui = new_ctx(200, 120, false);
+    status_case c = { CUI_STATUS_BUSY, false, false };
+    run(ui, build_status, &c, 10);
+    CHECK(c.shown);
+    float w = cui_next_wakeup(ui);
+    CHECK(w >= 0 && w <= 1.0f / 30 + 1e-4f);
+    image im = render(ui);
+    CHECK_EQ(status_px(ui, im, 1), 0);
+    free(im.px);
+    /* success: a green disc with a check cut into it, held, then gone */
+    c.status = CUI_STATUS_SUCCESS;
+    run(ui, build_status, &c, 6);
+    im = render(ui);
+    int early = status_px(ui, im, 1);
+    free(im.px);
+    run(ui, build_status, &c, 30);   /* half a second in: held */
+    im = render(ui);
+    int held = status_px(ui, im, 1), r = (int)(28 * 28 * 3.14159f);
+    CHECK(early > 0 && early < held);
+    CHECK(held > r / 2 && held < r);
+    /* the check is cut out of the disc in the background color, inside the disc */
+    cui_rect box = cui__prev_rect(ui, cui_make_id(ui, "st"));
+    const unsigned char *mid = at(im, box.x + 26, box.y + 32);   /* on the check's short stroke */
+    cui_color bg = cui_color_of(ui, CUI_COLOR_BACKGROUND);
+    CHECK(abs(mid[1] - bg.g) < 12);
+    free(im.px);
+    /* while held it wakes once, at the end of the hold, not every step */
+    w = cui_next_wakeup(ui);
+    CHECK(w > 0.5f);
+    run(ui, build_status, &c, 150);   /* past the fade */
+    CHECK(!c.shown);
+    CHECK(cui_next_wakeup(ui) < 0);
+    im = render(ui);
+    CHECK_EQ(status_px(ui, im, 1), 0);
+    free(im.px);
+    /* failure: the danger color */
+    c.status = CUI_STATUS_ERROR;
+    run(ui, build_status, &c, 40);
+    im = render(ui);
+    CHECK(status_px(ui, im, 2) > r / 2);
+    free(im.px);
+    /* keep: the mark stays and nothing wakes */
+    c.keep = true;
+    run(ui, build_status, &c, 200);
+    CHECK(c.shown);
+    CHECK(cui_next_wakeup(ui) < 0);
+    /* idle shows nothing */
+    c.status = CUI_STATUS_IDLE;
+    run(ui, build_status, &c, 2);
+    CHECK(!c.shown);
+    im = render(ui);
+    CHECK_EQ(status_px(ui, im, 2), 0);
+    free(im.px);
+    cui_destroy(ui);
+
+    /* reduced motion: the result at once, then gone at once after the hold */
+    ui = new_ctx(200, 120, true);
+    c = (status_case){ CUI_STATUS_BUSY, false, false };
+    run(ui, build_status, &c, 3);
+    CHECK(cui_next_wakeup(ui) < 0);
+    c.status = CUI_STATUS_SUCCESS;
+    run(ui, build_status, &c, 1);
+    im = render(ui);
+    CHECK(status_px(ui, im, 1) > r / 2);
+    free(im.px);
+    w = cui_next_wakeup(ui);
+    CHECK(w > 2.0f && w <= 2.4f);
+    run(ui, build_status, &c, 150);
+    CHECK(!c.shown);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
@@ -649,6 +744,7 @@ int main(void) {
     test_area();
     test_veil();
     test_spinners();
+    test_status_spinner();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

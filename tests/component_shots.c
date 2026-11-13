@@ -272,6 +272,24 @@ SCENE(dither_spinners) {
     ds_tiles(ui, t, (int)(sizeof t / sizeof t[0]));
     ds_inline(ui);
 }
+/* the status spinner while busy and a moment after each result, large and inline */
+SCENE(status_spinner) {
+    static const cui_status st[3] = { CUI_STATUS_BUSY, CUI_STATUS_SUCCESS, CUI_STATUS_ERROR };
+    static const char *names[3] = { "Uploading", "Uploaded", "Upload failed" };
+    cui_row(ui, .gap = 48, .align = CUI_ALIGN_END, .justify = CUI_JUSTIFY_CENTER, .wrap = true, UPTO(560)) {
+        for (int k = 0; k < 3; k++) {
+            cui_push_id_int(ui, k);
+            cui_column(ui, .gap = 12, .align = CUI_ALIGN_CENTER) {
+                cui_status_spinner(ui, "big", st[k], .size = 56);
+                cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER) {
+                    cui_status_spinner(ui, "small", st[k], .size = 16);
+                    cui_text(ui, names[k], .size = 13, .color = CUI_COLOR_TEXT_SECONDARY);
+                }
+            }
+            cui_pop_id(ui);
+        }
+    }
+}
 static cui_id pm_bar;   /* the first meter's bar, for the pointer */
 static void pm_meter(cui_ctx *ui, const char *id, bool gray) {
     static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };
@@ -4524,6 +4542,7 @@ int main(int argc, char **argv) {
         { "alerts", scene_alerts, 620, 210, true }, { "feedback", scene_feedback, 520, 220, false },
         { "dither-progress", scene_dither_progress, 620, 150, true, false, CUI_ACCENT_NEUTRAL },
         { "dither-spinners", scene_dither_spinners, 800, 860, true, false, CUI_ACCENT_NEUTRAL },
+        { "status-spinner", scene_status_spinner, 600, 170, true, false, CUI_ACCENT_NEUTRAL },
         { "pattern-meter", scene_pattern_meter_hover, 660, 280, true },
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },

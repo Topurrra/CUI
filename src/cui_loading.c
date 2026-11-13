@@ -1,4 +1,4 @@
-/* Loading animations drawn in dots: the dither styles of cui_spinner.
+/* Loading animations drawn in dots: the dither styles of cui_spinner and the status spinner.
  *
  * Every style fills a small grid of cells with densities (one array per color layer) for a
  * time that moves in steps, and draws each layer with cui__draw_dither_cells, so a cell is
@@ -272,6 +272,30 @@ static void cui__dspin_plasma(cui__dspin_grid *g) {
         }
 }
 
+/* distance from (x, y) to the segment a-b */
+static float cui__dspin_seg(float x, float y, float ax, float ay, float bx, float by) {
+    float vx = bx - ax, vy = by - ay, k = cui__clampf(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy), 0, 1);
+    float ex = x - ax - vx * k, ey = y - ay - vy * k;
+    return sqrtf(ex * ex + ey * ey);
+}
+
+/* a disc that dissolves in (`fin` its density) with a check (`kind` 1) or a cross (2) cut into
+ * it in the alternate color once `mark` is set */
+static void cui__dspin_mark(cui__dspin_grid *g, int kind, float fin, bool mark) {
+    float c = (g->w - 1) * 0.5f, R = g->w * 0.5f - 0.5f, s = g->w / 28.0f, wide = 1.7f * s;
+    static const float check[2][4] = { { -6, 0.5f, -1.5f, 5 }, { -1.5f, 5, 6.5f, -4.5f } };
+    static const float cross[2][4] = { { -4.5f, -4.5f, 4.5f, 4.5f }, { 4.5f, -4.5f, -4.5f, 4.5f } };
+    const float (*seg)[4] = kind == 1 ? check : cross;
+    for (int y = 0; y < g->h; y++)
+        for (int x = 0; x < g->w; x++) {
+            if ((x - c) * (x - c) + (y - c) * (y - c) > R * R) continue;
+            bool on_mark = false;
+            for (int k = 0; k < 2 && mark; k++)
+                on_mark |= cui__dspin_seg((float)x, (float)y, c + seg[k][0] * s, c + seg[k][1] * s, c + seg[k][2] * s, c + seg[k][3] * s) < wide;
+            cui__dspin_set(g, on_mark ? CUI__DSPIN_ALT : CUI__DSPIN_INK, x, y, fin);
+        }
+}
+
 /* ---- painting ---- */
 
 typedef struct {
@@ -279,6 +303,9 @@ typedef struct {
     float t;                   /* seconds, in steps */
     float wake;                /* seconds to the next step; 0: nothing moves */
     float cell;                /* points */
+    int mark;                  /* the status spinner: 0 the ring, 1 a check, 2 a cross */
+    float fin;                 /* its disc's density */
+    bool mark_on;              /* the check or cross shows in the disc */
     cui_color col[CUI__DSPIN_LAYERS];
 } cui__dspin_paint;
 
@@ -291,7 +318,8 @@ static void cui__paint_dither_spinner(cui_ctx *ui, cui_node *n, void *data) {
     float *buf = cui__frame_alloc(ui, sizeof(float) * (size_t)(cols * rows * CUI__DSPIN_LAYERS));
     memset(buf, 0, sizeof(float) * (size_t)(cols * rows * CUI__DSPIN_LAYERS));
     for (int k = 0; k < CUI__DSPIN_LAYERS; k++) g.v[k] = buf + (size_t)k * cols * rows;
-    switch (p->style) {
+    if (p->mark) cui__dspin_mark(&g, p->mark, p->fin, p->mark_on);
+    else switch (p->style) {
     case CUI_SPINNER_COMET: cui__dspin_comet(&g); break;
     case CUI_SPINNER_DOT_MATRIX: cui__dspin_matrix(&g); break;
     case CUI_SPINNER_FILL_DRAIN: cui__dspin_fill(&g); break;
@@ -366,4 +394,60 @@ void cui_spinner_ex(cui_ctx *ui, float size, const cui_spinner_opts *o) {
     if (ui->theme.motion > 0) p->t = cui__dspin_clock(ui, in->fps, &p->wake);
     else p->t = in->still;
     cui__dspin_node(ui, roundf(h * in->aspect), h, p);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Status spinner                                                           */
+/* ------------------------------------------------------------------------ */
+
+#define CUI__STATUS_IN 0.35f         /* seconds for the disc to dissolve in */
+#define CUI__STATUS_MARK 0.2f        /* when the check or cross shows in it */
+#define CUI__STATUS_HOLD 1.8f        /* when the disc starts to dissolve away */
+#define CUI__STATUS_OUT 0.6f         /* how long that takes */
+#define CUI__STATUS_FPS 30.0f
+
+typedef struct { cui_status status; double since; bool init; } cui__status_spinner_state;
+
+bool cui_status_spinner_ex(cui_ctx *ui, const char *id_str, cui_status status, const cui_status_spinner_opts *o) {
+    cui_status_spinner_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_id id = cui_make_id(ui, id_str);
+    cui__status_spinner_state *st = cui_state(ui, id, sizeof *st);
+    if (!st->init || st->status != status) { st->status = status; st->since = ui->time; st->init = true; }
+    float h = o->size > 0 ? o->size : 20;
+    cui__dspin_paint *p = cui__frame_alloc(ui, sizeof *p);
+    memset(p, 0, sizeof *p);
+    cui__dspin_colors(ui, p, o->color, CUI_TRANSPARENT);
+    bool motion = ui->theme.motion > 0;
+    bool shown = true;
+    if (status == CUI_STATUS_BUSY) {
+        p->style = CUI_SPINNER_COMET;
+        if (motion) p->t = cui__dspin_clock(ui, CUI__STATUS_FPS, &p->wake);
+        else p->t = cui__dspin_infos[CUI_SPINNER_COMET].still;
+    } else if (status == CUI_STATUS_SUCCESS || status == CUI_STATUS_ERROR) {
+        float e = (float)(ui->time - st->since), end = CUI__STATUS_HOLD + CUI__STATUS_OUT;
+        p->mark = status == CUI_STATUS_SUCCESS ? 1 : 2;
+        p->col[CUI__DSPIN_INK] = status == CUI_STATUS_SUCCESS ? CUI_C(ui, SUCCESS) : CUI_C(ui, DANGER);
+        p->col[CUI__DSPIN_ALT] = CUI_C(ui, BACKGROUND);
+        if (!motion) {
+            /* at once, and gone at once when the hold is over */
+            p->fin = 1; p->mark_on = true;
+            if (!o->keep) { shown = e < end; p->wake = shown ? end - e : 0; }
+        } else if (o->keep && e >= CUI__STATUS_IN) {
+            p->fin = 1; p->mark_on = true;
+        } else {
+            /* the steps count from the change, so every status spinner plays the same frames */
+            float t = floorf(e * CUI__STATUS_FPS) / CUI__STATUS_FPS, wake = t + 1 / CUI__STATUS_FPS - e;
+            p->mark_on = t >= CUI__STATUS_MARK;
+            if (t < CUI__STATUS_IN) { p->fin = t / CUI__STATUS_IN; p->wake = wake; }
+            else if (t < CUI__STATUS_HOLD) { p->fin = 1; p->wake = CUI__STATUS_HOLD - e; }
+            else if (t < end) { p->fin = 1 - (t - CUI__STATUS_HOLD) / CUI__STATUS_OUT; p->wake = wake; }
+            else shown = false;
+        }
+        if (!shown) p->fin = 0;
+    } else shown = false;
+    int i = cui__dspin_node(ui, h, h, p);
+    if (!shown) ui->nodes[i].paint = NULL;
+    return shown;
 }
