@@ -700,7 +700,12 @@ typedef struct {
     float body;                  /* unscaled body size */
     float u;                     /* spacing unit: body / 13 */
     cui_color fg, fg2, link_c, code_bg, marker_c, rule_c, rail_c;
-    int link_seq, code_seq, table_seq, callout_seq;
+    int link_seq, code_seq, table_seq;
+    cui_id callout_keys[128];    /* content hashes of this frame's foldable callouts, to number identical ones */
+    int callout_n;
+    const char *base_dir;
+    const char *(*resolve_image)(const char *src, void *user);
+    void *resolve_user;
     cui_id leaf_id;              /* id for the next inline block's node (headings: their position) */
     cui_id root_id;
     const md_line *lines;        /* every line of the text, for line numbers */
@@ -834,11 +839,274 @@ static const char *md_join(md_ctx *c, const md_line *L, int n, int *out_len) {
     return buf;
 }
 
+static char md_lc(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
+static bool md_alnum(char c) { return (c >= '0' && c <= '9') || (md_lc(c) >= 'a' && md_lc(c) <= 'z'); }
+
+/* ---- images: ![alt](src), ![alt|300](src), ![[file.png|300]], [![alt](src)](url) ---- */
+
+typedef struct {
+    const char *alt, *src, *link;
+    int alt_len, src_len, link_len;   /* link_len -1: not wrapped in a link */
+    float width;                      /* from the |300 size syntax, 0 for the natural size */
+} md_img;
+
+static bool md_image_ext(const char *s, int n) {
+    static const char *const ext[] = { "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tga" };
+    int dot = n;
+    while (dot > 0 && s[dot - 1] != '.' && s[dot - 1] != '/' && s[dot - 1] != '\\') dot--;
+    if (dot <= 0 || s[dot - 1] != '.') return false;
+    for (int k = 0; k < CUI_COUNTOF(ext); k++) {
+        int el = (int)strlen(ext[k]);
+        if (n - dot != el) continue;
+        bool same = true;
+        for (int q = 0; q < el && same; q++) same = md_lc(s[dot + q]) == ext[k][q];
+        if (same) return true;
+    }
+    return false;
+}
+
+/* "300": the width an image is shown at */
+static bool md_img_width(const char *s, int n, float *w) {
+    if (n <= 0 || n > 6) return false;
+    float v = 0;
+    for (int k = 0; k < n; k++) {
+        if (s[k] < '0' || s[k] > '9') return false;
+        v = v * 10 + (float)(s[k] - '0');
+    }
+    *w = v;
+    return v > 0;
+}
+
+/* The image starting at s[i]: the index after it, or 0. */
+static int md_img_at(const char *s, int n, int i, md_img *m) {
+    memset(m, 0, sizeof *m);
+    m->link_len = -1;
+    bool wrap = false;
+    if (s[i] == '[') {
+        if (!(i + 2 < n && s[i + 1] == '!' && s[i + 2] == '[')) return 0;
+        wrap = true; i++;
+    }
+    if (s[i] != '!' || i + 2 >= n || s[i + 1] != '[') return 0;
+    if (s[i + 2] == '[') {   /* ![[name|alt|300]] */
+        if (wrap) return 0;
+        int os = i + 3, q = os;
+        while (q + 1 < n && s[q] != '\n' && !(s[q] == ']' && s[q + 1] == ']')) q++;
+        if (q + 1 >= n || s[q] != ']' || s[q + 1] != ']') return 0;
+        int seg = os;
+        for (int k = os; k <= q; k++) {
+            if (k < q && s[k] != '|') continue;
+            int a = seg, e = k;
+            while (a < e && md_sp(s[a])) a++;
+            while (e > a && md_sp(s[e - 1])) e--;
+            if (seg == os) { m->src = s + a; m->src_len = e - a; }
+            else if (!md_img_width(s + a, e - a, &m->width) && !m->alt) { m->alt = s + a; m->alt_len = e - a; }
+            seg = k + 1;
+        }
+        return md_image_ext(m->src, m->src_len) ? q + 2 : 0;
+    }
+    int a = i + 2, q = a, depth = 0;
+    while (q < n) {
+        if (s[q] == '\\' && q + 1 < n) { q += 2; continue; }
+        if (s[q] == '[') depth++;
+        else if (s[q] == ']') { if (depth == 0) break; depth--; }
+        q++;
+    }
+    if (q >= n) return 0;
+    const char *url;
+    int ulen, end;
+    if (md_link_dest(s, n, q + 1, &url, &ulen, &end) != 1 || ulen <= 0) return 0;
+    m->alt = s + a; m->alt_len = q - a;
+    for (int k = m->alt_len - 1; k >= 0; k--) {   /* alt|300 */
+        if (m->alt[k] != '|') continue;
+        if (md_img_width(m->alt + k + 1, m->alt_len - k - 1, &m->width)) m->alt_len = k;
+        break;
+    }
+    m->src = url; m->src_len = ulen;
+    if (wrap) {
+        const char *lu;
+        int ll, le;
+        if (end >= n || s[end] != ']' || md_link_dest(s, n, end + 1, &lu, &ll, &le) != 1) return 0;
+        m->link = lu; m->link_len = ll;
+        end = le;
+    }
+    return end;
+}
+
+static bool md_is_abs_path(const char *p) {
+    return p[0] == '/' || p[0] == '\\' || (md_alnum(p[0]) && !(p[0] >= '0' && p[0] <= '9') && p[1] == ':');
+}
+/* scheme:// (http, https, file...) or data: : never fetched */
+static bool md_is_remote(const char *p, int n) {
+    for (int k = 0; k < n; k++) {
+        if (p[k] == ':') return k >= 2 && ((k + 2 < n && p[k + 1] == '/' && p[k + 2] == '/') || (k == 4 && !strncmp(p, "data", 4)));
+        if (!md_alnum(p[k]) && p[k] != '+' && p[k] != '-' && p[k] != '.') return false;
+    }
+    return false;
+}
+static int md_hexval(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : md_lc(c) >= 'a' && md_lc(c) <= 'f' ? md_lc(c) - 'a' + 10 : -1;
+}
+
+/* The file an image source names, or NULL (remote images are never fetched). */
+static const char *md_image_path(md_ctx *c, const md_img *m) {
+    if (md_is_remote(m->src, m->src_len)) return NULL;
+    char *src = cui__frame_alloc(c->ui, (size_t)m->src_len + 1);
+    int o = 0;
+    for (int k = 0; k < m->src_len; k++) {   /* %20 and friends */
+        if (m->src[k] == '%' && k + 2 < m->src_len && md_hexval(m->src[k + 1]) >= 0 && md_hexval(m->src[k + 2]) >= 0) {
+            src[o++] = (char)(md_hexval(m->src[k + 1]) * 16 + md_hexval(m->src[k + 2]));
+            k += 2;
+        } else src[o++] = m->src[k];
+    }
+    src[o] = 0;
+    if (c->resolve_image) {
+        const char *r = c->resolve_image(src, c->resolve_user);
+        if (r && r[0]) return cui__frame_strdup(c->ui, r, (int)strlen(r));
+    }
+    if (c->base_dir && c->base_dir[0] && !md_is_abs_path(src)) {
+        size_t bl = strlen(c->base_dir);
+        bool sep = c->base_dir[bl - 1] == '/' || c->base_dir[bl - 1] == '\\';
+        return cui__frame_printf(c->ui, sep ? "%s%s" : "%s/%s", c->base_dir, src);
+    }
+    return src;
+}
+
+/* One decoded picture per file, kept in CUI state: decoded once and freed with
+ * the state when nothing draws it for a few seconds. A file that failed is tried
+ * again about every two seconds, in case it appears later. */
+typedef struct { bool init; cui_texture tex; int w, h; uint64_t retry; } md_img_state;
+static void md_img_free(cui_ctx *ui, void *data) {
+    md_img_state *t = data;
+    cui_image_destroy(ui, t->tex);
+    t->tex = 0;
+}
+static md_img_state *md_img_tex(cui_ctx *ui, const char *path) {
+    cui_id id = cui__hash(path, strlen(path), 0x1A6E5u);
+    md_img_state *t = cui_state(ui, id, sizeof *t);
+    cui__state_set_dtor(ui, id, md_img_free);
+    if (!t->tex && (!t->init || ui->frame >= t->retry)) {
+        t->init = true;
+        t->retry = ui->frame + 120;
+        t->tex = cui_image_load(ui, path, &t->w, &t->h);
+        if (t->tex && (t->w <= 0 || t->h <= 0)) { cui_image_destroy(ui, t->tex); t->tex = 0; }
+    }
+    return t;
+}
+
+typedef struct { cui_texture tex; } md_img_paint;
+static void md_paint_img(cui_ctx *ui, cui_node *n, void *data) {
+    md_img_paint *p = data;
+    cui_rect uv = { 0, 0, 1, 1 };
+    cui_draw_image(ui, p->tex, n->rect, uv, n->radius, cui__rgba(255, 255, 255, 255));
+}
+
+/* The picture as a block of its own, or a quiet line with an icon and the alt text. */
+static float md_image_block(md_ctx *c, const md_img *m, float W) {
+    cui_ctx *ui = c->ui;
+    const char *path = md_image_path(c, m);
+    md_img_state *t = path ? md_img_tex(ui, path) : NULL;
+    bool ok = t && t->tex;
+    cui_id id = 0;
+    float *st = NULL;
+    if (m->link_len > 0) {
+        id = md_link_id(c, c->link_seq++);
+        cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
+        st = cui_state(ui, id, sizeof(float) * 2);
+        cui__tween(ui, &st[0], r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        cui__tween(ui, &st[1], r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+        const char *url = r.hovered || r.clicked ? cui__frame_strdup(ui, m->link, m->link_len) : NULL;
+        if (r.hovered) {
+            cui__set_cursor(ui, CUI_CURSOR_HAND);
+            c->res->hovered_link = url; c->res->hovered_is_wiki = false;
+            c->res->hovered_rect = cui__prev_rect(ui, id);
+        }
+        if (r.clicked) { c->res->link = url; c->res->link_is_wiki = false; }
+    }
+    int node;
+    float w = 0;
+    if (ok) {
+        w = m->width > 0 ? m->width : (float)t->w;
+        w = CUI_MAX(1.0f, CUI_MIN(w, W));
+        node = cui__leaf(ui, id, CUI_PX(w), CUI_PX(w * (float)t->h / (float)t->w));
+        cui_node *n = &ui->nodes[node];
+        n->radius = CUI_CORNERS(ui->theme.radius_control);
+        n->self_align = CUI__ALIGN_NOSTRETCH;
+        md_img_paint *p = cui__frame_alloc(ui, sizeof *p);
+        p->tex = t->tex;
+        n->paint = md_paint_img;
+        n->paint_data = p;
+    } else {
+        md_font f = md_body(c);
+        const char *label = m->alt;
+        int ll = m->alt_len;
+        if (ll <= 0) {   /* the file name */
+            label = m->src; ll = m->src_len;
+            for (int k = 0; k < m->src_len; k++) if (m->src[k] == '/' || m->src[k] == '\\') { label = m->src + k + 1; ll = m->src_len - k - 1; }
+        }
+        cui_color mute = c->custom_color ? c->fg2 : CUI_C(ui, TEXT_MUTED);
+        node = cui__node_new(ui, id);
+        cui_node *rn = &ui->nodes[node];
+        rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->gap = 6 * c->u; rn->w = CUI_FILL;
+        cui__open(ui, node);
+        cui__icon_node(ui, CUI_ICON_IMAGE, f.size * 1.1f, mute);
+        int tn = cui__text_node(ui, label, ll, CUI_FONT_BODY, f.size * 0.95f, mute, true);
+        ui->nodes[tn].w = CUI_FILL;
+        cui__close(ui);
+    }
+    if (id) {
+        cui__mark_interactive(ui, node, CUI_IF_FOCUSABLE);
+        if (st[1] > 0.01f) cui__focus_ring(ui, node, st[1]);
+    }
+    return c->fit ? w : 0;
+}
+
+/* Text around images stays inline text; each image is a block of its own. */
 static float md_paragraph(md_ctx *c, const md_box *b, const md_line *L, int n) {
     int len;
     const char *s = md_join(c, L, n, &len);
     md_font f = md_body(c);
-    return md_inline_block(c, s, len, &f, b->fg, md_tail(c, L[n - 1]), b->w);
+    bool tail = md_tail(c, L[n - 1]);
+    if (!memchr(s, '!', (size_t)len)) return md_inline_block(c, s, len, &f, b->fg, tail, b->w);
+    float best = 0;
+    int ts = 0, i = 0;
+    bool first = true;
+    for (;;) {
+        md_img m = { 0 };
+        int e = 0;
+        while (i < len && !(e = (s[i] == '!' || s[i] == '[') ? md_img_at(s, len, i, &m) : 0)) {
+            if (s[i] == '\\') i++;
+            else if (s[i] == '`') {   /* a code span hides what looks like an image */
+                int k = 0;
+                while (i + k < len && s[i + k] == '`') k++;
+                int j = i + k, close = -1;
+                while (j < len && close < 0) {
+                    if (s[j] != '`') { j++; continue; }
+                    int q = j;
+                    while (q < len && s[q] == '`') q++;
+                    if (q - j == k) close = q;
+                    j = q;
+                }
+                i = close >= 0 ? close - 1 : i + k - 1;
+            }
+            i++;
+        }
+        int a = ts, z = i;   /* the text before the image, or what is left */
+        while (a < z && (md_sp(s[a]) || s[a] == '\n')) a++;
+        while (z > a && (md_sp(s[z - 1]) || s[z - 1] == '\n')) z--;
+        if (z > a) {
+            if (!first) md_space(c, 6.0f * c->u);
+            float tw = md_inline_block(c, s + a, z - a, &f, b->fg, tail && e == 0, b->w);
+            best = CUI_MAX(best, tw);
+            first = false;
+        }
+        if (!e) break;
+        if (!first) md_space(c, 6.0f * c->u);
+        float iw = md_image_block(c, &m, b->w);
+        best = CUI_MAX(best, iw);
+        first = false;
+        i = ts = e;
+    }
+    return best;
 }
 
 /* Records a heading for the result: its line and its top in the latest layout. */
@@ -1172,8 +1440,6 @@ static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, f
 
 /* ---- callouts: > [!type]+- Title ---- */
 
-static char md_lc(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
-static bool md_alnum(char c) { return (c >= '0' && c <= '9') || (md_lc(c) >= 'a' && md_lc(c) <= 'z'); }
 typedef struct { cui_color c; float w, inset; } md_bar_paint;
 static void md_paint_bar(cui_ctx *ui, cui_node *n, void *data) {
     md_bar_paint *p = data;
@@ -1222,6 +1488,22 @@ static bool md_callout_parse(md_line L, md_callout_head *h) {
     return true;
 }
 
+/* The fold state of a callout follows its content, not its position, so adding
+ * a callout above another keeps what the reader opened. Identical callouts are
+ * told apart by how many came before them. */
+static cui_id md_callout_id(md_ctx *c, const md_callout_head *h, const md_line *body, int nbody) {
+    uint32_t key = 0xCA110u + (uint32_t)(unsigned char)h->fold;
+    char *lc = cui__frame_alloc(c->ui, (size_t)h->type_len + 1);
+    for (int q = 0; q < h->type_len; q++) lc[q] = md_lc(h->type[q]);
+    key = cui__hash(lc, (size_t)h->type_len, key);
+    key = cui__hash(h->title.s, (size_t)h->title.len, key ^ 1u);
+    for (int k = 0; k < nbody; k++) key = cui__hash(body[k].s, (size_t)body[k].len, key + 2u);
+    int occ = 0;
+    for (int k = 0; k < c->callout_n; k++) if (c->callout_keys[k] == key) occ++;
+    if (c->callout_n < CUI_COUNTOF(c->callout_keys)) c->callout_keys[c->callout_n++] = key;
+    return cui__hash(&occ, sizeof occ, key ^ c->id);
+}
+
 static void md_callout(md_ctx *c, const md_box *b, const md_line *sub, int count, const md_callout_head *h, float *nat) {
     cui_ctx *ui = c->ui;
     const md_callout_kind *kind = &md_callout_kinds[0];   /* unknown types are notes */
@@ -1250,8 +1532,7 @@ static void md_callout(md_ctx *c, const md_box *b, const md_line *sub, int count
     }
     float u = c->u;
     bool foldable = h->fold != 0;
-    int seq = c->callout_seq++;
-    cui_id hid = cui__hash(&seq, sizeof seq, c->id ^ 0xCA110u);
+    cui_id hid = md_callout_id(c, h, sub + 1, count - 1);
     md_callout_state *st = NULL;
     cui_interact r = { 0 };
     if (foldable) {
@@ -1680,6 +1961,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     memset(&c, 0, sizeof c);
     c.ui = ui; c.id = id; c.src = text; c.len = len; c.res = &res;
     c.streaming = o->streaming; c.compact = o->compact; c.fit = o->fit_content;
+    c.base_dir = o->base_dir; c.resolve_image = o->resolve_image; c.resolve_user = o->resolve_user;
     c.body = o->size > 0 ? o->size : ui->theme.text_body;
     c.u = c.body / 13.0f;
     c.content_end = len;

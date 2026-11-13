@@ -1565,6 +1565,32 @@ SCENE(markdown_callouts) {
             "> A plain quote stays a quote.\n");
     }
 }
+static void shot_scene(unsigned char *px, int w, int h, bool color);
+/* images: scaled to the column, a width with |180, a name found by the app's resolver, a missing file's placeholder */
+static const char *shot_find_image(const char *src, void *user) {
+    (void)user;
+    return strcmp(src, "lake.png") == 0 ? "cui_shot_photo.png" : NULL;
+}
+SCENE(markdown_images) {
+    static bool made;
+    if (!made) {
+        made = true;
+        static unsigned char px[960 * 600 * 4];
+        shot_scene(px, 960, 600, true);
+        cui_write_png("cui_shot_photo.png", px, 960, 600, 960 * 4);
+    }
+    cui_box(ui, UPTO(520)) {
+        cui_markdown(ui, "images",
+            "A wide picture scales down to the column and keeps its corners soft:\n"
+            "\n"
+            "![The harbour at dusk](cui_shot_photo.png)\n"
+            "\n"
+            "Obsidian's size syntax works too, and the app finds the file by name: ![[lake.png|200]]\n"
+            "\n"
+            "![Site plan](plan.png)\n",
+            .base_dir = ".", .resolve_image = shot_find_image);
+    }
+}
 /* mermaid diagrams in markdown: a flowchart left to right, one top down with edge labels and a
  * decision, and a pie */
 SCENE(mermaid) {
@@ -4584,7 +4610,7 @@ int main(int argc, char **argv) {
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
-        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true },
+        { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true }, { "markdown-images", scene_markdown_images, 560, 600, true },
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "diff-view", scene_diff_view, 900, 480, true },

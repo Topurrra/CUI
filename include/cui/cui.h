@@ -1514,7 +1514,7 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * under a line), paragraphs (single newlines are soft breaks; two trailing
  * spaces, a trailing backslash or <br> break the line), **bold**, *italic*
  * (and _ forms), ~~strikethrough~~, `inline code`, [links](url) and
- * ![images](url) (shown as links to the image), <https://autolinks>, bare
+ * ![images](url) (drawn as pictures, see below), <https://autolinks>, bare
  * https:// and www. links, backslash escapes, &amp; &lt; &gt; &quot; &#39;
  * &nbsp;, bullet (- * +) and ordered (1. or 1)) lists nested by indentation,
  * task items (- [ ] and - [x]), block quotes, fenced code blocks (``` or ~~~
@@ -1529,7 +1529,9 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * subgraphs) laid out like cui_graph_view, pie charts (a donut chart) and
  * gantt charts with dateFormat YYYY-MM-DD (a read only cui_gantt); other
  * diagrams and text that does not parse stay code. Quotes that start with
- * [!type] Title are callouts (note, tip, warning...; [!type]- and [!type]+ fold).
+ * [!type] Title are callouts (note, tip, warning...; [!type]- and [!type]+ fold;
+ * a fold remembers its state by the callout's type, title and text, so adding
+ * a callout above another does not swap them).
  * Everything else (HTML, reference links, footnotes, math) shows as plain
  * text. Containers nest at most 12 deep; deeper content shows as text.
  *
@@ -1538,6 +1540,16 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * closed, markers that may still grow are held back, and an unfinished
  * table row or heading underline waits for its line, so appending text never
  * flickers between styles. An unclosed code fence always runs to the end.
+ *
+ * Images: ![alt](path), ![alt|300](path) and Obsidian's ![[file.png]] and
+ * ![[file.png|300]] draw the picture (PNG and JPEG, see cui_image_load) as a
+ * block of its own, at its size in points, scaled down to the column and never
+ * up; |300 sets the width. A relative path is looked up in .base_dir, or by
+ * .resolve_image, which maps the name to a full path (an Obsidian embed is
+ * found by file name anywhere in the vault). Each file is decoded once and
+ * its texture kept in CUI state. A missing, undecodable or http(s) image (no
+ * networking here) shows a quiet line with an image icon and the alt text or
+ * file name. An image inside a link, [![alt](img)](url), reports .link when clicked.
  *
  * Links use the accent color with an underline that firms up on hover, show
  * their URL as a tooltip, take Tab focus and activate with Enter. Text is not
@@ -1554,6 +1566,12 @@ typedef struct cui_markdown_opts {
     bool streaming;            /* text is still arriving */
     bool compact;              /* smaller headings and tighter spacing, for chat bubbles */
     bool no_front_matter;      /* hide a leading YAML front matter block instead of showing it as collapsed properties */
+    const char *base_dir;      /* folder relative image paths are found in; NULL: the working directory */
+    /* maps an image name (the src of ![alt](src), the file of ![[file.png]], percent escapes decoded) to
+     * a full file path, or NULL to fall back to base_dir. Called every frame for every image, so keep
+     * it cheap (a hash lookup, not a directory walk); the string must stay valid until the call returns */
+    const char *(*resolve_image)(const char *src, void *user);
+    void *resolve_user;        /* passed to resolve_image */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */

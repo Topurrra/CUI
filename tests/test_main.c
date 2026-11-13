@@ -5696,6 +5696,8 @@ typedef struct {
     int length;             /* 0: strlen */
     float width;            /* 0: fill a 600 point column */
     bool streaming, no_front_matter;
+    const char *base_dir;
+    const char *(*resolve)(const char *src, void *user);
     cui_markdown_result res;
     int links, toggles;
     char last_link[128];
@@ -5703,7 +5705,8 @@ typedef struct {
 static void build_md(cui_ctx *ui, void *u) {
     md_test *m = u;
     cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
-        m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter);
+        m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter,
+                                .base_dir = m->base_dir, .resolve_image = m->resolve, .resolve_user = m);
     }
     if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
     if (m->res.task_offset >= 0) m->toggles++;
@@ -5810,10 +5813,10 @@ static void test_markdown_vault(void) {
     static char got[12][64];
     bool wiki[12];
     int ng = md_collect(ui, &m, got, wiki, 12);
-    CHECK(ng == 6);
+    CHECK(ng == 5);   /* the ![[Img.png]] embed is a picture (here its placeholder), not a link */
     CHECK(md_has_link(got, wiki, ng, "Note A", true) && md_has_link(got, wiki, ng, "Note B", true));
     CHECK(md_has_link(got, wiki, ng, "Note C#Sec", true) && md_has_link(got, wiki, ng, "Note D#Sec", true));
-    CHECK(md_has_link(got, wiki, ng, "Img.png", true) && md_has_link(got, wiki, ng, "https://e.org/x", false));
+    CHECK(!md_has_link(got, wiki, ng, "Img.png", true) && md_has_link(got, wiki, ng, "https://e.org/x", false));
     /* a click reports the target, flagged; a normal link is not */
     r = md_rect(ui);
     cui_vec2 at;
@@ -5903,6 +5906,117 @@ static void test_markdown_callouts(void) {
     snprintf(m.text, sizeof m.text, "---\nk: v\n---\n> [!bug]- B\n> # Hidden\n\n# Shown\n");
     md_frames(ui, &m, 40);
     CHECK(m.res.heading_count == 1 && m.res.headings[0].line == 7);
+    cui_destroy(ui);
+}
+
+/* images: ![alt](src), ![[file.png|300]], links around images, the placeholder, folded callouts keyed by content */
+static void md_png(const char *path, int w, int h) {
+    unsigned char *px = malloc((size_t)w * (size_t)h * 4);
+    for (int i = 0; i < w * h; i++) { px[i * 4] = 200; px[i * 4 + 1] = (unsigned char)(i % 256); px[i * 4 + 2] = 90; px[i * 4 + 3] = 255; }
+    CHECK(cui_write_png(path, px, w, h, w * 4));
+    free(px);
+}
+static int md_resolves;
+static const char *md_resolve_pic(const char *src, void *user) {
+    (void)user;
+    md_resolves++;
+    return strcmp(src, "pic.png") == 0 ? "cui_md_big.png" : NULL;
+}
+static void test_markdown_images(void) {
+    printf("markdown: images\n");
+    md_png("cui_md_big.png", 400, 200);
+    md_png("cui_md_small.png", 40, 20);
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    m.width = 300;
+    m.base_dir = ".";
+    /* scaled down to the column, proportions kept; never scaled up */
+    CHECK_NEAR(md_height_of(ui, &m, "![big](cui_md_big.png)"), 150, 0.5);
+    CHECK_NEAR(md_height_of(ui, &m, "![small](cui_md_small.png)"), 20, 0.5);
+    /* |width sets it, for both syntaxes; a title and a percent escape in the path still load */
+    CHECK_NEAR(md_height_of(ui, &m, "![[cui_md_big.png|100]]"), 50, 0.5);
+    CHECK_NEAR(md_height_of(ui, &m, "![big|60](cui_md_big.png \"a title\")"), 30, 0.5);
+    CHECK_NEAR(md_height_of(ui, &m, "![big](cui_md%5Fbig.png)"), 150, 0.5);
+    /* a size wider than the column is capped */
+    CHECK_NEAR(md_height_of(ui, &m, "![[cui_md_big.png|900]]"), 150, 0.5);
+    /* the resolver finds names (and wins over base_dir), NULL falls back to base_dir */
+    m.resolve = md_resolve_pic;
+    md_resolves = 0;
+    CHECK(fabsf(md_height_of(ui, &m, "![[pic.png|100]]") - 50) < 0.5f && md_resolves > 0);
+    CHECK_NEAR(md_height_of(ui, &m, "![[cui_md_small.png]]"), 20, 0.5);
+    m.resolve = NULL;
+    /* a missing file, an unsupported source and a remote image show a quiet line, not a picture */
+    float line = md_height_of(ui, &m, "![a missing one](nothing_here.png)");
+    CHECK(line > 10 && line < 40);
+    CHECK(fabsf(md_height_of(ui, &m, "![remote](https://example.com/a.png)") - line) < 0.5f);
+    CHECK(fabsf(md_height_of(ui, &m, "![[nothing_here.png]]") - line) < 0.5f);
+    CHECK(fabsf(md_height_of(ui, &m, "![x](data:image/png;base64,AAAA)") - line) < 0.5f);
+    CHECK(fabsf(md_height_of(ui, &m, "![[a note]]") - line) < 8);   /* not an image: stays a link line */
+    /* text around an image stays text, an image in a code span stays code */
+    float text = md_height_of(ui, &m, "just text");
+    float mixed = md_height_of(ui, &m, "before ![s](cui_md_small.png) after");
+    CHECK(mixed > text + 20 && mixed < 3 * text + 20 + 12);
+    float code = md_height_of(ui, &m, "`![s](cui_md_small.png)`");
+    CHECK(fabsf(code - text) < 0.5f);
+    CHECK_NEAR(md_height_of(ui, &m, "![s](cui_md_small.png)\n\n![s](cui_md_small.png)"), 52, 1.0);
+    /* decoded once: the picture stays after the file is gone */
+    md_height_of(ui, &m, "![small](cui_md_small.png)");
+    remove("cui_md_small.png");
+    CHECK_NEAR(md_height_of(ui, &m, "![small](cui_md_small.png)"), 20, 0.5);
+    /* a linked image reports the link when clicked, a plain one does not */
+    md_height_of(ui, &m, "[![big](cui_md_big.png)](http://x.test)");
+    cui_rect r = md_rect(ui);
+    m.links = 0;
+    click_at(ui, build_md, &m, r.x + 30, r.y + 30);
+    CHECK(m.links == 1 && strcmp(m.last_link, "http://x.test") == 0);
+    md_height_of(ui, &m, "![big](cui_md_big.png)");
+    r = md_rect(ui);
+    m.links = 0;
+    click_at(ui, build_md, &m, r.x + 30, r.y + 30);
+    CHECK(m.links == 0);
+    /* junk never crashes */
+    md_height_of(ui, &m, "![[|]] ![]() ![](  ) ![a](<>) ![[.png]] [![x](y.png) ![ ![[a.png|5|6|b]] ![a]( \\![b](c.png)");
+    cui_destroy(ui);
+    remove("cui_md_big.png");
+}
+
+static void test_markdown_callout_fold_keys(void) {
+    printf("markdown: callout fold state follows content\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    const char *two = "> [!note]- Two\n> b\n> b\n> b\n";
+    float closed = md_height_of(ui, &m, two);
+    cui_rect r = md_rect(ui);
+    click_at(ui, build_md, &m, r.x + 40, r.y + 14);
+    md_frames(ui, &m, 40);
+    float open = md_rect(ui).h;
+    CHECK(open > closed + 20);
+    /* a callout inserted above keeps the toggled one open and starts itself from its own marker */
+    char both[256];
+    snprintf(both, sizeof both, "> [!note]- Zero\n> z\n\n%s", two);
+    float with_zero = md_height_of(ui, &m, both);
+    snprintf(both, sizeof both, "> [!note]- Zero\n> z\n\n%s", "> [!note]+ Two\n> b\n> b\n> b\n");
+    cui_ctx *fresh = new_ctx();
+    float want = md_height_of(fresh, &m, both);
+    cui_destroy(fresh);
+    CHECK(fabsf(with_zero - want) < 0.5f);
+    /* removing it again leaves the state alone */
+    CHECK(fabsf(md_height_of(ui, &m, two) - open) < 0.5f);
+    /* identical callouts are told apart by order: opening the second leaves the first closed */
+    cui_destroy(ui);
+    ui = new_ctx();
+    const char *twin = "> [!note]- Same\n> x\n> x\n\n> [!note]- Same\n> x\n> x\n";
+    float shut = md_height_of(ui, &m, twin);
+    r = md_rect(ui);
+    click_at(ui, build_md, &m, r.x + 40, r.y + 14);   /* the first one */
+    md_frames(ui, &m, 40);
+    float one_open = md_rect(ui).h;
+    CHECK(one_open > shut + 10);
+    snprintf(both, sizeof both, "intro\n\n%s", twin);
+    float moved = md_height_of(ui, &m, both);
+    CHECK(moved > shut);
     cui_destroy(ui);
 }
 
@@ -8081,6 +8195,8 @@ int main(void) {
     test_markdown();
     test_markdown_vault();
     test_markdown_callouts();
+    test_markdown_images();
+    test_markdown_callout_fold_keys();
     test_code_editor();
     test_diff();
     test_dials();
