@@ -149,3 +149,10 @@ add_test(NAME cui_test_markdown_syntax COMMAND cui_test_markdown_syntax)
 add_executable(cui_test_langs test_langs.c)
 target_link_libraries(cui_test_langs PRIVATE cui::cui)
 add_test(NAME cui_test_langs COMMAND cui_test_langs)
+
+# Windows rendering probe: what a window costs with OpenGL, Direct3D 11 and GDI (see the file's header).
+option(CUI_BUILD_RENDER_PROBE "Build the Windows rendering probe (OpenGL against Direct3D 11)" OFF)
+if(WIN32 AND CUI_BUILD_RENDER_PROBE)
+    add_executable(cui_render_probe render_probe.c)
+    target_link_libraries(cui_render_probe PRIVATE cui::cui d3d11 dxgi dwmapi gdi32 user32 psapi)
+endif()

@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <dwmapi.h>
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -56,6 +57,64 @@ static PFN_GetDpiForWindow cui__GetDpiForWindow;
 static PFN_AdjustWindowRectExForDpi cui__AdjustWindowRectExForDpi;
 
 static cui__win32 *cui__w(cui_app *app) { return app->plat; }
+
+/* Frame pacing experiment for OpenGL (measurement only; off unless CUI_GL_PACE is set).
+ * CUI_GL_PACE=flush : swap interval 0, then DwmFlush() after every SwapBuffers.
+ * CUI_GL_PACE=timer : swap interval 0, then sleep to the next vblank read from
+ *                     DwmGetCompositionTimingInfo (waitable timer).
+ * CUI_GL_PACE_STATS=1 prints DWM frame counters at exit. Unset: the swap waits as before. */
+typedef HRESULT (WINAPI *PFN_DwmFlush)(void);
+typedef HRESULT (WINAPI *PFN_DwmGetCompositionTimingInfo)(HWND, DWM_TIMING_INFO *);
+static int cui__w32pace_mode = -1;   /* -1 unread, 0 off, 1 flush, 2 timer */
+static PFN_DwmFlush cui__w32pace_flush;
+static PFN_DwmGetCompositionTimingInfo cui__w32pace_timing;
+static DWM_TIMING_INFO cui__w32pace_t0;
+static unsigned long cui__w32pace_swaps;
+static bool cui__w32pace_stats;
+
+static int cui__w32pace_get(void) {
+    if (cui__w32pace_mode >= 0) return cui__w32pace_mode;
+    const char *v = getenv("CUI_GL_PACE");
+    cui__w32pace_mode = v && !strcmp(v, "flush") ? 1 : v && !strcmp(v, "timer") ? 2 : 0;
+    cui__w32pace_stats = getenv("CUI_GL_PACE_STATS") != NULL;
+    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+    if (dwm) {
+        cui__w32pace_flush = (PFN_DwmFlush)(void *)GetProcAddress(dwm, "DwmFlush");
+        cui__w32pace_timing = (PFN_DwmGetCompositionTimingInfo)(void *)GetProcAddress(dwm, "DwmGetCompositionTimingInfo");
+    }
+    if (!cui__w32pace_flush || !cui__w32pace_timing) cui__w32pace_mode = 0;
+    return cui__w32pace_mode;
+}
+
+static void cui__w32pace_wait(cui__win32 *w) {
+    if (cui__w32pace_mode == 1) { cui__w32pace_flush(); return; }
+    DWM_TIMING_INFO t;
+    memset(&t, 0, sizeof t);
+    t.cbSize = sizeof t;
+    if (FAILED(cui__w32pace_timing(NULL, &t)) || !t.qpcRefreshPeriod) { cui__w32pace_flush(); return; }
+    LARGE_INTEGER now, freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    unsigned long long period = t.qpcRefreshPeriod, last = t.qpcVBlank;
+    unsigned long long next = last;
+    if ((unsigned long long)now.QuadPart >= last) next = last + ((unsigned long long)now.QuadPart - last) / period * period + period;
+    long long ticks = (long long)(next - (unsigned long long)now.QuadPart);
+    if (ticks <= 0 || !w->timer) return;
+    LARGE_INTEGER due;
+    due.QuadPart = -(ticks * 10000000LL / freq.QuadPart);   /* 100 ns units, relative */
+    if (SetWaitableTimer(w->timer, &due, 0, NULL, NULL, FALSE)) WaitForSingleObject(w->timer, 100);
+}
+
+static void cui__w32pace_report(void) {
+    DWM_TIMING_INFO t;
+    if (!cui__w32pace_stats || !cui__w32pace_timing) return;
+    memset(&t, 0, sizeof t);
+    t.cbSize = sizeof t;
+    if (FAILED(cui__w32pace_timing(NULL, &t))) return;
+    fprintf(stderr, "pace=%d swaps=%lu dwm_composed=%llu dwm_refreshes=%llu dwm_dropped=%llu dwm_missed=%llu\n", cui__w32pace_mode, cui__w32pace_swaps,
+            (unsigned long long)(t.cFrame - cui__w32pace_t0.cFrame), (unsigned long long)(t.cRefresh - cui__w32pace_t0.cRefresh),
+            (unsigned long long)(t.cFramesDropped - cui__w32pace_t0.cFramesDropped), (unsigned long long)(t.cFramesMissed - cui__w32pace_t0.cFramesMissed));
+}
 
 double cui__plat_now(void) {
     static LARGE_INTEGER freq;
@@ -495,6 +554,7 @@ static void cui__win32_activate(cui__win32 *w) {
 void cui__plat_shutdown(cui_app *app) {
     cui__win32 *w = cui__w(app);
     if (!w) return;
+    cui__w32pace_report();
     if (w->glrc) { wglMakeCurrent(NULL, NULL); wglDeleteContext(w->glrc); }
     if (w->hdc) ReleaseDC(w->hwnd, w->hdc);
     if (w->timer) CloseHandle(w->timer);
@@ -562,7 +622,7 @@ static HGLRC cui__win32_gl_context(HDC dc) {
 
 static void cui__win32_swap_interval(bool vsync) {
     PFN_wglSwapIntervalEXT swap = (PFN_wglSwapIntervalEXT)(void *)wglGetProcAddress("wglSwapIntervalEXT");
-    if (swap) swap(vsync ? 1 : 0);
+    if (swap) swap(vsync && !cui__w32pace_get() ? 1 : 0);
 }
 
 bool cui__plat_gl_create(cui_app *app, bool vsync) {
@@ -680,7 +740,20 @@ void cui__plat_gl_swap(cui_app *app) {
     cui__win32 *w = cui__w(app);
     bool first = w->show_pending;
     cui__win32_show_now(w);
+    if (cui__w32pace_get() && cui__w32pace_stats && !cui__w32pace_swaps) {
+        memset(&cui__w32pace_t0, 0, sizeof cui__w32pace_t0);
+        cui__w32pace_t0.cbSize = sizeof cui__w32pace_t0;
+        cui__w32pace_timing(NULL, &cui__w32pace_t0);
+    }
     SwapBuffers(w->hdc);
+    cui__w32pace_swaps++;
+    if (cui__w32pace_stats && cui__w32pace_timing) {   /* the counters only advance for a process that asks */
+        DWM_TIMING_INFO t;
+        memset(&t, 0, sizeof t);
+        t.cbSize = sizeof t;
+        cui__w32pace_timing(NULL, &t);
+    }
+    if (cui__w32pace_mode > 0) cui__w32pace_wait(w);
     if (first) cui__win32_activate(w);
 }
 
