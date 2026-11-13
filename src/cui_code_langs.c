@@ -184,7 +184,7 @@ static void lx_yaml(cui__lx *x, int *state) {
         if (e <= i) return;                                          /* a blank line stays in the scalar */
         if (i > p) { lx_e(x, i, e - i, TK_STRING); return; }
         *state = 0;
-    } else if (x->cap == 0 && !memchr(s, '|', (size_t)n) && !memchr(s, '>', (size_t)n)) return;   /* only a header changes the state */
+    } else if (x->cap == 0 && n > 0 && !memchr(s, '|', (size_t)n) && !memchr(s, '>', (size_t)n)) return;   /* only a header changes the state */
     if (i >= n) return;
     if (s[i] == '#') { lx_e(x, i, n - i, TK_COMMENT); return; }
     if (i == 0 && n >= 3 && (lx_has(s, 0, n, "---") || lx_has(s, 0, n, "...")) && (n == 3 || lx_ws(s[3]))) {   /* a document marker */
