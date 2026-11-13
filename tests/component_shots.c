@@ -290,6 +290,28 @@ SCENE(status_spinner) {
         }
     }
 }
+/* placeholders for a message and a card, drawn in dots under one passing band */
+SCENE(dither_skeleton) {
+    cui_row(ui, .gap = 20, .wrap = true, .align = CUI_ALIGN_START, UPTO(640)) {
+        cui_column(ui, .width = CUI_FILL, .min_width = 240, .pad = 16, .radius = 14, .border = 1) {
+            cui_skeleton_group(ui, .dither = true, .gap = 12) {
+                cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                    cui_skeleton(ui, CUI_PX(32), 32);
+                    cui_column(ui, .gap = 8, .width = CUI_FILL) { cui_skeleton(ui, CUI_PCT(60), 8); cui_skeleton(ui, CUI_PCT(40), 8); }
+                }
+                cui_skeleton(ui, CUI_FILL, 8);
+                cui_skeleton(ui, CUI_PCT(80), 8);
+            }
+        }
+        cui_column(ui, .width = CUI_FILL, .min_width = 240, .pad = 16, .radius = 14, .border = 1) {
+            cui_skeleton_group(ui, .dither = true, .gap = 10) {
+                cui_skeleton(ui, CUI_FILL, 72);
+                cui_skeleton(ui, CUI_PCT(70), 10);
+                cui_skeleton(ui, CUI_PCT(45), 10);
+            }
+        }
+    }
+}
 static cui_id pm_bar;   /* the first meter's bar, for the pointer */
 static void pm_meter(cui_ctx *ui, const char *id, bool gray) {
     static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };
@@ -4543,6 +4565,7 @@ int main(int argc, char **argv) {
         { "dither-progress", scene_dither_progress, 620, 150, true, false, CUI_ACCENT_NEUTRAL },
         { "dither-spinners", scene_dither_spinners, 800, 860, true, false, CUI_ACCENT_NEUTRAL },
         { "status-spinner", scene_status_spinner, 600, 170, true, false, CUI_ACCENT_NEUTRAL },
+        { "dither-skeleton", scene_dither_skeleton, 680, 210, true, false, CUI_ACCENT_NEUTRAL },
         { "pattern-meter", scene_pattern_meter_hover, 660, 280, true },
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },

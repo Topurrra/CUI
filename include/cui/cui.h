@@ -895,6 +895,24 @@ typedef struct cui_spinner_opts {
 CUI_API void cui_spinner_ex(cui_ctx *ui, float size, const cui_spinner_opts *opts);
 CUI_API void (cui_spinner)(cui_ctx *ui, float size);   /* the ring; the macro below calls cui_spinner_ex */
 CUI_API void cui_skeleton(cui_ctx *ui, cui_size width, float height);
+/* Skeleton group: placeholders for content that is loading, built inside it with
+ * cui_skeleton (in rows and columns as the content will be), share one shine that passes
+ * over them together. With `dither` they are drawn in dots and a band of brighter dots
+ * travels over them, asking for 20 frames a second while on screen; reduced motion holds
+ * the band still. Groups nest.
+ *
+ *     cui_skeleton_group(ui, .dither = true) {
+ *         cui_row(ui, .gap = 10) { cui_skeleton(ui, CUI_PX(20), 20); cui_skeleton(ui, CUI_PCT(55), 6); }
+ *         cui_skeleton(ui, CUI_FILL, 6);
+ *     } */
+typedef struct cui_skeleton_group_opts {
+    int _;
+    bool dither;               /* in dots, with a band of brighter dots passing over them */
+    cui_size width;            /* default: fill */
+    float gap;                 /* between what is built inside, default 8 */
+} cui_skeleton_group_opts;
+CUI_API void cui_skeleton_group_begin_ex(cui_ctx *ui, const cui_skeleton_group_opts *opts);
+CUI_API void cui_skeleton_group_end(cui_ctx *ui);
 
 typedef struct cui_badge_opts {
     int _;
@@ -5027,6 +5045,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_alert(ui, title, ...)           cui_alert_ex((ui), (title), CUI__OPTS(cui_alert_opts, __VA_ARGS__))
 #define cui_progress(ui, value, ...)        cui_progress_ex((ui), (value), CUI__OPTS(cui_progress_opts, __VA_ARGS__))
 #define cui_spinner(ui, size, ...)          cui_spinner_ex((ui), (size), CUI__OPTS(cui_spinner_opts, __VA_ARGS__))
+#define cui_skeleton_group(ui, ...)         CUI__SCOPE(cui_skeleton_group_begin_ex((ui), CUI__OPTS(cui_skeleton_group_opts, __VA_ARGS__)), cui_skeleton_group_end(ui))
 #define cui_badge(ui, text, ...)            cui_badge_ex((ui), (text), CUI__OPTS(cui_badge_opts, __VA_ARGS__))
 #define cui_avatar(ui, name, ...)           cui_avatar_ex((ui), (name), CUI__OPTS(cui_avatar_opts, __VA_ARGS__))
 #define cui_empty_state(ui, title, ...)     cui_empty_state_ex((ui), (title), CUI__OPTS(cui_empty_opts, __VA_ARGS__))

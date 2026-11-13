@@ -479,6 +479,13 @@ static void page_feedback(cui_ctx *ui, gallery *g) {
             cui_skeleton(ui, CUI_FILL, 88);
             cui_skeleton(ui, CUI_PCT(90), 12);
             cui_skeleton(ui, CUI_PCT(60), 12);
+            cui_skeleton_group(ui, .dither = true, .gap = 10) {
+                cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+                    cui_skeleton(ui, CUI_PX(32), 32);
+                    cui_column(ui, .gap = 8, .width = CUI_FILL) { cui_skeleton(ui, CUI_PCT(60), 8); cui_skeleton(ui, CUI_PCT(40), 8); }
+                }
+                cui_skeleton(ui, CUI_FILL, 8);
+            }
         }
         cui_card(ui, .gap = 14) {
             cui_heading(ui, "Dither spinners", 4);

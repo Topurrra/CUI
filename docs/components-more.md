@@ -646,6 +646,25 @@ It takes the same `cui_status` as the status button. While the status is `CUI_ST
 
 Returns true while it shows something, so after a result you can stop calling it once it returns false. The id keeps the time of the last change; a status that changes again starts over. Options: `size` in points (20) and `color` for the ring. It asks for 30 frames a second while the ring turns and while the disc dissolves in or away, one frame at the end of the hold, and none after that. Under reduced motion the ring holds still, and the result shows at once and goes at once when the hold and the dissolve would have ended.
 
+### Skeleton group
+
+Placeholders for content that is loading, sharing one shine that passes over them together; with `dither` they are drawn in dots under a passing band of brighter dots.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dither-skeleton-dark.png"><img src="images/components/dither-skeleton.png" alt="Skeleton group"></picture>
+
+```c
+cui_skeleton_group(ui, .dither = true, .gap = 12) {
+    cui_row(ui, .gap = 12, .align = CUI_ALIGN_CENTER, .width = CUI_FILL) {
+        cui_skeleton(ui, CUI_PX(32), 32);                  /* an avatar */
+        cui_column(ui, .gap = 8, .width = CUI_FILL) { cui_skeleton(ui, CUI_PCT(60), 8); cui_skeleton(ui, CUI_PCT(40), 8); }
+    }
+    cui_skeleton(ui, CUI_FILL, 8);
+    cui_skeleton(ui, CUI_PCT(80), 8);
+}
+```
+
+Build the placeholders inside the group with `cui_skeleton`, in the rows and columns the content will have. Every placeholder in a group takes its shine from the group's rectangle, so one sweep crosses them all instead of each running its own. With `dither` a placeholder is a solid base of dots in the skeleton's color, and a soft diagonal band of brighter dots, on one grid for the whole group, travels across from 30 dots before the group to 30 after it at 42 dots a second. The band moves in steps, 20 a second, and the group asks for frames only while it is on screen; reduced motion holds the band a third of the way across. Without `dither` the placeholders look as they do on their own and the reduced motion path draws no shine. The group is a column: `width` (the container's width when unset) and `gap` (8). Groups nest. It returns nothing and takes no input.
+
 ## Data
 
 ### Data grid and filter bar

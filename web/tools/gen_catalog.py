@@ -674,7 +674,7 @@ DISPLAY_ONLY = {
     "progress-meter-spinner-and-skeleton", "timeline-and-progress-ring", "charts", "heatmap",
     "calendar-heatmap", "treemap-and-radar", "funnel-split-bar-and-waffle", "sankey",
     "bar-list-and-activity-rings", "scatter-and-bubble", "radial-gauge", "presence-counter-and-ticker",
-    "text-effects", "loaders", "dither-spinners", "status-spinner", "chat", "uptime-bars", "readout", "dot-matrix-display", "chart-annotations"
+    "text-effects", "loaders", "dither-spinners", "status-spinner", "skeleton-group", "chat", "uptime-bars", "readout", "dot-matrix-display", "chart-annotations"
 }
 
 def keyboard_lines(body_html):

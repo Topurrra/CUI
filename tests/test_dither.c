@@ -735,6 +735,57 @@ static void test_status_spinner(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+/* skeleton group                                                           */
+
+static void build_skel(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_box(ui, .width = CUI_PX(400)) {
+        cui_skeleton_group(ui, .dither = true) {
+            cui_row(ui, .gap = 0, .width = CUI_FILL) {
+                cui_box(ui, .id = "sa", .width = CUI_PCT(50)) { cui_skeleton(ui, CUI_FILL, 24); }
+                cui_box(ui, .id = "sb", .width = CUI_PCT(50)) { cui_skeleton(ui, CUI_FILL, 24); }
+            }
+        }
+    }
+}
+/* pixels in the box of `id` brighter than the placeholder's base */
+static int sheen_px(cui_ctx *ui, image im, const char *id) {
+    cui_rect r = cui__prev_rect(ui, cui_make_id(ui, id));
+    int base = at(im, r.x + r.w - 6, r.y + 12)[0], n = 0;
+    for (float y = r.y + 2; y < r.y + r.h - 2; y++)
+        for (float x = r.x + 8; x < r.x + r.w - 8; x++) n += at(im, x, y)[0] > base + 8;
+    return n;
+}
+
+static void test_skeleton_group(void) {
+    printf("skeleton group\n");
+    /* held still: the band rests a third of the way across the group, so it lights the first
+     * placeholder and not the second, which a sweep per placeholder would */
+    cui_ctx *ui = new_ctx(480, 120, true);
+    run(ui, build_skel, NULL, 2);
+    image im = render(ui);
+    CHECK(sheen_px(ui, im, "sa") > 20);
+    CHECK_EQ(sheen_px(ui, im, "sb"), 0);
+    CHECK(cui_next_wakeup(ui) < 0);
+    run(ui, build_skel, NULL, 30);
+    image later = render(ui);
+    CHECK(same(im, later));
+    free(im.px); free(later.px);
+    cui_destroy(ui);
+    /* moving: twenty steps a second, and the band travels */
+    ui = new_ctx(480, 120, false);
+    run(ui, build_skel, NULL, 20);
+    float w = cui_next_wakeup(ui);
+    CHECK(w >= 0 && w <= 1.0f / 20 + 1e-4f);
+    im = render(ui);
+    run(ui, build_skel, NULL, 12);
+    later = render(ui);
+    CHECK(!same(im, later));
+    free(im.px); free(later.px);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
@@ -745,6 +796,7 @@ int main(void) {
     test_veil();
     test_spinners();
     test_status_spinner();
+    test_skeleton_group();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
