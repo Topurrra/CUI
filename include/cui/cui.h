@@ -2676,13 +2676,22 @@ CUI_API void cui_expandable_card_end(cui_ctx *ui);
 /* Table of contents for a scroll area: highlights the section in view on a
  * progress rail, and scrolls to a section when clicked. Put
  * cui_toc_anchor(ui, "anchor") at each heading inside the scroll area, and
- * call cui_toc in the same scope as the scroll area. Returns the active index. */
+ * call cui_toc in the same scope as the scroll area. Returns the active index.
+ * Content you do not lay out yourself (a markdown view's headings) gives each
+ * entry its `y` instead of an anchor. Up to 256 entries. */
 typedef struct cui_toc_item {
     const char *title;         /* the entry's text in the list */
-    const char *anchor;        /* the name given to `cui_toc_anchor` at that section's heading */
+    const char *anchor;        /* the name given to `cui_toc_anchor` at that section's heading; NULL: use `y` */
     int level;                 /* indentation: 0 for a top level section, up to 4 (12 points each) */
+    float y;                   /* with no anchor: the section's top inside the scroll area's content, in points */
 } cui_toc_item;
-CUI_API int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int count);
+typedef struct cui_toc_opts {
+    int _;
+    bool set_active;           /* `active` is the current entry instead of the one scrolled into view */
+    int active;                /* with set_active: the entry to mark, -1 for none */
+    int *clicked;              /* receives the entry clicked this frame, or -1 (a NULL scroll_id scrolls nothing: act on it yourself) */
+} cui_toc_opts;
+CUI_API int cui_toc_ex(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int count, const cui_toc_opts *opts);
 CUI_API void cui_toc_anchor(cui_ctx *ui, const char *anchor);
 
 /* ------------------------------------------------------------------------ */
@@ -3046,6 +3055,14 @@ CUI_API bool cui_node_deleted(cui_ctx *ui, int *node_id);
 typedef struct cui_menu_bar_opts { int _; bool no_border; } cui_menu_bar_opts;
 CUI_API void cui_menu_bar_begin(cui_ctx *ui, const char *id, const cui_menu_bar_opts *opts);
 CUI_API void cui_menu_bar_end(cui_ctx *ui);
+/* Opens menu number `menu` (0 based) of the bar `id` as soon as the bar has
+ * been built with it, so a bar that only shows on demand can open with a menu
+ * already down; -1 closes the open menu and lets go of the keyboard. Call it
+ * in the id scope of cui_menu_bar. */
+CUI_API void cui_menu_bar_open(cui_ctx *ui, const char *id, int menu);
+/* True while a menu of the bar is open, about to open, or the bar holds the
+ * keyboard (Alt, F10): how a bar shown on demand knows when to hide again. */
+CUI_API bool cui_menu_bar_is_active(cui_ctx *ui, const char *id);
 /* One menu of the bar. Returns true while its items should be built; call
  * cui_menu_bar_menu_end only then. */
 typedef struct cui_menu_bar_menu_opts {
@@ -5072,6 +5089,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_money_input(ui, id, value, ...) cui_money_input_ex((ui), (id), (value), CUI__OPTS(cui_money_opts, __VA_ARGS__))
 #define cui_shortcut_recorder(ui, id, combo, ...) cui_shortcut_recorder_ex((ui), (id), (combo), CUI__OPTS(cui_shortcut_recorder_opts, __VA_ARGS__))
 /* app chrome */
+#define cui_toc(ui, scroll_id, items, count, ...) cui_toc_ex((ui), (scroll_id), (items), (count), CUI__OPTS(cui_toc_opts, __VA_ARGS__))
 #define cui_menu_bar(ui, id, ...)           CUI__SCOPE(cui_menu_bar_begin((ui), (id), CUI__OPTS(cui_menu_bar_opts, __VA_ARGS__)), cui_menu_bar_end(ui))
 #define cui_menu_bar_menu(ui, label, ...)   CUI__SCOPE_IF(cui_menu_bar_menu_begin((ui), (label), CUI__OPTS(cui_menu_bar_menu_opts, __VA_ARGS__)), cui_menu_bar_menu_end(ui))
 #define cui_toolbar(ui, id, ...)            CUI__SCOPE(cui_toolbar_begin((ui), (id), CUI__OPTS(cui_toolbar_opts, __VA_ARGS__)), cui_toolbar_end(ui))

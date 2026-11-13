@@ -545,6 +545,8 @@ The rail fills as you read, and a marker glides to the section in view. Clicking
 
 `cui_toc` returns the index of the section in view, or of the entry that was just clicked. The section in view is the last one whose anchor has passed a line 30% of the way down the scroll area. You own the `cui_toc_item` array: a title, the anchor's name and a level from 0 to 4. `cui_toc_anchor` puts an invisible marker at that point of the scroll area; call it just before each heading, with the same string as in the item. Anchor names are matched across the whole window whatever the id scope, so keep them unique.
 
+For content you do not lay out yourself, such as the headings of a markdown view, leave the anchor NULL and give each item its `y`, the section's top inside the scroll content (the markdown view reports it for each heading). Options: `.set_active` with `.active` marks an entry of your choosing instead of following the scroll (an editor might mark the section holding the caret), and `.clicked` receives the entry clicked this frame or -1; with a NULL scroll id nothing scrolls, so act on the click yourself. Up to 256 entries.
+
 Keyboard: Tab moves through the entries, and Enter or Space jumps to the focused section.
 
 ## Feedback
@@ -2137,6 +2139,8 @@ cui_menu_bar(ui, "menubar") {
 ```
 
 Each menu holds ordinary menu items, so shortcuts, separators, labels, icons, disabled and checked items work as they do in a dropdown. A press opens a menu; while one is open, moving over another title switches to it. Alt on its own or F10 puts the keyboard on the bar and underlines each title's mnemonic (its first letter, or `.mnemonic`). Then Left and Right move along the bar, Enter or Down opens a menu with its first item ready, Left and Right inside a menu move to the next one, Enter chooses, and Esc steps back to the bar and then gives the keyboard back to what had it. Alt plus a mnemonic opens that menu from anywhere. Shortcuts shown in the menus are labels only: handle them in your app with `cui_shortcut`. A check sits after the shortcut text, so a menu reads best when its checkable items have no shortcut. Submenus are not supported.
+
+A bar shown only on demand (behind a single menu button, say) uses two more calls in the bar's id scope: `cui_menu_bar_open(ui, "menubar", 0)` asks for a menu to open as soon as the bar has been built with it, so the bar appears with that menu already down, and `cui_menu_bar_is_active(ui, "menubar")` stays true while a menu is open, about to open, or the bar holds the keyboard; when it turns false, hide the bar again. `cui_menu_bar_open(ui, id, -1)` closes it.
 
 ### Toolbar
 

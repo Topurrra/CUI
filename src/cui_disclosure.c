@@ -273,7 +273,8 @@ void cui_toc_anchor(cui_ctx *ui, const char *anchor) {
     ui->nodes[n].self_align = CUI_ALIGN_STRETCH;
 }
 
-typedef struct { cui_spring y, h; float progress; bool init; float hover[64]; } cui__toc_state;
+#define CUI__TOC_MAX 256
+typedef struct { cui_spring y, h; float progress; bool init; float hover[CUI__TOC_MAX]; } cui__toc_state;
 typedef struct { float y, h, progress, rail_h; cui_color track, fill, mark; } cui__toc_paint;
 
 static void cui__paint_toc_rail(cui_ctx *ui, cui_node *n, void *data) {
@@ -284,23 +285,33 @@ static void cui__paint_toc_rail(cui_ctx *ui, cui_node *n, void *data) {
     if (p->h > 0) cui_draw_rect(ui, (cui_rect){ r.x - 0.5f, r.y + p->y, 2, p->h }, CUI_CORNERS(1), p->mark);
 }
 
-int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int count) {
-    if (count > 64) count = 64;
-    cui_id scid = cui_make_id(ui, scroll_id);
+int cui_toc_ex(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int count, const cui_toc_opts *o) {
+    cui_toc_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    if (o->clicked) *o->clicked = -1;
+    if (count > CUI__TOC_MAX) count = CUI__TOC_MAX;
+    if (count < 0) count = 0;
+    cui_id scid = cui_make_id(ui, scroll_id ? scroll_id : "toc");
     cui_id tid = scid ^ 0x70CCu;
     cui__toc_state *st = cui_state(ui, tid, sizeof *st);
-    cui_scroll_state *ss = cui_state(ui, scid, sizeof *ss);
-    cui_rect view = cui__prev_rect(ui, scid);
+    cui_scroll_state none = { 0 };
+    cui_scroll_state *ss = scroll_id ? cui_state(ui, scid, sizeof *ss) : &none;
+    cui_rect view = scroll_id ? cui__prev_rect(ui, scid) : (cui_rect){ 0 };
     float range = ss->content_h - ss->view_h;
     float progress = range > 1 ? cui__clampf(ss->y / range, 0, 1) : 0;
     int active = 0;
-    for (int k = 0; k < count; k++) {
-        cui_id aid = cui__anchor_id(items[k].anchor);
-        if (!cui__has_prev_rect(ui, aid)) continue;
-        cui_rect ar = cui__prev_rect(ui, aid);
-        if (ar.y - view.y <= view.h * 0.3f + 1) active = k;
+    for (int k = 0; k < count && scroll_id; k++) {
+        float top;   /* the section's top, from the top of the view */
+        if (items[k].anchor) {
+            cui_id aid = cui__anchor_id(items[k].anchor);
+            if (!cui__has_prev_rect(ui, aid)) continue;
+            top = cui__prev_rect(ui, aid).y - view.y;
+        } else top = items[k].y - ss->y;
+        if (top <= view.h * 0.3f + 1) active = k;
     }
     if (range > 1 && progress >= 0.995f) active = count - 1;
+    if (o->set_active) active = o->active < count ? o->active : -1;
     cui__tween(ui, &st->progress, progress, 0.08f);
     int clicked = -1;
     int row = cui__node_new(ui, tid);
@@ -356,11 +367,15 @@ int cui_toc(cui_ctx *ui, const char *scroll_id, const cui_toc_item *items, int c
     ui->nodes[rail].paint = cui__paint_toc_rail;
     ui->nodes[rail].paint_data = p;
     if (clicked >= 0) {
-        cui_id aid = cui__anchor_id(items[clicked].anchor);
-        if (cui__has_prev_rect(ui, aid) && view.h > 0) {
-            cui_rect ar = cui__prev_rect(ui, aid);
-            float y = ar.y - view.y + ss->y - 12;
-            cui_scroll_to(ui, scroll_id, CUI_MAX(0.0f, y));
+        if (o->clicked) *o->clicked = clicked;
+        if (scroll_id && !items[clicked].anchor) cui_scroll_to(ui, scroll_id, CUI_MAX(0.0f, items[clicked].y - 12));
+        else if (scroll_id) {
+            cui_id aid = cui__anchor_id(items[clicked].anchor);
+            if (cui__has_prev_rect(ui, aid) && view.h > 0) {
+                cui_rect ar = cui__prev_rect(ui, aid);
+                float y = ar.y - view.y + ss->y - 12;
+                cui_scroll_to(ui, scroll_id, CUI_MAX(0.0f, y));
+            }
         }
         active = clicked;
     }

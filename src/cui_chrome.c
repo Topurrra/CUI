@@ -74,6 +74,7 @@ struct cui__menubar_state {
     char mn[CUI__BAR_MAX];
     bool dis[CUI__BAR_MAX];
     cui_id saved_focus;        /* restored when the bar lets go of the keyboard */
+    int want;                  /* cui_menu_bar_open: menu + 1 to open once it has been built, 0 none */
     /* while building */
     int build;
     int cur;
@@ -151,6 +152,10 @@ void cui_menu_bar_begin(cui_ctx *ui, const char *id_str, const cui_menu_bar_opts
     int n = st->count < CUI__BAR_MAX ? st->count : CUI__BAR_MAX;
     if (st->open >= n) st->open = -1;
     if (st->hl >= n) st->hl = 0;
+    if (st->want > 0 && st->want - 1 < n && st->trig[st->want - 1]) {   /* asked for, and its trigger is laid out */
+        if (!st->dis[st->want - 1]) cui__bar_open(ui, st, st->want - 1, false);
+        st->want = 0;
+    }
     st->esc = cui_key_pressed(ui, CUI_KEY_ESCAPE);
     /* the bar cleared the focus when it took the keys; anything focused since
      * (Tab, a click) means the keyboard moved on */
@@ -250,6 +255,18 @@ void cui_menu_bar_begin(cui_ctx *ui, const char *id_str, const cui_menu_bar_opts
     cui_push_id(ui, id_str);
     st->build = 0;
     cui__slots(ui)->bar = st;
+}
+
+void cui_menu_bar_open(cui_ctx *ui, const char *id_str, int menu) {
+    cui__menubar_state *st = cui_state(ui, cui_make_id(ui, id_str), sizeof *st);
+    if (!st->init) { st->open = -1; st->init = true; }
+    if (menu < 0) { if (st->open >= 0) cui__bar_open(ui, st, -1, false); cui__bar_release_keys(ui, st); st->want = 0; }
+    else st->want = menu + 1;
+}
+
+bool cui_menu_bar_is_active(cui_ctx *ui, const char *id_str) {
+    cui__menubar_state *st = cui_state(ui, cui_make_id(ui, id_str), sizeof *st);
+    return st->init && (st->open >= 0 || st->kbd || st->want > 0);
 }
 
 void cui_menu_bar_end(cui_ctx *ui) {

@@ -1427,6 +1427,60 @@ static void test_confirm_popover_keyboard(void) {
     cui_destroy(ui);
 }
 
+/* the table of contents with positions instead of anchors, a chosen entry and a reported click;
+ * a menu bar opened from code and asked whether it is in use */
+typedef struct { int active, clicked, chosen; bool set; bool show_bar, bar_active; float y_two; } toc_pos_ctx;
+static void build_toc_pos(cui_ctx *ui, void *user) {
+    toc_pos_ctx *t = user;
+    cui_toc_item toc[] = { { "One", NULL, 0, 0 }, { "Two", NULL, 1, 300 }, { "Three", NULL, 0, 600 } };
+    cui_row(ui) {
+        cui_scroll(ui, .id = "pos", .height = CUI_PX(200), .width = CUI_PX(300)) {
+            cui_box(ui, .height = CUI_PX(900)) { cui_text(ui, "content"); }
+        }
+        cui_column(ui, .width = CUI_PX(160)) {
+            t->active = cui_toc(ui, "pos", toc, 3, .set_active = t->set, .active = 2, .clicked = &t->clicked);
+        }
+    }
+    if (t->show_bar) {
+        cui_menu_bar(ui, "bar") {
+            cui_menu_bar_menu(ui, "File") { if (cui_menu_item(ui, "Open")) t->chosen = 1; }
+            cui_menu_bar_menu(ui, "View") { if (cui_menu_item(ui, "Zoom")) t->chosen = 2; }
+        }
+    }
+    t->bar_active = cui_menu_bar_is_active(ui, "bar");
+}
+static void test_toc_positions(void) {
+    printf("toc: positions, a set entry, clicks; menu bar opened from code\n");
+    cui_ctx *ui = new_ctx();
+    toc_pos_ctx t;
+    memset(&t, 0, sizeof t);
+    run(ui, build_toc_pos, &t, 3);
+    CHECK(t.active == 0 && t.clicked == -1);
+    cui_scroll_to(ui, "pos", 320);
+    run(ui, build_toc_pos, &t, 30);
+    CHECK(t.active == 1);
+    t.set = true;
+    run(ui, build_toc_pos, &t, 1);
+    CHECK(t.active == 2);
+    t.set = false;
+    /* a click on "Three" reports it and scrolls there */
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "pos") ^ 0x70CCu);
+    click_at(ui, build_toc_pos, &t, r.x + 40, r.y + r.h - 8);
+    CHECK(t.clicked == 2 || t.active == 2);
+    run(ui, build_toc_pos, &t, 30);
+    CHECK(t.active == 2);
+    /* the bar: asked to open its second menu before it is shown, it opens once laid out */
+    CHECK(!t.bar_active);
+    cui_menu_bar_open(ui, "bar", 1);
+    t.show_bar = true;
+    run(ui, build_toc_pos, &t, 3);
+    CHECK(t.bar_active);
+    cui_menu_bar_open(ui, "bar", -1);
+    run(ui, build_toc_pos, &t, 3);
+    CHECK(!t.bar_active);
+    cui_destroy(ui);
+}
+
 static void test_disclosure(void) {
     printf("disclosure: hover card, confirm popover, expandables, toc, banner, checklist\n");
     cui_ctx *ui = new_ctx();
@@ -8630,6 +8684,7 @@ int main(void) {
     test_strings();
     test_pickers();
     test_disclosure();
+    test_toc_positions();
     test_confirm_popover_keyboard();
     test_checklist();
     test_data_grid();
