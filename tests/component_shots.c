@@ -361,6 +361,17 @@ static void hover_id(cui_ctx *ui, cui_id id, int f, int at, float fx, float fy) 
     cui_rect r = cui_get_rect(ui, id);
     if (f == at && r.w > 0) cui_input_mouse_move(ui, r.x + r.w * fx, r.y + r.h * fy);
 }
+static void body_dither_area(cui_ctx *ui) {
+    static const float api[] = { 22, 19, 17, 21, 30, 38, 41, 37, 34, 39, 33, 26 }, web[] = { 18, 15, 13, 16, 24, 33, 36, 40, 38, 42, 35, 28 };
+    static const char *h[] = { "00:00", "02:00", "04:00", "06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00" };
+    cui_series s[2] = { { "API", api, 12, CUI_COLOR_SERIES(3) }, { "Web", web, 12, CUI_COLOR_SERIES(0) } };
+    cui_card(ui, UPTO(680)) { cui_line_chart(ui, "area", s, 2, .labels = h, .label_count = 12, .dither = true, .stacked = true, .smooth = true, .height = 210, .format = "%.0fk"); }
+}
+/* the pointer over the afternoon, for the crosshair and the tooltip */
+static void scene_dither_area(cui_ctx *ui, int f) {
+    if (f < 0) { hover_id(ui, cui_make_id(ui, "area") ^ 0x9107u, -f - 1, 30, 0.66f, 0.5f); return; }
+    frame_wrap(ui, body_dither_area);
+}
 static void body_bar_chart(cui_ctx *ui);
 static void scene_bar_chart(cui_ctx *ui, int f) {
     /* April's column, to show the hover band and its value chip */
@@ -4446,6 +4457,7 @@ int main(int argc, char **argv) {
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },
         { "chips", scene_chips, 520, 140, false }, { "line-chart", scene_line_chart, 740, 320, true },
+        { "dither-area", scene_dither_area, 740, 340, true },
         { "bar-donut", scene_bar_chart, 840, 290, true }, { "command-palette", scene_palette, 680, 460, true },
         { "icons", scene_icons, 1040, 1120, false },
         { "radio-cards", scene_radio_cards, 940, 170, true }, { "tag-otp", scene_tag_otp, 520, 330, true },

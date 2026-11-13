@@ -203,7 +203,7 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
         npts = CUI_MAX(npts, s->count);
         for (int i = 0; i < s->count; i++) {
             float v = s->values[i];
-            if (p->bars && p->o.stacked) {
+            if (p->o.stacked) {
                 float sum = 0;
                 for (int j = 0; j < p->count; j++) if (i < p->series[j].count) sum += p->series[j].values[i];
                 v = sum;
@@ -320,29 +320,66 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
         }
         return;
     }
-    /* lines */
+    /* lines: every fill first, then every line over them */
     cui_push_clip(ui, (cui_rect){ plot.x - 4, r.y, (plot.w + 8) * intro, r.h });
+    float *acc = cui__frame_alloc(ui, sizeof(float) * (size_t)npts);   /* stacked: the top of the series so far */
+    for (int i = 0; i < npts; i++) acc[i] = 0;
+    cui_vec2 **lines = cui__frame_alloc(ui, sizeof(cui_vec2 *) * (size_t)p->count);
+    int *line_n = cui__frame_alloc(ui, sizeof(int) * (size_t)p->count);
     for (int k = 0; k < p->count; k++) {
         cui_series *s = &p->series[k];
+        line_n[k] = 0;
         if (s->count < 1) continue;
         cui_vec2 *pts = cui__frame_alloc(ui, sizeof(cui_vec2) * (size_t)s->count);
+        cui_vec2 *low = cui__frame_alloc(ui, sizeof(cui_vec2) * (size_t)s->count);   /* the bottom of its band */
         for (int i = 0; i < s->count; i++) {
-            pts[i].x = plot.x + slot * (float)i;
-            pts[i].y = plot.y + plot.h - (s->values[i] - lo) / (hi - lo) * plot.h;
+            float under = p->o.stacked ? acc[i] : 0;
+            pts[i].x = low[i].x = plot.x + slot * (float)i;
+            pts[i].y = plot.y + plot.h - (under + s->values[i] - lo) / (hi - lo) * plot.h;
+            low[i].y = p->o.stacked ? plot.y + plot.h - (under - lo) / (hi - lo) * plot.h : base_y;
+            if (p->o.stacked) acc[i] += s->values[i];
         }
-        cui_vec2 *line = pts;
+        cui_vec2 *line = pts, *floor_line = low;
         int ln = s->count;
-        if (p->o.smooth && s->count > 2) cui__smooth_points(ui, pts, s->count, &line, &ln);
+        if (p->o.smooth && s->count > 2) {
+            cui__smooth_points(ui, pts, s->count, &line, &ln);
+            if (p->o.stacked) { int fn; cui__smooth_points(ui, low, s->count, &floor_line, &fn); }
+            else {
+                floor_line = cui__frame_alloc(ui, sizeof(cui_vec2) * (size_t)ln);
+                for (int i = 0; i < ln; i++) { floor_line[i].x = line[i].x; floor_line[i].y = base_y; }
+            }
+        }
+        lines[k] = line; line_n[k] = ln;
         cui_color c = cui__series_color(ui, s, k);
+        if (p->o.dither && ln > 1) {
+            /* dots that thin out from the line to the bottom of its own band, so stacked bands
+             * stay apart and overlaps never mix into a third color */
+            cui__dvert *v = cui__frame_alloc(ui, sizeof(cui__dvert) * (size_t)ln * 2);
+            uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)(ln - 1) * 6);
+            for (int i = 0; i < ln; i++) {
+                v[i * 2] = (cui__dvert){ line[i].x, line[i].y, 0.5f };
+                v[i * 2 + 1] = (cui__dvert){ floor_line[i].x, floor_line[i].y, 0.1f };
+            }
+            for (int i = 0; i < ln - 1; i++) {
+                uint32_t a = (uint32_t)i * 2;
+                uint32_t q[6] = { a, a + 2, a + 3, a, a + 3, a + 1 };
+                memcpy(idx + i * 6, q, sizeof q);
+            }
+            cui__dither d;
+            memset(&d, 0, sizeof d);
+            d.color = c;
+            d.origin = (cui_vec2){ plot.x, plot.y };
+            cui__draw_dither_mesh(ui, &d, v, ln * 2, idx, (ln - 1) * 6);
+        }
         /* with several series only the first is filled: overlapping fills tint each other into a third color */
-        if (p->o.area && ln > 1 && k == 0) {
+        else if (p->o.area && ln > 1 && k == 0) {
             cui_cvert *v = cui__frame_alloc(ui, sizeof(cui_cvert) * (size_t)ln * 2);
             uint32_t *idx = cui__frame_alloc(ui, sizeof(uint32_t) * (size_t)(ln - 1) * 6);
             float alpha_top = (p->count > 1 ? 0.16f : 0.2f) * (ui->mode == CUI_THEME_DARK ? 1.2f : 1.0f);
             for (int i = 0; i < ln; i++) {
                 /* a flat tint: the area is a quantity, not a glow fading into the page */
                 v[i * 2].x = line[i].x; v[i * 2].y = line[i].y; v[i * 2].c = cui_alpha(c, alpha_top * 0.6f);
-                v[i * 2 + 1].x = line[i].x; v[i * 2 + 1].y = base_y; v[i * 2 + 1].c = cui_alpha(c, alpha_top * 0.6f);
+                v[i * 2 + 1].x = floor_line[i].x; v[i * 2 + 1].y = floor_line[i].y; v[i * 2 + 1].c = cui_alpha(c, alpha_top * 0.6f);
             }
             for (int i = 0; i < ln - 1; i++) {
                 uint32_t a = (uint32_t)i * 2;
@@ -351,8 +388,9 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
             }
             cui__draw_triangles(ui, v, ln * 2, idx, (ln - 1) * 6);
         }
-        cui_draw_polyline(ui, line, ln, 2.0f, c, false);
     }
+    for (int k = 0; k < p->count; k++)
+        if (line_n[k] > 0) cui_draw_polyline(ui, lines[k], line_n[k], 2.0f, cui__series_color(ui, &p->series[k], k), false);
     cui_pop_clip(ui);
     if (npts > 1) cui__paint_annotations(ui, p->o.annotations, p->o.annotation_count, plot, 0, npts - 1, lo, hi, plot.y, false);
     if (p->hover >= 0 && p->hover_t > 0.01f) {
@@ -363,7 +401,10 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
         for (int k = 0; k < p->count; k++) {
             cui_series *s = &p->series[k];
             if (p->hover >= s->count) continue;
-            float y = plot.y + plot.h - (s->values[p->hover] - lo) / (hi - lo) * plot.h;
+            float v = s->values[p->hover];
+            if (p->o.stacked)
+                for (int j = 0; j < k; j++) if (p->hover < p->series[j].count) v += p->series[j].values[p->hover];
+            float y = plot.y + plot.h - (v - lo) / (hi - lo) * plot.h;
             ay = CUI_MIN(ay, y);
             cui_vec2 c = { plot.x + slot * (float)p->hover, y };
             cui_draw_circle(ui, c, 5.5f, cui_alpha(CUI_C(ui, SURFACE), p->hover_t));

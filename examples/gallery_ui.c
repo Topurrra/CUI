@@ -685,6 +685,14 @@ static void page_charts(cui_ctx *ui, gallery *g) {
             }
         }
     }
+    section(ui, "Dither area chart", "Fills made of dots that thin out toward the base; stacked bands keep their own color.");
+    cui_card(ui) {
+        static const char *hours[12] = { "00:00", "02:00", "04:00", "06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00" };
+        static const float api[12] = { 22, 19, 17, 21, 30, 38, 41, 37, 34, 39, 33, 26 };
+        static const float web[12] = { 18, 15, 13, 16, 24, 33, 36, 40, 38, 42, 35, 28 };
+        cui_series s[2] = { { "API", api, 12, CUI_COLOR_SERIES(3) }, { "Web", web, 12, CUI_COLOR_SERIES(0) } };
+        cui_line_chart(ui, "requests", s, 2, .labels = hours, .label_count = 12, .dither = true, .stacked = true, .smooth = true, .height = 220, .format = "%.0fk");
+    }
     section(ui, "Pattern meter", "Each part has a color and a density, so it reads in grayscale too. Hover a part or a legend entry.");
     cui_card(ui, .gap = 24) {
         static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };

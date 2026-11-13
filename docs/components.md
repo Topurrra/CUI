@@ -697,7 +697,16 @@ cui_donut_chart(ui, "share", values, labels, 4, .format = "%.0f%%");
 cui_sparkline(ui, values, 12, CUI_PX(120), 32, CUI_COLOR_SERIES(0));
 ```
 
-Charts draw in once and pick nice axis ticks. Gridlines are faint dashed hairlines over a solid zero line, and the axis labels are small and muted, so the data leads. The line chart shows a crosshair that glides between points and a tooltip with every series on hover. Bars are slim, with rounded tops and a small gap inside a group; hovering a column lays a soft band behind it, brings its label forward and shows a compact chip over it with each series' value (the full tooltip when the chip would not fit). The donut is a thin ring whose segments are parted by real gaps, with the leading or hovered share in the middle; its legend puts a thin bar under each name that shows the share's size against the largest. Colors come from the theme's series palette, which starts at the accent hue. Options: `width`, `height`, `labels`, `label_count`, `area`, `smooth`, `stacked`, `no_grid`, `no_legend`, `format`, `min`, `max`. With `area` and several series, only the first is filled, so fills never tint each other into a third color.
+Charts draw in once and pick nice axis ticks. Gridlines are faint dashed hairlines over a solid zero line, and the axis labels are small and muted, so the data leads. The line chart shows a crosshair that glides between points and a tooltip with every series on hover. Bars are slim, with rounded tops and a small gap inside a group; hovering a column lays a soft band behind it, brings its label forward and shows a compact chip over it with each series' value (the full tooltip when the chip would not fit). The donut is a thin ring whose segments are parted by real gaps, with the leading or hovered share in the middle; its legend puts a thin bar under each name that shows the share's size against the largest. Colors come from the theme's series palette, which starts at the accent hue. Options: `width`, `height`, `labels`, `label_count`, `area`, `smooth`, `stacked`, `dither`, `no_grid`, `no_legend`, `format`, `min`, `max`. With `area` and several series, only the first is filled, so fills never tint each other into a third color. `stacked` stacks a bar chart's series in one column and a line chart's series on the ones before them; the tooltip still shows each series' own value.
+
+`dither` fills every series of a line chart with dots, about half lit at its line and a tenth at the bottom of its band (the base, or with `stacked` the series under it), so each band fades within itself and bands meet without mixing into a third color. The dots are drawn whole, never blended, and the lines stay crisp on top.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/dither-area-dark.png"><img src="images/components/dither-area.png" alt="Dither area chart"></picture>
+
+```c
+cui_series s[] = { { "API", api, 12, CUI_COLOR_SERIES(3) }, { "Web", web, 12, CUI_COLOR_SERIES(0) } };
+cui_line_chart(ui, "requests", s, 2, .labels = hours, .label_count = 12, .dither = true, .stacked = true, .smooth = true, .format = "%.0fk");
+```
 
 ## Image
 

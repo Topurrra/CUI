@@ -294,11 +294,56 @@ static void test_meter(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+/* dither area fills                                                        */
+
+static cui_id g_chart;
+static void build_area(cui_ctx *ui, void *u) {
+    (void)u;
+    static const float a[] = { 50, 50, 50, 50, 50, 50 }, b[] = { 50, 50, 50, 50, 50, 50 };
+    cui_series s[2] = { { "Low", a, 6, { 230, 40, 40, 255 } }, { "High", b, 6, { 40, 40, 230, 255 } } };
+    cui_line_chart(ui, "c", s, 2, .dither = true, .stacked = true, .min = 0, .max = 100, .height = 220, .no_legend = true);
+    g_chart = cui_last_id(ui);
+}
+
+static void test_area(void) {
+    printf("dither area fills\n");
+    cui_ctx *ui = new_ctx(520, 280, true);
+    run(ui, build_area, NULL, 3);
+    image im = render(ui);
+    cui_rect r = cui_get_rect(ui, g_chart);
+    /* the plot: 6 points under the top, 12 shorter than the chart without x labels */
+    float py = r.y + 6, ph = r.h - 12;
+    int red_low = 0, blue_low = 0, red_high = 0, blue_high = 0, near_line = 0, near_base = 0;
+    for (float x = r.x + r.w * 0.3f; x < r.x + r.w * 0.7f; x += 1) {
+        for (float y = py + ph * 0.60f; y < py + ph * 0.95f; y += 1) {
+            const unsigned char *p = at(im, x, y);
+            red_low += p[0] > 200 && p[2] < 80;
+            blue_low += p[2] > 200 && p[0] < 80;
+        }
+        for (float y = py + ph * 0.10f; y < py + ph * 0.40f; y += 1) {
+            const unsigned char *p = at(im, x, y);
+            red_high += p[0] > 200 && p[2] < 80;
+            blue_high += p[2] > 200 && p[0] < 80;
+        }
+        for (float y = py + ph * 0.53f; y < py + ph * 0.60f; y += 1) near_line += at(im, x, y)[0] > 200;
+        for (float y = py + ph * 0.90f; y < py + ph * 0.97f; y += 1) near_base += at(im, x, y)[0] > 200;
+    }
+    /* each band holds only its own color: the bands never mix */
+    CHECK(red_low > 100); CHECK_EQ(blue_low, 0);
+    CHECK(blue_high > 100); CHECK_EQ(red_high, 0);
+    /* and thins out from its line down to its base */
+    CHECK(near_line > near_base * 2);
+    free(im.px);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
     test_progress();
     test_meter();
+    test_area();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

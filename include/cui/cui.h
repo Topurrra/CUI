@@ -999,12 +999,14 @@ typedef struct cui_chart_opts {
     bool area;                 /* fill under lines */
     bool no_grid;
     bool no_legend;
-    bool stacked;              /* bar chart */
+    bool stacked;              /* bars stack in one column; lines stack on the series before them */
     bool smooth;               /* curved lines */
     const char *format;        /* value format for axis and tooltip, default "%.0f" */
     float min, max;            /* fixed y range when min != max */
     const cui_chart_annotation *annotations;   /* lines and points drawn over the chart (line and bar charts) */
     int annotation_count;      /* number of `annotations` */
+    bool dither;               /* line chart: every series filled with dots that thin out from its line to the
+                                * bottom of its band (implies `area`); with `stacked`, bands never mix colors */
 } cui_chart_opts;
 CUI_API void cui_line_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const cui_chart_opts *opts);
 CUI_API void cui_bar_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const cui_chart_opts *opts);
