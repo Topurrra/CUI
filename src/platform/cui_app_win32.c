@@ -58,11 +58,14 @@ static PFN_AdjustWindowRectExForDpi cui__AdjustWindowRectExForDpi;
 
 static cui__win32 *cui__w(cui_app *app) { return app->plat; }
 
-/* Frame pacing experiment for OpenGL (measurement only; off unless CUI_GL_PACE is set).
- * CUI_GL_PACE=flush : swap interval 0, then DwmFlush() after every SwapBuffers.
- * CUI_GL_PACE=timer : swap interval 0, then sleep to the next vblank read from
- *                     DwmGetCompositionTimingInfo (waitable timer).
- * CUI_GL_PACE_STATS=1 prints DWM frame counters at exit. Unset: the swap waits as before. */
+/* OpenGL frame pacing. With the swap interval at 1 some drivers (Intel here) block in the
+ * first buffer upload of the next frame until the flip, spinning a core: scrolling a big
+ * file cost 13 ms and a whole core per frame. So by default the swap interval is 0 and the
+ * frame waits for the compositor with DwmFlush() after SwapBuffers: still one frame per
+ * refresh and no tearing (DWM counters: composed == refreshes == swaps, nothing dropped),
+ * about 1-2 ms per frame and a sixth of the CPU. Only when vsync is wanted.
+ * CUI_GL_PACE=flush (default) | timer (sleep to the next vblank from DwmGetCompositionTimingInfo)
+ *             | swap (the old way: swap interval 1). CUI_GL_PACE_STATS=1 prints DWM counters at exit. */
 typedef HRESULT (WINAPI *PFN_DwmFlush)(void);
 typedef HRESULT (WINAPI *PFN_DwmGetCompositionTimingInfo)(HWND, DWM_TIMING_INFO *);
 static int cui__w32pace_mode = -1;   /* -1 unread, 0 off, 1 flush, 2 timer */
@@ -71,11 +74,12 @@ static PFN_DwmGetCompositionTimingInfo cui__w32pace_timing;
 static DWM_TIMING_INFO cui__w32pace_t0;
 static unsigned long cui__w32pace_swaps;
 static bool cui__w32pace_stats;
+static bool cui__w32pace_vsync = true;   /* pace only when the app wants vsync */
 
 static int cui__w32pace_get(void) {
     if (cui__w32pace_mode >= 0) return cui__w32pace_mode;
     const char *v = getenv("CUI_GL_PACE");
-    cui__w32pace_mode = v && !strcmp(v, "flush") ? 1 : v && !strcmp(v, "timer") ? 2 : 0;
+    cui__w32pace_mode = !v || !strcmp(v, "flush") ? 1 : !strcmp(v, "timer") ? 2 : 0;
     cui__w32pace_stats = getenv("CUI_GL_PACE_STATS") != NULL;
     HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
     if (dwm) {
@@ -622,6 +626,7 @@ static HGLRC cui__win32_gl_context(HDC dc) {
 
 static void cui__win32_swap_interval(bool vsync) {
     PFN_wglSwapIntervalEXT swap = (PFN_wglSwapIntervalEXT)(void *)wglGetProcAddress("wglSwapIntervalEXT");
+    cui__w32pace_vsync = vsync;
     if (swap) swap(vsync && !cui__w32pace_get() ? 1 : 0);
 }
 
@@ -753,7 +758,7 @@ void cui__plat_gl_swap(cui_app *app) {
         t.cbSize = sizeof t;
         cui__w32pace_timing(NULL, &t);
     }
-    if (cui__w32pace_mode > 0) cui__w32pace_wait(w);
+    if (cui__w32pace_mode > 0 && cui__w32pace_vsync) cui__w32pace_wait(w);
     if (first) cui__win32_activate(w);
 }
 
@@ -841,6 +846,15 @@ bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int st
 }
 
 double cui__plat_refresh_hz(cui_app *app) {
+    /* the compositor's rate is the real one (a 75 Hz panel reported 60 through VREFRESH) */
+    cui__w32pace_get();
+    if (cui__w32pace_timing) {
+        DWM_TIMING_INFO t;
+        memset(&t, 0, sizeof t);
+        t.cbSize = sizeof t;
+        if (SUCCEEDED(cui__w32pace_timing(NULL, &t)) && t.rateRefresh.uiDenominator && t.rateRefresh.uiNumerator)
+            return (double)t.rateRefresh.uiNumerator / (double)t.rateRefresh.uiDenominator;
+    }
     return GetDeviceCaps(cui__w(app)->hdc, VREFRESH);   /* 0 or 1 means the hardware default: unknown */
 }
 
