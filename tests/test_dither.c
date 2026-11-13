@@ -141,6 +141,58 @@ static void test_primitive(void) {
     cui_destroy(ui);
 }
 
+/* cells with a density each: 20 x 10 cells of 2 points from a point off the pixel grid */
+static float g_cell_density[200];
+static cui_vec2 g_cell_origin;
+static void paint_cells(cui_ctx *ui, cui_rect r, void *u) {
+    (void)u;
+    cui_draw_rect(ui, r, CUI_CORNERS(0), cui__rgba(0, 0, 0, 255));
+    cui__dither d;
+    memset(&d, 0, sizeof d);
+    d.color = cui__rgba(255, 255, 255, 255);
+    g_cell_origin = d.origin = (cui_vec2){ r.x + 3.3f, r.y + 2.6f };
+    for (int k = 0; k < 200; k++) g_cell_density[k] = (float)((k * 7 + (k / 20) * 13) % 17) / 16.0f;
+    for (int k = 40; k < 60; k++) g_cell_density[k] = 0.5f;   /* a row of one density: one quad */
+    cui__draw_dither_cells(ui, &d, 1, 2, 20, 10, g_cell_density);
+}
+static void build_cells(cui_ctx *ui, void *u) { (void)u; cui_canvas(ui, "cells", CUI_PX(60), CUI_PX(40), paint_cells, NULL, 0); }
+
+static void test_cells(void) {
+    printf("cells\n");
+    static const float scales[2] = { 1, 1.5f };
+    for (int si = 0; si < 2; si++) {
+        float sc = scales[si];
+        cui_ctx *ui = new_ctx(100, 80, true);
+        cui_set_viewport(ui, 100, 80, sc);
+        run(ui, build_cells, NULL, 2);
+        const cui_draw_data *dd = cui_get_draw_data(ui);
+        image im = { malloc((size_t)dd->width_px * dd->height_px * 4), dd->width_px, dd->height_px };
+        cui_sw_render(g_sw, dd, im.px, im.w, im.h, im.w * 4, CUI_SW_RGBA);
+        /* the grid the primitive uses: whole pixel cells from a whole pixel origin */
+        int cell = (int)roundf(2 * sc), gx = (int)roundf(g_cell_origin.x * sc), gy = (int)roundf(g_cell_origin.y * sc);
+        int wrong = 0, split = 0, lit = 0;
+        for (int j = 0; j < 10; j++)
+            for (int i = 0; i < 20; i++) {
+                int px = gx + (i + 1) * cell, py = gy + (j + 2) * cell;
+                float t = (bayer(i + 1, j + 2) + 0.5f) / 64.0f;
+                bool want = t < g_cell_density[j * 20 + i];
+                bool on = at(im, (float)px, (float)py)[0] > 128;
+                lit += on;
+                wrong += on != want;
+                /* every pixel of the cell agrees: a cell is an exact square at any scale */
+                for (int y = 0; y < cell; y++)
+                    for (int x = 0; x < cell; x++) split += (at(im, (float)(px + x), (float)(py + y))[0] > 128) != on;
+            }
+        CHECK_EQ(wrong, 0);
+        CHECK_EQ(split, 0);
+        CHECK(lit > 50 && lit < 150);
+        /* the cells before the first one stay dark */
+        CHECK(at(im, (float)(gx + 1), (float)(gy + 1))[0] < 30);
+        free(im.px);
+        cui_destroy(ui);
+    }
+}
+
 /* ------------------------------------------------------------------------ */
 /* dither progress                                                          */
 
@@ -443,6 +495,7 @@ static void test_veil(void) {
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
+    test_cells();
     test_progress();
     test_meter();
     test_area();

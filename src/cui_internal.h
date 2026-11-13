@@ -232,6 +232,11 @@ typedef struct cui__dvert { float x, y, density; } cui__dvert;   /* points; dens
 void cui__draw_dither_mesh(cui_ctx *ui, const cui__dither *d, const cui__dvert *v, int nv, const uint32_t *idx, int ni);
 /* a rectangle whose density runs from d0 to d1, left to right, or top to bottom when vertical */
 void cui__draw_dither_rect(cui_ctx *ui, const cui__dither *d, cui_rect r, float d0, float d1, bool vertical);
+/* Cells with a density each, for patterns computed per cell (a sweep, a noise, a trail): the
+ * cols x rows densities, row major, of the cells from (i0, j0) on the grid anchored at
+ * d->origin. Each cell is an exact square of the grid at any scale; a run of cells with the
+ * same density in a row is one quad, and cells at 0 draw nothing. */
+void cui__draw_dither_cells(cui_ctx *ui, const cui__dither *d, int i0, int j0, int cols, int rows, const float *density);
 
 /* ---- layout tree ---- */
 enum {
