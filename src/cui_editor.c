@@ -654,6 +654,12 @@ typedef struct {
 } cui__ed_paint;
 
 /* Draws s[a, b) from column col; tabs expand; only the columns in view. */
+/* a plain token that is only spaces and tabs draws nothing (one that starts with a space may still hold words) */
+static bool cui__ed_blank(const char *s, int a, int b) {
+    for (int i = a; i < b; i++) if (s[i] != ' ' && s[i] != '	') return false;
+    return true;
+}
+
 static void cui__ed_run(cui_ctx *ui, const cui__ed_paint *p, const char *s, int a, int b, int col, float x0, float y, cui_color c) {
     int i = a;
     while (i < b && col < p->vc1) {
@@ -736,7 +742,7 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 int ca = col;
                 col = cui__ed_adv(s, a2, b2, p->tab, col);
                 pos = b2;
-                if (toks[t].kind == 0 && (s[a] == ' ' || s[a] == '	')) continue;   /* white space */
+                if (toks[t].kind == 0 && cui__ed_blank(s, a, b)) continue;   /* white space */
                 cui__ed_run(ui, p, s, a2, b2, ca, x0, y + ty, p->colors[toks[t].kind]);
             }
         }
