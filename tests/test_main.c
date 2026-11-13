@@ -7293,6 +7293,49 @@ static void test_strings(void) {
     cui_destroy(ui);
 }
 
+/* ---- syntax colors: SQL ---- */
+typedef struct { const char *src, *lang; } sqlc_ctx;
+static void build_sqlc(cui_ctx *ui, void *u) {
+    sqlc_ctx *c = u;
+    cui_column(ui, .pad = 10) { cui_code_block(ui, "q", c->src, .lang = c->lang, .no_header = true); }
+}
+static bool has_color(cui_ctx *ui, cui_color want) {
+    const cui_draw_data *d = cui_get_draw_data(ui);
+    for (int i = 0; i < d->vertex_count; i++) {
+        cui_color k = d->vertices[i].color;
+        if (k.r == want.r && k.g == want.g && k.b == want.b && k.a == want.a) return true;
+    }
+    return false;
+}
+/** Does this source, in this language, draw anything in the color? */
+static bool code_has(const char *lang, const char *src, cui_color want) {
+    cui_ctx *ui = new_ctx();
+    sqlc_ctx c = { src, lang };
+    run(ui, build_sqlc, &c, 2);
+    bool r = has_color(ui, want);
+    cui_destroy(ui);
+    return r;
+}
+/** SQL keywords match in any case, -- and block comments hide them, and other languages stay case-sensitive. */
+static void test_sql_colors(void) {
+    printf("syntax colors: SQL\n");
+    cui_color kw = cui_oklch(0.52f, 0.20f, 305, 1), ty = cui_oklch(0.52f, 0.11f, 200, 1), cn = cui_oklch(0.58f, 0.16f, 50, 1);
+    CHECK(code_has("sql", "SELECT id", kw));
+    CHECK(code_has("sql", "select id", kw));
+    CHECK(code_has("sql", "Select id", kw));
+    CHECK(!code_has("text", "SELECT id", kw));
+    CHECK(!code_has("sql", "selected id", kw));                 /* whole words only */
+    CHECK(code_has("sql", "x VARCHAR", ty));
+    CHECK(!code_has("sql", "x Users", ty));                     /* a capital is not a type in SQL */
+    CHECK(code_has("sql", "x IS NULL", cn));
+    CHECK(code_has("sql", "x = true", cn));
+    CHECK(!code_has("sql", "x -- SELECT", kw));                 /* a line comment */
+    CHECK(!code_has("sql", "/* a\nSELECT */ x", kw));          /* a block comment across lines */
+    CHECK(code_has("sql", "/* a */ SELECT", kw));
+    CHECK(code_has("c", "if x", kw));
+    CHECK(!code_has("c", "IF x", kw));                          /* C keeps its case */
+}
+
 /* ---- calendar: months and years ---- */
 /* the draw without texture coordinates, which depend on the order glyphs entered the atlas */
 static uint64_t shape_hash(cui_ctx *ui) {
@@ -8207,6 +8250,7 @@ int main(void) {
     test_swipe();
     test_date_math();
     test_strings();
+    test_sql_colors();
     test_calendar_years();
     test_date_picker_reopens_on_days();
     test_pickers();

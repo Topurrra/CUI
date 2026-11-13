@@ -759,7 +759,12 @@ int cui__edit_word_left(const char *s, int pos);
 int cui__edit_word_right(const char *s, int len, int pos);
 
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */
-typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types, plain; } cui__lang;
+typedef struct {
+    const char *const *kw; const char *const *types; const char *line_comment, *line_comment2;
+    bool block_comments, hash_preproc, backtick, no_caps_types, plain;
+    bool fold_case;                    /* keywords, types and constants match in any case (SQL) */
+    const char *const *consts;         /* more words colored as constants, or NULL */
+} cui__lang;
 typedef struct { int start, len; uint8_t kind; } cui__tok;
 #define CUI__TK_COUNT 10   /* token kinds; colors from cui__syntax_colors */
 cui__lang cui__lang_for(const char *lang);
