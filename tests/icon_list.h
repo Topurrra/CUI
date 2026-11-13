@@ -211,4 +211,12 @@ static const struct { const char *name, *icon; } icon_list[] = {
     { "table", CUI_ICON_TABLE },
     { "image-plus", CUI_ICON_IMAGE_PLUS },
     { "sigma", CUI_ICON_SIGMA },
+    { "strikethrough", CUI_ICON_STRIKETHROUGH },
+    { "heading", CUI_ICON_HEADING },
+    { "heading-3", CUI_ICON_HEADING_3 },
+    { "heading-4", CUI_ICON_HEADING_4 },
+    { "heading-5", CUI_ICON_HEADING_5 },
+    { "heading-6", CUI_ICON_HEADING_6 },
+    { "text-quote", CUI_ICON_TEXT_QUOTE },
+    { "square-code", CUI_ICON_SQUARE_CODE },
 };

@@ -216,5 +216,13 @@
 #define CUI_ICON_TABLE                    "\xee\x85\xbd"
 #define CUI_ICON_IMAGE_PLUS               "\xee\x87\xb7"
 #define CUI_ICON_SIGMA                    "\xee\x88\x81"
+#define CUI_ICON_STRIKETHROUGH            "\xee\x85\xb7"
+#define CUI_ICON_HEADING                  "\xee\x8e\x84"
+#define CUI_ICON_HEADING_3                "\xee\x8e\x87"
+#define CUI_ICON_HEADING_4                "\xee\x8e\x88"
+#define CUI_ICON_HEADING_5                "\xee\x8e\x89"
+#define CUI_ICON_HEADING_6                "\xee\x8e\x8a"
+#define CUI_ICON_TEXT_QUOTE               "\xee\x92\x9e"
+#define CUI_ICON_SQUARE_CODE              "\xee\x85\xab"
 
 #endif /* CUI_ICONS_H */
