@@ -361,6 +361,7 @@ static void cui__prb_diag_row(cui__prbf *f, int i, cui_problems_result *res) {
     cui_interact ri = cui__interact(ui, rid, CUI_IF_KEEP_FOCUS);
     if (ri.clicked) {
         s->sel = i; ui->focus = f->lid;
+        res->clicked = i;
         if (ui->click_count >= 2) res->activated = i;
     }
     bool sel = s->sel == i;
@@ -400,7 +401,7 @@ cui_problems_result cui_problems_ex(cui_ctx *ui, const char *id_str, const cui_d
     cui_problems_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
-    cui_problems_result res = { -1, -1, 0 };
+    cui_problems_result res = { .selected = -1, .activated = -1, .clicked = -1 };
     if (!diags || count < 0) count = 0;
     cui__prbf f;
     memset(&f, 0, sizeof f);

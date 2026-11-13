@@ -805,6 +805,10 @@ CUI_API void cui_menu_end(cui_ctx *ui);
 /* Context menu: opens on right click over the previous component. */
 CUI_API bool cui_context_menu_begin(cui_ctx *ui, const char *id);
 CUI_API void cui_context_menu_end(cui_ctx *ui);
+/* Opens the context menu with this id at a point (points, as the pointer is reported), from code: call it
+ * the frame a right click is reported (cui_doc_tabs_result.context), before the cui_context_menu block that
+ * builds the menu. The menu closes as any context menu does. */
+CUI_API void cui_context_menu_open_at(cui_ctx *ui, const char *id, float x, float y);
 
 typedef struct cui_menu_item_opts {
     int _;
@@ -1798,8 +1802,13 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
  * replaces (not when read only), Ctrl+G goes to a line; Esc closes the bar, else clears the selection, else lets the next
  * Tab move focus. Double-click selects a word, triple-click or the gutter a
  * line. Read only keeps selection, copy and find. */
-/* a highlighted range of bytes: color 0 is the accent, 1 to 6 the series colors */
-typedef struct cui_text_mark { int start, end; int color; } cui_text_mark;
+/* a highlighted range of bytes. `color` 0 is the accent, 1 to 6 the series colors. `tone` (a cui_tone,
+ * zero for none) takes the color from CUI_TONE_INFO, SUCCESS, WARNING or DANGER instead, and `style`
+ * says how the range is drawn: CUI_MARK_TINT (zero, a tinted box), CUI_MARK_WAVY (a wavy line under
+ * the text, as a linter shows an error) or CUI_MARK_UNDERLINE (a straight line). Lines are drawn under
+ * the text in the full tone color. A mark with both zero is the old one. */
+enum { CUI_MARK_TINT = 0, CUI_MARK_WAVY, CUI_MARK_UNDERLINE };
+typedef struct cui_text_mark { int start, end; int color; int tone; int style; } cui_text_mark;
 typedef struct cui_code_editor_opts {
     int _;
     const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown", "yaml", "toml", "ini", "xml", "html", "css", "powershell", "csharp", "java", "batch" (aliases as there); "text" for none */
@@ -1817,6 +1826,8 @@ typedef struct cui_code_editor_opts {
     int mark_count;            /* number of `marks` */
     bool borderless;           /* no border, corners or focus ring, on the window background: an editor that fills a pane */
     bool plain;                /* no syntax colors and no bracket matching, whatever `lang` says: for huge files */
+    const char *find_extra_icon;      /* an icon button in the find bar after the .* toggle (NULL none): see find_extra_clicked */
+    const char *find_extra_tooltip;   /* its tooltip */
     int revision;              /* big files: nonzero promises the text changes only through the editor while it stays the same,
                                 * so the editor keeps its line index between frames instead of reading the whole text each
                                 * frame. Change it whenever your code writes the buffer (loading a file, replacing all). */
@@ -1832,6 +1843,7 @@ typedef struct cui_code_editor_result {
     int bracket, bracket_match;   /* the bracket beside the caret and its partner, byte offsets, or -1 */
     int find_matches, find_index; /* with the find bar open: matches, and which one is selected (1 based, 0 none) */
     bool find_case, find_word, find_regex;   /* the find bar's toggles: match case, whole word, regular expression */
+    bool find_extra_clicked;   /* the find bar's extra icon button (`find_extra_icon`) was clicked this frame */
     int splice_start, splice_removed, splice_inserted;   /* with `changed`: this frame's edits as one splice, bytes
                                 * [splice_start, splice_start + splice_removed) of the text before them are now
                                 * splice_inserted bytes there (several edits in a frame: the smallest range that covers
@@ -1867,6 +1879,15 @@ CUI_API void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int en
 CUI_API void cui_code_editor_splice(cui_ctx *ui, cui_id editor, int start, int removed, int inserted);
 /* Opens the find bar with query and selects the next match (NULL closes). */
 CUI_API void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query);
+/* As cui_code_editor_find, with the toggles set too: flags is CUI_FIND_CASE, CUI_FIND_WORD and
+ * CUI_FIND_REGEX or'ed together (zero turns all three off), or CUI_FIND_KEEP to leave them as they are.
+ * A NULL query opens the bar with the field as it is. */
+enum { CUI_FIND_CASE = 1, CUI_FIND_WORD = 2, CUI_FIND_REGEX = 4, CUI_FIND_KEEP = -1 };
+CUI_API void cui_code_editor_find_ex(cui_ctx *ui, const char *id, const char *query, int flags);
+/* The find bar as of the last frame: copies its query into query (cap bytes, always ends in 0; NULL
+ * to skip) and its toggles into *flags (CUI_FIND_*; NULL to skip). Returns whether the bar is open
+ * with the find row showing. */
+CUI_API bool cui_code_editor_find_state(cui_ctx *ui, const char *id, char *query, int cap, int *flags);
 /* Opens the find bar with the replace row, query and replacement filled in
  * (either may be NULL to keep what is there); a read only editor shows find only. */
 CUI_API void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *query, const char *with);
@@ -3436,6 +3457,8 @@ typedef struct cui_doc_tabs_result {
     int close;                 /* tab to close, or -1 */
     int move_from, move_to;    /* move the tab at move_from to move_to, or -1 */
     int activated;             /* tab double clicked this frame (to rename it, say), or -1 */
+    int context;               /* tab right clicked this frame, or -1: open a menu with cui_context_menu_open_at at (mouse_x, mouse_y) */
+    float mouse_x, mouse_y;    /* the pointer, in points, when `context` is set */
 } cui_doc_tabs_result;
 CUI_API cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id, const cui_doc_tab *tabs, int count, int *selected, const cui_doc_tabs_opts *opts);
 
@@ -4367,6 +4390,7 @@ typedef struct cui_problems_opts {
 typedef struct cui_problems_result {
     int selected;                    /* diagnostic selected, or -1 */
     int activated;                   /* diagnostic opened this frame (Enter, double-click), or -1 */
+    int clicked;                     /* diagnostic clicked this frame (a single click on its row), or -1 */
     int shown;                       /* diagnostics that pass the filters */
 } cui_problems_result;
 CUI_API cui_problems_result cui_problems_ex(cui_ctx *ui, const char *id, const cui_diagnostic *diags, int count, const cui_problems_opts *opts);

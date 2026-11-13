@@ -1343,6 +1343,7 @@ typedef struct {
     cui__ed_q fq;               /* the find bar's query, when it is open */
     const cui_text_mark *marks; int nmarks;   /* the app's marks that reach the lines in view */
     cui_color mark_colors[7];
+    cui_color tone_tint[9], tone_line[9];   /* marks with a tone: the box, and the full color of a line */
     const char *placeholder;
     float size, lh, cw, gutter, view_h;
     double sy, max_sy;
@@ -1386,6 +1387,32 @@ static void cui__ed_run(cui_ctx *ui, const cui__ed_paint *p, const char *s, int 
 /* The row of the top of line first + k. */
 static double cui__ed_prow(const cui__ed_paint *p, int k) { return p->wrap ? (double)p->lrow[k] : (double)(p->first + k); }
 
+/* One mark's part in a row: a tinted box, or a wavy or straight line under the text; x and w are
+ * where it goes in the view, y the row's top. */
+static void cui__ed_draw_mark(cui_ctx *ui, const cui__ed_paint *p, const cui_text_mark *mk, float x, float w, float y) {
+    int tone = CUI_CLAMP(mk->tone, 0, 8);
+    if (mk->style != CUI_MARK_WAVY && mk->style != CUI_MARK_UNDERLINE) {
+        cui_color c = tone ? p->tone_tint[tone] : p->mark_colors[CUI_CLAMP(mk->color, 0, 6)];
+        cui_draw_rect(ui, (cui_rect){ x, y + 1, w, p->lh - 2 }, CUI_CORNERS(2), c);
+        return;
+    }
+    cui_color c = tone ? p->tone_line[tone] : p->mark_colors[CUI_CLAMP(mk->color, 0, 6)];
+    float yy = y + p->lh - 3.0f;
+    if (mk->style == CUI_MARK_UNDERLINE) { cui_draw_line(ui, (cui_vec2){ x, yy }, (cui_vec2){ x + w, yy }, 1.2f, c); return; }
+    cui_vec2 pt[48];   /* a zigzag two points wide, drawn in runs that share their end point */
+    int k = 0;
+    for (float px = x;; px += 2.0f) {
+        bool end = px >= x + w;
+        if (end) px = x + w;
+        pt[k++] = (cui_vec2){ px, yy + ((((int)((px - x) * 0.5f)) & 1) ? 1.4f : -0.4f) };
+        if (end || k == 48) {
+            cui_draw_polyline(ui, pt, k, 1.2f, c, false);
+            if (end) break;
+            pt[0] = pt[k - 1]; k = 1;
+        }
+    }
+}
+
 /* A wrapped line's rows: selection, marks, find matches, brackets and tokens, each
  * clipped to the row's bytes. Rows are bytes [rs[j], rs[j + 1]); the last row also
  * holds the position of the newline. */
@@ -1423,7 +1450,7 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 int a = CUI_MAX(mk->start, ras) - p->base, b = CUI_MIN(mk->end, rae) - p->base;
                 float xa = (float)cui__ed_adv(s, rs, a, p->tab, rc0) * p->cw, xb = (float)cui__ed_adv(s, rs, b, p->tab, rc0) * p->cw;
                 if (xb - xa < 2) { xa -= 1; xb = xa + 2; }
-                cui_draw_rect(ui, (cui_rect){ x0 + xa, y + 1, xb - xa, p->lh - 2 }, CUI_CORNERS(2), p->mark_colors[CUI_CLAMP(mk->color, 0, 6)]);
+                cui__ed_draw_mark(ui, p, mk, x0 + xa, xb - xa, y);
             }
             if (p->fq.qn > 0) {   /* a match may run on into the next row: each row shows its part */
                 for (int i = ls, x, y; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &x, &y, NULL) > 0 && x < re; i = y) {
@@ -1528,7 +1555,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             int a = CUI_MAX(mk->start, als) - p->base, b = CUI_MIN(mk->end, ale) - p->base;
             float xa = (float)cui__ed_col(s, ls, a, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, b, p->tab) * p->cw;
             if (xb - xa < 2) { xa -= 1; xb = xa + 2; }   /* an empty match shows as a bar */
-            cui_draw_rect(ui, (cui_rect){ x0 + xa, y + 1, xb - xa, p->lh - 2 }, CUI_CORNERS(2), p->mark_colors[CUI_CLAMP(mk->color, 0, 6)]);
+            cui__ed_draw_mark(ui, p, mk, x0 + xa, xb - xa, y);
         }
         /* find matches */
         if (p->fq.qn > 0) {
@@ -1748,6 +1775,28 @@ void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query) {
     s->rep_show = false;
     s->bar_focus = s->pend_find = true;
     ui->animating = true;
+}
+
+void cui_code_editor_find_ex(cui_ctx *ui, const char *id, const char *query, int flags) {
+    cui__ed_state *s = cui__ed_get(ui, id);
+    if (flags != CUI_FIND_KEEP) {
+        s->f_case = (flags & CUI_FIND_CASE) != 0;
+        s->f_word = (flags & CUI_FIND_WORD) != 0;
+        s->f_rx = (flags & CUI_FIND_REGEX) != 0;
+    }
+    if (query) snprintf(s->query, sizeof s->query, "%s", query);
+    s->mode = 1;
+    s->rep_show = false;
+    s->bar_focus = true;
+    if (query) s->pend_find = true;
+    ui->animating = true;
+}
+
+bool cui_code_editor_find_state(cui_ctx *ui, const char *id, char *query, int cap, int *flags) {
+    cui__ed_state *s = cui__ed_get(ui, id);
+    if (query && cap > 0) snprintf(query, (size_t)cap, "%s", s->query);
+    if (flags) *flags = (s->f_case ? CUI_FIND_CASE : 0) | (s->f_word ? CUI_FIND_WORD : 0) | (s->f_rx ? CUI_FIND_REGEX : 0);
+    return s->mode == 1;
 }
 
 void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *query, const char *with) {
@@ -2230,6 +2279,12 @@ static int cui__edf_build_find(cui__edf *f, cui_input_opts *io, cui_button_opts 
     if (cui__edf_toggle(ui, bo, "Aa", "Match case", st->f_case)) { st->f_case = !st->f_case; tg = true; }
     if (cui__edf_toggle(ui, bo, "W", "Whole word", st->f_word)) { st->f_word = !st->f_word; tg = true; }
     if (cui__edf_toggle(ui, bo, ".*", "Regular expression", st->f_rx)) { st->f_rx = !st->f_rx; tg = true; }
+    if (f->o->find_extra_icon) {
+        bo->tooltip = f->o->find_extra_tooltip;
+        if (cui_icon_button_ex(ui, f->o->find_extra_icon, bo)) f->res->find_extra_clicked = true;
+        ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
+        bo->tooltip = NULL;
+    }
     Q = cui__ed_q_of(st);
     s0 = CUI_MIN(e->cursor, e->anchor);
     if (tg) cui__ed_find_go(E, s0, 1);
@@ -2488,6 +2543,11 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
         for (int k = 0; k < 7; k++) {
             cui_color base = k == 0 ? (ui->accent == CUI_ACCENT_NEUTRAL ? cui_oklch(0.6f, 0.13f, 250, 1) : CUI_C(ui, ACCENT)) : ui->theme.colors[CUI_TOKEN_SERIES_1 + (k - 1)];
             p->mark_colors[k] = cui_alpha(base, dark ? 0.34f : 0.26f);
+        }
+        for (int k = 1; k < 9; k++) {
+            cui_color c = cui__tone_color(ui, (cui_tone)k);
+            p->tone_line[k] = c;
+            p->tone_tint[k] = cui_alpha(c, dark ? 0.34f : 0.26f);
         }
     }
     cui__syntax_colors(ui, p->colors);

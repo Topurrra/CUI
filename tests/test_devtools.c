@@ -297,17 +297,18 @@ static const cui_diagnostic pb_diags[] = {
     { CUI_SEVERITY_INFO, "could be static", "src/layout.c", 402, 6, "clang-tidy", NULL },
     { CUI_SEVERITY_HINT, "loop variable copied", NULL, 0, 0, NULL, NULL },
 };
-typedef struct { cui_problems_result r; int activated; int n; const cui_diagnostic *d; } pb_ctx;
+typedef struct { cui_problems_result r; int activated; int clicked; int n; const cui_diagnostic *d; } pb_ctx;
 static void build_pb(cui_ctx *ui, void *u) {
     pb_ctx *c = u;
     c->r = cui_problems(ui, "problems", c->d, c->n, .height = 320);
     if (c->r.activated >= 0) c->activated = c->r.activated;
+    if (c->r.clicked >= 0) c->clicked = c->r.clicked;
 }
 static void test_problems(void) {
     printf("problems panel: counts, select, keys, activate, fold, filter by text, empty, 20k diagnostics\n");
     pb_ctx c;
     memset(&c, 0, sizeof c);
-    c.d = pb_diags; c.n = 5; c.activated = -1;
+    c.d = pb_diags; c.n = 5; c.activated = -1; c.clicked = -1;
     cui_ctx *ui = new_ctx(800, 600);
     run(ui, build_pb, &c, 3);
     CHECK(c.r.shown == 5 && c.r.selected == -1);
@@ -316,6 +317,7 @@ static void test_problems(void) {
     float y = pr.y + 40;
     for (; y < pr.y + pr.h && c.r.selected < 0; y += 8) click(ui, build_pb, &c, pr.x + pr.w * 0.5f, y);
     CHECK(c.r.selected >= 0);
+    CHECK(c.clicked == c.r.selected && c.activated == -1);   /* a single click reports the row, not an activation */
     int s0 = c.r.selected;
     key(ui, build_pb, &c, CUI_KEY_DOWN, 0);
     CHECK(c.r.selected != s0 && c.r.selected >= 0);

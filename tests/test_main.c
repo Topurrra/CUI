@@ -10475,6 +10475,156 @@ static void test_emoji_text(void) {
 
 /** Share one software renderer across the test contexts and return a failing
  * exit status to CTest if any check in the suite fails. */
+/* find bar from code, tone marks, doc tab context menu ---------------------- */
+
+typedef struct {
+    char buf[256];
+    cui_text_mark marks[2]; int nmarks;
+    bool extra;                /* show the find bar's extra icon */
+    cui_code_editor_result r;
+    int extra_clicks;
+} p3s_ctx;
+static void build_p3s(cui_ctx *ui, void *u) {
+    p3s_ctx *c = u;
+    c->r = cui_code_editor(ui, "ed", c->buf, sizeof c->buf, .lang = "c", .height = 200, .width = CUI_PX(600),
+                           .marks = c->marks, .mark_count = c->nmarks,
+                           .find_extra_icon = c->extra ? CUI_ICON_SEARCH : NULL, .find_extra_tooltip = "Regex tester");
+    if (c->r.find_extra_clicked) c->extra_clicks++;
+}
+/* the number of strongly red pixels at the top left, where the editor draws its first lines */
+static int p3s_red(cui_ctx *ui) {
+    enum { w = 800, h = 600 };
+    unsigned char *px = malloc((size_t)w * h * 4);
+    cui_sw_render(g_sw, cui_get_draw_data(ui), px, w, h, w * 4, CUI_SW_RGBA);
+    int n = 0;
+    for (int y = 0; y < 100; y++)
+        for (int x = 0; x < 300; x++) {
+            const unsigned char *p = px + ((size_t)y * w + x) * 4;
+            if (p[0] > p[1] + 25 && p[0] > p[2] + 25) n++;
+        }
+    free(px);
+    return n;
+}
+static void test_find_from_code_and_marks(void) {
+    printf("code editor: find_ex and find_state, extra find icon, tone and underline marks\n");
+    cui_ctx *ui = new_ctx();
+    p3s_ctx c;
+    memset(&c, 0, sizeof c);
+    snprintf(c.buf, sizeof c.buf, "Tile tile TILE t1le;\nint x = 1;\n");
+    run(ui, build_p3s, &c, 2);
+    char q[32]; int fl = -7;
+    CHECK(!cui_code_editor_find_state(ui, "ed", q, sizeof q, &fl) && fl == 0);
+    cui_code_editor_find_ex(ui, "ed", "tile", CUI_FIND_CASE);
+    run(ui, build_p3s, &c, 2);
+    CHECK(c.r.bar_open && c.r.find_case && !c.r.find_word && !c.r.find_regex && c.r.find_matches == 1);
+    CHECK(cui_code_editor_find_state(ui, "ed", q, sizeof q, &fl) && strcmp(q, "tile") == 0 && fl == CUI_FIND_CASE);
+    cui_code_editor_find_ex(ui, "ed", "t.le", CUI_FIND_KEEP);   /* the toggles stay: case on, regex off */
+    run(ui, build_p3s, &c, 2);
+    CHECK(c.r.find_case && !c.r.find_regex && c.r.find_matches == 0);
+    cui_code_editor_find_ex(ui, "ed", "t.le", CUI_FIND_REGEX | CUI_FIND_WORD);
+    run(ui, build_p3s, &c, 2);
+    CHECK(!c.r.find_case && c.r.find_word && c.r.find_regex && c.r.find_matches == 4);   /* Tile, tile, TILE and t1le: case is off */
+    CHECK(cui_code_editor_find_state(ui, "ed", q, 3, &fl) && strcmp(q, "t.") == 0 && fl == (CUI_FIND_REGEX | CUI_FIND_WORD));   /* cap truncates */
+    cui_code_editor_find(ui, "ed", NULL);
+    run(ui, build_p3s, &c, 2);
+    CHECK(!cui_code_editor_find_state(ui, "ed", NULL, 0, NULL));
+    /* the extra icon button sits after the regex toggle and reports its click */
+    c.extra = true;
+    cui_code_editor_find_ex(ui, "ed", "tile", 0);
+    run(ui, build_p3s, &c, 3);
+    CHECK(c.extra_clicks == 0 && !c.r.find_extra_clicked);
+    cui_push_id(ui, "ed");
+    cui_rect rx = rect_of(ui, cui_make_id(ui, ".*"));
+    cui_pop_id(ui);
+    CHECK(rx.w > 0);
+    click_at(ui, build_p3s, &c, rx.x + rx.w + 4 + 13, rx.y + rx.h / 2);
+    CHECK(c.extra_clicks == 1);
+    CHECK(c.r.bar_open);   /* the click did not close the bar or toggle regex */
+    CHECK(!c.r.find_regex);
+    cui_destroy(ui);
+
+    /* marks: a tone and an underline style change what is drawn; zero fields draw as before */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    snprintf(c.buf, sizeof c.buf, "int value = 1;\n");
+    run(ui, build_p3s, &c, 3);
+    int none = p3s_red(ui);
+    c.marks[0] = (cui_text_mark){ 4, 9, 0 }; c.nmarks = 1;   /* the old form: accent tint, nothing red */
+    run(ui, build_p3s, &c, 2);
+    CHECK(p3s_red(ui) == none);
+    c.marks[0] = (cui_text_mark){ 4, 9, 0, CUI_TONE_DANGER, CUI_MARK_TINT };
+    run(ui, build_p3s, &c, 2);
+    int tint = p3s_red(ui);
+    c.marks[0].style = CUI_MARK_WAVY;
+    run(ui, build_p3s, &c, 2);
+    int wavy = p3s_red(ui);
+    c.marks[0].style = CUI_MARK_UNDERLINE;
+    run(ui, build_p3s, &c, 2);
+    int line = p3s_red(ui);
+    CHECK(tint > none + 100 && wavy > none + 10 && line > none + 10);
+    CHECK(wavy < tint && line < tint && wavy != line);
+    c.marks[0].tone = CUI_TONE_WARNING;   /* a warning is not red */
+    c.marks[0].style = CUI_MARK_WAVY;
+    run(ui, build_p3s, &c, 2);
+    CHECK(p3s_red(ui) < wavy);
+    c.marks[0].tone = 0; c.marks[0].color = 2;   /* no tone: the series color, whatever the style */
+    run(ui, build_p3s, &c, 2);
+    CHECK(p3s_red(ui) <= none + 2);
+    cui_destroy(ui);
+}
+
+typedef struct { int sel; cui_doc_tabs_result r; cui_rect strip; int ctx_tab; int chosen; bool built; cui_doc_tab tabs[3]; } p3t_ctx;
+static void build_p3t(cui_ctx *ui, void *u) {
+    p3t_ctx *d = u;
+    cui_column(ui, .id = "p3wrap", .width = CUI_FILL) { d->r = cui_doc_tabs(ui, "dt", d->tabs, 3, &d->sel); }
+    d->strip = cui_get_rect(ui, cui_make_id(ui, "p3wrap"));
+    if (d->r.context >= 0) { d->ctx_tab = d->r.context; cui_context_menu_open_at(ui, "tabmenu", d->r.mouse_x, d->r.mouse_y); }
+    d->built = false;
+    cui_context_menu(ui, "tabmenu") {
+        d->built = true;
+        if (cui_menu_item(ui, "Close tab")) d->chosen = 1;
+    }
+}
+static void test_doc_tabs_context(void) {
+    printf("document tabs: right click reports the tab and the pointer; a context menu opens there\n");
+    cui_ctx *ui = new_ctx();
+    p3t_ctx d;
+    memset(&d, 0, sizeof d);
+    d.ctx_tab = -1;
+    d.tabs[0].title = "one.c"; d.tabs[1].title = "two.c"; d.tabs[2].title = "three.c";
+    run(ui, build_p3t, &d, 3);
+    CHECK(d.r.context == -1 && !d.built);
+    /* a right click over the second tab (tabs are about 90 points wide, from x 10) */
+    cui_rect strip = d.strip;
+    float y = strip.y + strip.h - 14, hit = -1;
+    for (float x = strip.x + 10; x < strip.x + 400 && hit < 0; x += 5) {
+        d.ctx_tab = -1;
+        cui_input_mouse_move(ui, x, y);
+        run(ui, build_p3t, &d, 2);
+        cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, true);
+        run(ui, build_p3t, &d, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, false);
+        if (d.ctx_tab == 1) hit = x;
+        run(ui, build_p3t, &d, 1);
+        key(ui, build_p3t, &d, CUI_KEY_ESCAPE, 0);
+        run(ui, build_p3t, &d, 2);
+    }
+    CHECK(hit >= 0);
+    d.ctx_tab = -1;
+    cui_input_mouse_move(ui, hit, y);
+    run(ui, build_p3t, &d, 2);
+    CHECK(d.r.context == -1);   /* only the frame of the press reports it */
+    cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, true);
+    run(ui, build_p3t, &d, 1);
+    CHECK(d.ctx_tab == 1 && d.r.context == 1 && d.r.mouse_x == hit && d.r.mouse_y == y);
+    cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, false);
+    run(ui, build_p3t, &d, 2);
+    CHECK(d.built);   /* the menu is open */
+    click_at(ui, build_p3t, &d, hit + 20, y + 22);   /* the first item sits under the pointer: padding 6, rows 32 tall */
+    CHECK(d.chosen == 1);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -10575,6 +10725,8 @@ int main(void) {
     test_toast_deadline();
     test_reorder();
     test_chrome();
+    test_find_from_code_and_marks();
+    test_doc_tabs_context();
     test_dock();
     test_virtual_list();
     test_theme();

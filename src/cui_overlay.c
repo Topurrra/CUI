@@ -220,6 +220,15 @@ bool cui_context_menu_begin(cui_ctx *ui, const char *id) {
 
 void cui_context_menu_end(cui_ctx *ui) { cui__popup_end(ui); }
 
+void cui_context_menu_open_at(cui_ctx *ui, const char *id, float x, float y) {
+    cui_id pid = cui_make_id(ui, id) ^ 0xC7Cu;
+    cui__close_all_popups(ui);
+    cui__popup_set(ui, pid, true);
+    cui_popup *p = cui__popup_get(ui, pid, false);
+    if (p) { p->at_mouse = true; p->mouse.x = x; p->mouse.y = y; }
+    ui->animating = true;
+}
+
 typedef struct { float hover; } cui__item_state;
 
 bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *o) {

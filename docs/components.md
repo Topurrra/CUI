@@ -380,7 +380,7 @@ cui_context_menu(ui, "file-menu") {                   /* right click on the prev
 }
 ```
 
-Menus open with a short scale and fade from the trigger, close on a click outside, Esc or after choosing. Item options: `icon`, `shortcut`, `danger`, `disabled`, `checked`. Menu options: `icon`, `variant`, `placement`, `width`, `icon_only`. Keyboard: Down opens from the focused trigger, Up/Down move, Enter chooses.
+Menus open with a short scale and fade from the trigger, close on a click outside, Esc or after choosing. Item options: `icon`, `shortcut`, `danger`, `disabled`, `checked`. Menu options: `icon`, `variant`, `placement`, `width`, `icon_only`. A context menu can also be opened from code at a point with `cui_context_menu_open_at(ui, id, x, y)`, for example at the pointer when a tab strip reports a right click. Keyboard: Down opens from the focused trigger, Up/Down move, Enter chooses.
 
 ## Popover
 
