@@ -924,6 +924,19 @@ if (open_clicked) { size_t n = load_file(path, buf, cap); huge = n > (8u << 20);
 cui_code_editor(ui, "log", buf, cap, .lang = lang, .plain = huge, .revision = rev, .height = -1);
 ```
 
+Two editors can show one buffer, as a split view does: one text, two carets, two scroll positions. Each editor reports the edits it made in a frame as one splice, `r.splice_start`, `r.splice_removed` and `r.splice_inserted` (bytes `[start, start + removed)` of the text before the frame became `inserted` bytes; several edits in one frame report the smallest range that covers them all, so Replace all is one splice from its first match to its last), and `cui_code_editor_splice(ui, other_id, start, removed, inserted)` tells the other editor. On its next frame that editor patches its line index, wrap counts, line states and bracket pair for just that range, the way its own edits do, instead of reading the whole text again: keep its `.revision` as it is, and change it only for changes made outside the editors. Its caret and selection stay on the same text (positions after the change move with it, positions inside the removed bytes go to the end of the new ones), and a change above its view keeps the lines in view where they are. An editor not drawn for a while can be told of many splices: they are patched as one range, and its caret and undo steps follow each in turn.
+
+Each editor keeps its own undo history, of its own edits. Ctrl+Z in one view undoes that view's last edit wherever the other view's edits moved it; when the other view changed bytes of one of those edits, that edit can no longer be undone exactly, so this view's undo stops there (that step and older ones go). Undo never writes over the other view's text, and redo steps go when the other view edits, as after any edit. Measured with `cui_bench_editor --shared` (two editors side by side on one buffer, `.plain` and `.revision`, a frame draws both): at 10 MB a key near the top takes about 4.7 ms against 3.9 ms for one editor alone, near the end about 1.2 ms; at 100 MB a key near the top about 41 ms (one editor: about 35 ms, the rest of the text moving in your buffer) and near the end about 1.1 ms. The editor that is told pays for the lines the edit touched and moving the line index below them, not for reading the text.
+
+```c
+cui_code_editor_result ra = cui_code_editor(ui, "left", buf, cap, .revision = rev, .height = -1);
+cui_id left = cui_last_id(ui);
+cui_code_editor_result rb = cui_code_editor(ui, "right", buf, cap, .revision = rev, .height = -1);
+cui_id right = cui_last_id(ui);
+if (ra.changed) cui_code_editor_splice(ui, right, ra.splice_start, ra.splice_removed, ra.splice_inserted);   /* this frame */
+if (rb.changed) cui_code_editor_splice(ui, left, rb.splice_start, rb.splice_removed, rb.splice_inserted);    /* next frame */
+```
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-editor-wrap-dark.png"><img src="images/components/code-editor-wrap.png" alt="Code editor with soft wrapping"></picture>
 
 Mouse: click places the caret, Shift+click extends, drag selects (the view scrolls when the pointer leaves it), double-click selects a word, triple-click or a click in the gutter selects a line, and dragging after a double or triple click extends by words or lines. The wheel scrolls, Shift+wheel or a sideways scroll goes sideways, and the thin scrollbars that appear can be dragged. Keys, with the editor focused (on a Mac, Cmd for Ctrl and Option for the word moves):

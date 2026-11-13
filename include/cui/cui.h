@@ -1832,6 +1832,11 @@ typedef struct cui_code_editor_result {
     int bracket, bracket_match;   /* the bracket beside the caret and its partner, byte offsets, or -1 */
     int find_matches, find_index; /* with the find bar open: matches, and which one is selected (1 based, 0 none) */
     bool find_case, find_word, find_regex;   /* the find bar's toggles: match case, whole word, regular expression */
+    int splice_start, splice_removed, splice_inserted;   /* with `changed`: this frame's edits as one splice, bytes
+                                * [splice_start, splice_start + splice_removed) of the text before them are now
+                                * splice_inserted bytes there (several edits in a frame: the smallest range that covers
+                                * them all, so a replace all is one splice from its first match to its last);
+                                * splice_start is -1 when the editor changed nothing. For cui_code_editor_splice. */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),
@@ -1844,6 +1849,22 @@ CUI_API void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int
  * both negative puts the caret after the inserted text; one negative takes the other's value.
  * Focuses the editor. An edit that would not fit the capacity is refused whole (`refused`). */
 CUI_API void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int end, const char *text, int sel_anchor, int sel_cursor);
+/* Two editors on one buffer (a split view): when one of them changes the text, pass its
+ * reported splice to the other editor, whose id is `cui_last_id(ui)` right after its call (or
+ * cui_make_id in its id scope). On its next frame that editor patches its line index, wrap
+ * counts, colors and bracket pair for just that range, as for its own edits, so the cost
+ * follows the edit and not the size of the text; keep its `.revision` as it is. Its caret,
+ * selection and scroll stay on the same text: positions after the change move with it,
+ * positions inside the removed bytes go to the end of the inserted ones, and a change above
+ * the view keeps the lines in view where they are. Several calls before that frame (an
+ * editor not drawn for a while) are patched as one range; carets and undo steps still
+ * follow each in turn. Each editor keeps its own undo history, of its own edits: Ctrl+Z undoes this
+ * editor's last edit, wherever the other editor's edits moved it, and an edit the other
+ * editor changed (its bytes overlap the splice) can no longer be undone exactly, so undo
+ * stops there: it and every older step are dropped (redo steps go, as after any edit).
+ * Undo never writes over the other editor's text. A splice that does not fit the text (or
+ * a negative value) makes the editor read the whole text again, like a new `.revision`. */
+CUI_API void cui_code_editor_splice(cui_ctx *ui, cui_id editor, int start, int removed, int inserted);
 /* Opens the find bar with query and selects the next match (NULL closes). */
 CUI_API void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query);
 /* Opens the find bar with the replace row, query and replacement filled in

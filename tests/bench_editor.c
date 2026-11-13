@@ -8,6 +8,8 @@
  *     cui_bench_editor [MB ...]          default: 1 10 100
  *     cui_bench_editor --quick           1 and 10 MB only
  *     cui_bench_editor --replace [A B]   replace the whole text of A MB with B MB (20, 50)
+ *     cui_bench_editor --shared [MB ...] two editors on one buffer, each told of the other's
+ *                                        edits with cui_code_editor_splice (default 10 100)
  */
 #include <cui/cui.h>
 #include <cui/cui_render.h>
@@ -231,7 +233,99 @@ static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wra
     free(b.buf); free(nt);
 }
 
+/* Two editors side by side on one buffer (a split view), with .revision: each frame draws both,
+ * and an edit in one is handed to the other as a splice. Typing near the top and the end, Enter,
+ * typing in the other editor, undo in each; each number is the ms of a frame (both editors). */
+typedef struct {
+    char *buf; size_t cap;
+    bool wrap;
+    cui_id id[2];
+    cui_code_editor_result r[2];
+} bench_two;
+static void build_two(cui_ctx *ui, void *u) {
+    bench_two *b = u;
+    cui_row(ui, .width = CUI_FILL, .height = CUI_FILL) {
+        for (int k = 0; k < 2; k++) {
+            cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) {
+                b->r[k] = cui_code_editor(ui, k ? "b" : "a", b->buf, b->cap, .lang = "text", .plain = true, .wrap = b->wrap, .height = -1, .revision = 1);
+                b->id[k] = cui_last_id(ui);
+            }
+            if (b->r[k].changed && b->id[1 - k]) cui_code_editor_splice(ui, b->id[1 - k], b->r[k].splice_start, b->r[k].splice_removed, b->r[k].splice_inserted);
+        }
+    }
+}
+static double frame_two(cui_ctx *ui, bench_two *b, double *worst) {
+    double t0 = now();
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    build_two(ui, b);
+    cui_end_frame(ui);
+    double t = (now() - t0) * 1000;
+    if (t > *worst) *worst = t;
+    return t;
+}
+/* n frames, each with the key or text given, in editor k (focused first): the average, and the worst in *w */
+static double keys_two(cui_ctx *ui, bench_two *b, int n, const char *text, cui_key key, int mods, double *w) {
+    double total = 0;
+    *w = 0;
+    for (int i = 0; i < n; i++) {
+        if (text) { cui_input_key(ui, CUI_KEY_NONE, false, 0); cui_input_text(ui, text); }
+        else { cui_input_key(ui, key, true, mods); cui_input_key(ui, key, false, mods); }
+        total += frame_two(ui, b, w);
+    }
+    return total / n;
+}
+static void shared(size_t mb, bool wrap) {
+    bench_two b;
+    memset(&b, 0, sizeof b);
+    b.cap = mb * 1024 * 1024 + 1024 * 1024;
+    b.buf = malloc(b.cap);
+    gen(b.buf, mb * 1024 * 1024, false, "text");
+    b.wrap = wrap;
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1400, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    double w = 0, open = frame_two(ui, &b, &w);
+    for (int i = 0; i < 3; i++) frame_two(ui, &b, &w);
+    int nl = b.r[0].line_count;
+    cui_code_editor_goto(ui, "b", nl / 2, 1);   /* the other editor looks at the middle */
+    for (int i = 0; i < 2; i++) frame_two(ui, &b, &w);
+    double idle = 0, wi = 0;
+    for (int i = 0; i < 10; i++) idle += frame_two(ui, &b, &wi);
+    double wt, we, wn, wo, wu, wv;
+    cui_code_editor_goto(ui, "a", 3, 5);
+    for (int i = 0; i < 2; i++) frame_two(ui, &b, &w);
+    double top = keys_two(ui, &b, 10, "a", CUI_KEY_NONE, 0, &wt);
+    double enter = keys_two(ui, &b, 10, NULL, CUI_KEY_ENTER, 0, &wn);
+    cui_code_editor_goto(ui, "a", nl - 3, 5);
+    for (int i = 0; i < 2; i++) frame_two(ui, &b, &w);
+    double end = keys_two(ui, &b, 10, "b", CUI_KEY_NONE, 0, &we);
+    cui_code_editor_goto(ui, "b", nl / 2, 5);   /* now type in the other one */
+    for (int i = 0; i < 2; i++) frame_two(ui, &b, &w);
+    double other = keys_two(ui, &b, 10, "c", CUI_KEY_NONE, 0, &wo);
+    double undo_b = keys_two(ui, &b, 3, NULL, CUI_KEY_Z, CUI_MOD_PRIMARY, &wu);
+    cui_code_editor_select(ui, "a", 10, 10);
+    for (int i = 0; i < 2; i++) frame_two(ui, &b, &w);
+    double undo_a = keys_two(ui, &b, 3, NULL, CUI_KEY_Z, CUI_MOD_PRIMARY, &wv);
+    bool same = b.r[0].length == b.r[1].length && b.r[0].line_count == b.r[1].line_count && b.r[0].length == (int)strlen(b.buf);
+    printf("shared %4zu MB %-4s %8d lines | open %6.1f  idle %5.2f (%5.2f) | type top %6.2f (%6.2f)  enter %6.2f (%6.2f)  end %5.2f (%5.2f)"
+           "  other %6.2f (%6.2f) | undo there %6.2f (%6.2f) here %6.2f (%6.2f) ms, avg (worst) | %s\n",
+           mb, wrap ? "wrap" : "", nl, open, idle / 10, wi, top, wt, enter, wn, end, we, other, wo, undo_b, wu, undo_a, wv, same ? "both agree" : "DISAGREE");
+    fflush(stdout);
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    free(b.buf);
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--shared")) {   /* --shared [MB ...] */
+        size_t mbs[8] = { 10, 100 };
+        int n = 2;
+        if (argc > 2) { n = 0; for (int i = 2; i < argc && n < 8; i++) mbs[n++] = (size_t)atoi(argv[i]); }
+        for (int i = 0; i < n; i++) for (int w = 0; w < 2; w++) shared(mbs[i], w);
+        return 0;
+    }
+
     if (argc > 1 && !strcmp(argv[1], "--replace")) {   /* --replace [FROM_MB TO_MB] */
         size_t f = argc > 3 ? (size_t)atoi(argv[2]) : 20, t = argc > 3 ? (size_t)atoi(argv[3]) : 50;
         static const char *const rl[] = { "text", "c", "markdown", "json" };

@@ -8264,6 +8264,351 @@ static void test_code_editor_replace_all(void) {
     cui_destroy(ui);
 }
 
+/* two editors on one buffer ------------------------------------------------ */
+
+typedef struct {
+    char *buf; size_t cap;
+    const char *lang;
+    bool wrap, show[2];         /* show[k]: editor k is drawn */
+    int rev;                    /* both editors' .revision, 0 none */
+    cui_id id[2];
+    cui_code_editor_result r[2];
+    int passed;                 /* splices handed over */
+} sh_ctx;
+static const char *const sh_name[2] = { "a", "b" };
+/* what a split view does: each editor's edits go to the other as a splice */
+static void build_sh(cui_ctx *ui, void *u) {
+    sh_ctx *c = u;
+    cui_column(ui, .pad = 10, .gap = 8) {
+        for (int k = 0; k < 2; k++) {
+            if (!c->show[k]) continue;
+            c->r[k] = cui_code_editor(ui, sh_name[k], c->buf, c->cap, .lang = c->lang, .wrap = c->wrap, .height = 260, .width = CUI_PX(600), .revision = c->rev);
+            c->id[k] = cui_last_id(ui);
+            if (c->r[k].changed && c->id[1 - k]) {
+                cui_code_editor_splice(ui, c->id[1 - k], c->r[k].splice_start, c->r[k].splice_removed, c->r[k].splice_inserted);
+                c->passed++;
+            }
+        }
+    }
+}
+static void sh_init(sh_ctx *c, const char *text, size_t cap) {
+    memset(c, 0, sizeof *c);
+    c->cap = cap;
+    c->buf = malloc(cap);
+    snprintf(c->buf, cap, "%s", text);
+    c->show[0] = c->show[1] = true;
+}
+static void sh_sel(cui_ctx *ui, sh_ctx *c, int k, int a, int b) { cui_code_editor_select(ui, sh_name[k], a, b); run(ui, build_sh, c, 1); }
+/* a key, then a frame for editor a, drawn first, to hear of an edit in b */
+static void sh_key(cui_ctx *ui, sh_ctx *c, cui_key k, int mods) { key(ui, build_sh, c, k, mods); run(ui, build_sh, c, 1); }
+/* editor k's length, line count, caret line and column agree with the text */
+static bool sh_agrees(const sh_ctx *c, int k) {
+    const cui_code_editor_result *r = &c->r[k];
+    int n = (int)strlen(c->buf), cur = r->cursor, line = 1, ls = 0;
+    if (cur < 0 || cur > n || r->anchor < 0 || r->anchor > n) return false;
+    for (int i = 0; i < cur; i++) if (c->buf[i] == '\n') { line++; ls = i + 1; }
+    return r->length == n && r->line_count == ced_count_lines(c->buf) && r->line == line && r->column == ced_column(c->buf, ls, cur) + 1;
+}
+/* the caret after Ctrl+Home and n presses of Down in editor k */
+static int sh_walk_down(cui_ctx *ui, sh_ctx *c, int k, int n) {
+    sh_sel(ui, c, k, 0, 0);
+    for (int i = 0; i < n; i++) key(ui, build_sh, c, CUI_KEY_DOWN, 0);
+    return c->r[k].cursor;
+}
+/* Editor k against one that just opened the same text: go to line (the line index), the colors
+ * in view (line states), the bracket pair, find's count, and with wrapping the rows. NULL when
+ * they agree, else what differs. */
+static const char *sh_like_fresh(cui_ctx *ui, sh_ctx *c, int k, unsigned seed) {
+    static sh_ctx f;
+    cui_ctx *ui2 = new_ctx();
+    bool other = c->show[1 - k];
+    c->show[1 - k] = false;   /* only editor k draws: its colors alone */
+    f = *c;
+    f.id[0] = f.id[1] = 0;
+    const char *why = NULL;
+    int lines = ced_count_lines(c->buf), target = 1 + (int)(seed % (unsigned)lines);
+    cui_code_editor_goto(ui, sh_name[k], target, 1);
+    cui_code_editor_goto(ui2, sh_name[k], target, 1);
+    run(ui, build_sh, c, 2);
+    run(ui2, build_sh, &f, 2);
+    if (c->r[k].cursor != ced_line_start(c->buf, target) || f.r[k].cursor != c->r[k].cursor) why = "go to line";
+    if (!why) {   /* the colors in view, then the same view with everything made again from the whole text (the undo history goes too) */
+        unsigned a1[16], a2[16];
+        int n1 = ced_text_colors(ui, a1, 16);
+        cui_code_editor_splice(ui, c->id[k], -1, 0, 0);
+        run(ui, build_sh, c, 2);
+        int n2 = ced_text_colors(ui, a2, 16);
+        if (!ced_colors_within(a1, n1, a2, n2) || !ced_colors_within(a2, n2, a1, n1)) why = "colors";
+    }
+
+    if (!why) {
+        const char *br = strpbrk(c->buf + ced_line_start(c->buf, target), "({[");
+        if (br) {
+            int at = (int)(br - c->buf);
+            sh_sel(ui, c, k, at, at);
+            sh_sel(ui2, &f, k, at, at);
+            if (c->r[k].bracket != f.r[k].bracket || c->r[k].bracket_match != f.r[k].bracket_match) why = "brackets";
+        }
+    }
+    if (!why) {
+        cui_code_editor_find(ui, sh_name[k], "tile");
+        run(ui, build_sh, c, 2);
+        if (c->r[k].find_matches != ced_count_hits(c->buf, "tile")) why = "find";
+        cui_code_editor_find(ui, sh_name[k], NULL);
+        run(ui, build_sh, c, 1);
+    }
+    if (!why && c->wrap) {
+        int down = 10 + (int)(seed % 25);
+        if (sh_walk_down(ui, c, k, down) != sh_walk_down(ui2, &f, k, down)) why = "rows";
+    }
+    c->show[1 - k] = other;
+    run(ui, build_sh, c, 1);
+    cui_destroy(ui2);
+    return why;
+}
+
+static void test_code_editor_shared(void) {
+    printf("code editor: two editors on one buffer, each told of the other's edits\n");
+    static sh_ctx c;
+
+    /* the report: one splice per frame; a caret moves with the text, inside the removed bytes
+     * it goes to the end of the new ones */
+    cui_ctx *ui = new_ctx();
+    sh_init(&c, "0123456789\nabcdefghij\n", 4096);
+    c.rev = 1;
+    run(ui, build_sh, &c, 2);
+    sh_sel(ui, &c, 1, 8, 8);
+    sh_sel(ui, &c, 0, 2, 5);
+    type(ui, build_sh, &c, "XY");
+    CHECK(strncmp(c.buf, "01XY56789", 9) == 0);
+    CHECK(c.r[0].changed && c.r[0].splice_start == 2 && c.r[0].splice_removed == 3 && c.r[0].splice_inserted == 2);
+    CHECK(!c.r[1].changed && c.r[1].splice_start == -1);   /* told, not changed by itself: nothing to pass back */
+    CHECK(c.r[1].cursor == 7 && c.r[1].anchor == 7 && sh_agrees(&c, 1));
+    run(ui, build_sh, &c, 1);
+    CHECK(c.r[0].splice_start == -1 && c.passed == 1);
+    sh_sel(ui, &c, 1, 3, 4);               /* a selection inside what goes: to the end of the new text */
+    sh_sel(ui, &c, 0, 2, 6);
+    type(ui, build_sh, &c, "Q");
+    CHECK(strncmp(c.buf, "01Q789", 6) == 0 && c.r[1].cursor == 3 && c.r[1].anchor == 3);
+    sh_sel(ui, &c, 1, 1, 6);               /* a selection around it grows with it */
+    sh_sel(ui, &c, 0, 3, 3);
+    type(ui, build_sh, &c, "ZZZ");
+    CHECK(c.r[1].anchor == 1 && c.r[1].cursor == 9 && sh_agrees(&c, 1));
+    sh_sel(ui, &c, 1, 3, 3);               /* inserted at the caret: the caret ends up after it */
+    sh_sel(ui, &c, 0, 3, 3);
+    type(ui, build_sh, &c, "w");
+    CHECK(c.r[1].cursor == 4);
+    /* a frame with two edits reports the range that covers both */
+    sh_sel(ui, &c, 0, 0, 0);
+    cui_code_editor_edit(ui, "a", 12, 14, "\n\n", -1, -1);
+    type(ui, build_sh, &c, "<");
+    CHECK(c.r[0].splice_start == 12 && sh_agrees(&c, 1) && sh_agrees(&c, 0));
+    /* a splice that does not fit the text, or a negative one: the whole text is read again */
+    cui_code_editor_splice(ui, c.id[1], 0, 1 << 20, 0);
+    run(ui, build_sh, &c, 1);
+    CHECK(sh_agrees(&c, 1));
+    cui_code_editor_splice(ui, c.id[1], -1, 0, 0);
+    run(ui, build_sh, &c, 1);
+    CHECK(sh_agrees(&c, 1));
+    cui_destroy(ui);
+    free(c.buf);
+
+    /* undo: each editor undoes its own edits, wherever the other's moved them */
+    ui = new_ctx();
+    sh_init(&c, "hello world\n", 4096);
+    c.rev = 1;
+    run(ui, build_sh, &c, 2);
+    sh_sel(ui, &c, 0, 0, 0);
+    type(ui, build_sh, &c, "AAA");
+    sh_sel(ui, &c, 1, 15, 15);
+    type(ui, build_sh, &c, "BBB");
+    CHECK(strcmp(c.buf, "AAAhello world\nBBB") == 0);
+    sh_sel(ui, &c, 0, 0, 0);
+    sh_key(ui, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello world\nBBB") == 0 && sh_agrees(&c, 0) && sh_agrees(&c, 1));
+    sh_key(ui, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello world\nBBB") == 0);   /* nothing more of its own */
+    sh_sel(ui, &c, 1, 0, 0);
+    sh_key(ui, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello world\n") == 0 && sh_agrees(&c, 0) && sh_agrees(&c, 1));
+
+
+    sh_sel(ui, &c, 0, 0, 0);
+    sh_key(ui, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello world\n") == 0);   /* the other editor edited since: no redo */
+    sh_sel(ui, &c, 1, 0, 0);
+    sh_key(ui, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello world\nBBB") == 0 && sh_agrees(&c, 0));
+    /* an edit the other editor changed is not undone: undo stops there */
+    snprintf(c.buf, c.cap, "one two three\n");
+    c.rev = 2;
+    run(ui, build_sh, &c, 1);
+    sh_sel(ui, &c, 0, 4, 4);
+    type(ui, build_sh, &c, "XYZ");
+    sh_sel(ui, &c, 1, 5, 6);
+    sh_key(ui, &c, CUI_KEY_DELETE, 0);
+    CHECK(strcmp(c.buf, "one XZtwo three\n") == 0);
+    sh_sel(ui, &c, 0, 0, 0);
+    sh_key(ui, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "one XZtwo three\n") == 0);
+    sh_sel(ui, &c, 1, 0, 0);
+    sh_key(ui, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "one XYZtwo three\n") == 0 && sh_agrees(&c, 0) && sh_agrees(&c, 1));
+    cui_destroy(ui);
+    free(c.buf);
+
+    /* random edits, each editor in its own part of the text: then undoing everything in one
+     * editor gives back its part as it was, and in the other the whole text */
+    for (int mode = 0; mode < 4; mode++) {
+        ui = new_ctx();
+        char start[1024];
+        int off = 0;
+        for (int i = 0; i < 12; i++) off += snprintf(start + off, sizeof start - (size_t)off, "a%d = tile(%d);\n", i, i);
+        off += snprintf(start + off, sizeof start - (size_t)off, "|||\n");
+        for (int i = 0; i < 12; i++) off += snprintf(start + off, sizeof start - (size_t)off, "b%d = tile(%d);\n", i, i);
+        sh_init(&c, start, 1 << 16);
+        c.lang = "text";
+        c.wrap = mode & 1;
+        c.rev = mode & 2 ? 3 : 0;
+        run(ui, build_sh, &c, 2);
+        unsigned rng = 99u + (unsigned)mode;
+        bool ok = true;
+        for (int step = 0; step < 70 && ok; step++) {
+            rng = rng * 1664525u + 1013904223u;
+            unsigned r = rng >> 8;
+            int k = (int)(r & 1), len = (int)strlen(c.buf), m = (int)(strstr(c.buf, "|||") - c.buf);
+            int lo = k ? m + 4 : 0, hi = k ? len : m - 1;
+            int a = lo + (int)((r >> 2) % (unsigned)(hi - lo + 1)), b = a + (int)((r >> 12) % 6);
+            if (b > hi) b = hi;
+            static const char *ins[] = { "q", "\n", "tile ", "\t", "xyz\n\n" };
+            switch ((r >> 20) % 8) {
+            case 0: case 1: sh_sel(ui, &c, k, a, a); type(ui, build_sh, &c, ins[(r >> 4) % 5]); break;
+            case 2: cui_code_editor_edit(ui, sh_name[k], a, b, ins[(r >> 4) % 5], -1, -1); run(ui, build_sh, &c, 1); break;   /* with line breaks */
+            case 3: if (b > a) { sh_sel(ui, &c, k, a, b); key(ui, build_sh, &c, CUI_KEY_BACKSPACE, 0); } break;
+            case 4: if (a < hi) { sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_DELETE, 0); } break;
+            case 5: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_ENTER, 0); break;
+            case 6: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_Z, CUI_MOD_PRIMARY); break;
+            default: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_Y, CUI_MOD_PRIMARY); break;
+            }
+            run(ui, build_sh, &c, 1);
+            ok = sh_agrees(&c, 0) && sh_agrees(&c, 1) && strstr(c.buf, "\n|||\n") != NULL;
+            if (!ok) printf("  mode %d: disagrees at step %d\n", mode, step);
+        }
+        CHECK(ok);
+        char *bpart = strdup(strstr(c.buf, "|||"));
+        sh_sel(ui, &c, 0, 0, 0);
+        for (int i = 0; i < 80; i++) key(ui, build_sh, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        int m0 = (int)(strstr(start, "|||") - start);
+        CHECK(strncmp(c.buf, start, (size_t)m0) == 0 && strcmp(strstr(c.buf, "|||"), bpart) == 0);   /* its part as it was, the other's untouched */
+        sh_sel(ui, &c, 1, 0, 0);
+        for (int i = 0; i < 80; i++) key(ui, build_sh, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.buf, start) == 0 && sh_agrees(&c, 0) && sh_agrees(&c, 1));
+        free(bpart);
+        cui_destroy(ui);
+        free(c.buf);
+    }
+
+    /* random edits anywhere, in either editor, undo and redo too, with and without wrapping, the
+     * revision and markdown's line states: both editors agree with the text after each, and every
+     * few with an editor that just opened it */
+    for (int mode = 0; mode < 8; mode++) {
+        ui = new_ctx();
+        char start[4096];
+        int off = 0;
+        for (int i = 0; i < 40; i++)
+            off += snprintf(start + off, sizeof start - (size_t)off, i % 7 == 3 ? "```\n" : i % 5 == 0 ? "/* tile %d */ a long line that wraps at the width of the view (%d)\n" : "x%d = tile(%d);\n", i, i);
+        sh_init(&c, start, 1 << 16);
+        c.lang = mode & 4 ? "md" : "c";
+        c.wrap = mode & 1;
+        c.rev = mode & 2 ? 9 : 0;
+        run(ui, build_sh, &c, 2);
+        unsigned rng = 4242u + (unsigned)mode;
+        static const char *ins[] = { "q", "\n", "tile\n\n", "}", "\t", "/*", "*/", "```\n", "\xc3\xa9", "(x[1])",
+                                     "ab cd ef gh ij kl mn op qr st uv wx yz 01 23 45 67 89 tile tile tile" };
+        bool ok = true;
+        const char *why = NULL;
+        for (int step = 0; step < 240 && ok; step++) {
+            rng = rng * 1664525u + 1013904223u;
+            unsigned r = rng >> 8;
+            int k = (int)(r & 1), len = (int)strlen(c.buf);
+            int a = (int)((r >> 1) % (unsigned)(len + 1)), b = a + (int)((r >> 12) % 40);
+            if (b > len) b = len;
+            while (a > 0 && ((unsigned char)c.buf[a] & 0xC0) == 0x80) a--;
+            while (b < len && ((unsigned char)c.buf[b] & 0xC0) == 0x80) b++;
+            switch ((r >> 20) % 8) {
+            case 0: sh_sel(ui, &c, k, a, a); type(ui, build_sh, &c, ins[(r >> 4) % (sizeof ins / sizeof ins[0])]); break;
+            case 1: cui_code_editor_edit(ui, sh_name[k], a, b, ins[(r >> 4) % (sizeof ins / sizeof ins[0])], -1, -1); run(ui, build_sh, &c, 1); break;
+            case 2: sh_sel(ui, &c, k, a, b); key(ui, build_sh, &c, CUI_KEY_BACKSPACE, 0); break;
+            case 3: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_DELETE, 0); break;
+            case 4: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_ENTER, 0); break;
+            case 5: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_Z, CUI_MOD_PRIMARY); break;
+            case 6: sh_sel(ui, &c, k, a, a); key(ui, build_sh, &c, CUI_KEY_Y, CUI_MOD_PRIMARY); break;
+            default:   /* replace all, from the find bar: one splice from the first match to the last */
+                cui_code_editor_replace(ui, sh_name[k], "tile", (r >> 4) & 1 ? "T\nT" : "tile");
+                run(ui, build_sh, &c, 2);
+                key(ui, build_sh, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+                cui_code_editor_find(ui, sh_name[k], NULL);
+                break;
+            }
+            if (strlen(c.buf) > 3000) { sh_sel(ui, &c, k, 0, 600); key(ui, build_sh, &c, CUI_KEY_DELETE, 0); }
+            run(ui, build_sh, &c, 1);
+            if (!sh_agrees(&c, 0) || !sh_agrees(&c, 1)) { ok = false; why = "the caret or the line count"; }
+            if (ok && step % 20 == 19) for (int j = 0; j < 2 && ok; j++) if ((why = sh_like_fresh(ui, &c, j, r)) != NULL) ok = false;
+            if (!ok) printf("  mode %d: %s disagrees at step %d\n", mode, why, step);
+        }
+        CHECK(ok);
+        CHECK(c.passed > 50);
+        cui_destroy(ui);
+        free(c.buf);
+    }
+
+    /* an editor not drawn for a while: the splices meanwhile join into one; a change above the
+     * view keeps the lines in view where they are; replace all is one splice */
+    ui = new_ctx();
+    {
+        char *t = ced_gen(400, false, false, 1);
+        sh_init(&c, t, 1 << 20);
+        free(t);
+    }
+    c.lang = "c";
+    c.rev = 4;
+    run(ui, build_sh, &c, 2);
+    cui_code_editor_goto(ui, "b", 300, 1);
+    run(ui, build_sh, &c, 2);
+    cui_rect rb = rect_of(ui, c.id[1]);
+    float px = rb.x + 100, py = rb.y + 40;
+    click_at(ui, build_sh, &c, px, py);
+    int seen = c.r[1].line;
+    CHECK(seen > 250);
+    cui_code_editor_edit(ui, "a", 0, 0, "a\nb\nc\n", -1, -1);   /* typed text has no line breaks */
+    run(ui, build_sh, &c, 1);
+    click_at(ui, build_sh, &c, px, py);
+    CHECK(c.r[1].line == seen + 3);   /* the same text under the pointer */
+    int caret = c.r[1].cursor, end_at = (int)strlen(c.buf) - 2;
+    c.show[1] = false;
+    cui_code_editor_edit(ui, "a", 0, 0, "top\n", -1, -1);
+    run(ui, build_sh, &c, 1);
+    cui_code_editor_edit(ui, "a", end_at + 4, end_at + 4, "\nend\n", -1, -1);
+    run(ui, build_sh, &c, 1);
+    sh_sel(ui, &c, 0, 10, 20);
+    key(ui, build_sh, &c, CUI_KEY_BACKSPACE, 0);
+    c.show[1] = true;
+    run(ui, build_sh, &c, 1);
+
+    CHECK(c.r[1].cursor == caret + 4 - 10 && sh_agrees(&c, 1));
+    const char *why = sh_like_fresh(ui, &c, 1, 77);
+    CHECK(why == NULL);
+    cui_code_editor_replace(ui, "a", "tile", "T\nT");
+    run(ui, build_sh, &c, 2);
+    int first = (int)(strstr(c.buf, "tile") - c.buf), hits = ced_count_hits(c.buf, "tile"), len0 = (int)strlen(c.buf);
+    key(ui, build_sh, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(ced_count_hits(c.buf, "tile") == 0 && (int)strlen(c.buf) == len0 - hits);
+    CHECK(c.r[0].splice_start == first && c.r[0].splice_inserted - c.r[0].splice_removed == -hits);
+    CHECK(sh_agrees(&c, 1) && sh_like_fresh(ui, &c, 1, 5) == NULL);
+    cui_destroy(ui);
+    free(c.buf);
+}
+
 /* diff viewer ---------------------------------------------------------- */
 
 /* the lines of a text, each with its line ending, for checking scripts */
@@ -9914,6 +10259,7 @@ int main(void) {
     test_log_view_settles();
     test_code_editor_big();
     test_code_editor_replace_all();
+    test_code_editor_shared();
     test_diff();
     test_dials();
     test_candles();

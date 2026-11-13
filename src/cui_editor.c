@@ -27,6 +27,9 @@
  * when the text changed outside the editor: the app's `.revision` says so, or without one a
  * hash of the text taken each frame does. */
 
+/* Splices from another editor kept one by one until the next frame; more join the last. */
+#define CUI__ED_SPLICES 16
+
 /* An edit of more lines than this gets its wrap counts the way a new text does: a guess for
  * every line, counted when in view, in one pass. */
 #define CUI__ED_BIG_LINES 4096
@@ -106,6 +109,10 @@ typedef struct {
     unsigned gen;               /* counts changes to the text: the bracket pair below is for one */
     unsigned br_gen; int br_at, br_a, br_b;
     bool br_ok;
+    bool sp_on;                 /* cui_code_editor_splice: bytes [sp_a, sp_b0) of the text this index is for are now [sp_a, sp_b1); applied on the next frame */
+    int sp_a, sp_b0, sp_b1;
+    int sp[CUI__ED_SPLICES][3], sp_n;   /* the same splices one by one, in order (past the last one join), to move the caret and the undo steps exactly */
+    float lh_seen;              /* the line height last frame: a splice above the view keeps the lines in view where they are */
 } cui__ed_state;
 
 /* One frame of editing: the caller's buffer and the line index. */
@@ -122,7 +129,20 @@ typedef struct {
     bool wrap;                  /* soft wrapping on; wcols is the row width in columns */
     int wcols;
     int hint_cr, hint_nl;       /* for the next replace of cui_code_editor_edit's text, read while it was copied: 1 no carriage returns, 2 some; line breaks + 1 (0: not known) */
+    bool rep_on;                /* this frame's edits as one splice: [rep_a, rep_b0) of the text before them is [rep_a, rep_b1) now */
+    int rep_a, rep_b0, rep_b1;
 } cui__ed;
+
+/* One more splice, bytes [s, s + r) of the text as it is now becoming i bytes, joined to the
+ * splices before it: [*a, *b0) of the text before all of them is [*a, *b1) after. The result is
+ * the smallest range that covers them all; outside it the text is the old one, moved. */
+static void cui__ed_span_add(bool *on, int *a, int *b0, int *b1, int s, int r, int i) {
+    if (!*on) { *on = true; *a = s; *b0 = s + r; *b1 = s + i; return; }
+    int lo = CUI_MIN(*a, s), hi = CUI_MAX(*b1, s + r);
+    *b0 += hi - *b1;            /* past the covered range the text is the old one, shifted */
+    *b1 = hi + i - r;
+    *a = lo;
+}
 static void cui__ed_wrap_splice(cui__ed *E, int la, int lb, int k);
 static void cui__ed_wrap_sync(cui__ed *E);
 static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k);
@@ -659,6 +679,7 @@ static void cui__ed_splice(cui__ed *E, int a, int b, const char *t, int n) {
     if (!E->hint_nl) memcpy(E->buf + a, t, (size_t)n);   /* else reindex copies it */
     E->len += n - (b - a);
     cui__ed_reindex(E, a, b, n, t);
+    cui__ed_span_add(&E->rep_on, &E->rep_a, &E->rep_b0, &E->rep_b1, a, b - a, n);
 }
 
 /* ---- undo ---- */
@@ -1575,6 +1596,116 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
     ui->text_unshaped = unshaped;
 }
 
+/* ---- one text, several editors ----
+ * Two editors can show one buffer (a split view). Each reports its edits of a frame as one
+ * splice (cui_code_editor_result.splice_*); the app hands it to the other editor with
+ * cui_code_editor_splice, which patches its line index, wrap counts, line states and caret
+ * for just that range on its next frame, the way its own edits do, instead of reading the
+ * whole text again. Each editor keeps its own undo history: another editor's splice moves
+ * the steps it does not touch, and the step it touches goes with all older ones. */
+
+/* Where a position goes when bytes [a, b0) became [a, b1): past the change it moves with the
+ * text, inside the removed bytes it goes to the end of the new ones. */
+static int cui__ed_map(int p, int a, int b0, int b1) { return p < a ? p : p >= b0 ? p + (b1 - b0) : b1; }
+
+/* The history after another editor turned [a, b0) into [a, b1). Steps are walked from the
+ * newest: one whose bytes the splice does not reach moves (a splice before it shifts it, one
+ * after it shifts the splice back into the text before the step); the first one it reaches
+ * cannot be undone exactly any more, so it goes with everything older. The redo steps go,
+ * as after any new edit. */
+static void cui__ed_hist_splice(cui_ctx *ui, cui__ed_hist *h, int a, int b0, int b1) {
+    for (int i = h->pos; i < h->n; i++) { h->bytes -= (size_t)(h->r[i].del_n + h->r[i].ins_n); cui__ed_rec_free(ui, &h->r[i]); }
+    h->n = h->pos;
+    int fa = a, fdel = b0 - a, fins = b1 - a, cut = -1;
+    for (int i = h->pos - 1; i >= 0; i--) {
+        cui__ed_rec *q = &h->r[i];
+        if (fa + fdel <= q->at) q->at += fins - fdel;                       /* the splice is before the step */
+        else if (fa >= q->at + q->ins_n) fa += q->del_n - q->ins_n;          /* after it */
+        else { cut = i; break; }                                              /* in it */
+        q->caret = cui__ed_map(q->caret, fa, fa + fdel, fa + fins);
+    }
+    if (cut < 0) return;
+    int g = h->r[cut].group, k = cut + 1;
+    while (k < h->n && h->r[k].group == g) k++;
+    for (int i = 0; i < k; i++) { h->bytes -= (size_t)(h->r[i].del_n + h->r[i].ins_n); cui__ed_rec_free(ui, &h->r[i]); }
+    memmove(h->r, h->r + k, sizeof *h->r * (size_t)(h->n - k));
+    h->n -= k; h->pos -= k;
+}
+
+/* a position moved by each splice in turn */
+static int cui__ed_map_all(int p, int (*sp)[3], int n) {
+    for (int i = 0; i < n; i++) p = cui__ed_map(p, sp[i][0], sp[i][1], sp[i][2]);
+    return p;
+}
+
+/* At the start of a frame, before the text is synced: the splices another editor made in the
+ * text, applied to what this editor keeps. The index, wrap counts and line states are patched
+ * once, over the range that covers them all; the caret, the scroll and the undo steps follow
+ * each splice in turn. Nothing happens when the index is made from the whole text this frame
+ * anyway (a new revision); splices that do not fit the text say it has to be. */
+static void cui__ed_take_splice(cui_ctx *ui, cui__ed_state *st, char *buf, size_t cap, int rev) {
+    if (!st->sp_on) return;
+    int sp[CUI__ED_SPLICES][3], n = st->sp_n;
+    memcpy(sp, st->sp, sizeof sp);
+    st->sp_on = false; st->sp_n = 0;
+    cui__ed_ix *ix = &st->ix;
+    int a = st->sp_a, b0 = st->sp_b0, b1 = st->sp_b1;
+    if (!ix->ok || ix->rev != rev) return;
+    long long nlen = (long long)ix->len + (b1 - b0);
+    bool fits = a >= 0 && a <= b0 && b0 <= ix->len && b1 >= a && nlen >= 0 && (size_t)nlen < cap && buf[nlen] == 0;
+    if (!fits) { ix->ok = false; return; }
+    if (b0 == a && b1 == a) return;
+    cui__ed E;
+    memset(&E, 0, sizeof E);
+    E.ui = ui; E.st = st; E.buf = buf; E.cap = cap; E.len = (int)nlen;
+    E.ls = ix->ls; E.nl = ix->nl; E.maxlen = ix->maxlen;
+    E.tab = 4;
+    cui__ed_wc *wc = st->wc;
+    if (wc && wc->ok && wc->n != ix->nl) wc->ok = false;
+    if (st->mc && st->mc->ok && st->mc->n != ix->nl) st->mc->ok = false;
+    if (wc && wc->ok) { E.wrap = true; E.wcols = wc->key / 32; E.tab = wc->key % 32; }   /* as last frame; a new width counts again anyway */
+    /* the line at the top of the view: the scroll moves with its first byte */
+    double lh = st->lh_seen, top_row = 0;
+    int top = -1, top_at = 0;
+    if (lh > 0) {
+        int row = (int)floor(st->sy / lh);
+        top = E.wrap ? cui__ed_line_of_row(&E, row) : CUI_CLAMP(row, 0, ix->nl - 1);
+        top_row = E.wrap ? wc->pre[top] : top;
+        top_at = ix->ls[top];
+    }
+    cui__ed_reindex(&E, a, b0, b1 - a, NULL);
+    if (top >= 0) {
+        int nt = cui__ed_line_of(&E, cui__ed_map_all(top_at, sp, n));
+        double nrow = E.wrap && st->wc && st->wc->ok ? st->wc->pre[nt] : nt;
+        st->sy = CUI_MAX(0.0, st->sy + (nrow - top_row) * lh);
+    }
+    cui_edit_state *e = &st->ed;
+    e->cursor = cui__ed_map_all(e->cursor, sp, n);
+    e->anchor = cui__ed_map_all(e->anchor, sp, n);
+    e->last_cursor = cui__ed_map_all(e->last_cursor, sp, n);
+    e->last_edit = 0;   /* typing after it is a new undo step */
+    st->drag_a = cui__ed_map_all(st->drag_a, sp, n);
+    st->drag_b = cui__ed_map_all(st->drag_b, sp, n);
+    st->aff_pos = -1;
+    for (int i = 0; i < n; i++) cui__ed_hist_splice(ui, &st->hist, sp[i][0], sp[i][1], sp[i][2]);
+    if (!rev) ix->hash = cui__ed_hash_text(buf, (size_t)nlen);
+}
+
+void cui_code_editor_splice(cui_ctx *ui, cui_id editor, int start, int removed, int inserted) {
+    cui__ed_state *s = cui_state(ui, editor ^ CUI__ED_SALT, sizeof *s);
+    if (start < 0 || removed < 0 || inserted < 0) { s->ix.ok = false; return; }   /* not a splice: read the whole text */
+    cui__ed_span_add(&s->sp_on, &s->sp_a, &s->sp_b0, &s->sp_b1, start, removed, inserted);
+    if (s->sp_n < CUI__ED_SPLICES) {
+        int *q = s->sp[s->sp_n++];
+        q[0] = start; q[1] = start + removed; q[2] = start + inserted;
+    } else {
+        bool on = true;
+        int *q = s->sp[CUI__ED_SPLICES - 1];
+        cui__ed_span_add(&on, &q[0], &q[1], &q[2], start, removed, inserted);
+    }
+    ui->animating = true;
+}
+
 /* ---- the editor ---- */
 
 static cui__ed_state *cui__ed_get(cui_ctx *ui, const char *id_str) {
@@ -2420,6 +2551,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     cui__ed E;
     memset(&E, 0, sizeof E);
     E.ui = ui; E.st = st; E.buf = buf; E.cap = cap;
+    cui__ed_take_splice(ui, st, buf, cap, o->revision);
     E.len = cui__ed_text_sync(ui, st, buf, cap, o->revision);
     E.ls = st->ix.ls; E.nl = st->ix.nl; E.maxlen = st->ix.maxlen;
     E.tab = o->tab_size > 0 ? CUI_MIN(o->tab_size, 16) : 4;
@@ -2439,6 +2571,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
 
     f.size = cui__fs(ui, o->size > 0 ? o->size : 13);
     f.lh = roundf(f.size * 1.6f);
+    st->lh_seen = f.lh;
     f.cw = cui__text_width(ui, CUI_FONT_MONO, f.size, "0000000000000000", 16, true) / 16.0f;
     int digits = 2;
     for (int v = E.nl / 100; v > 0; v /= 10) digits++;
@@ -2500,6 +2633,9 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
 
     if (E.changed && !o->revision) st->ix.hash = cui__ed_hash_text(buf, (size_t)E.len);   /* next frame: the text is as the editor left it */
     res.changed = E.changed;
+    res.splice_start = E.rep_on ? E.rep_a : -1;
+    res.splice_removed = E.rep_on ? E.rep_b0 - E.rep_a : 0;
+    res.splice_inserted = E.rep_on ? E.rep_b1 - E.rep_a : 0;
     res.refused = E.refused;
     res.bar_open = st->mode != 0;
     res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.rid || ui->focus == f.gid;
