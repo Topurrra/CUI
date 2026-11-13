@@ -657,6 +657,7 @@ typedef struct {
     bool copying, copy_started;
     char *copy; int copy_len, copy_cap;
     char sep;                   /* goes before the next block's text: '\n', or '\t' between table cells */
+    int gap;                    /* blank lines (plain text) copied after sep, before the next block's text */
     md_code_sel *codes;
     md_diag_sel *diags;
     uint32_t hash; bool hashed;  /* the text's hash, once taken this frame */
@@ -746,9 +747,14 @@ static void md_sel_put(cui_ctx *ui, md_sel *S, const char *p, int n) {
 static void md_sel_copy(cui_ctx *ui, md_sel *S, int blk, const md_run *runs, int nruns, const char *code, int code_len) {
     int a, b;
     char sep = S->sep;
+    int gap = S->gap;
     S->sep = '\n';
+    S->gap = 0;
     if (!S->copying || !md_sel_range(S, blk, &a, &b)) return;
-    if (S->copy_started) md_sel_put(ui, S, &sep, 1);   /* also after a selection that starts at the end of a block */
+    if (S->copy_started) {   /* also after a selection that starts at the end of a block */
+        md_sel_put(ui, S, &sep, 1);
+        for (; gap > 0; gap--) md_sel_put(ui, S, "\n", 1);
+    }
     S->copy_started = true;
     if (code) { md_sel_put(ui, S, code + a, CUI_MIN(b, code_len) - a); return; }
     for (int k = 0; k < nruns; k++) {
@@ -2108,6 +2114,41 @@ static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b) {
     return best;
 }
 
+/* Plain text (cui_markdown_opts.plain): every line is shown and copied as written. A
+ * paragraph is the lines up to a blank one, with a hard break after each line; blank lines
+ * leave a blank line's height, and copy puts them back. Nothing is parsed, so no markers,
+ * links or images, and spaces do not hold their width. */
+static float md_plain_text(md_ctx *c, const md_line *L, int n, float W) {
+    md_font f = md_body(c);
+    float best = 0;
+    int i = 0, blanks = 0;
+    bool any = false;
+    while (i < n) {
+        if (md_blank(L[i])) { blanks++; i++; continue; }
+        int j = i;
+        while (j < n && !md_blank(L[j])) j++;
+        md_space(c, (float)blanks * f.lh);
+        if (any) c->sel->gap = blanks;
+        blanks = 0;
+        md_run *runs = cui__frame_alloc(c->ui, sizeof(md_run) * (size_t)((j - i) * 2));
+        int nr = 0;
+        for (int k = i; k < j; k++) {
+            md_line T = L[k];
+            while (T.len > 0 && md_sp(T.s[T.len - 1])) T.len--;
+            if (k > i) { runs[nr].p = NULL; runs[nr].len = 0; runs[nr].style = MS_BREAK; runs[nr].link = -1; nr++; }
+            md_emit(runs, &nr, T.s, T.len, 0, -1);
+        }
+        int at = 0;
+        for (int k = 0; k < nr; k++) { runs[k].at = at; at += (runs[k].style & MS_BREAK) ? 1 : runs[k].len; }
+        md_inline in = { runs, nr, NULL, 0 };
+        float bw = md_inline_emit(c, &in, &f, c->fg, CUI_TEXT_LEFT, W);   /* not inside CUI_MAX: it evaluates twice */
+        best = CUI_MAX(best, bw);
+        any = true;
+        i = j;
+    }
+    return best;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Front matter                                                             */
 /* ------------------------------------------------------------------------ */
@@ -2482,7 +2523,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     int total = len > 0 ? n : 0, first = 0;
     c.lines = lines; c.nlines = total; c.root_id = id;
     c.heads = total > 0 ? cui__frame_alloc(ui, sizeof(cui_markdown_heading) * (size_t)total) : NULL;
-    int fe = md_fm_end(lines, total);
+    int fe = o->plain ? -1 : md_fm_end(lines, total);
     if (fe >= 0) {   /* front matter: a properties block, not markdown */
         first = fe + 1;
         md_prop *props;
@@ -2495,7 +2536,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
         }
     }
     md_box box = { W, 0, false, c.fg };
-    float natural = md_blocks(&c, lines + first, total - first, &box);
+    float natural = o->plain ? md_plain_text(&c, lines, total, W) : md_blocks(&c, lines + first, total - first, &box);
     res.headings = c.heads; res.heading_count = c.nheads;
     md_sel_end(&c);
 

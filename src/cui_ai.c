@@ -61,13 +61,16 @@ bool cui_reasoning_begin(cui_ctx *ui, const char *id_str, const cui_reasoning_op
     if (!o) o = &d;
     cui_id id = cui_make_id(ui, id_str);
     cui__rs_state *st = cui_state(ui, id, sizeof *st);
-    /* open while thinking, fold away once it is done, unless the user chose */
-    if (!st->f.init) { st->open = o->thinking; st->f.t.x = st->open ? 1.0f : 0.0f; st->f.init = true; }
-    if (st->was_thinking && !o->thinking && !st->user_set) st->open = false;
-    if (!st->was_thinking && o->thinking && !st->user_set) st->open = true;
+    /* open while thinking, fold away once it is done, unless the user chose; with .open the caller's flag decides */
+    if (o->open) st->open = *o->open;
+    if (!st->f.init) { st->open = o->open ? *o->open : o->thinking; st->f.t.x = st->open ? 1.0f : 0.0f; st->f.init = true; }
+    if (!o->open) {
+        if (st->was_thinking && !o->thinking && !st->user_set) st->open = false;
+        if (!st->was_thinking && o->thinking && !st->user_set) st->open = true;
+    }
     st->was_thinking = o->thinking;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
-    if (r.clicked) { st->open = !st->open; st->user_set = true; }
+    if (r.clicked) { st->open = !st->open; st->user_set = true; if (o->open) *o->open = st->open; }
     cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
     cui__tween(ui, &st->f.hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int wrap = cui__node_new(ui, 0);
@@ -184,7 +187,8 @@ static bool cui__looks_json(const char *s) {
     return s && (*s == '{' || *s == '[');
 }
 
-static void cui__tool_payload(cui_ctx *ui, const char *label, const char *body, const char *id) {
+static void cui__tool_payload(cui_ctx *ui, const char *label, const char *body, int len, const char *id) {
+    if (len > 0) body = cui__frame_strdup(ui, body, len);   /* the code block wants a NUL terminated string */
     int t = cui__text_node(ui, label, -1, CUI_FONT_MEDIUM, cui__fs(ui, ui->theme.text_xs), CUI_C(ui, TEXT_MUTED), false);
     ui->nodes[t].line_height = 1.3f;
     cui_code_opts co;
@@ -203,8 +207,9 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
     cui_id id = cui_make_id(ui, id_str);
     cui__tc_state *st = cui_state(ui, id, sizeof *st);
     bool expandable = o->input || o->output;
+    if (o->open) st->open = *o->open;
     cui_interact r = cui__interact(ui, id, expandable ? CUI_IF_FOCUSABLE : 0);
-    if (r.clicked && expandable) st->open = !st->open;
+    if (r.clicked && expandable) { st->open = !st->open; if (o->open) *o->open = st->open; }
     if (!st->f.init) { st->f.t.x = st->open ? 1.0f : 0.0f; st->f.init = true; }
     cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
     cui__tween(ui, &st->f.hover, r.hovered && expandable ? 1.0f : 0.0f, CUI__T_HOVER);
@@ -231,10 +236,10 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
     cui__open(ui, ib);
     cui__icon_node(ui, o->icon ? o->icon : CUI_ICON_TERMINAL, 14, CUI_C(ui, TEXT_SECONDARY));
     cui__close(ui);
-    int nt = cui__text_node(ui, name, -1, CUI_FONT_MONO, cui__fs(ui, ui->theme.text_sm - 0.5f), CUI_C(ui, FOREGROUND), false);
+    int nt = cui__text_node(ui, name, o->name_length > 0 ? o->name_length : -1, CUI_FONT_MONO, cui__fs(ui, ui->theme.text_sm - 0.5f), CUI_C(ui, FOREGROUND), false);
     ui->nodes[nt].line_height = 1.3f;
     if (o->detail) {
-        int dt = cui__text_node(ui, o->detail, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
+        int dt = cui__text_node(ui, o->detail, o->detail_length > 0 ? o->detail_length : -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[dt].line_height = 1.3f;
         ui->nodes[dt].w = CUI_FILL;
     } else cui_spacer(ui);
@@ -251,8 +256,8 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
         cui_node *ct = &ui->nodes[cui__current(ui)];
         ct->pad[1] = 12; ct->pad[2] = 12; ct->pad[0] = 2;
         cui_push_id(ui, id_str);
-        if (o->input) cui__tool_payload(ui, "Input", o->input, "in");
-        if (o->output) cui__tool_payload(ui, o->status == CUI_TASK_FAILED ? "Error" : "Output", o->output, "out");
+        if (o->input) cui__tool_payload(ui, "Input", o->input, o->input_length, "in");
+        if (o->output) cui__tool_payload(ui, o->status == CUI_TASK_FAILED ? "Error" : "Output", o->output, o->output_length, "out");
         cui_pop_id(ui);
         cui__fold_body_end(ui, st->open);
     }

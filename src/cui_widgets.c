@@ -66,7 +66,7 @@ void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *o) {
     if (!o) o = &d;
     float size = o->size > 0 ? o->size : ui->theme.text_body;
     cui_color c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : CUI_C(ui, FOREGROUND);
-    int i = cui__text_node(ui, text, -1, o->font, cui__fs(ui, size), c, !o->nowrap);
+    int i = cui__text_node(ui, text, o->length > 0 ? o->length : -1, o->font, cui__fs(ui, size), c, !o->nowrap);
     cui_node *n = &ui->nodes[i];
     n->text_align = (uint8_t)o->align;
     n->direction = (uint8_t)o->direction;
@@ -74,14 +74,15 @@ void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *o) {
     if (o->line_height > 0) n->line_height = o->line_height;
     if (o->width.kind != CUI_SIZE_FIT) n->w = o->width;
     if (o->align != CUI_TEXT_LEFT && o->align != CUI_TEXT_START && o->width.kind == CUI_SIZE_FIT) n->self_align = CUI_ALIGN_STRETCH;
-    if (o->nowrap && text && text[0]) {
+    if (o->nowrap && text && text[0] && n->text_len > 0) {
+        text = n->text;   /* the frame copy: NUL terminated whatever o->length said */
         /* a single line cut short by an ellipsis shows its whole text on hover. The
          * text stays non-interactive, so a row or card around it keeps its clicks. */
         cui_id tid = cui_make_id(ui, text) ^ ((cui_id)ui->node_count * 2654435761u);
         n->id = tid;
         cui_rect pr = cui__prev_rect(ui, tid);
         if (pr.w > 0 && !ui->mdown[0] && cui__rect_contains(pr, ui->mx, ui->my)) {
-            float tw = cui__text_width(ui, n->font, n->font_size, text, -1, o->tabular);
+            float tw = cui__text_width(ui, n->font, n->font_size, text, n->text_len, o->tabular);
             if (tw > pr.w + 0.5f) cui__tooltip_passive(ui, tid, text);
         }
     }
@@ -1334,6 +1335,27 @@ void cui_scroll_end(cui_ctx *ui) { cui__scroll_end_ex(ui); }
 void cui_scroll_to(cui_ctx *ui, const char *scroll_id, float y) {
     cui_scroll_state *st = cui_state(ui, cui_make_id(ui, scroll_id), sizeof *st);
     st->ty = y < 0 ? 0 : y;
+}
+
+cui_scroll_info cui_scroll_get(cui_ctx *ui, const char *scroll_id) {
+    cui_scroll_info r;
+    memset(&r, 0, sizeof r);
+    /* no state is made for an area that was never built */
+    const cui_scroll_state *st = cui__state_lazy(ui, cui_make_id(ui, scroll_id), sizeof *st, false);
+    if (!st) return r;
+    r.found = true;
+    r.y = st->y; r.target_y = st->ty;
+    r.content_h = st->content_h; r.view_h = st->view_h;
+    r.max_y = CUI_MAX(0.0f, st->content_h - st->view_h);
+    return r;
+}
+
+void cui_scroll_set(cui_ctx *ui, const char *scroll_id, float y, bool instant) {
+    cui_scroll_state *st = cui_state(ui, cui_make_id(ui, scroll_id), sizeof *st);
+    if (!(y > 0)) y = 0;   /* also NaN */
+    if (st->view_h > 0 && y > st->content_h - st->view_h) y = CUI_MAX(0.0f, st->content_h - st->view_h);
+    st->ty = y;
+    if (instant) st->y = y;
 }
 
 /* ------------------------------------------------------------------------ */

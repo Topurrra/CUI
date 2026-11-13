@@ -246,6 +246,9 @@ CUI_API void cui_request_wakeup(cui_ctx *ui, float seconds);
 CUI_API double cui_time(cui_ctx *ui);
 CUI_API float cui_delta_time(cui_ctx *ui);   /* seconds since the last frame */
 CUI_API uint64_t cui_frame_count(cui_ctx *ui);
+/* A NUL terminated copy of the first n bytes of s (all of s when n < 0) in frame memory, valid until the
+ * next frame starts: for passing a slice of a buffer to an API that wants a C string. NULL when s is NULL. */
+CUI_API char *cui_frame_strndup(cui_ctx *ui, const char *s, int n);
 
 /* ------------------------------------------------------------------------ */
 /* Input (called by the platform layer)                                     */
@@ -518,6 +521,20 @@ typedef struct cui_scroll_opts {
 CUI_API void cui_scroll_begin(cui_ctx *ui, const cui_scroll_opts *opts);
 CUI_API void cui_scroll_end(cui_ctx *ui);
 CUI_API void cui_scroll_to(cui_ctx *ui, const char *scroll_id, float y);
+/* Reads and sets a scroll area's position by the id given as `.id` (the same string as cui_scroll_to).
+ * Values come from the latest layout, so they lag a change you made this frame by one frame. */
+typedef struct cui_scroll_info {
+    bool found;                /* false: no such scroll area (yet); everything else is 0 */
+    float y;                   /* offset now (animated), points: 0 is the top */
+    float target_y;            /* where the animation is heading */
+    float content_h, view_h;   /* height of everything inside, and of the visible window */
+    float max_y;               /* the largest offset: max(0, content_h - view_h) */
+} cui_scroll_info;
+CUI_API cui_scroll_info cui_scroll_get(cui_ctx *ui, const char *scroll_id);
+/* Scrolls to y (clamped to 0 and, once the layout is known, to max_y; pass a huge value for the bottom).
+ * instant: jump there this frame with no animation, for anchoring the view when content above it changes
+ * height or following the end of a streaming reply. Otherwise it eases there, like cui_scroll_to. */
+CUI_API void cui_scroll_set(cui_ctx *ui, const char *scroll_id, float y, bool instant);
 
 /* Resizable split view: two panes with a draggable divider. `ratio` is the
  * size of the first pane in 0..1. Call cui_split_next between the panes. */
@@ -558,7 +575,8 @@ typedef struct cui_text_opts {
     cui_text_align align;
     bool nowrap;               /* single line, ellipsis when it does not fit */
     bool tabular;              /* tabular numbers */
-    bool selectable;           /* reserved */
+    bool selectable;           /* reserved; for plain text you can select and copy use cui_markdown with .plain */
+    int length;                /* bytes of text to show, default strlen (text then need not end in a NUL) */
     cui_size width;
     float line_height;         /* multiplier, default 1.45 */
     cui_direction direction;   /* inherited; AUTO examines this text */
@@ -1742,6 +1760,9 @@ typedef struct cui_markdown_opts {
     const char *(*resolve_image)(const char *src, void *user);
     void *resolve_user;        /* passed to resolve_image */
     bool no_select;            /* text does not select: presses on it go to what is under the view */
+    bool plain;                /* the text is not markdown: lines show and copy as written (a line break stays a line break, blank lines stay),
+                                * nothing is parsed (no markers, links, images or front matter), spaces collapse. Selects like the rest:
+                                * drag, double click a word, triple click a paragraph, Ctrl+A, Ctrl+C */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */
@@ -2055,6 +2076,7 @@ typedef struct cui_chat_opts {
     cui_texture avatar;        /* picture for the sender's avatar instead of initials (other people's messages) */
     bool markdown;             /* render the text with cui_markdown (compact, as wide as it needs) */
     cui_markdown_result *markdown_result;   /* optional: links and task toggles the markdown reported */
+    int length;                /* bytes of text to show, default strlen (text then need not end in a NUL) */
 } cui_chat_opts;
 CUI_API void cui_chat_message_ex(cui_ctx *ui, const char *text, const cui_chat_opts *opts);
 CUI_API void cui_chat_divider(cui_ctx *ui, const char *label);       /* "Today" */
@@ -2522,6 +2544,7 @@ typedef struct cui_reasoning_opts {
     bool thinking;             /* still thinking: the header shimmers and the body opens; it folds when this turns false */
     float seconds;             /* time spent, for the header: "Thinking for 12s", then "Thought for 12s" */
     const char *title;         /* header text to show instead of the "Thinking" and "Thought for" lines */
+    bool *open;                /* you keep whether it is open: read every frame, written when the header is clicked. NULL: kept in CUI state, which is dropped after about 300 frames out of sight */
 } cui_reasoning_opts;
 CUI_API bool cui_reasoning_begin(cui_ctx *ui, const char *id, const cui_reasoning_opts *opts);
 CUI_API void cui_reasoning_end(cui_ctx *ui);
@@ -2537,6 +2560,10 @@ typedef struct cui_tool_call_opts {
     const char *input;         /* what was sent to the tool; the row then opens to show it (as JSON when it parses) */
     const char *output;        /* what the tool returned, shown when open; labelled "Error" when the status is failed */
     float seconds;             /* how long the call took, shown at the end of the row unless it is pending; 0 hides it */
+    bool *open;                /* you keep whether it is open: read every frame, written when the row is clicked. NULL: kept in CUI state, which is dropped after about 300 frames out of sight */
+    /* byte lengths for the strings above, 0: strlen (the string then need not end in a NUL).
+     * input and output are copied into frame memory only while the card is open. */
+    int name_length, detail_length, input_length, output_length;
 } cui_tool_call_opts;
 CUI_API void cui_tool_call_ex(cui_ctx *ui, const char *id, const char *name, const cui_tool_call_opts *opts);
 

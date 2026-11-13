@@ -14,8 +14,9 @@ void cui_chat_message_ex(cui_ctx *ui, const char *text, const cui_chat_opts *o) 
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     if (!text) text = "";
+    int tlen = o->length > 0 ? o->length : (int)strlen(text);
     /* new messages ease in */
-    cui_id mid = cui__position_id(ui, cui__hash_str(text, 0xC4A7u));
+    cui_id mid = cui__position_id(ui, cui__hash(text, (size_t)tlen, 0xC4A7u));
     cui_id mdid = cui__position_id(ui, 0x4D44u);   /* without the text, so a streamed reply keeps its state */
     float *in = cui_state(ui, mid, sizeof(float) * 2);
     if (in[1] == 0) { in[1] = 1; in[0] = ui->frame <= 2 ? 1.0f : 0.0f; }
@@ -73,11 +74,12 @@ void cui_chat_message_ex(cui_ctx *ui, const char *text, const cui_chat_opts *o) 
         mo.fit_content = true;
         if (o->mine) mo.color = cui__accent_text(ui);
         cui_push_id_int(ui, (int)mdid);
+        mo.length = tlen;
         cui_markdown_result mr = cui_markdown_ex(ui, "md", text, &mo);
         cui_pop_id(ui);
         if (o->markdown_result) *o->markdown_result = mr;
     } else {
-        int t = cui__text_node(ui, text, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), o->mine ? cui__accent_text(ui) : CUI_C(ui, FOREGROUND), true);
+        int t = cui__text_node(ui, text, tlen, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), o->mine ? cui__accent_text(ui) : CUI_C(ui, FOREGROUND), true);
         ui->nodes[t].line_height = 1.45f;
     }
     cui__close(ui);

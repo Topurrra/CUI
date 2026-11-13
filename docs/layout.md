@@ -240,6 +240,8 @@ cui_scroll(ui, .id = "messages", .gap = 8) {
 
 A scroll area fills the remaining height of its parent by default, scrolls smoothly with the wheel or trackpad, and shows a thin scrollbar while scrolling or when hovered near the edge. The thumb can be dragged. Set `.horizontal = true` to scroll both ways. Jump with `cui_scroll_to(ui, "messages", 0)`.
 
+To read or set the position from code, use the same id string. `cui_scroll_get(ui, "messages")` returns a `cui_scroll_info` with `found` (false until the area has been built once), `y` (the offset now), `target_y`, `content_h`, `view_h` and `max_y` (`max(0, content_h - view_h)`), all from the latest layout. `cui_scroll_set(ui, "messages", y, instant)` sets the offset, clamped to 0 and `max_y` (a huge `y` means the bottom); with `instant = true` the view jumps there in the same frame instead of easing, which is what anchoring needs when items above the viewport change height (`cui_scroll_set(ui, id, info.y + growth, true)`) and following the end of a streaming reply (`cui_scroll_set(ui, id, 1e9f, true)` each frame while `info.y >= info.max_y - 1`). Neither allocates; `cui_scroll_get` creates nothing for an id that was never built.
+
 With `.fade_edges = true` the content fades out at an edge that has more to scroll, instead of being cut off. It works sideways too for `.horizontal` areas. The fade takes the color of the nearest opaque box around the scroll area (the page background if there is none); set `.fade_color` to override it. Source cards and the kanban board fade their overflow the same way.
 
 For long lists, build only what is visible:

@@ -5995,7 +5995,7 @@ typedef struct {
     char text[4096];
     int length;             /* 0: strlen */
     float width;            /* 0: fill a 600 point column */
-    bool streaming, no_front_matter, no_select;
+    bool streaming, no_front_matter, no_select, plain;
     const char *base_dir;
     const char *(*resolve)(const char *src, void *user);
     cui_markdown_result res;
@@ -6007,7 +6007,7 @@ static void build_md(cui_ctx *ui, void *u) {
     cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
         m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter,
                                 .base_dir = m->base_dir, .resolve_image = m->resolve, .resolve_user = m,
-                                .no_select = m->no_select);
+                                .no_select = m->no_select, .plain = m->plain);
     }
     if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
     if (m->res.task_offset >= 0) m->toggles++;
@@ -10625,6 +10625,225 @@ static void test_doc_tabs_context(void) {
     cui_destroy(ui);
 }
 
+/* app requests: scroll position, caller-owned open state, explicit lengths, plain selectable text ---- */
+
+typedef struct { int items; float item_h; } sp_ctx;
+static void build_sp(cui_ctx *ui, void *u) {
+    sp_ctx *s = u;
+    cui_column(ui, .pad = 10, .width = CUI_PX(300)) {
+        cui_scroll(ui, .id = "list", .height = CUI_PX(100)) {
+            for (int i = 0; i < s->items; i++) cui_box(ui, .height = CUI_PX(s->item_h), .width = CUI_FILL) {}
+        }
+    }
+}
+
+static void test_scroll_get_set(void) {
+    printf("scroll: cui_scroll_get and cui_scroll_set\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, false);   /* the difference between instant and eased */
+    sp_ctx s = { 20, 40 };
+    CHECK(!cui_scroll_get(ui, "list").found);
+    run(ui, build_sp, &s, 3);
+    cui_scroll_info a = cui_scroll_get(ui, "list");
+    CHECK(a.found && a.y == 0 && a.target_y == 0);
+    CHECK_NEAR(a.view_h, 100, 0.01); CHECK_NEAR(a.content_h, 800, 0.01); CHECK_NEAR(a.max_y, 700, 0.01);
+    /* instant: there at once, and it stays */
+    cui_scroll_set(ui, "list", 300, true);
+    run(ui, build_sp, &s, 1);
+    a = cui_scroll_get(ui, "list");
+    CHECK_NEAR(a.y, 300, 0.001); CHECK_NEAR(a.target_y, 300, 0.001);
+    run(ui, build_sp, &s, 5);
+    CHECK_NEAR(cui_scroll_get(ui, "list").y, 300, 0.001);
+    /* eased: on its way after one frame, there after a while */
+    cui_scroll_set(ui, "list", 500, false);
+    run(ui, build_sp, &s, 1);
+    a = cui_scroll_get(ui, "list");
+    CHECK_NEAR(a.target_y, 500, 0.001); CHECK(a.y > 300 && a.y < 500);
+    run(ui, build_sp, &s, 120);
+    CHECK_NEAR(cui_scroll_get(ui, "list").y, 500, 0.01);
+    /* clamped to the ends; a huge value is the bottom */
+    cui_scroll_set(ui, "list", 1e9f, true);
+    run(ui, build_sp, &s, 1);
+    CHECK_NEAR(cui_scroll_get(ui, "list").y, 700, 0.001);
+    cui_scroll_set(ui, "list", -50, true);
+    run(ui, build_sp, &s, 1);
+    CHECK_NEAR(cui_scroll_get(ui, "list").y, 0, 0.001);
+    /* anchoring: items above the view grow and the app moves the offset by the same amount */
+    cui_scroll_set(ui, "list", 300, true);
+    run(ui, build_sp, &s, 2);
+    const float y0 = cui_scroll_get(ui, "list").y;
+    s.item_h = 46;   /* every item 6 points taller: the 10 above the view grew by 60 */
+    cui_scroll_set(ui, "list", y0 + 60, true);
+    run(ui, build_sp, &s, 2);
+    a = cui_scroll_get(ui, "list");
+    CHECK_NEAR(a.content_h, 920, 0.01); CHECK_NEAR(a.y, 360, 0.001);
+    /* a scroll area that was never built is not created by asking */
+    CHECK(!cui_scroll_get(ui, "nothing").found);
+    CHECK(!cui_scroll_get(ui, "nothing").found);
+    cui_destroy(ui);
+}
+
+typedef struct {
+    bool tool_open, think_open, use_ptr, skip;
+    cui_id wrap_tool, wrap_think;
+    bool body;
+} oc_ctx;
+static void build_oc(cui_ctx *ui, void *u) {
+    oc_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 10, .width = CUI_PX(600)) {
+        if (!a->skip) {
+            cui_column(ui, .id = "wrap_tool") {
+                cui_tool_call(ui, "tool", "web_search", .status = CUI_TASK_DONE, .input = "{\"q\": 1}", .output = "{\"r\": 2}",
+                              .open = a->use_ptr ? &a->tool_open : NULL);
+            }
+            cui_column(ui, .id = "wrap_think") {
+                a->body = false;
+                cui_reasoning(ui, "think", .seconds = 3, .open = a->use_ptr ? &a->think_open : NULL) { a->body = true; cui_text(ui, "thoughts"); }
+            }
+        }
+    }
+}
+static float oc_h(cui_ctx *ui, const char *id) { return cui_get_rect(ui, cui_make_id(ui, id)).h; }
+
+static void test_open_pointer(void) {
+    printf("tool call and reasoning: caller-owned open state\n");
+    cui_ctx *ui = new_ctx();
+    oc_ctx a = { .use_ptr = true };
+    run(ui, build_oc, &a, 3);
+    const float tool_closed = oc_h(ui, "wrap_tool"), think_closed = oc_h(ui, "wrap_think");
+    CHECK(!a.body);
+    /* the flag opens them */
+    a.tool_open = a.think_open = true;
+    run(ui, build_oc, &a, 3);
+    CHECK(oc_h(ui, "wrap_tool") > tool_closed + 20 && oc_h(ui, "wrap_think") > think_closed + 5 && a.body);
+    /* a click writes it back */
+    a.tool_open = a.think_open = false;
+    run(ui, build_oc, &a, 3);
+    cui_rect hr = cui_get_rect(ui, cui_make_id(ui, "tool"));
+    click_at(ui, build_oc, &a, hr.x + hr.w / 2, hr.y + hr.h / 2);
+    CHECK(a.tool_open && !a.think_open);
+    cui_rect tr = cui_get_rect(ui, cui_make_id(ui, "think"));
+    click_at(ui, build_oc, &a, tr.x + 10, tr.y + tr.h / 2);
+    CHECK(a.think_open);
+    run(ui, build_oc, &a, 3);
+    const float tool_open_h = oc_h(ui, "wrap_tool"), think_open_h = oc_h(ui, "wrap_think");
+    CHECK(tool_open_h > tool_closed + 20 && think_open_h > think_closed + 5);
+    /* out of sight for longer than CUI keeps state: still open when it comes back */
+    a.skip = true;
+    run(ui, build_oc, &a, 400);
+    a.skip = false;
+    run(ui, build_oc, &a, 3);
+    CHECK_NEAR(oc_h(ui, "wrap_tool"), tool_open_h, 0.5);
+    CHECK_NEAR(oc_h(ui, "wrap_think"), think_open_h, 0.5);
+    cui_destroy(ui);
+
+    /* without the pointer: as before, a click opens it and the state is forgotten when freed */
+    ui = new_ctx();
+    oc_ctx b = { 0 };
+    run(ui, build_oc, &b, 3);
+    hr = cui_get_rect(ui, cui_make_id(ui, "tool"));
+    click_at(ui, build_oc, &b, hr.x + hr.w / 2, hr.y + hr.h / 2);
+    run(ui, build_oc, &b, 3);
+    CHECK(oc_h(ui, "wrap_tool") > tool_closed + 20);
+    b.skip = true;
+    run(ui, build_oc, &b, 400);
+    b.skip = false;
+    run(ui, build_oc, &b, 3);
+    CHECK_NEAR(oc_h(ui, "wrap_tool"), tool_closed, 0.5);
+    cui_destroy(ui);
+}
+
+typedef struct { int mode; } ln_ctx;
+/* mode 0: NUL terminated copies; 1: the same text followed by other bytes and no NUL, with lengths */
+static void build_ln(cui_ctx *ui, void *u) {
+    ln_ctx *l = u;
+    static const char name_nt[] = "web_search", detail_nt[] = "quarterly report", in_nt[] = "{\"q\": 1}", out_nt[] = "{\"r\": 2}", msg_nt[] = "Hello there, friend";
+    static const char name_raw[] = { 'w','e','b','_','s','e','a','r','c','h','X','X' }, detail_raw[] = { 'q','u','a','r','t','e','r','l','y',' ','r','e','p','o','r','t','!' };
+    static const char in_raw[] = { '{','"','q','"',':',' ','1','}','!','!' }, out_raw[] = { '{','"','r','"',':',' ','2','}','!','!' };
+    static const char msg_raw[] = { 'H','e','l','l','o',' ','t','h','e','r','e',',',' ','f','r','i','e','n','d','#','#' };
+    cui_column(ui, .pad = 20, .gap = 10, .width = CUI_PX(600)) {
+        if (l->mode == 0) {
+            cui_tool_call(ui, "tool", name_nt, .detail = detail_nt, .input = in_nt, .output = out_nt, .status = CUI_TASK_DONE);
+            cui_chat_message(ui, msg_nt, .author = "Ada");
+            cui_text(ui, msg_nt);
+            cui_text(ui, msg_nt, .nowrap = true, .width = CUI_PX(60));
+        } else {
+            cui_tool_call(ui, "tool", name_raw, .detail = detail_raw, .detail_length = 16, .input = in_raw, .output = out_raw,
+                          .status = CUI_TASK_DONE, .name_length = 10, .input_length = 8, .output_length = 8);
+            cui_chat_message(ui, msg_raw, .author = "Ada", .length = 19);
+            cui_text(ui, msg_raw, .length = 19);
+            cui_text(ui, msg_raw, .length = 19, .nowrap = true, .width = CUI_PX(60));
+        }
+    }
+}
+
+static void test_explicit_lengths(void) {
+    printf("strings with explicit lengths: cui_text, cui_chat_message, cui_tool_call, cui_frame_strndup\n");
+    cui_ctx *ui = new_ctx();
+    char *d = cui_frame_strndup(ui, "abcdef", 3);
+    CHECK(d && strcmp(d, "abc") == 0);
+    CHECK(strcmp(cui_frame_strndup(ui, "abcdef", -1), "abcdef") == 0 && strcmp(cui_frame_strndup(ui, "abcdef", 0), "") == 0);
+    CHECK(cui_frame_strndup(ui, NULL, 4) == NULL);
+    ln_ctx l = { 0 };
+    run(ui, build_ln, &l, 3);
+    cui_rect hr = cui_get_rect(ui, cui_make_id(ui, "tool"));
+    click_at(ui, build_ln, &l, hr.x + hr.w / 2, hr.y + hr.h / 2);   /* open it: input and output show */
+    cui_input_mouse_move(ui, 790, 590);
+    run(ui, build_ln, &l, 4);
+    const uint32_t ref = frame_hash(ui);
+    cui_destroy(ui);
+    ui = new_ctx();
+    l.mode = 1;
+    run(ui, build_ln, &l, 3);
+    hr = cui_get_rect(ui, cui_make_id(ui, "tool"));
+    click_at(ui, build_ln, &l, hr.x + hr.w / 2, hr.y + hr.h / 2);
+    cui_input_mouse_move(ui, 790, 590);
+    run(ui, build_ln, &l, 4);
+    CHECK(frame_hash(ui) == ref);   /* same pixels as the NUL terminated strings */
+    cui_destroy(ui);
+}
+
+static void test_markdown_plain(void) {
+    printf("markdown: .plain text with real line breaks, selecting and copying\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    static const char src[] = "line one\nline two\n\n\nsecond  para  *star*\n- not a list\n# not a heading";
+    snprintf(m.text, sizeof m.text, "%s", src);
+    md_frames(ui, &m, 3);
+    const float merged = md_rect(ui).h;
+    m.plain = true;
+    md_frames(ui, &m, 3);
+    cui_rect r = md_rect(ui);
+    CHECK(r.h > merged);   /* breaks kept: more rows than the merged markdown paragraph */
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 20, r.y + 8);
+    key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(strcmp(md_copy(ui, &m), src) == 0);   /* everything as written: breaks, the extra blank line, markers */
+    /* double click a word, triple click a paragraph */
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 3, r.y + 8);
+    click_at(ui, build_md, &m, r.x + 3, r.y + 8);
+    CHECK(strcmp(md_copy(ui, &m), "line") == 0);
+    md_frames(ui, &m, 30);
+    for (int k = 0; k < 3; k++) click_at(ui, build_md, &m, r.x + 3, r.y + 8);
+    CHECK(strcmp(md_copy(ui, &m), "line one\nline two") == 0);
+    /* a drag across the paragraphs */
+    md_drag(ui, &m, r.x + 1, r.y + 8, r.x + r.w - 2, r.y + r.h - 4);
+    CHECK(strcmp(md_copy(ui, &m), src) == 0);
+    /* explicit length, CRLF, and no markdown: links stay text */
+    snprintf(m.text, sizeof m.text, "a\r\nb [x](http://y.z)\r\nEXTRA");
+    m.length = 20;
+    md_frames(ui, &m, 3);
+    r = md_rect(ui);
+    md_frames(ui, &m, 30);
+    click_at(ui, build_md, &m, r.x + 20, r.y + 8);
+    key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(strcmp(md_copy(ui, &m), "a\nb [x](http://y.z)") == 0);
+    CHECK(m.links == 0);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -10679,6 +10898,10 @@ int main(void) {
     test_markdown_callout_fold_keys();
     test_markdown_select();
     test_markdown_select_labels();
+    test_markdown_plain();
+    test_scroll_get_set();
+    test_open_pointer();
+    test_explicit_lengths();
     test_code_editor();
     test_code_editor_replace();
     test_code_editor_wrap();
