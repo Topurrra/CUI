@@ -6964,7 +6964,7 @@ typedef struct {
     bool ro, wrap;
     char other[32];
     cui_code_editor_result r;
-    bool any_changed;
+    bool any_changed, any_refused;
 } ced_ctx;
 static void build_ced(cui_ctx *ui, void *u) {
     ced_ctx *c = u;
@@ -6973,6 +6973,7 @@ static void build_ced(cui_ctx *ui, void *u) {
         size_t cap = c->cap ? c->cap : sizeof c->buf;
         c->r = cui_code_editor(ui, "ed", b, cap, .lang = c->lang, .read_only = c->ro, .wrap = c->wrap, .height = 300, .width = CUI_PX(600));
         c->any_changed |= c->r.changed;
+        c->any_refused |= c->r.refused;
         cui_input(ui, "after", c->other, sizeof c->other, .width = CUI_PX(200));
     }
 }
@@ -6980,6 +6981,150 @@ static void ced_text(ced_ctx *c, const char *s) { snprintf(c->buf, sizeof c->buf
 /* caret (or a selection) from code; also focuses the editor */
 static void ced_sel(cui_ctx *ui, ced_ctx *c, int a, int b) { cui_code_editor_select(ui, "ed", a, b); run(ui, build_ced, c, 1); }
 static int ced_at(const ced_ctx *c, const char *needle) { const char *p = strstr(c->buf, needle); return p ? (int)(p - c->buf) : -1; }
+
+/* the find bar's widgets are found by id inside the editor's scope */
+static cui_rect ced_widget(cui_ctx *ui, const char *name) {
+    cui_push_id(ui, "ed");
+    cui_id id = cui_make_id(ui, name);
+    cui_pop_id(ui);
+    return rect_of(ui, id);
+}
+static void ced_press(cui_ctx *ui, ced_ctx *c, const char *name) {
+    cui_rect r = ced_widget(ui, name);
+    click_at(ui, build_ced, c, r.x + r.w / 2, r.y + r.h / 2);
+    run(ui, build_ced, c, 1);   /* the count catches up with the edit */
+}
+/* opens the bar in replace mode with both fields set */
+static void ced_replace(cui_ctx *ui, ced_ctx *c, const char *text, const char *q, const char *with) {
+    ced_text(c, text);
+    c->any_changed = c->any_refused = false;
+    ced_sel(ui, c, 0, 0);
+    cui_code_editor_replace(ui, "ed", q, with);
+    run(ui, build_ced, c, 3);
+}
+
+static void test_code_editor_replace(void) {
+    printf("code editor: replace, replace all, match case, whole word, regex groups, undo, capacity, read only\n");
+    cui_ctx *ui = new_ctx();
+    static ced_ctx c;
+    memset(&c, 0, sizeof c);
+    c.lang = "c";
+    run(ui, build_ced, &c, 3);
+
+    /* replace one: the selected match, then on to the next; case is ignored by default */
+    ced_replace(ui, &c, "a cat, a Cat, cat\n", "cat", "dog");
+    CHECK(c.r.find_matches == 3 && c.r.find_index == 1 && ced_widget(ui, "replace").w > 0);
+    ced_press(ui, &c, "Replace");
+    CHECK(strcmp(c.buf, "a dog, a Cat, cat\n") == 0 && c.any_changed && c.r.find_matches == 2 && c.r.anchor == ced_at(&c, "Cat"));
+    ced_press(ui, &c, "Replace");
+    ced_press(ui, &c, "Replace");
+    CHECK(strcmp(c.buf, "a dog, a dog, dog\n") == 0 && c.r.find_matches == 0);
+
+    /* Enter in the replace field replaces; Ctrl+Alt+Enter replaces all, as one undo step */
+    ced_replace(ui, &c, "cat Cat cat\n", "cat", "dog");
+    cui_rect rr = ced_widget(ui, "replace");
+    click_at(ui, build_ced, &c, rr.x + rr.w / 2, rr.y + rr.h / 2);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(c.buf, "dog Cat cat\n") == 0 && c.r.anchor == 4);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(strcmp(c.buf, "dog dog dog\n") == 0);
+    ced_replace(ui, &c, "cat Cat cat\n", "cat", "dog");
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "dog dog dog\n") == 0 && c.r.find_matches == 0);
+    ced_sel(ui, &c, 0, 0);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "cat Cat cat\n") == 0);   /* one step restores everything */
+    ced_replace(ui, &c, "cat Cat cat\n", "cat", "dog");
+    rr = ced_widget(ui, "replace");
+    click_at(ui, build_ced, &c, rr.x + rr.w / 2, rr.y + rr.h / 2);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    CHECK(strcmp(c.buf, "dog dog dog\n") == 0);
+
+    /* match case and whole word */
+    ced_replace(ui, &c, "cat Cat CAT concat cat_x cat\n", "cat", "dog");
+    CHECK(c.r.find_matches == 6);
+    ced_press(ui, &c, "Aa");
+    CHECK(c.r.find_matches == 4);   /* cat, concat, cat_x, cat */
+    ced_press(ui, &c, "W");
+    CHECK(c.r.find_matches == 2);
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "dog Cat CAT concat cat_x dog\n") == 0);
+    ced_press(ui, &c, "Aa");
+    CHECK(c.r.find_matches == 2);   /* case ignored, whole word: Cat and CAT */
+    ced_press(ui, &c, "W");        /* both toggles are off again */
+    CHECK(c.r.find_matches == 4);
+
+    /* regex: groups, $0, $& and $$ */
+    ced_replace(ui, &c, "x=12, y=345\n", "(\\w)=(\\d+)", "$2:$1 [$&] $$ $0");
+    ced_press(ui, &c, ".*");
+    CHECK(c.r.find_matches == 2);
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "12:x [x=12] $ x=12, 345:y [y=345] $ y=345\n") == 0);
+    ced_replace(ui, &c, "ab12 cd7\n", "[a-z]+(\\d)", "<$1>");
+    CHECK(c.r.find_matches == 2);
+    ced_press(ui, &c, "Replace");
+    CHECK(strcmp(c.buf, "<1>2 cd7\n") == 0);
+    /* without regex a $ is just a character */
+    ced_press(ui, &c, ".*");
+    ced_replace(ui, &c, "a b\n", "a", "$1");
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "$1 b\n") == 0);
+
+    /* an invalid pattern finds nothing and changes nothing */
+    ced_press(ui, &c, ".*");
+    ced_replace(ui, &c, "f(x) f(y)\n", "(", "z");
+    CHECK(c.r.find_matches == 0);
+    ced_press(ui, &c, "Replace all");
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(strcmp(c.buf, "f(x) f(y)\n") == 0 && !c.any_changed);
+    ced_replace(ui, &c, "f(x) f(y)\n", "\\(.", "[");
+    CHECK(c.r.find_matches == 2);
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "f[) f[)\n") == 0);
+    ced_press(ui, &c, ".*");   /* off */
+
+    /* capacity: if the result does not fit, nothing changes and it is reported */
+    c.cap = 16;
+    ced_replace(ui, &c, "aa aa aa\n", "aa", "bbbbb");
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "aa aa aa\n") == 0 && c.any_refused && !c.any_changed);
+    ced_replace(ui, &c, "aa aa aa\n", "aa", "bbb");
+    ced_press(ui, &c, "Replace all");
+    CHECK(strcmp(c.buf, "bbb bbb bbb\n") == 0);
+    c.cap = 0;
+
+    /* Ctrl+H shows the replace row, Ctrl+F hides it: Ctrl+Alt+Enter in the find field replaces only while it shows */
+    ced_replace(ui, &c, "cat\n", "cat", "dog");
+    key(ui, build_ced, &c, CUI_KEY_F, CUI_MOD_PRIMARY);
+    run(ui, build_ced, &c, 2);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(strcmp(c.buf, "cat\n") == 0 && c.r.find_matches == 1);
+    key(ui, build_ced, &c, CUI_KEY_H, CUI_MOD_PRIMARY);
+    run(ui, build_ced, &c, 2);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(strcmp(c.buf, "dog\n") == 0);
+    key(ui, build_ced, &c, CUI_KEY_ESCAPE, 0);
+    run(ui, build_ced, &c, 2);
+    CHECK(c.r.find_matches == 0 && c.r.focused);
+    cui_destroy(ui);
+
+    /* read only: find, but no replace row or replace */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.ro = true;
+    run(ui, build_ced, &c, 3);
+    ced_text(&c, "cat cat\n");
+    ced_sel(ui, &c, 0, 0);
+    key(ui, build_ced, &c, CUI_KEY_H, CUI_MOD_PRIMARY);
+    run(ui, build_ced, &c, 2);
+    CHECK(ced_widget(ui, "find").w > 0 && ced_widget(ui, "replace").w == 0 && ced_widget(ui, "Replace all").w == 0);
+    cui_code_editor_replace(ui, "ed", "cat", "dog");
+    run(ui, build_ced, &c, 3);
+    CHECK(c.r.find_matches == 2 && ced_widget(ui, "replace").w == 0 && ced_widget(ui, "Replace").w == 0);
+    key(ui, build_ced, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(strcmp(c.buf, "cat cat\n") == 0 && !c.any_changed);
+    cui_destroy(ui);
+}
 
 static void test_code_editor(void) {
     printf("code editor: typing, indentation, undo, clipboard, find, brackets, capacity, virtualization\n");
@@ -9091,6 +9236,7 @@ int main(void) {
     test_markdown_select();
     test_markdown_select_labels();
     test_code_editor();
+    test_code_editor_replace();
     test_code_editor_wrap();
     test_code_editor_markdown();
     test_diff();

@@ -46,7 +46,9 @@ typedef struct {
     float bar_grab, bar_t;
     double last_activity;
     int mode;                   /* bar: 0 none, 1 find, 2 go to line */
-    char query[128], go[24];
+    char query[128], repl[128], go[24];
+    bool rep_show;              /* the bar shows the replace row */
+    bool f_case, f_word, f_rx;  /* find: match case, whole word, regular expression */
     bool tab_free;              /* Esc released Tab: the next one moves focus */
     bool bar_focus;             /* give the bar's field focus this frame */
     bool pend_sel, pend_goto, pend_find, init;
@@ -416,37 +418,217 @@ static void cui__ed_brackets(const cui__ed *E, int caret, int *a, int *b) {
 
 /* ---- find ---- */
 
+/* what to look for: the text or the pattern, and the three toggles */
+typedef struct { const char *q; int qn; bool cs, word, rx; } cui__ed_q;
 
-static bool cui__ed_hit(const char *s, int len, int i, const char *q, int qn) {
-    if (qn <= 0 || i < 0 || i + qn > len) return false;
-    for (int k = 0; k < qn; k++) if (cui__ascii_lower((unsigned char)s[i + k]) != cui__ascii_lower((unsigned char)q[k])) return false;
+static cui__ed_q cui__ed_q_of(const cui__ed_state *st) {
+    cui__ed_q Q = { st->query, (int)strlen(st->query), st->f_case, st->f_word, st->f_rx };
+    return Q;
+}
+
+/* why a pattern does not compile (it then finds nothing), or NULL */
+static const char *cui__ed_q_bad(const cui__ed_q *Q) {
+    const char *err = NULL;
+    if (Q->rx && Q->qn > 0 && cui_regex_search(Q->q, 0, "", 0, 0, NULL, &err) < 0) return err ? err : "Invalid pattern";
+    return NULL;
+}
+
+static bool cui__ed_hit(const cui__ed_q *Q, const char *s, int i) {
+    if (Q->cs) return memcmp(s + i, Q->q, (size_t)Q->qn) == 0;
+    for (int k = 0; k < Q->qn; k++) if (cui__ascii_lower((unsigned char)s[i + k]) != cui__ascii_lower((unsigned char)Q->q[k])) return false;
     return true;
 }
 
-/* First match at or after from (dir > 0), or last one before from (dir < 0),
- * wrapping around the ends; -1 when there is none. Case is ignored. */
-static int cui__ed_find(const char *s, int len, const char *q, int qn, int from, int dir) {
-    if (qn <= 0 || qn > len) return -1;
-    int last = len - qn;
-    if (dir > 0) {
-        for (int i = CUI_MAX(0, from); i <= last; i++) if (cui__ed_hit(s, len, i, q, qn)) return i;
-        for (int i = 0; i < CUI_MIN(from, last + 1); i++) if (cui__ed_hit(s, len, i, q, qn)) return i;
-    } else {
-        for (int i = CUI_MIN(from - 1, last); i >= 0; i--) if (cui__ed_hit(s, len, i, q, qn)) return i;
-        for (int i = last; i >= CUI_MAX(0, from); i--) if (cui__ed_hit(s, len, i, q, qn)) return i;
+/* The first match in the line [ls, le) that starts at or after `from`: 1 and its bytes
+ * [*a, *b), and for a pattern its groups in `m` (as offsets into s); 0 for none, -1 for a
+ * pattern that does not compile or backtracks too much. Matches never span lines. */
+static int cui__ed_q_line(const cui__ed_q *Q, const char *s, int ls, int le, int from, int *a, int *b, cui_regex_match *m) {
+    if (Q->qn <= 0) return 0;
+    for (int p = CUI_MAX(from, ls); p <= le;) {
+        int x, y;
+        if (Q->rx) {
+            cui_regex_match M;
+            int r = cui_regex_search(Q->q, Q->cs ? 0 : CUI_REGEX_ICASE, s + ls, le - ls, p - ls, &M, NULL);
+            if (r < 0) return -1;
+            if (r == 0) return 0;
+            x = ls + M.start; y = ls + M.end;
+            if (y == x) { p = x + 1; continue; }   /* an empty match is not one */
+            if (m) {
+                *m = M;
+                m->start = x; m->end = y;
+                for (int g = 0; g <= M.groups; g++)
+                    if (M.group_start[g] >= 0) { m->group_start[g] += ls; m->group_end[g] += ls; }
+            }
+        } else {
+            if (p + Q->qn > le) return 0;
+            if (!cui__ed_hit(Q, s, p)) { p++; continue; }
+            x = p; y = p + Q->qn;
+        }
+        if (Q->word && ((x > ls && cui__edit_is_word((unsigned char)s[x]) && cui__edit_is_word((unsigned char)s[x - 1])) ||
+                        (y < le && cui__edit_is_word((unsigned char)s[y - 1]) && cui__edit_is_word((unsigned char)s[y])))) { p = x + 1; continue; }
+        *a = x; *b = y;
+        return 1;
     }
-    return -1;
+    return 0;
 }
 
-static void cui__ed_find_go(cui__ed *E, int from, int dir) {
-    const char *q = E->st->query;
-    int qn = (int)strlen(q);
-    int at = cui__ed_find(E->buf, E->len, q, qn, from, dir);
-    if (at < 0) return;
-    E->st->ed.anchor = at;
-    E->st->ed.cursor = at + qn;
+static int cui__ed_lstart(const char *s, int pos) { while (pos > 0 && s[pos - 1] != '\n') pos--; return pos; }
+static int cui__ed_lend(const char *s, int len, int pos) {
+    const char *p = memchr(s + pos, '\n', (size_t)(len - pos));
+    return p ? (int)(p - s) : len;
+}
+
+/* The last match in a line that starts before `limit`. */
+static int cui__ed_q_last(const cui__ed_q *Q, const char *s, int ls, int le, int limit, int *a, int *b) {
+    int found = 0;
+    for (int p = ls;;) {
+        int x, y, r = cui__ed_q_line(Q, s, ls, le, p, &x, &y, NULL);
+        if (r < 0) return -1;
+        if (r == 0 || x >= limit) return found;
+        *a = x; *b = y; found = 1;
+        p = x + 1;
+    }
+}
+
+/* First match at or after from (dir > 0), or last one before from (dir < 0), wrapping
+ * around the ends: 1 with the match, 0 for none, -1 for a bad pattern. */
+static int cui__ed_find(const cui__ed_q *Q, const char *s, int len, int from, int dir, int *a, int *b, cui_regex_match *m) {
+    if (Q->qn <= 0) return 0;
+    from = CUI_CLAMP(from, 0, len);
+    int fl = cui__ed_lstart(s, from);
+    if (dir > 0) {
+        for (int pass = 0; pass < 2; pass++) {
+            int stop = pass ? cui__ed_lend(s, len, from) : len;
+            for (int ls = pass ? 0 : fl;;) {
+                int le = cui__ed_lend(s, len, ls);
+                int r = cui__ed_q_line(Q, s, ls, le, pass ? 0 : from, a, b, m);
+                if (r) return r;
+                if (le >= stop) break;
+                ls = le + 1;
+            }
+        }
+        return 0;
+    }
+    for (int pass = 0; pass < 2; pass++) {
+        int limit = pass ? len + 1 : from;
+        for (int ls = pass ? cui__ed_lstart(s, len) : fl;;) {
+            int r = cui__ed_q_last(Q, s, ls, cui__ed_lend(s, len, ls), limit, a, b);
+            if (r) {
+                if (r > 0 && m) cui__ed_q_line(Q, s, ls, cui__ed_lend(s, len, ls), *a, a, b, m);
+                return r;
+            }
+            if (ls <= (pass ? fl : 0)) break;
+            ls = cui__ed_lstart(s, ls - 1);
+        }
+    }
+    return 0;
+}
+
+/* the matches of the whole text, the number of them before s0, and whether one is [s0, s1) */
+static int cui__ed_count(const cui__ed_q *Q, const char *s, int len, int s0, int s1, int *index, bool *on) {
+    int total = 0;
+    *index = 0; *on = false;
+    if (Q->qn <= 0) return 0;
+    for (int ls = 0;;) {
+        int le = cui__ed_lend(s, len, ls);
+        for (int p = ls, a, b; cui__ed_q_line(Q, s, ls, le, p, &a, &b, NULL) > 0; p = b) {
+            total++;
+            if (a < s0) (*index)++;
+            else if (a == s0 && b == s1) *on = true;
+        }
+        if (le >= len) break;
+        ls = le + 1;
+    }
+    return total;
+}
+
+static bool cui__ed_find_go(cui__ed *E, int from, int dir) {
+    cui__ed_q Q = cui__ed_q_of(E->st);
+    int a, b;
+    if (cui__ed_find(&Q, E->buf, E->len, from, dir, &a, &b, NULL) <= 0) return false;
+    E->st->ed.anchor = a;
+    E->st->ed.cursor = b;
     E->reveal = E->center = true;
     E->st->pref_col = -1;
+    return true;
+}
+
+/* The replacement for one match, written to out (NULL to measure); the length. With a
+ * pattern, $0 and $& are the match, $1 to $9 its groups and $$ a dollar sign. */
+static int cui__ed_expand(const cui__ed_q *Q, const char *with, const char *s, const cui_regex_match *m, char *out) {
+    int n = 0;
+    for (const char *w = with; *w; w++) {
+        if (Q->rx && *w == '$' && w[1]) {
+            int g = w[1] == '&' ? 0 : (w[1] >= '0' && w[1] <= '9') ? w[1] - '0' : -1;
+            if (w[1] == '$') { if (out) out[n] = '$'; n++; w++; continue; }
+            if (g >= 0) {
+                w++;
+                if (g <= m->groups && m->group_start[g] >= 0 && m->group_end[g] >= m->group_start[g]) {
+                    int gn = m->group_end[g] - m->group_start[g];
+                    if (out) memcpy(out + n, s + m->group_start[g], (size_t)gn);
+                    n += gn;
+                }
+                continue;
+            }
+        }
+        if (out) out[n] = *w;
+        n++;
+    }
+    return n;
+}
+
+/* Every match replaced, from the first to the last: the new text of that stretch
+ * (out NULL to measure), the stretch [*first, *last) and the number of matches; -1 for a bad pattern. */
+static int cui__ed_rall(const cui__ed_q *Q, const char *with, const char *s, int len, char *out, int *first, int *last, int *count) {
+    int n = 0, pos = 0, cnt = 0;
+    for (int ls = 0;;) {
+        int le = cui__ed_lend(s, len, ls);
+        for (int p = ls, a, b;; p = b) {
+            cui_regex_match m;
+            int r = cui__ed_q_line(Q, s, ls, le, p, &a, &b, &m);
+            if (r < 0) return -1;
+            if (r == 0) break;
+            if (cnt == 0) *first = a;
+            else { if (out) memcpy(out + n, s + pos, (size_t)(a - pos)); n += a - pos; }
+            n += cui__ed_expand(Q, with, s, &m, out ? out + n : NULL);
+            pos = b; cnt++;
+        }
+        if (le >= len) break;
+        ls = le + 1;
+    }
+    *last = pos; *count = cnt;
+    return n;
+}
+
+/* Replace: the selected match (then on to the next), or when the selection is not a match,
+ * just on to the next one. */
+static void cui__ed_replace_one(cui__ed *E, const char *with) {
+    if (E->ro) return;
+    cui__ed_q Q = cui__ed_q_of(E->st);
+    cui_edit_state *e = &E->st->ed;
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor), a, b;
+    cui_regex_match m;
+    memset(&m, 0, sizeof m);
+    int ls = cui__ed_lstart(E->buf, s0), le = cui__ed_lend(E->buf, E->len, s0);
+    if (s1 > s0 && s1 <= le && cui__ed_q_line(&Q, E->buf, ls, le, s0, &a, &b, &m) == 1 && a == s0 && b == s1) {
+        int n = cui__ed_expand(&Q, with, E->buf, &m, NULL);
+        char *t = cui__frame_alloc(E->ui, (size_t)n + 1);
+        cui__ed_expand(&Q, with, E->buf, &m, t);
+        if (!cui__ed_replace(E, s0, s1, t, n, 3)) return;
+        cui__ed_find_go(E, e->cursor, 1);
+    } else cui__ed_find_go(E, s0, 1);
+}
+
+/* Replace all, as one undo step; if the result does not fit the buffer nothing changes. */
+static void cui__ed_replace_all(cui__ed *E, const char *with) {
+    cui__ed_q Q = cui__ed_q_of(E->st);
+    int first = 0, last = 0, cnt = 0;
+    if (E->ro || Q.qn <= 0) return;
+    int n = cui__ed_rall(&Q, with, E->buf, E->len, NULL, &first, &last, &cnt);
+    if (n < 0 || cnt == 0) return;
+    char *t = cui__frame_alloc(E->ui, (size_t)n + 1);
+    cui__ed_rall(&Q, with, E->buf, E->len, t, &first, &last, &cnt);
+    cui__ed_replace(E, first, last, t, n, 3);
 }
 
 /* ---- indentation ---- */
@@ -635,7 +817,7 @@ typedef struct {
     cui__lang lang;
     int tab, cursor, anchor, caret_line, caret_col;
     int br_line[2], br_col[2];
-    const char *query; int qn;
+    cui__ed_q fq;               /* the find bar's query, when it is open */
     const cui_text_mark *marks; int nmarks;   /* the app's marks that reach the lines in view */
     cui_color mark_colors[7];
     const char *placeholder;
@@ -720,10 +902,10 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 if (xb - xa < 2) { xa -= 1; xb = xa + 2; }
                 cui_draw_rect(ui, (cui_rect){ x0 + xa, y + 1, xb - xa, p->lh - 2 }, CUI_CORNERS(2), p->mark_colors[CUI_CLAMP(mk->color, 0, 6)]);
             }
-            if (p->qn > 0) {   /* a match may run on into the next row: each row shows its part */
-                for (int i = CUI_MAX(ls, rs - p->qn + 1); i < re && i + p->qn <= le; i++) {
-                    if (!cui__ed_hit(s, le, i, p->query, p->qn)) continue;
-                    int a = CUI_MAX(i, rs), b = CUI_MIN(i + p->qn, re);
+            if (p->fq.qn > 0) {   /* a match may run on into the next row: each row shows its part */
+                for (int i = ls, x, y; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &x, &y, NULL) > 0 && x < re; i = y) {
+                    if (y <= rs) continue;
+                    int a = CUI_MAX(x, rs), b = CUI_MIN(y, re);
                     float xa = (float)cui__ed_adv(s, rs, a, p->tab, rc0) * p->cw, xb = (float)cui__ed_adv(s, rs, b, p->tab, rc0) * p->cw;
                     cui_draw_rect_border(ui, (cui_rect){ x0 + xa - 1, y + 1, xb - xa + 2, p->lh - 2 }, CUI_CORNERS(3), p->match, p->match_edge, 1);
                 }
@@ -826,10 +1008,9 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             cui_draw_rect(ui, (cui_rect){ x0 + xa, y + 1, xb - xa, p->lh - 2 }, CUI_CORNERS(2), p->mark_colors[CUI_CLAMP(mk->color, 0, 6)]);
         }
         /* find matches */
-        if (p->qn > 0) {
-            for (int i = ls; i + p->qn <= le; i++) {
-                if (!cui__ed_hit(s, le, i, p->query, p->qn)) continue;
-                float xa = (float)cui__ed_col(s, ls, i, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, i + p->qn, p->tab) * p->cw;
+        if (p->fq.qn > 0) {
+            for (int i = ls, x, y; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &x, &y, NULL) > 0; i = y) {
+                float xa = (float)cui__ed_col(s, ls, x, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, y, p->tab) * p->cw;
                 cui_draw_rect_border(ui, (cui_rect){ x0 + xa - 1, y + 1, xb - xa + 2, p->lh - 2 }, CUI_CORNERS(3), p->match, p->match_edge, 1);
             }
         }
@@ -917,7 +1098,18 @@ void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query) {
     if (!query) { s->mode = 0; return; }
     snprintf(s->query, sizeof s->query, "%s", query);
     s->mode = 1;
+    s->rep_show = false;
     s->bar_focus = s->pend_find = true;
+    ui->animating = true;
+}
+
+void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *query, const char *with) {
+    cui__ed_state *s = cui__ed_get(ui, id);
+    if (query) { snprintf(s->query, sizeof s->query, "%s", query); s->pend_find = true; }
+    if (with) snprintf(s->repl, sizeof s->repl, "%s", with);
+    s->mode = 1;
+    s->rep_show = true;
+    s->bar_focus = true;
     ui->animating = true;
 }
 
@@ -947,7 +1139,7 @@ typedef struct {
     const cui_code_editor_opts *o;
     cui_code_editor_result *res;
     const char *id_str;
-    cui_id id, lid, sid, fid, gid;      /* the editor, its lines, its scroll, the find and go to fields */
+    cui_id id, lid, sid, fid, rid, gid; /* the editor, its lines, its scroll, the find, replace and go to fields */
     int lang_kind;
     float size, lh, cw, gutter, height; /* text size, line height, column width */
     cui_rect br; bool known;            /* the lines' box, last frame (known: it has one) */
@@ -993,14 +1185,16 @@ static void cui__edf_bar_keys(cui__edf *f) {
     cui__ed_state *st = E->st;
     cui_edit_state *e = &st->ed;
     cui_ctx *ui = E->ui;
-    bool mine = ui->focus == f->lid || ui->focus == f->fid || ui->focus == f->gid;
-    if (mine && f->prim && cui_key_pressed(ui, CUI_KEY_F)) {
+    bool mine = ui->focus == f->lid || ui->focus == f->fid || ui->focus == f->rid || ui->focus == f->gid;
+    if (mine && f->prim && (cui_key_pressed(ui, CUI_KEY_F) || cui_key_pressed(ui, CUI_KEY_H))) {
+        bool rep = cui_key_pressed(ui, CUI_KEY_H);   /* Ctrl+H shows the replace row, Ctrl+F hides it */
         int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
         if (s1 > s0 && s1 - s0 < (int)sizeof st->query && !memchr(E->buf + s0, '\n', (size_t)(s1 - s0)))
             snprintf(st->query, sizeof st->query, "%.*s", s1 - s0, E->buf + s0);
         st->mode = 1;
+        st->rep_show = rep && !E->ro;
         st->bar_focus = true;
-        ui->kpressed[CUI_KEY_F] = 0;
+        ui->kpressed[CUI_KEY_F] = ui->kpressed[CUI_KEY_H] = 0;
     }
     if (mine && f->prim && cui_key_pressed(ui, CUI_KEY_G)) {
         st->mode = 2;
@@ -1008,7 +1202,7 @@ static void cui__edf_bar_keys(cui__edf *f) {
         st->bar_focus = true;
         ui->kpressed[CUI_KEY_G] = 0;
     }
-    if ((ui->focus == f->fid || ui->focus == f->gid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+    if ((ui->focus == f->fid || ui->focus == f->rid || ui->focus == f->gid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         st->mode = 0;
         ui->focus = f->lid;
         ui->kpressed[CUI_KEY_ESCAPE] = 0;
@@ -1333,29 +1527,53 @@ static void cui__edf_keys(cui__edf *f) {
     if (!E->ro && !st->tab_free) ui->tab_owner = f->lid;
 }
 
-/* the find bar's field, the match count and the previous and next buttons */
-static void cui__edf_build_find(cui__edf *f, cui_input_opts *io, cui_button_opts *bo, bool narrow) {
+/* a toggle in the find row: Aa, W, .* */
+static bool cui__edf_toggle(cui_ctx *ui, cui_button_opts *bo, const char *label, const char *tip, bool on) {
+    bo->selected = on; bo->tooltip = tip;
+    bool hit = cui_button_ex(ui, label, bo);
+    ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
+    bo->selected = false;
+    return hit;
+}
+
+/* the find bar's field, the toggles, the match count and the previous and next buttons;
+ * the number of matches */
+static int cui__edf_build_find(cui__edf *f, cui_input_opts *io, cui_button_opts *bo, bool narrow) {
     cui__ed *E = f->E;
     cui__ed_state *st = E->st;
     cui_edit_state *e = &st->ed;
     cui_ctx *ui = E->ui;
-    bool shift = f->shift;
+    bool shift = f->shift, rep = st->rep_show && !E->ro;
     if (st->bar_focus) { ui->focus = f->fid; ui->tf_select_all = f->fid; st->bar_focus = false; }
     io->placeholder = "Find";
     io->icon = narrow ? NULL : CUI_ICON_SEARCH;
+    cui__ed_q Q = cui__ed_q_of(st);
+    io->error = cui__ed_q_bad(&Q);
     int fl = cui_input_ex(ui, "find", st->query, sizeof st->query, io);
-    int qn = (int)strlen(st->query);
+    io->error = NULL;
+    Q = cui__ed_q_of(st);
     int s0 = CUI_MIN(e->cursor, e->anchor);
     if (fl & CUI_CHANGED) cui__ed_find_go(E, s0, 1);   /* as you type, from where the selection starts */
-    if (fl & CUI_SUBMITTED) cui__ed_find_go(E, shift ? s0 : s0 + (e->cursor != e->anchor ? 1 : 0), shift ? -1 : 1);
-    /* the count, and which match the selection is */
-    int total = 0, index = 0;
+    if (fl & CUI_SUBMITTED) {
+        if (rep && f->prim && (f->mods & (CUI_MOD_ALT | CUI_MOD_SHIFT))) cui__ed_replace_all(E, st->repl);
+        else cui__ed_find_go(E, shift ? s0 : s0 + (e->cursor != e->anchor ? 1 : 0), shift ? -1 : 1);
+    }
+    bool tg = false;
+    if (cui__edf_toggle(ui, bo, "Aa", "Match case", st->f_case)) { st->f_case = !st->f_case; tg = true; }
+    if (cui__edf_toggle(ui, bo, "W", "Whole word", st->f_word)) { st->f_word = !st->f_word; tg = true; }
+    if (cui__edf_toggle(ui, bo, ".*", "Regular expression", st->f_rx)) { st->f_rx = !st->f_rx; tg = true; }
+    Q = cui__ed_q_of(st);
     s0 = CUI_MIN(e->cursor, e->anchor);
+    if (tg) cui__ed_find_go(E, s0, 1);
+    /* the count, and which match the selection is */
+    int index, total;
+    bool on_match;
     int s1 = CUI_MAX(e->cursor, e->anchor);
-    bool on_match = qn > 0 && s1 - s0 == qn && cui__ed_hit(E->buf, E->len, s0, st->query, qn);
-    for (int i = 0; qn > 0 && i + qn <= E->len; i++)
-        if (cui__ed_hit(E->buf, E->len, i, st->query, qn)) { total++; if (i < s0 || (on_match && i == s0)) index++; }
+    total = cui__ed_count(&Q, E->buf, E->len, s0, s1, &index, &on_match);
+    int qn = Q.qn;
+    if (on_match) index++;
     f->res->find_matches = total;
+    f->res->find_case = st->f_case; f->res->find_word = st->f_word; f->res->find_regex = st->f_rx;
     f->res->find_index = on_match ? index : 0;
     const char *label = qn == 0 ? "" : narrow ? (on_match ? cui__frame_printf(ui, "%d/%d", index, total) : cui__frame_printf(ui, "%d", total))
                       : total == 0 ? "No results" : on_match ? cui__frame_printf(ui, "%d of %d", index, total)
@@ -1374,6 +1592,30 @@ static void cui__edf_build_find(cui__edf *f, cui_input_opts *io, cui_button_opts
     if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_DOWN, bo)) cui__ed_find_go(E, s0 + (s1 > s0 ? 1 : 0), 1);
     ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
     bo->disabled = false;
+    return total;
+}
+
+/* the replace row under the find row: the field, Replace and Replace all */
+static void cui__edf_build_replace(cui__edf *f, cui_input_opts *io, cui_button_opts *bo, bool narrow, int total) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_ctx *ui = E->ui;
+    io->placeholder = "Replace";
+    io->icon = NULL;
+    int fl = cui_input_ex(ui, "replace", st->repl, sizeof st->repl, io);
+    if (fl & CUI_SUBMITTED) {
+        if (f->prim && (f->mods & (CUI_MOD_ALT | CUI_MOD_SHIFT))) cui__ed_replace_all(E, st->repl);
+        else cui__ed_replace_one(E, st->repl);
+    }
+    bo->disabled = total == 0;
+    bo->variant = CUI_BUTTON_SECONDARY;
+    bo->tooltip = "Replace this match and go to the next"; bo->shortcut = "Enter";
+    if (cui_button_ex(ui, "Replace", bo)) cui__ed_replace_one(E, st->repl);
+    bo->tooltip = "Replace every match"; bo->shortcut = "Ctrl Alt Enter";
+    if (cui_button_ex(ui, narrow ? "All" : "Replace all", bo)) cui__ed_replace_all(E, st->repl);
+    bo->disabled = false;
+    bo->variant = CUI_BUTTON_GHOST;
+    bo->tooltip = bo->shortcut = NULL;
 }
 
 /* the go to line field: "line" or "line:column" */
@@ -1407,12 +1649,16 @@ static void cui__edf_build_bar(cui__edf *f) {
     bool narrow = f->known && f->br.w < 360;   /* a phone: a shorter count, no search icon */
     int bar = cui__node_new(ui, 0);
     cui_node *bn = &ui->nodes[bar];
-    bn->dir = CUI_ROW; bn->align = CUI_ALIGN_CENTER; bn->gap = 4;
+    bn->dir = CUI_COLUMN; bn->gap = 4;
     bn->w = CUI_FILL;
     bn->pad[0] = bn->pad[2] = 6; bn->pad[1] = 6; bn->pad[3] = 6;
     bn->bg = CUI_C(ui, SURFACE);
     cui__open(ui, bar);
     cui_push_id(ui, f->id_str);
+    int row = cui__node_new(ui, 0);
+    cui_node *rn = &ui->nodes[row];
+    rn->dir = CUI_ROW; rn->align = CUI_ALIGN_CENTER; rn->gap = 4; rn->w = CUI_FILL;
+    cui__open(ui, row);
     cui_input_opts io;
     memset(&io, 0, sizeof io);
     io.size = CUI_SIZE_SM;
@@ -1421,11 +1667,22 @@ static void cui__edf_build_bar(cui__edf *f) {
     memset(&bo, 0, sizeof bo);
     bo.size = CUI_SIZE_SM;
     bo.variant = CUI_BUTTON_GHOST;
-    if (st->mode == 1) cui__edf_build_find(f, &io, &bo, narrow);
+    int total = 0;
+    if (st->mode == 1) total = cui__edf_build_find(f, &io, &bo, narrow);
     else cui__edf_build_goto(f, &io, narrow);
     bo.tooltip = "Close"; bo.shortcut = "Esc";
     if (cui_icon_button_ex(ui, CUI_ICON_X, &bo)) { st->mode = 0; ui->focus = f->lid; }
     ui->nodes[ui->last_node].w = CUI_PX(26); ui->nodes[ui->last_node].h = CUI_PX(26);
+    cui__close(ui);   /* the row */
+    if (st->mode == 1 && st->rep_show && !f->E->ro) {
+        int row2 = cui__node_new(ui, 0);
+        cui_node *r2 = &ui->nodes[row2];
+        r2->dir = CUI_ROW; r2->align = CUI_ALIGN_CENTER; r2->gap = 4; r2->w = CUI_FILL;
+        cui__open(ui, row2);
+        bo.tooltip = bo.shortcut = NULL;
+        cui__edf_build_replace(f, &io, &bo, narrow, total);
+        cui__close(ui);
+    }
     cui_pop_id(ui);
     cui__close(ui);
     int hl = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
@@ -1543,7 +1800,7 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
             }
         }
     }
-    if (st->mode == 1 && st->query[0]) { p->query = cui__frame_strdup(ui, st->query, -1); p->qn = (int)strlen(p->query); }
+    if (st->mode == 1 && st->query[0]) { p->fq = cui__ed_q_of(st); p->fq.q = cui__frame_strdup(ui, st->query, -1); }
     if (f->o->marks && f->o->mark_count > 0) {   /* the marks that reach the lines in view, copied: the caller owns them */
         const cui_text_mark *mk = f->o->marks;
         int n = f->o->mark_count, lo = 0, hi = n;
@@ -1613,6 +1870,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     }
     cui_push_id(ui, id_str);
     f.fid = cui_make_id(ui, "find");
+    f.rid = cui_make_id(ui, "replace");
     f.gid = cui_make_id(ui, "goto");
     cui_pop_id(ui);
 
@@ -1680,7 +1938,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
                  : dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);
     on->bg = bg;   /* the code block's surface */
     on->border = o->borderless ? 0 : 1;
-    cui__tween(ui, &st->focus_t, (ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.gid) ? 1.0f : 0.0f, CUI__T_FOCUS);
+    cui__tween(ui, &st->focus_t, (ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.rid || ui->focus == f.gid) ? 1.0f : 0.0f, CUI__T_FOCUS);
     on->border_color = cui_mix(CUI_C(ui, BORDER), cui__edge_on(ui), st->focus_t * 0.7f);
     on->flags |= CUI_NF_CLIP;
     cui__open(ui, outer);
@@ -1699,7 +1957,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
 
     res.changed = E.changed;
     res.refused = E.refused;
-    res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.gid;
+    res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.rid || ui->focus == f.gid;
     res.cursor = e->cursor; res.anchor = e->anchor;
     res.line = f.caret_line + 1; res.column = f.caret_col + 1;
     res.line_count = E.nl;

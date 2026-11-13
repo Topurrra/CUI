@@ -1761,8 +1761,8 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
  * Shift extends; Ctrl+A; Ctrl+C/X/V (the whole line without a selection);
  * Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y; Tab and Shift+Tab indent and outdent the
  * selected lines; Enter keeps the indentation (a level deeper after an
- * opening bracket, or a colon in Python); Ctrl+F finds, Ctrl+G goes to a
- * line; Esc closes the bar, else clears the selection, else lets the next
+ * opening bracket, or a colon in Python); Ctrl+F finds, Ctrl+H finds and
+ * replaces (not when read only), Ctrl+G goes to a line; Esc closes the bar, else clears the selection, else lets the next
  * Tab move focus. Double-click selects a word, triple-click or the gutter a
  * line. Read only keeps selection, copy and find. */
 /* a highlighted range of bytes: color 0 is the accent, 1 to 6 the series colors */
@@ -1793,6 +1793,7 @@ typedef struct cui_code_editor_result {
     int line_count, length;    /* lines, and bytes of text */
     int bracket, bracket_match;   /* the bracket beside the caret and its partner, byte offsets, or -1 */
     int find_matches, find_index; /* with the find bar open: matches, and which one is selected (1 based, 0 none) */
+    bool find_case, find_word, find_regex;   /* the find bar's toggles: match case, whole word, regular expression */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),
@@ -1802,6 +1803,9 @@ CUI_API void cui_code_editor_goto(cui_ctx *ui, const char *id, int line, int col
 CUI_API void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int cursor);
 /* Opens the find bar with query and selects the next match (NULL closes). */
 CUI_API void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query);
+/* Opens the find bar with the replace row, query and replacement filled in
+ * (either may be NULL to keep what is there); a read only editor shows find only. */
+CUI_API void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *query, const char *with);
 #ifndef __cplusplus
 #define cui_code_editor(ui, id, buf, cap, ...) cui_code_editor_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_code_editor_opts, __VA_ARGS__))
 #endif
