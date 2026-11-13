@@ -68,7 +68,31 @@ static double frames(cui_ctx *ui, bench_ed *b, int n, int scroll) {
 
 /* Text: short lines like a log, or long lines (about 3000 bytes) like minified code. Lines
  * hold words, brackets, quotes and comment markers, and every 40th line in markdown is a fence. */
-static size_t gen(char *buf, size_t size, bool long_lines) {
+/* yaml and xml: items with keys, values, comments, block scalars (yaml), tags with attributes and entities (xml) */
+static size_t gen_struct(char *buf, size_t size, bool long_lines, bool xml) {
+    size_t n = 0;
+    unsigned seed = 777;
+    int line = 0;
+    while (n + 4000 < size) {
+        seed = seed * 1103515245u + 12345u;
+        int target = long_lines ? 2500 + (int)(seed % 1000) : 0, start = (int)n;
+        if (xml) {
+            if (line % 50 == 49) n += (size_t)sprintf(buf + n, "<!-- note %d -->", line);
+            else n += (size_t)sprintf(buf + n, "  <item id=\"%d\" name='n%d' on=\"true\">text &amp; more %d</item>", line, line, line * 7);
+        } else if (line % 40 == 36) n += (size_t)sprintf(buf + n, "  text: |");
+        else if (line % 40 > 36) n += (size_t)sprintf(buf + n, "    block scalar line %d: not a key # nor a comment", line);
+        else if (line % 7 == 0) n += (size_t)sprintf(buf + n, "# comment %d", line);
+        else n += (size_t)sprintf(buf + n, "  - key_%d: \"value %d\"  # c  [1, 2.5, true]", line, line * 3);
+        while ((int)n - start < target) n += (size_t)sprintf(buf + n, xml ? " <a b=\"c\">d</a>" : ", item: 12");
+        buf[n++] = '\n';
+        line++;
+    }
+    buf[n] = 0;
+    return n;
+}
+
+static size_t gen(char *buf, size_t size, bool long_lines, const char *lang) {
+    if (!strcmp(lang, "yaml") || !strcmp(lang, "xml")) return gen_struct(buf, size, long_lines, lang[0] == 'x');
     static const char *const words[] = { "INFO", "worker", "request", "(id=42)", "{ok}", "\"path\"", "-> done;", "//", "x[3]",
                                          "# heading", "`code`", "*em*", "value=0x1F", "elapsed", "ms", "retry" };
     size_t n = 0;
@@ -102,7 +126,7 @@ static void one(size_t mb, bool long_lines, const char *lang, bool wrap, bool pl
     memset(&b, 0, sizeof b);
     b.cap = size + 1024 * 1024;
     b.buf = malloc(b.cap);
-    size_t len = gen(b.buf, size, long_lines);
+    size_t len = gen(b.buf, size, long_lines, lang);
     b.lang = lang; b.wrap = wrap; b.plain = plain; b.big = big;
     cui_sw_renderer *sw = cui_sw_create();
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
@@ -156,12 +180,12 @@ int main(int argc, char **argv) {
 #endif
     if (argc > 1 && !strcmp(argv[1], "--quick")) ns = 2;
     else if (argc > 1) { ns = 0; for (int i = 1; i < argc && ns < 8; i++) sizes[ns++] = (size_t)atoi(argv[i]); }
-    static const char *const langs[] = { "text", "c", "markdown" };
+    static const char *const langs[] = { "text", "c", "markdown", "yaml", "xml" };
     for (int s = 0; s < ns; s++)
         for (int ll = 0; ll < 2; ll++)
             for (int w = 0; w < 2; w++)
                 for (int k = 0; k < nb; k++) {
-                    for (int l = 0; l < 3; l++) one(sizes[s], ll, langs[l], w, false, bigs[k]);
+                    for (int l = 0; l < 5; l++) one(sizes[s], ll, langs[l], w, false, bigs[k]);
                     one(sizes[s], ll, "text", w, true, bigs[k]);
                 }
     return 0;

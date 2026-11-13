@@ -7683,6 +7683,101 @@ static void test_code_editor_markdown(void) {
     cui_destroy(ui);
 }
 
+
+/* the languages with a state per line (yaml, toml, xml, powershell, csharp...): an editor scrolled into the middle of a
+ * multi-line construct colors its lines as inside it, since the state comes from the cache, not from the first visible line */
+static void test_code_editor_langs(void) {
+    printf("code editor: yaml, toml, xml, powershell, csharp, java, css state from line 0\n");
+    static const struct { const char *lang, *open, *body, *control; } cases[] = {
+        { "yaml", "k: |\n", "  # not: a comment\n", "k: x\n" },
+        { "toml", "s = \"\"\"\n", "[not.a.table]\n", "s = 1\n" },
+        { "xml", "<!--\n", "<a b=\"c\"/>\n", "<!-- -->\n" },
+        { "html", "<![CDATA[\n", "<a b=\"c\"/>\n", "<x/>\n" },
+        { "css", "/*\n", "a { color: red; }\n", "/**/\n" },
+        { "ps1", "<#\n", "$x -and 12\n", "#\n" },
+        { "cs", "var s = @\"\n", "int x = 12; // c\n", "var s = 1;\n" },
+        { "java", "String s = \"\"\"\n", "int x = 12; // c\n", "String s = 1;\n" },
+    };
+    static ced_ctx c;
+    for (int k = 0; k < (int)(sizeof cases / sizeof *cases); k++) {
+        unsigned top[16], mid[16], ctl[16];
+        int ntop = 0;
+        for (int pass = 0; pass < 2; pass++) {
+            cui_ctx *ui = new_ctx();
+            memset(&c, 0, sizeof c);
+            c.lang = cases[k].lang;
+            strcpy(c.buf, pass ? cases[k].control : cases[k].open);
+            for (int i = 0; i < 60; i++) strcat(c.buf, cases[k].body);
+            cui_code_editor_goto(ui, "ed", 1, 1);
+            run(ui, build_ced, &c, 3);
+            if (pass == 0) ntop = ced_text_colors(ui, top, 16);
+            cui_code_editor_goto(ui, "ed", 50, 1);
+            run(ui, build_ced, &c, 3);
+            CHECK(c.r.line == 50);
+            if (pass == 0) {
+                int nmid = ced_text_colors(ui, mid, 16);
+                CHECK(nmid > 0 && ced_colors_within(mid, nmid, top, ntop));
+            } else {
+                int nctl = ced_text_colors(ui, ctl, 16);
+                CHECK(nctl > 0 && !ced_colors_within(ctl, nctl, top, ntop));   /* a body line is something else outside the construct */
+            }
+            cui_destroy(ui);
+        }
+    }
+
+    /* an edit above closes or opens it: the lines below follow */
+    {
+        unsigned top[16], mid[16];
+        cui_ctx *ui = new_ctx();
+        memset(&c, 0, sizeof c);
+        c.lang = "yaml";
+        strcpy(c.buf, "k: |\n");
+        for (int i = 0; i < 60; i++) strcat(c.buf, "  # not: a comment\n");
+        cui_code_editor_goto(ui, "ed", 1, 1);
+        run(ui, build_ced, &c, 3);
+        int ntop = ced_text_colors(ui, top, 16);
+        cui_code_editor_goto(ui, "ed", 50, 1);
+        run(ui, build_ced, &c, 3);
+        int nmid = ced_text_colors(ui, mid, 16);
+        CHECK(nmid > 0 && ced_colors_within(mid, nmid, top, ntop));
+        ced_sel(ui, &c, 4, 4);
+        type(ui, &build_ced, &c, "x");                   /* "k: |x": no block scalar now */
+        cui_code_editor_goto(ui, "ed", 50, 1);
+        run(ui, build_ced, &c, 3);
+        nmid = ced_text_colors(ui, mid, 16);
+        CHECK(c.r.line == 50 && !ced_colors_within(mid, nmid, top, ntop));
+        cui_destroy(ui);
+    }
+
+    /* garbage in every language, wrapped and not, scrolled and typed into: nothing crashes */
+    static const char *const langs[] = { "yaml", "toml", "ini", "xml", "html", "css", "scss", "ps1", "cs", "java", "bat" };
+    static const char *const bits[] = { "\"\"\"", "'''", "<!--", "-->", "<![CDATA[", "]]>", "<", ">", "|", "---", "#", "<#", "#>", "@\"", "\"@", "{", "}", "[", "]", ":",
+                                         "/*", "*/", "\n", "\n", "\n", "\t", "  ", "%", "$", "\xff", "\xe2\x82", "a", "1", "\"", "'", "&" };
+    unsigned seed = 99;
+    for (int l = 0; l < (int)(sizeof langs / sizeof *langs); l++)
+        for (int wrap = 0; wrap < 2; wrap++) {
+            cui_ctx *ui = new_ctx();
+            memset(&c, 0, sizeof c);
+            c.lang = langs[l];
+            c.wrap = wrap != 0;
+            size_t n = 0;
+            for (int i = 0; i < 400; i++) {
+                seed = seed * 1103515245u + 12345u;
+                const char *b = bits[(seed >> 16) % (sizeof bits / sizeof *bits)];
+                size_t bl = strlen(b);
+                if (n + bl < sizeof c.buf - 1) { memcpy(c.buf + n, b, bl); n += bl; }
+            }
+            c.buf[n] = 0;
+            run(ui, build_ced, &c, 3);
+            for (int g = 1; g < 40; g += 7) { cui_code_editor_goto(ui, "ed", g, 1); run(ui, build_ced, &c, 2); }
+            ced_sel(ui, &c, 0, 0);
+            type(ui, &build_ced, &c, "\"");
+            type(ui, &build_ced, &c, "\n");
+            key(ui, &build_ced, &c, CUI_KEY_DELETE, 0);
+            CHECK(c.r.line_count > 0);
+            cui_destroy(ui);
+        }
+}
 /* big texts: the line index, wrap counts and line states are patched by each edit instead of
  * made again each frame. Here edits are checked against the text itself and against an editor
  * that just opened the same text, with the app's revision (nothing read between frames) and
@@ -9436,6 +9531,7 @@ int main(void) {
     test_code_editor_replace();
     test_code_editor_wrap();
     test_code_editor_markdown();
+    test_code_editor_langs();
     test_code_editor_big();
     test_diff();
     test_dials();

@@ -47,6 +47,7 @@ set(CUI_CORE_SOURCES
     src/cui_grid.c
     src/cui_treetable.c
     src/cui_code.c
+    src/cui_code_langs.c
     src/cui_markdown.c
     src/cui_mermaid.c
     src/cui_editor.c

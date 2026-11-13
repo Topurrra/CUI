@@ -56,9 +56,35 @@ static const char *const ty_sql[] = { "integer", "int", "smallint", "bigint", "t
 static const char *const const_sql[] = { "null", "true", "false", NULL };
 static const char *const none[] = { NULL };
 
+/* the name is one of the words, ASCII case as given */
+static bool cui__lang_is(const char *lang, const char *const *names) {
+    for (int k = 0; names[k]; k++) if (!strcmp(lang, names[k])) return true;
+    return false;
+}
+
+/* The languages with a line tokenizer of their own (cui_code_langs.c): name, aliases, mode, whether lines carry state. */
+static const struct { const char *names[5]; int mode; bool multi; } cui__lang_modes[] = {
+    { { "yaml", "yml" }, CUI__LM_YAML, true },
+    { { "toml" }, CUI__LM_TOML, true },
+    { { "ini", "cfg", "conf", "properties" }, CUI__LM_INI, false },
+    { { "xml", "svg", "xaml" }, CUI__LM_XML, true },
+    { { "html", "htm" }, CUI__LM_HTML, true },
+    { { "css", "scss", "less" }, CUI__LM_CSS, true },
+    { { "powershell", "ps1", "pwsh" }, CUI__LM_POWERSHELL, true },
+    { { "csharp", "cs", "c#" }, CUI__LM_CSHARP, true },
+    { { "java" }, CUI__LM_JAVA, true },
+    { { "batch", "bat", "cmd" }, CUI__LM_BATCH, false },
+};
+
 cui__lang cui__lang_for(const char *lang) {
     cui__lang l = { none, none, NULL, NULL, false, false, false, false, false, false };
     if (!lang) return l;
+    for (int k = 0; k < (int)CUI_COUNTOF(cui__lang_modes); k++)
+        if (cui__lang_is(lang, cui__lang_modes[k].names)) {
+            l.mode = cui__lang_modes[k].mode; l.multi = cui__lang_modes[k].multi;
+            if (!strcmp(lang, "scss") || !strcmp(lang, "less")) l.line_comment = "//";   /* the css tokenizer reads it */
+            return l;
+        }
     if (!strcmp(lang, "c") || !strcmp(lang, "cpp") || !strcmp(lang, "c++") || !strcmp(lang, "h")) {
         l.kw = kw_c; l.types = ty_c; l.line_comment = "//"; l.block_comments = true; l.hash_preproc = true;
     } else if (!strcmp(lang, "js") || !strcmp(lang, "ts") || !strcmp(lang, "javascript") || !strcmp(lang, "typescript")) {
@@ -72,7 +98,7 @@ cui__lang cui__lang_for(const char *lang) {
     } else if (!strcmp(lang, "shell") || !strcmp(lang, "sh") || !strcmp(lang, "bash")) {
         l.kw = kw_sh; l.line_comment = "#"; l.no_caps_types = true;
     } else if (!strcmp(lang, "markdown") || !strcmp(lang, "md")) {
-        l.markdown = true;
+        l.markdown = true; l.mode = CUI__LM_MARKDOWN; l.multi = true;
     } else if (!strcmp(lang, "sql")) {
         l.kw = kw_sql; l.types = ty_sql; l.consts = const_sql; l.line_comment = "--"; l.block_comments = true;
         l.no_caps_types = true; l.fold_case = true;
@@ -83,7 +109,7 @@ cui__lang cui__lang_for(const char *lang) {
 }
 
 /* fold: the word matches in any case (the lists are lowercase) */
-static bool cui__in_list(const char *const *list, const char *s, int n, bool fold) {
+bool cui__in_list(const char *const *list, const char *s, int n, bool fold) {
     for (int k = 0; list[k]; k++) {
         if ((int)strlen(list[k]) != n) continue;
         int j = 0;
@@ -97,8 +123,8 @@ static bool cui__in_list(const char *const *list, const char *s, int n, bool fol
     }
     return false;
 }
-static bool cui__ident_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (unsigned char)c >= 0x80; }
-static bool cui__ident_char(char c) { return cui__ident_start(c) || (c >= '0' && c <= '9'); }
+bool cui__ident_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (unsigned char)c >= 0x80; }
+bool cui__ident_char(char c) { return cui__ident_start(c) || (c >= '0' && c <= '9'); }
 
 /* ---- markdown ---------------------------------------------------------- */
 
@@ -372,6 +398,10 @@ int cui__tokenize_md(const char *s, int n, int *state, cui__tok *out, int cap) {
     return m.count;
 }
 
+int cui__tokenize_st(const cui__lang *L, const char *s, int n, int *state, cui__tok *out, int cap) {
+    return L->markdown ? cui__tokenize_md(s, n, state, out, cap) : cui__tokenize_x(L, s, n, state, out, cap);
+}
+
 /* Tokenize one line. *in_block carries an open block comment between lines. */
 int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
     int count = 0, i = 0;
@@ -384,9 +414,9 @@ int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_
         if (i < n) EMIT(i, n - i, TK_TEXT);
         return count;
     }
-    if (L->markdown) {      /* the bool can only say that a block is open */
+    if (L->mode) {      /* the bool can only say that a block is open */
         int ms = *in_block ? 1 : 0;
-        count = cui__tokenize_md(s, n, &ms, out, cap);
+        count = cui__tokenize_st(L, s, n, &ms, out, cap);
         *in_block = ms != 0;
         return count;
     }
@@ -551,7 +581,7 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     float fh = cui__font_line_height(ui, CUI_FONT_MONO, p->size);
     float x0 = r.x + p->pad + p->gutter, y = r.y + p->pad;
     bool block = false;
-    int mdst = CUI__MD_START;
+    int mdst = p->lang.markdown ? CUI__MD_START : 0;
     int line = 1, i = 0;
     cui__tok toks[256];
     while (i <= p->len) {
@@ -574,7 +604,7 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
             float w = cui__text_width(ui, CUI_FONT_MONO, p->size, ln, -1, true);
             cui__draw_text_line(ui, CUI_FONT_MONO, p->size, r.x + p->pad + p->gutter - 16 - w, ty, p->gutter_c, ln, -1, true);
         }
-        int nt = p->lang.markdown ? cui__tokenize_md(p->code + i, e - i, &mdst, toks, 256)
+        int nt = p->lang.multi ? cui__tokenize_st(&p->lang, p->code + i, e - i, &mdst, toks, 256)
                                   : cui__tokenize(&p->lang, p->json, p->code + i, e - i, &block, toks, 256);
         float x = x0;
         for (int k = 0; k < nt; k++) {

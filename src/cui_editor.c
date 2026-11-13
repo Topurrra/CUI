@@ -48,7 +48,7 @@ typedef struct {
 typedef struct {
     int *st; int cap;           /* st[i]: the state before line i, st[n] after the last */
     int n, valid, kept0, kept1;
-    const char *lc; bool md, bt;   /* the language the states are for */
+    const char *lc; int mode; bool bt;   /* the language the states are for */
     bool ok;
 } cui__ed_mc;
 
@@ -84,7 +84,7 @@ typedef struct {
     int pend_a, pend_c, pend_line, pend_col;
     float focus_t;
     cui__ed_wc *wc;             /* wrap cache, only while `.wrap` is on */
-    cui__ed_mc *mc;             /* line states, only for markdown and languages with block comments */
+    cui__ed_mc *mc;             /* line states, for the languages with a state (markdown, yaml, xml...) and those with block comments */
     int aff_pos;                /* a caret at this byte, on a row boundary, shows at the end of the row above (End, a click past the end) */
     cui__ed_ix ix;
     cui__ed_hist hist;
@@ -997,21 +997,20 @@ static bool cui__ed_scan_line(const cui__lang *L, const char *s, int i, int e, b
 static const int *cui__ed_states(cui__ed *E, const cui__lang *L, int upto) {
     cui_ctx *ui = E->ui;
     cui__ed_state *st = E->st;
-    if (!L->markdown && !L->block_comments) return NULL;
+    if (!L->multi && !L->block_comments) return NULL;
     if (!st->mc) { st->mc = cui__alloc(ui, sizeof *st->mc); memset(st->mc, 0, sizeof *st->mc); }
     cui__ed_mc *mc = st->mc;
     int nl = E->nl;
-    if (!mc->ok || mc->n != nl || mc->md != L->markdown || mc->lc != L->line_comment || mc->bt != L->backtick) {
-        mc->ok = true; mc->n = nl; mc->md = L->markdown; mc->lc = L->line_comment; mc->bt = L->backtick;
+    if (!mc->ok || mc->n != nl || mc->mode != L->mode || mc->lc != L->line_comment || mc->bt != L->backtick) {
+        mc->ok = true; mc->n = nl; mc->mode = L->mode; mc->lc = L->line_comment; mc->bt = L->backtick;
         mc->valid = mc->kept0 = mc->kept1 = 0;
     }
     CUI__GROW(ui, mc->st, 0, mc->cap, nl + 1);
     mc->st[0] = L->markdown ? CUI__MD_START : 0;
     upto = CUI_CLAMP(upto, 0, nl);
-    cui__tok toks[64];   /* the states do not depend on the tokens, only fewer are kept */
     for (int i = mc->valid; i < upto; i++) {
         int state = mc->st[i], a = E->ls[i], e = cui__ed_end(E, i);
-        if (L->markdown) cui__tokenize_md(E->buf + a, e - a, &state, toks, 64);
+        if (L->multi) cui__tokenize_st(L, E->buf + a, e - a, &state, NULL, 0);
         else state = cui__ed_scan_line(L, E->buf, a, e, state != 0);
         if (i + 1 >= mc->kept0 && i + 1 < mc->kept1 && mc->st[i + 1] == state) {   /* as before the edit: right down to kept1 */
             mc->valid = mc->kept1 - 1;
@@ -1114,7 +1113,7 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
         int nn = le - ls;
         if (nn + 1 > tok_cap) { tok_cap = nn + 1; toks = cui__frame_alloc(ui, sizeof *toks * (size_t)tok_cap); }
         int nt;
-        if (p->lang.markdown) { int ms = p->mst[k]; nt = cui__tokenize_md(s + ls, nn, &ms, toks, tok_cap); }
+        if (p->lang.multi) { int ms = p->mst[k]; nt = cui__tokenize_st(&p->lang, s + ls, nn, &ms, toks, tok_cap); }
         else nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
         int t0 = 0;
         for (int j = 0; j < R->n; j++) {
@@ -1263,7 +1262,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         if (nn + 1 > tok_cap) { tok_cap = nn + 1; toks = cui__frame_alloc(ui, sizeof *toks * (size_t)tok_cap); }
         bool was_block = block;
         int nt;
-        if (p->lang.markdown) { int ms = p->mst[k]; nt = cui__tokenize_md(s + ls, nn, &ms, toks, tok_cap); }
+        if (p->lang.multi) { int ms = p->mst[k]; nt = cui__tokenize_st(&p->lang, s + ls, nn, &ms, toks, tok_cap); }
         else nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
         int pos = ls, col = 0;
         for (int t = 0; t < nt; t++) {
@@ -2008,9 +2007,9 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
         p->caret_row = f->caret_row;
     }
     p->lang = *L; p->json = json;
-    const int *states = cui__ed_states(E, L, L->markdown ? last : first);   /* only down to the lines in view */
-    p->in_block = states && !L->markdown && states[first];
-    if (L->markdown) p->mst = states + first;
+    const int *states = cui__ed_states(E, L, L->multi ? last : first);   /* only down to the lines in view */
+    p->in_block = states && !L->multi && states[first];
+    if (L->multi) p->mst = states + first;
     p->tab = E->tab;
     p->cursor = e->cursor; p->anchor = e->anchor;
     p->caret_line = f->caret_line; p->caret_col = f->caret_vcol;
@@ -2133,7 +2132,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     f.lang_kind = cui__ed_lang_kind(lang);
     bool json = lang && !strcmp(lang, "json");
     cui__lang L = cui__lang_for(json ? NULL : lang);
-    if (!L.markdown && !L.block_comments) cui__ed_mc_free(ui, st);
+    if (!L.multi && !L.block_comments) cui__ed_mc_free(ui, st);
 
     f.size = cui__fs(ui, o->size > 0 ? o->size : 13);
     f.lh = roundf(f.size * 1.6f);

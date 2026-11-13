@@ -1597,7 +1597,7 @@ CUI_API bool cui_file_picker_ex(cui_ctx *ui, const char *id, bool *open, char *o
  * copy button. Long lines scroll sideways. */
 typedef struct cui_code_opts {
     int _;
-    const char *lang;          /* "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown" ("md") or "text" (no colors); shown in the title bar */
+    const char *lang;          /* "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown" ("md"), "yaml" ("yml"), "toml", "ini" ("cfg", "conf", "properties"), "xml" ("svg", "xaml"), "html", "css" ("scss", "less"), "powershell" ("ps1", "pwsh"), "csharp" ("cs", "c#"), "java", "batch" ("bat", "cmd") or "text" (no colors); shown in the title bar */
     const char *title;         /* e.g. a file name */
     bool line_numbers;         /* a column of line numbers on the left */
     int highlight_from, highlight_to;   /* 1 based line range to emphasize */
@@ -1770,7 +1770,7 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
 typedef struct cui_text_mark { int start, end; int color; } cui_text_mark;
 typedef struct cui_code_editor_opts {
     int _;
-    const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown"; "text" for none */
+    const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown", "yaml", "toml", "ini", "xml", "html", "css", "powershell", "csharp", "java", "batch" (aliases as there); "text" for none */
     cui_size width;            /* default fill */
     float height;              /* default 320; negative fills the space */
     float size;                /* font size, default 13 */

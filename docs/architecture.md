@@ -65,7 +65,7 @@ Components are grouped by family, one family per file, so a change to one compon
 | `cui_instrument.c` | instruments: the dot-matrix chart, chart annotations (also drawn by line and bar charts), the event track, the readout and the dot-matrix display, with the shared axis |
 | `cui_creative.c` | creative controls: the status tag, the ratio slider, and the controls in a control well (gradient slider, step slider, palette strip, aspect ratio picker, option field with action, seed field), with the well they share |
 | `cui_planning.c`, `cui_month.c`, `cui_timeline.c` | kanban, week calendar, gantt, month calendar, timeline editor |
-| `cui_code.c`, `cui_editor.c`, `cui_diff.c`, `cui_hex.c`, `cui_terminal.c`, `cui_markdown.c`, `cui_mermaid.c` | code and text tools; mermaid diagrams in markdown |
+| `cui_code.c`, `cui_code_langs.c`, `cui_editor.c`, `cui_diff.c`, `cui_hex.c`, `cui_terminal.c`, `cui_markdown.c`, `cui_mermaid.c` | code and text tools; mermaid diagrams in markdown |
 | `cui_ai.c`, `cui_voice.c`, `cui_social.c`, `cui_media.c`, `cui_photo.c`, `cui_emoji.c` | AI, voice, conversation, media and image components |
 | `cui_chrome.c`, `cui_dock.c`, `cui_tools.c`, `cui_nodes.c`, `cui_curves.c` | app chrome, docking, tool panels, node and curve editors |
 | `cui_canvas.c` | canvas and bars: the format bar, live cursors and the presence pill, canvas controls, the result card, the selection bar |

@@ -21,7 +21,7 @@
  *   user-facing text                 cui_strings.c (month and weekday names, for translation)
  *   shared widget pieces             cui_widgets.c, cui_controls.c, cui_overlay.c...
  *   text editing primitives          cui_textedit.c (shared with the code editor)
- *   syntax highlighting              cui_code.c (code block, code editor, diff viewer)
+ *   syntax highlighting              cui_code.c (code block, code editor, diff viewer), cui_code_langs.c
  *   layered graph layout             cui_graph.c (dependency graph, mermaid flowcharts)
  *   mermaid diagrams                 cui_mermaid.c (fenced mermaid blocks in markdown)
  *
@@ -805,7 +805,11 @@ typedef struct {
     bool block_comments, hash_preproc, backtick, no_caps_types, plain, markdown;
     bool fold_case;                    /* keywords, types and constants match in any case (SQL) */
     const char *const *consts;         /* more words colored as constants, or NULL */
+    int mode;                          /* CUI__LM_*: a language with its own line tokenizer (markdown, config, markup and C-like ones) */
+    bool multi;                        /* its lines carry an int state (cui__tokenize_st); the code editor caches it per line */
 } cui__lang;
+enum { CUI__LM_NONE, CUI__LM_MARKDOWN, CUI__LM_YAML, CUI__LM_TOML, CUI__LM_INI, CUI__LM_XML, CUI__LM_HTML, CUI__LM_CSS,
+       CUI__LM_POWERSHELL, CUI__LM_CSHARP, CUI__LM_JAVA, CUI__LM_BATCH };
 typedef struct { int start, len; uint8_t kind; } cui__tok;
 #define CUI__TK_COUNT 10   /* token kinds; colors from cui__syntax_colors */
 cui__lang cui__lang_for(const char *lang);
@@ -813,6 +817,14 @@ cui__lang cui__lang_for(const char *lang);
 /* markdown, one line: the multi-line state is an int (0 none); start it at CUI__MD_START on line 0 to find front matter */
 #define CUI__MD_START 5
 int cui__tokenize_md(const char *s, int n, int *state, cui__tok *out, int cap);
+/* One line of any language with a mode (markdown, yaml, toml, ini, xml, html, css, powershell, csharp, java, batch).
+ * *state is the int state between lines: 0 at the start (CUI__MD_START for markdown), kept per line by the code
+ * editor. The tokens cover the line without gaps. cap 0 finds the state only. A caller that has only a bool passes 0 or 1. */
+int cui__tokenize_st(const cui__lang *L, const char *s, int n, int *state, cui__tok *out, int cap);
+int cui__tokenize_x(const cui__lang *L, const char *s, int n, int *state, cui__tok *out, int cap);   /* cui_code_langs.c */
+bool cui__in_list(const char *const *list, const char *s, int n, bool fold);
+bool cui__ident_start(char c);
+bool cui__ident_char(char c);
 int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap);
 /* The same, by language name as the code block takes it ("c", "py", "json"...). */
 int cui__tokenize_lang(const char *lang, const char *s, int n, bool *in_block, cui__tok *out, int cap);
