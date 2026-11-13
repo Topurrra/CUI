@@ -11,7 +11,8 @@
  *   hashing                          cui_core.c
  *   animation                        cui_core.c (springs, tweens) and the motion tokens
  *   fonts and text                   cui_text.c, cui_draw.c
- *   draw list                        cui_draw.c (and the ordered dither primitive)
+ *   draw list                        cui_draw.c (and the ordered dither primitive); moving textures
+ *                                    between renderers, render/cui_render_sw.c
  *   layout tree                      cui_layout.c (cui_node, building and laying out the tree)
  *   per id state                     cui_core.c (cui_state, garbage collection)
  *   interaction                      cui_core.c (hit testing, focus, cui__interact)
@@ -191,6 +192,11 @@ void cui__fonts_upload(cui_ctx *ui);
 cui_font cui__resolve_font(cui_ctx *ui, cui_font f);
 
 /* ---- draw list ---- */
+/* The software renderer (render/cui_render_sw.c) makes each of its textures again in another,
+ * empty renderer, in order, so each keeps its handle there: the app layer moves to OpenGL
+ * once that is ready, and the atlas, emoji and images made before stay valid. */
+struct cui_sw_renderer;
+void cui__sw_move_textures(struct cui_sw_renderer *r, const cui_renderer_iface *to);
 typedef struct cui_xform { float scale, ox, oy, alpha, tx, ty; } cui_xform;
 
 typedef struct cui_draw_list {

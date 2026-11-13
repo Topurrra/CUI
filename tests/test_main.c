@@ -9301,6 +9301,11 @@ static void build_em(cui_ctx *ui, void *u) {
     cui_pop_id(ui);
     cui_pop_id(ui);
 }
+static void build_em_text(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_text(ui, "Ship it \xf0\x9f\x9a\x80 \xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd \xe2\x98\x95", .size = 24);
+}
+
 static void test_emoji(void) {
     printf("emoji: list, search, tones, recent, keys, clicks, font tables\n");
     cui_ctx *ui = new_ctx();
@@ -9407,6 +9412,39 @@ static void test_emoji(void) {
         run(ui, build_em, &c2, 6);   /* draws real bitmaps */
         cui_destroy(ui);
     } else printf("    (no Noto Color Emoji here: font checks skipped)\n");
+#if defined(_WIN32)
+    /* Windows maps the font file instead of reading it: it draws as the same bytes in memory do */
+    char seg[300];
+    const char *win = getenv("WINDIR");
+    snprintf(seg, sizeof seg, "%s\\Fonts\\seguiemj.ttf", win ? win : "C:\\Windows");
+    f = fopen(seg, "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char *bytes = n > 0 ? malloc((size_t)n) : NULL;
+        bool got = bytes && fread(bytes, 1, (size_t)n, f) == (size_t)n;
+        fclose(f);
+        unsigned char *shot[2] = { NULL, NULL };
+        int w = 0, h = 0;
+        for (int k = 0; k < 2 && got; k++) {
+            ui = new_ctx();
+            CHECK(k == 0 ? cui_emoji_font_load_file(ui, seg) : cui_emoji_font_load_memory(ui, bytes, (size_t)n, false));
+            CHECK(cui_emoji_supported(ui, "\xf0\x9f\x98\x80", -1));                       /* grinning face */
+            CHECK(cui_emoji_supported(ui, "\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd", -1));       /* thumbs up, medium tone */
+            run(ui, build_em_text, NULL, 4);
+            const cui_draw_data *dd = cui_get_draw_data(ui);
+            w = dd->width_px; h = dd->height_px;
+            shot[k] = malloc((size_t)w * h * 4);
+            cui_sw_render(g_sw, dd, shot[k], w, h, w * 4, CUI_SW_RGBA);
+            cui_destroy(ui);
+        }
+        if (got) CHECK(shot[0] && shot[1] && !memcmp(shot[0], shot[1], (size_t)w * h * 4));
+        free(shot[0]);
+        free(shot[1]);
+        free(bytes);
+    } else printf("    (no Segoe UI Emoji here: mapped font checks skipped)\n");
+#endif
 }
 
 /* ---- glyph atlas: grows for many sizes, shrinks back when they are gone ---- */
@@ -9440,6 +9478,7 @@ static void test_atlas_shrink(void) {
     at_ctx c = { false };
     run(ui, build_at, &c, 2);
     int w0 = at_w;
+    CHECK(w0 == 512);                    /* a line of text fits the smallest atlas */
     static unsigned char before[900 * 2 * 60 * 2 * 4], after[sizeof before];
     const cui_draw_data *dd = cui_get_draw_data(ui);
     unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
@@ -9463,6 +9502,54 @@ static void test_atlas_shrink(void) {
     run(ui, build_at, &c, 3);
     CHECK(at_w > w0);
     cui_destroy(ui);
+}
+
+/* ---- the app layer's switch from software to OpenGL: textures move with their handles ---- */
+struct cui_sw_renderer;
+void cui__sw_move_textures(struct cui_sw_renderer *r, const cui_renderer_iface *to);
+typedef struct { cui_texture a, b; } mv_ctx;
+static void build_mv(cui_ctx *ui, void *u) {
+    mv_ctx *c = u;
+    cui_column(ui, .pad = 10, .gap = 6) {
+        cui_text(ui, "Moved glyphs 0123456789", .size = 16);
+        cui_image(ui, c->a, .width = CUI_PX(40), .height = CUI_PX(40));
+        cui_image(ui, c->b, .width = CUI_PX(40), .height = CUI_PX(20));
+    }
+}
+static void test_renderer_move(void) {
+    printf("renderer switch: textures move with their handles, the picture stays\n");
+    cui_sw_renderer *from = cui_sw_create(), *to = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(from) });
+    cui_set_viewport(ui, 200, 160, 1);
+    cui_set_reduced_motion(ui, true);
+    static unsigned char pa[8 * 8 * 4], pg[4 * 4 * 4], pb[8 * 4 * 4];
+    for (int i = 0; i < (int)sizeof pa; i++) pa[i] = (unsigned char)(i * 7);
+    for (int i = 0; i < (int)sizeof pb; i++) pb[i] = (unsigned char)(255 - i * 3);
+    memset(pg, 9, sizeof pg);
+    mv_ctx c;
+    c.a = cui_image_create(ui, 8, 8, pa);
+    cui_texture gone = cui_image_create(ui, 4, 4, pg);
+    c.b = cui_image_create(ui, 8, 4, pb);
+    run(ui, build_mv, &c, 2);      /* the glyph atlas comes after them */
+    cui_image_destroy(ui, gone);   /* a free slot between two images */
+    run(ui, build_mv, &c, 1);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    int w = dd->width_px, h = dd->height_px;
+    size_t n = (size_t)w * (size_t)h * 4;
+    unsigned char *p1 = malloc(n), *p2 = malloc(n);
+    cui_sw_render(from, dd, p1, w, h, w * 4, CUI_SW_RGBA);
+    cui_renderer_iface ti = cui_sw_iface(to);
+    cui__sw_move_textures(from, &ti);
+    memset(p2, 0, n);
+    cui_sw_render(to, dd, p2, w, h, w * 4, CUI_SW_RGBA);
+    CHECK(!memcmp(p1, p2, n));     /* the atlas and both images answer to the same handles */
+    /* the free slot moved too: the next texture takes it, as it would have before */
+    CHECK(ti.texture_create(ti.user, 2, 2, CUI_TEXTURE_RGBA8, NULL) == gone);
+    free(p1);
+    free(p2);
+    cui_destroy(ui);
+    cui_sw_destroy(from);
+    cui_sw_destroy(to);
 }
 
 /* ---- software renderer: incremental frames equal full ones ---- */
@@ -9687,6 +9774,7 @@ int main(void) {
     test_terminal();
     test_emoji();
     test_atlas_shrink();
+    test_renderer_move();
     test_sw_incremental();
     test_emoji_release();
     test_emoji_text();

@@ -20,6 +20,7 @@
 #define WM_MOUSEHWHEEL 0x020E
 #endif
 
+#define CUI_GLAPI_WIN32 __stdcall
 typedef HGLRC (WINAPI *PFN_wglCreateContextAttribsARB)(HDC, HGLRC, const int *);
 typedef BOOL (WINAPI *PFN_wglSwapIntervalEXT)(int);
 typedef BOOL (WINAPI *PFN_SetProcessDpiAwarenessContext)(HANDLE);
@@ -47,6 +48,7 @@ typedef struct {
     bool in_size_move;
     BITMAPINFO bmi;
     HANDLE timer;          /* timed waits: high resolution where Windows has it (10 1803 and later) */
+    bool show_pending;     /* shown with the first picture (cui__plat_show) */
 } cui__win32;
 
 static HMODULE cui__opengl32;
@@ -463,10 +465,31 @@ bool cui__plat_init(cui_app *app) {
     return true;
 }
 
+/* Activating a new window costs 50 to 80 ms (Windows sets up text input for it), and showing
+ * it takes the first picture's place on screen before there is one. So a window opened the
+ * usual way is shown when its first picture is ready, without activating, and activated right
+ * after that picture is out. One that starts minimized or maximized (a shortcut's setting)
+ * is shown now, as Windows says, since that changes its size before the first picture. */
 void cui__plat_show(cui_app *app) {
     cui__win32 *w = cui__w(app);
+    STARTUPINFOW si;
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    GetStartupInfoW(&si);
+    WORD how = (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : (WORD)SW_SHOWNORMAL;
+    if (how == SW_SHOWNORMAL || how == SW_SHOW || how == SW_SHOWDEFAULT) { w->show_pending = true; return; }
     ShowWindow(w->hwnd, SW_SHOWDEFAULT);
     UpdateWindow(w->hwnd);
+}
+
+static void cui__win32_show_now(cui__win32 *w) {
+    if (!w->show_pending) return;
+    w->show_pending = false;
+    ShowWindow(w->hwnd, SW_SHOWNA);
+}
+
+static void cui__win32_activate(cui__win32 *w) {
+    if (GetForegroundWindow() != w->hwnd) SetForegroundWindow(w->hwnd);
 }
 
 void cui__plat_shutdown(cui_app *app) {
@@ -490,41 +513,181 @@ void *cui__plat_gl_proc(const char *name) {
     return p;
 }
 
+/* The pixel format OpenGL draws with: 32 bit color with alpha, double buffered. CUI needs no
+ * depth or stencil buffer, but ChoosePixelFormat gives one even when none is asked for (24 + 8
+ * bits on Intel: 4 bytes a pixel of the window, 7 MB for a 1620 x 1080 window). So the same
+ * format without them is taken when the driver has it. */
+static int cui__win32_gl_format(HDC dc, PIXELFORMATDESCRIPTOR *pfd) {
+    memset(pfd, 0, sizeof *pfd);
+    pfd->nSize = sizeof *pfd;
+    pfd->nVersion = 1;
+    pfd->dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd->iPixelType = PFD_TYPE_RGBA;
+    pfd->cColorBits = 32;
+    pfd->cAlphaBits = 8;
+    pfd->iLayerType = PFD_MAIN_PLANE;
+    int pf = ChoosePixelFormat(dc, pfd);
+    PIXELFORMATDESCRIPTOR c, q;
+    if (!pf || !DescribePixelFormat(dc, pf, sizeof c, &c)) return pf;
+    *pfd = c;
+    if (!c.cDepthBits && !c.cStencilBits) return pf;
+    int n = DescribePixelFormat(dc, 1, sizeof q, NULL);
+    for (int i = 1; i <= n; i++) {
+        if (!DescribePixelFormat(dc, i, sizeof q, &q)) break;
+        if (q.dwFlags == c.dwFlags && q.iPixelType == c.iPixelType && q.cColorBits == c.cColorBits && q.cAlphaBits == c.cAlphaBits &&
+            q.cAccumBits == c.cAccumBits && q.cAuxBuffers == c.cAuxBuffers && !q.cDepthBits && !q.cStencilBits) {
+            *pfd = q;
+            return i;
+        }
+    }
+    return pf;
+}
+
+/* An OpenGL 3.3 core context for dc (whose pixel format is set), current on this thread. */
+static HGLRC cui__win32_gl_context(HDC dc) {
+    HGLRC legacy = wglCreateContext(dc);
+    if (!legacy) return NULL;
+    wglMakeCurrent(dc, legacy);
+    PFN_wglCreateContextAttribsARB create = (PFN_wglCreateContextAttribsARB)(void *)wglGetProcAddress("wglCreateContextAttribsARB");
+    if (!create) { wglMakeCurrent(NULL, NULL); wglDeleteContext(legacy); return NULL; }
+    int attrs[] = { WGL_CONTEXT_MAJOR_VERSION_ARB_, 3, WGL_CONTEXT_MINOR_VERSION_ARB_, 3,
+                    WGL_CONTEXT_PROFILE_MASK_ARB_, WGL_CONTEXT_CORE_PROFILE_BIT_ARB_, 0 };
+    HGLRC ctx = create(dc, NULL, attrs);
+    wglMakeCurrent(NULL, NULL);
+    wglDeleteContext(legacy);
+    if (!ctx) return NULL;
+    if (!wglMakeCurrent(dc, ctx)) { wglDeleteContext(ctx); return NULL; }
+    return ctx;
+}
+
+static void cui__win32_swap_interval(bool vsync) {
+    PFN_wglSwapIntervalEXT swap = (PFN_wglSwapIntervalEXT)(void *)wglGetProcAddress("wglSwapIntervalEXT");
+    if (swap) swap(vsync ? 1 : 0);
+}
+
 bool cui__plat_gl_create(cui_app *app, bool vsync) {
     cui__win32 *w = cui__w(app);
     PIXELFORMATDESCRIPTOR pfd;
-    memset(&pfd, 0, sizeof pfd);
-    pfd.nSize = sizeof pfd;
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cAlphaBits = 8;
-    pfd.iLayerType = PFD_MAIN_PLANE;
-    int pf = ChoosePixelFormat(w->hdc, &pfd);
+    int pf = cui__win32_gl_format(w->hdc, &pfd);
     if (!pf || !SetPixelFormat(w->hdc, pf, &pfd)) return false;
-    HGLRC legacy = wglCreateContext(w->hdc);
-    if (!legacy) return false;
-    wglMakeCurrent(w->hdc, legacy);
-    PFN_wglCreateContextAttribsARB create = (PFN_wglCreateContextAttribsARB)(void *)wglGetProcAddress("wglCreateContextAttribsARB");
-    if (!create) { wglMakeCurrent(NULL, NULL); wglDeleteContext(legacy); return false; }
-    int attrs[] = { WGL_CONTEXT_MAJOR_VERSION_ARB_, 3, WGL_CONTEXT_MINOR_VERSION_ARB_, 3,
-                    WGL_CONTEXT_PROFILE_MASK_ARB_, WGL_CONTEXT_CORE_PROFILE_BIT_ARB_, 0 };
-    HGLRC ctx = create(w->hdc, NULL, attrs);
-    wglMakeCurrent(NULL, NULL);
-    wglDeleteContext(legacy);
+    HGLRC ctx = cui__win32_gl_context(w->hdc);
     if (!ctx) return false;
-    if (!wglMakeCurrent(w->hdc, ctx)) { wglDeleteContext(ctx); return false; }
     w->glrc = ctx;
-    PFN_wglSwapIntervalEXT swap = (PFN_wglSwapIntervalEXT)(void *)wglGetProcAddress("wglSwapIntervalEXT");
-    if (swap) swap(vsync ? 1 : 0);
+    cui__win32_swap_interval(vsync);
     return true;
 }
 
-void cui__plat_gl_swap(cui_app *app) { SwapBuffers(cui__w(app)->hdc); }
+/* OpenGL set up on a thread of its own. The context is made for a small hidden window with
+ * the pixel format the app's window gets later, the renderer (its shaders) is made and draws
+ * once, which is when drivers finish compiling; then the context is let go, and the app's
+ * thread takes it for its window (a context works with any window of the same format). */
+typedef struct {
+    HANDLE thread;
+    volatile LONG done;    /* set by the thread when its work is over (it may still be exiting) */
+    DWORD app_thread;
+    int pf;
+    PIXELFORMATDESCRIPTOR pfd;
+    HGLRC ctx;
+    cui_gl_renderer *gl;
+} cui__win32_gl_start;
+
+static DWORD WINAPI cui__win32_gl_thread(LPVOID user) {
+    cui__win32_gl_start *s = user;
+    HINSTANCE inst = GetModuleHandleW(NULL);
+    WNDCLASSEXW wc;
+    memset(&wc, 0, sizeof wc);
+    wc.cbSize = sizeof wc;
+    wc.style = CS_OWNDC;
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = inst;
+    wc.lpszClassName = L"CUIGLStart";
+    RegisterClassExW(&wc);   /* fails harmlessly when a window made it before */
+    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"", WS_POPUP, 0, 0, 1, 1, NULL, NULL, inst, NULL);
+    HDC dc = hwnd ? GetDC(hwnd) : NULL;
+    s->pf = dc ? cui__win32_gl_format(dc, &s->pfd) : 0;
+    if (s->pf && SetPixelFormat(dc, s->pf, &s->pfd)) s->ctx = cui__win32_gl_context(dc);
+    if (s->ctx) {
+        s->gl = cui_gl_create(cui__plat_gl_proc);
+        if (s->gl && cui_gl_is_software(s->gl)) {
+            /* OpenGL drawn on the CPU: the software renderer, which redraws only what changed, is cheaper */
+            cui_gl_destroy(s->gl);
+            s->gl = NULL;
+        }
+        if (s->gl) {
+            /* one small draw: drivers compile the shaders for real on the first one */
+            cui_vertex v[3];
+            memset(v, 0, sizeof v);
+            v[1].x = 1; v[2].y = 1;
+            uint32_t idx[3] = { 0, 1, 2 };
+            cui_draw_cmd cmd;
+            memset(&cmd, 0, sizeof cmd);
+            cmd.clip.w = 1; cmd.clip.h = 1; cmd.index_count = 3;
+            cui_draw_data dd;
+            memset(&dd, 0, sizeof dd);
+            dd.vertices = v; dd.vertex_count = 3; dd.indices = idx; dd.index_count = 3;
+            dd.commands = &cmd; dd.command_count = 1; dd.width_px = 1; dd.height_px = 1;
+            cui_gl_render(s->gl, &dd, true);
+            void (CUI_GLAPI_WIN32 *finish)(void) = (void (CUI_GLAPI_WIN32 *)(void))cui__plat_gl_proc("glFinish");
+            if (finish) finish();
+        }
+        wglMakeCurrent(NULL, NULL);
+        if (!s->gl) { wglDeleteContext(s->ctx); s->ctx = NULL; }
+    }
+    if (dc) ReleaseDC(hwnd, dc);
+    if (hwnd) DestroyWindow(hwnd);
+    InterlockedExchange(&s->done, 1);
+    PostThreadMessageW(s->app_thread, WM_NULL, 0, 0);   /* wakes the app's loop */
+    return 0;
+}
+
+bool cui__plat_gl_begin_async(cui_app *app) {
+    cui__win32_gl_start *s = calloc(1, sizeof *s);
+    if (!s) return false;
+    MSG msg;
+    PeekMessageW(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);   /* this thread has a message queue, for the wake up */
+    s->app_thread = GetCurrentThreadId();
+    s->thread = CreateThread(NULL, 0, cui__win32_gl_thread, s, 0, NULL);
+    if (!s->thread) { free(s); return false; }
+    app->gl_start = s;
+    return true;
+}
+
+bool cui__plat_gl_end_async(cui_app *app, bool wait, bool vsync, cui_gl_renderer **out) {
+    cui__win32_gl_start *s = app->gl_start;
+    *out = NULL;
+    if (!s) return true;
+    if (!wait && !InterlockedCompareExchange(&s->done, 0, 0)) return false;
+    WaitForSingleObject(s->thread, INFINITE);
+    CloseHandle(s->thread);
+    cui__win32 *w = cui__w(app);
+    if (s->ctx) {
+        /* the window has no pixel format yet: software pictures are plain GDI */
+        bool ok = w && SetPixelFormat(w->hdc, s->pf, &s->pfd) && wglMakeCurrent(w->hdc, s->ctx);
+        if (ok) {
+            w->glrc = s->ctx;
+            cui__win32_swap_interval(vsync);
+            *out = s->gl;
+        } else {
+            wglDeleteContext(s->ctx);   /* frees what the renderer made; its small struct is left (a failure path) */
+        }
+    }
+    free(s);
+    app->gl_start = NULL;
+    return true;
+}
+
+void cui__plat_gl_swap(cui_app *app) {
+    cui__win32 *w = cui__w(app);
+    bool first = w->show_pending;
+    cui__win32_show_now(w);
+    SwapBuffers(w->hdc);
+    if (first) cui__win32_activate(w);
+}
 
 void cui__plat_present(cui_app *app, const void *bgra, int width, int height, int stride) {
     cui__win32 *w = cui__w(app);
+    bool first = w->show_pending;
+    cui__win32_show_now(w);
     BITMAPINFO *bmi = &w->bmi;
     memset(bmi, 0, sizeof *bmi);
     bmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -533,7 +696,7 @@ void cui__plat_present(cui_app *app, const void *bgra, int width, int height, in
     bmi->bmiHeader.biPlanes = 1;
     bmi->bmiHeader.biBitCount = 32;
     bmi->bmiHeader.biCompression = BI_RGB;
-    SetDIBitsToDevice(w->hdc, 0, 0, (DWORD)width, (DWORD)height, 0, 0, 0, (UINT)height, bgra, bmi, DIB_RGB_COLORS);
+    if (first) cui__win32_activate(w);
 }
 
 void cui__plat_metrics(cui_app *app, float *wpt, float *hpt, float *scale, int *fb_w, int *fb_h) {

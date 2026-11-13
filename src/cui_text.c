@@ -123,7 +123,9 @@ struct cui_font_data {
     float *kern_ascii;                 /* 95*95, em units, lazily built */
 };
 
-#define CUI_ATLAS_MIN 1024
+/* The glyph atlas starts at 512 x 512 (256 KB, and as much again on the GPU) and doubles when
+ * full, keeping every glyph where it is; it shrinks back when fewer glyphs are in use. */
+#define CUI_ATLAS_MIN 512
 #define CUI_ATLAS_MAX 4096
 
 static cui_font_data *cui__fd(cui_ctx *ui, cui_font f) {

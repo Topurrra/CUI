@@ -221,3 +221,7 @@ double cui__plat_refresh_hz(cui_app *app) {
 }
 
 void cui__plat_gl_release(cui_app *app) { (void)app; }   /* not used: these keep OpenGL */
+
+/* OpenGL is set up on the app's thread before the first frame (see cui_app_win32.c for the other way) */
+bool cui__plat_gl_begin_async(cui_app *app) { (void)app; return false; }
+bool cui__plat_gl_end_async(cui_app *app, bool wait, bool vsync, cui_gl_renderer **out) { (void)app; (void)wait; (void)vsync; *out = NULL; return true; }

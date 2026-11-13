@@ -108,6 +108,18 @@ Ten simulated minutes of each app, run one at a time on an otherwise idle machin
 - A dialog fading in over a dimmed window took up to 320 ms a frame on one thread at 2560×1600, almost all of it in the dialog's soft shadow and the dim layer. Shadow insides, long translucent runs and the shadow falloff are now cheap, and the worst frame is about 60 ms.
 - Every Windows app carried the emoji picker and the PNG decoder (70 KB) because the core called into the emoji code, and MinGW and MSVC drop unused code by whole files. The core now reaches it through a hook set when emoji are first used.
 
+### Starting
+
+A window should show its first frame quickly. On Windows, with the Auto renderer:
+
+- **OpenGL starts on another thread.** Loading the GPU driver, making the context and compiling the shaders take 150 to 200 ms on an Intel laptop, before anything could be drawn. The app's thread draws the first frames in software meanwhile; the other thread makes the context for a small hidden window of the same pixel format, makes the renderer, draws once (drivers compile for real on the first draw) and lets the context go, and the app's thread takes it for its window. The textures made so far (the glyph atlas, emoji, images) move to OpenGL under the same handles. Screenshots (`CUI_SCREENSHOT`), hidden windows and an explicit renderer start the old way.
+- **The window shows with its first frame.** It is shown without activating once the first frame is ready, and activated right after: activating a new window costs Windows 50 to 80 ms (it sets up text input), which used to come before the first frame. A shortcut that starts the app minimized or maximized still shows it at once.
+- **The first frame waits for nothing:** no frame pacing and no asking for the refresh rate (15 ms the first time) before it.
+
+Measured on that laptop (Windows 11, Intel graphics, 150% scale) with mdr and ed, two apps on CUI: from the process starting to the first frame on screen, timed inside the process, about 290 ms became 55 to 95 ms; timed from a script that starts the process and waits for its window, about 220 ms became about 115 ms. What is left is Windows: starting the process and loading its DLLs (20 to 40 ms), making the window (10 to 20 ms), then building and drawing the frame (10 to 20 ms).
+
+Memory there is mostly the GPU driver: a window of that size with an OpenGL 3.3 context and nothing drawn has a working set of 52 to 69 MB (depending on the pixel format), against 12 MB without OpenGL. CUI asks for no depth or stencil buffer (the driver used to add a 24 + 8 bit one, 7 to 14 MB), the glyph atlas starts at 512 x 512, and the system emoji font is mapped rather than read, so its pages are shared with the system's file cache (Segoe UI Emoji took 12 MB of the app's own memory once an emoji showed). An idle app's working set went from about 76 to about 69 MB; its own allocations are a few MB. When memory matters more than GPU offload, the software renderer keeps the same apps near 20 MB.
+
 ## What keeps it low
 
 - **Nothing happens without a reason.** With no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that wait (the caret, tooltips, toasts) set `cui_next_wakeup`, and `cui_request_wakeup` does the same for an app's own timers.

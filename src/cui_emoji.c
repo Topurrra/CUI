@@ -4,6 +4,9 @@
  * sequences (skin tones, joined people, flags, keycaps), and the color formats
  * in use: sbix and CBDT bitmaps (PNG) and COLR version 0 layers. A font is read
  * from its file as needed, so a big one costs only the tables kept in memory.
+ * On Windows the file is mapped instead: its pages are shared with the system's
+ * file cache, and only the ones read count (Segoe UI Emoji is drawn from outlines,
+ * which stb_truetype wants in memory: read, it took 12 MB of the app's own).
  * Drawn emoji go to one texture, cell by cell, and the least recently used
  * cell is reused. The picker's list (names, groups, versions) is built in,
  * compressed, and inflated the first time it is needed. */
@@ -11,6 +14,15 @@
 #include "cui_emoji_data.h"
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #define CUI__EM_ATLAS_MAX 1024
 #define CUI__EM_IDLE 600   /* frames without an emoji before the texture is let go */
@@ -24,6 +36,7 @@ typedef struct { uint32_t text, name; uint8_t len, name_len, group, version; boo
 typedef struct cui__emoji {
     /* the font */
     unsigned char *mem; size_t size; bool owned;
+    bool mapped;                            /* mem is the file mapped read only (Windows) */
     FILE *file;
     uint32_t base;                          /* the font inside a collection */
     uint8_t *cmap; uint32_t cmap_len, cmap_sub; int cmap_fmt;
@@ -76,13 +89,45 @@ static uint8_t *cui__em_table(cui_ctx *ui, cui__emoji *e, uint32_t off, uint32_t
     return t;
 }
 
+/* The font file mapped read only, or NULL (then it is read as needed). */
+static unsigned char *cui__em_map(const char *path, size_t *size) {
+#if defined(_WIN32)
+    WCHAR wpath[1024];
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wpath, 1024)) return NULL;
+    HANDLE f = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return NULL;
+    LARGE_INTEGER n;
+    HANDLE m = NULL;
+    if (GetFileSizeEx(f, &n) && n.QuadPart >= 12 && n.QuadPart <= 0x7FFFFFFF)
+        m = CreateFileMappingW(f, NULL, PAGE_READONLY, 0, 0, NULL);
+    CloseHandle(f);   /* the mapping keeps the file open */
+    if (!m) return NULL;
+    void *p = MapViewOfFile(m, FILE_MAP_READ, 0, 0, 0);
+    CloseHandle(m);   /* and the view keeps the mapping */
+    if (p) *size = (size_t)n.QuadPart;
+    return (unsigned char *)p;
+#else
+    (void)path; (void)size;
+    return NULL;
+#endif
+}
+
+static void cui__em_unmap(unsigned char *p) {
+#if defined(_WIN32)
+    if (p) UnmapViewOfFile(p);
+#else
+    (void)p;
+#endif
+}
+
 static void cui__em_close_font(cui_ctx *ui, cui__emoji *e) {
     cui__free(ui, e->cmap); cui__free(ui, e->gsub); cui__free(ui, e->cblc); cui__free(ui, e->colr); cui__free(ui, e->cpal);
     cui__free(ui, e->tt);
-    if (e->owned) cui__free(ui, e->mem);
+    if (e->mapped) cui__em_unmap(e->mem);
+    else if (e->owned) cui__free(ui, e->mem);
     if (e->file) fclose(e->file);
     e->cmap = e->gsub = e->cblc = e->colr = e->cpal = NULL; e->tt = NULL; e->mem = NULL; e->file = NULL;
-    e->owned = e->loaded = e->mono_font = false; e->sbix_n = 0; e->sbix = e->cbdt = 0; e->size = 0;
+    e->owned = e->mapped = e->loaded = e->mono_font = false; e->sbix_n = 0; e->sbix = e->cbdt = 0; e->size = 0;
     for (int i = 0; i < e->nslots; i++) e->slots[i].state = 0;   /* drawn with the old font */
     e->avail_font = false;
 }
@@ -229,6 +274,15 @@ bool cui_emoji_font_load_memory(cui_ctx *ui, const void *data, size_t size, bool
 bool cui_emoji_font_load_file(cui_ctx *ui, const char *path) {
     cui__emoji *e = cui__em(ui);
     if (!e || !path) return false;
+    size_t mapped_size = 0;
+    unsigned char *mapped = cui__em_map(path, &mapped_size);
+    if (mapped) {
+        cui__em_close_font(ui, e);
+        e->mem = mapped; e->size = mapped_size; e->mapped = true;
+        if (!cui__em_open(ui, e)) { cui__em_close_font(ui, e); return false; }
+        ui->settle_frames = CUI_MAX(ui->settle_frames, 2);
+        return true;
+    }
     FILE *f = fopen(path, "rb");
     if (!f) return false;
     if (fseek(f, 0, SEEK_END)) { fclose(f); return false; }

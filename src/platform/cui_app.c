@@ -19,6 +19,35 @@ static void cui__app_make_software(cui_app *app) {
     cui_set_renderer(app->ui, &iface);
 }
 
+/* OpenGL that was being set up on another thread is ready: from the next frame on it draws.
+ * The textures made so far move to it under the same handles. False while it is not ready. */
+static bool cui__app_take_gl(cui_app *app, bool wait) {
+    cui_gl_renderer *gl = NULL;
+    if (!cui__plat_gl_end_async(app, wait, !app->desc.no_vsync, &gl)) return false;
+    app->gl_starting = false;
+    if (!gl) return true;   /* no usable OpenGL: software goes on */
+    cui_renderer_iface iface = cui_gl_iface(gl);
+    cui__sw_move_textures(app->sw, &iface);
+    app->ui->renderer = iface;   /* not cui_set_renderer: that would drop the atlas the handles point to */
+    app->gl = gl;
+    app->software = false;
+    cui_sw_destroy(app->sw);
+    app->sw = NULL;
+    free(app->sw_pixels);
+    app->sw_pixels = NULL;
+    app->sw_w = app->sw_h = 0;
+    app->pace_frames = app->pace_fast = 0;
+    cui_request_redraw(app->ui);
+    return true;
+}
+
+/* An app that could not be made: the OpenGL thread is waited for and its work dropped. */
+static void cui__app_drop_gl_start(cui_app *app) {
+    cui_gl_renderer *gl = NULL;
+    if (app->gl_starting && cui__plat_gl_end_async(app, true, false, &gl)) cui_gl_destroy(gl);
+    app->gl_starting = false;
+}
+
 cui_app *cui_app_create(const cui_app_desc *desc) {
     cui_app *app = calloc(1, sizeof *app);
     if (!app) return NULL;
@@ -45,20 +74,26 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     for (int i = 0; i < CUI_ACCENT_COUNT; i++)
         if (cui__env_is("CUI_ACCENT", accents[i])) d->accent = (cui_accent)i;
     d->theme = mode;
+    /* Auto: OpenGL is set up on another thread while the first pictures are drawn in software,
+     * so the window shows without waiting for the driver. Tests and screenshots, and an app or
+     * user that asks for a renderer, get it from the first frame. */
+    bool want_gl = d->renderer != CUI_RENDERER_SOFTWARE && !cui__env_is("CUI_RENDERER", "software");
+    if (want_gl && d->renderer == CUI_RENDERER_AUTO && !getenv("CUI_RENDERER") && !getenv("CUI_SCREENSHOT") && !d->hidden)
+        app->gl_starting = cui__plat_gl_begin_async(app);
     cui_ctx_desc cd;
     memset(&cd, 0, sizeof cd);
     cd.theme = mode;
     cd.accent = d->accent;
     app->ui = cui_create(&cd);
-    if (!app->ui) { free(app); return NULL; }
+    if (!app->ui) { cui__app_drop_gl_start(app); free(app); return NULL; }
     if (!cui__plat_init(app)) {
+        cui__app_drop_gl_start(app);
         fprintf(stderr, "cui: could not create a window (%s backend)\n", cui__plat_name());
         cui_destroy(app->ui);
         free(app);
         return NULL;
     }
-    bool want_gl = d->renderer != CUI_RENDERER_SOFTWARE && !cui__env_is("CUI_RENDERER", "software");
-    if (want_gl && cui__plat_gl_create(app, !d->no_vsync)) {
+    if (!app->gl_starting && want_gl && cui__plat_gl_create(app, !d->no_vsync)) {
         app->gl = cui_gl_create(cui__plat_gl_proc);
         /* OpenGL drawn on the CPU (a virtual machine, a remote session) costs several times
          * what the software renderer does, as that one redraws only what changed. Where the
@@ -102,6 +137,7 @@ void cui_app_destroy(cui_app *app) {
     if (!app) return;
     if (cui__current_app == app) cui__current_app = NULL;
     if (app->in_frame) { cui_end_frame(app->ui); app->in_frame = false; }
+    if (app->gl_starting) cui__app_take_gl(app, true);   /* then the thread is done and the context is this thread's */
     /* release textures while the GL context still exists */
     cui_set_renderer(app->ui, NULL);
     if (app->gl) cui_gl_destroy(app->gl);
@@ -233,10 +269,11 @@ bool cui_app_frame(cui_app *app) {
     if (app->desc.continuous || cui_needs_redraw(ui) || !app->presented_once) {
         /* Animation frames come at the display's rate. With vsync the swap waits for it; the
          * software renderer, and drivers that ignore the swap interval (software GL, settings
-         * that force vsync off), are paced by the clock instead of drawing frames nobody sees. */
+         * that force vsync off), are paced by the clock instead of drawing frames nobody sees.
+         * The first picture waits for nothing (asking for the refresh rate can take 15 ms). */
         timeout = 0;
         double now = cui__plat_now();
-        if (app->hz <= 0 || now - app->hz_checked > 2.0) {   /* some clocks start at 0 */
+        if (app->presented_once && (app->hz <= 0 || now - app->hz_checked > 2.0)) {   /* some clocks start at 0 */
             double hz = cui__plat_refresh_hz(app);
             app->hz = hz >= 24 && hz <= 1000 ? hz : 60;
             app->hz_checked = now;
@@ -252,7 +289,7 @@ bool cui_app_frame(cui_app *app) {
                 app->pace_frames = 0;
             }
         }
-        if (!app->gl || app->desc.no_vsync || app->vsync_off) {
+        if (app->presented_once && (!app->gl || app->desc.no_vsync || app->vsync_off)) {
             /* one frame per period, counted from when the last one began; events that come
              * in the meantime are taken in but do not start the frame early */
             double until = app->last_time + 1.0 / (app->desc.no_vsync && app->hz < 120 ? 120 : app->hz);
@@ -265,8 +302,10 @@ bool cui_app_frame(cui_app *app) {
         float wake = cui_next_wakeup(ui);
         timeout = wake >= 0 ? wake : -1;
     }
+    if (app->gl_starting && (timeout < 0 || timeout > 0.1)) timeout = 0.1;   /* the thread wakes the loop too; this is in case it cannot */
     cui__plat_wait(app, timeout);
     if (!app->running) return false;
+    if (app->gl_starting) cui__app_take_gl(app, false);
     cui__app_begin(app);
     return true;
 }

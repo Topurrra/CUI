@@ -11,6 +11,8 @@ struct cui_app {
     cui_app_desc desc;
     char title[256];
     cui_gl_renderer *gl;
+    bool gl_starting;          /* OpenGL is being set up on another thread; software draws meanwhile */
+    void *gl_start;            /* backend state of that */
     cui_sw_renderer *sw;
     uint8_t *sw_pixels;
     int sw_w, sw_h;
@@ -43,6 +45,14 @@ void *cui__plat_gl_proc(const char *name);
 void cui__plat_gl_swap(cui_app *app);
 double cui__plat_refresh_hz(cui_app *app);   /* refresh rate of the window's display, 0 when unknown */
 void cui__plat_gl_release(cui_app *app);   /* drop the GL context: the window goes on with software pictures */
+/* OpenGL set up on another thread while the first pictures are drawn in software, so the
+ * window shows sooner: loading the driver and compiling the shaders take 100 to 200 ms on
+ * some machines. Begin returns false where the backend cannot (then cui__plat_gl_create
+ * is used). End returns false while the thread is still busy (only when wait is false);
+ * when it returns true, *out is the renderer with its context current on this thread, or
+ * NULL when there is no usable hardware OpenGL. */
+bool cui__plat_gl_begin_async(cui_app *app);
+bool cui__plat_gl_end_async(cui_app *app, bool wait, bool vsync, cui_gl_renderer **out);
 void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride);
 /* software: shows only the part (x, y, pw, ph) of the buffer that changed; false when the
  * backend cannot, and the whole buffer is shown instead */

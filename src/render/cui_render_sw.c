@@ -109,6 +109,18 @@ static void cui__sw_tex_destroy(void *user, cui_texture tex) {
     r->tex[slot].used = false;
 }
 
+void cui__sw_move_textures(cui_sw_renderer *r, const cui_renderer_iface *to) {
+    if (!r || !to || !to->texture_create) return;
+    /* free slots are made too, then let go, so the ones after them keep their numbers */
+    for (int i = 0; i < r->tex_count; i++) {
+        const cui__sw_tex *t = &r->tex[i];
+        if (t->used) to->texture_create(to->user, t->w, t->h, t->fmt, t->data);
+        else to->texture_create(to->user, 1, 1, CUI_TEXTURE_R8, NULL);
+    }
+    for (int i = 0; i < r->tex_count; i++)
+        if (!r->tex[i].used && to->texture_destroy) to->texture_destroy(to->user, (cui_texture)(i + 1));
+}
+
 static int cui__cpu_count(void) {
 #if defined(_WIN32)
     SYSTEM_INFO si;
