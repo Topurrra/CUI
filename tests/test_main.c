@@ -8115,6 +8115,154 @@ static void test_code_editor_big(void) {
     c.big = NULL; c.cap = 0;
 }
 
+
+/* A text of n lines between braces: code (md: with a code fence every 9th line), carriage
+ * returns at the line ends if asked. */
+static char *ced_gen(int n, bool cr, bool md, int seed) {
+    char *t = malloc((size_t)n * 56 + 16), *o = t;
+    const char *eol = cr ? "\r\n" : "\n";
+    o += sprintf(o, "{%s", eol);
+    for (int i = 0; i < n; i++) {
+        if (md && i % 9 == 4) o += sprintf(o, "```%s", eol);
+        else o += sprintf(o, "x%d = tile(%d, \"s\"); /* %d */%s", i, i + seed, seed, eol);
+    }
+    sprintf(o, "}%s", eol);
+    return t;
+}
+/* Replacing (almost) the whole text with cui_code_editor_edit: one undo step each way, the
+ * caret as asked, and the index, find, go to line, wrapping, colors and brackets right after. */
+static void test_code_editor_replace_all(void) {
+    printf("code editor: replacing the whole text is one undo step and every cache follows\n");
+    static ced_ctx c, fresh;
+    static const int sizes[] = { 30, 12000 };   /* under and over the size past which the new text is kept as it is */
+    for (int variant = 0; variant < 16; variant++) {
+        int lines = sizes[variant & 1];
+        bool wrap = (variant & 2) != 0, md = (variant & 4) != 0, cr = (variant & 8) != 0;
+        cui_ctx *ui = new_ctx(), *ui2 = new_ctx();
+        memset(&c, 0, sizeof c);
+        c.lang = md ? "markdown" : "c";
+        c.wrap = wrap;
+        c.rev = 3;
+        c.cap = 4 << 20;
+        c.big = malloc(c.cap);
+        char *old_t = ced_gen(3000, false, md, 1), *new_t = ced_gen(lines, cr, md, 2), *want = ced_gen(lines, false, md, 2);
+        strcpy(c.big, old_t);
+        int old_len = (int)strlen(old_t), want_len = (int)strlen(want);
+        int old_lines = ced_count_lines(old_t), want_lines = ced_count_lines(want);
+        run(ui, build_ced, &c, 2);
+        cui_code_editor_goto(ui, "ed", 1500, 1);
+        run(ui, build_ced, &c, 2);
+        CHECK(c.r.length == old_len && c.r.line_count == old_lines);
+        c.any_changed = false;
+
+        cui_code_editor_edit(ui, "ed", 0, old_len, new_t, -1, -1);
+        run(ui, build_ced, &c, 2);
+        bool same = strcmp(c.big, want) == 0;
+        CHECK(same);   /* carriage returns are left out */
+        CHECK(c.any_changed && c.r.length == want_len && c.r.line_count == want_lines);
+        CHECK(c.r.cursor == want_len && c.r.anchor == want_len);   /* after the new text */
+
+        /* the caret and selection as the edit asks */
+        cui_code_editor_select(ui, "ed", 0, 0);
+        run(ui, build_ced, &c, 1);
+        CHECK(c.r.cursor == 0 && c.r.bracket == 0 && c.r.bracket_match == want_len - 2);   /* the braces at the ends pair up */
+
+        /* find, go to line, wrapped rows and colors agree with an editor that opened this text */
+        cui_code_editor_find(ui, "ed", "tile");
+        run(ui, build_ced, &c, 2);
+        CHECK(c.r.find_matches == ced_count_hits(want, "tile"));
+        cui_code_editor_find(ui, "ed", NULL);
+        run(ui, build_ced, &c, 1);
+        int target = 1 + lines / 2;
+        cui_code_editor_goto(ui, "ed", target, 1);
+        run(ui, build_ced, &c, 2);
+        CHECK(c.r.cursor == ced_line_start(want, target));
+        unsigned a1[16], a2[16];
+        int n1 = ced_text_colors(ui, a1, 16);
+        memcpy(&fresh, &c, sizeof c);
+        fresh.rev = 9;
+        run(ui2, build_ced, &fresh, 2);
+        cui_code_editor_goto(ui2, "ed", target, 1);
+        run(ui2, build_ced, &fresh, 2);
+        int n2 = ced_text_colors(ui2, a2, 16);
+        CHECK(ced_colors_within(a1, n1, a2, n2) && ced_colors_within(a2, n2, a1, n1));
+        if (wrap) CHECK(ced_walk_down(ui, &c, 25) == ced_walk_down(ui2, &fresh, 25));
+        cui_code_editor_select(ui, "ed", 0, 0);
+        key(ui, build_ced, &c, CUI_KEY_END, 0);
+        CHECK(c.r.cursor == 1);   /* the first line is "{" */
+
+        /* one undo step restores the old text (also the carriage returns it never had), redo the new one */
+        key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, old_t) == 0 && c.r.length == old_len && c.r.line_count == old_lines);
+        cui_code_editor_goto(ui, "ed", 1500, 1);
+        run(ui, build_ced, &c, 2);
+        CHECK(c.r.cursor == ced_line_start(old_t, 1500));
+        cui_code_editor_find(ui, "ed", "tile");
+        run(ui, build_ced, &c, 2);
+        CHECK(c.r.find_matches == ced_count_hits(old_t, "tile"));
+        cui_code_editor_find(ui, "ed", NULL);
+        ced_sel(ui, &c, 0, 0);   /* the editor has the focus again */
+        key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, old_t) == 0);   /* nothing further to undo */
+        key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, want) == 0 && c.r.length == want_len && c.r.line_count == want_lines);
+        key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, want) == 0);
+        key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, old_t) == 0);
+        /* typing after an undo drops the redo, and the new text is a separate undo step */
+        cui_code_editor_select(ui, "ed", 0, 0);
+        run(ui, build_ced, &c, 1);
+        type(ui, build_ced, &c, "q");
+        CHECK(c.big[0] == 'q' && c.r.length == old_len + 1);
+        key(ui, build_ced, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+        CHECK(c.big[0] == 'q' && c.r.length == old_len + 1);
+
+        /* a selection asked for, and a replace of a middle part keeps the rest */
+        cui_code_editor_edit(ui, "ed", 0, c.r.length, new_t, 5, 9);
+        run(ui, build_ced, &c, 2);
+        CHECK(strcmp(c.big, want) == 0 && c.r.anchor == 5 && c.r.cursor == 9);
+        int cut = ced_line_start(want, 10);
+        cui_code_editor_edit(ui, "ed", cut, want_len - 2, "mid\r\nmid\r\n", -1, -1);
+        run(ui, build_ced, &c, 2);
+        CHECK(strncmp(c.big + cut, "mid\nmid\n}", 9) == 0 && c.r.line_count == 13);
+        key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, want) == 0 && c.r.line_count == want_lines);
+        key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(c.big[0] == 'q' && c.r.length == old_len + 1);   /* back before the whole replace */
+
+        /* the app swaps the text and gives a new revision: everything is made again, the history goes */
+        char *other = ced_gen(lines + 7, false, md, 4);
+        strcpy(c.big, other);
+        c.rev = 4;
+        run(ui, build_ced, &c, 2);
+        CHECK(c.r.length == (int)strlen(other) && c.r.line_count == ced_count_lines(other));
+        key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+        CHECK(strcmp(c.big, other) == 0);
+        free(other);
+
+        free(old_t); free(new_t); free(want);
+        free(c.big);
+        c.big = NULL; c.cap = 0;
+        cui_destroy(ui2);
+        cui_destroy(ui);
+    }
+
+    /* an edit too big for the buffer is refused whole, and the pending text is dropped */
+    cui_ctx *ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    ced_text(&c, "0123456789");
+    c.cap = 40;
+    run(ui, build_ced, &c, 1);
+    char *huge = ced_gen(30, true, false, 1);
+    c.any_refused = false;
+    cui_code_editor_edit(ui, "ed", 0, 10, huge, -1, -1);
+    run(ui, build_ced, &c, 2);
+    CHECK(c.any_refused && strcmp(c.buf, "0123456789") == 0);
+    free(huge);
+    cui_destroy(ui);
+}
+
 /* diff viewer ---------------------------------------------------------- */
 
 /* the lines of a text, each with its line ending, for checking scripts */
@@ -9764,6 +9912,7 @@ int main(void) {
     test_code_editor_mdwrite();
     test_log_view_settles();
     test_code_editor_big();
+    test_code_editor_replace_all();
     test_diff();
     test_dials();
     test_candles();

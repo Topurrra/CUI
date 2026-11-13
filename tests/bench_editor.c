@@ -7,6 +7,7 @@
  *
  *     cui_bench_editor [MB ...]          default: 1 10 100
  *     cui_bench_editor --quick           1 and 10 MB only
+ *     cui_bench_editor --replace [A B]   replace the whole text of A MB with B MB (20, 50)
  */
 #include <cui/cui.h>
 #include <cui/cui_render.h>
@@ -37,6 +38,7 @@ typedef struct {
     char *buf; size_t cap;
     const char *lang;
     bool wrap, plain, big;
+    int rev;                    /* the revision to give; 0: 1 with .big */
     cui_code_editor_result r;
 } bench_ed;
 
@@ -46,7 +48,7 @@ static void build(cui_ctx *ui, void *u) {
     b->r = cui_code_editor(ui, "ed", b->buf, b->cap, .lang = b->plain ? "text" : b->lang, .wrap = b->wrap, .height = -1);
 #else
     b->r = cui_code_editor(ui, "ed", b->buf, b->cap, .lang = b->lang, .wrap = b->wrap, .height = -1,
-                           .plain = b->plain, .revision = b->big ? 1 : 0);
+                           .plain = b->plain, .revision = b->rev ? b->rev : b->big ? 1 : 0);
 #endif
 }
 
@@ -91,7 +93,23 @@ static size_t gen_struct(char *buf, size_t size, bool long_lines, bool xml) {
     return n;
 }
 
+/* a formatted JSON document: one object, nested arrays and objects, an opening brace on the
+ * first line whose partner is on the last */
+static size_t gen_json(char *buf, size_t size, bool long_lines) {
+    size_t n = (size_t)sprintf(buf, "{\n");
+    int line = 0;
+    while (n + 4000 < size - 8) {
+        n += (size_t)sprintf(buf + n, "  \"key_%d\": {\n    \"id\": %d,\n    \"name\": \"item %d\",\n    \"tags\": [\"a\", \"b\", \"c\"],\n", line, line, line);
+        if (long_lines) for (int k = 0; k < 40; k++) n += (size_t)sprintf(buf + n, "    \"field_%d\": [%d, %d, %d, \"value\"],\n", k, k, line, k * line);
+        n += (size_t)sprintf(buf + n, "    \"ok\": true\n  },\n");
+        line++;
+    }
+    n += (size_t)sprintf(buf + n, "  \"end\": null\n}\n");
+    return n;
+}
+
 static size_t gen(char *buf, size_t size, bool long_lines, const char *lang) {
+    if (!strcmp(lang, "json")) return gen_json(buf, size, long_lines);
     if (!strcmp(lang, "yaml") || !strcmp(lang, "xml")) return gen_struct(buf, size, long_lines, lang[0] == 'x');
     static const char *const words[] = { "INFO", "worker", "request", "(id=42)", "{ok}", "\"path\"", "-> done;", "//", "x[3]",
                                          "# heading", "`code`", "*em*", "value=0x1F", "elapsed", "ms", "retry" };
@@ -170,7 +188,56 @@ static void one(size_t mb, bool long_lines, const char *lang, bool wrap, bool pl
     free(b.buf);
 }
 
+/* Replacing (almost) the whole text of a big buffer: cui_code_editor_edit over [0, len) with
+ * a text of another size (the way an app applies a formatter's output so that Ctrl Z undoes
+ * it), then undo and redo; then the app swapping the text and changing .revision. Each
+ * number is the ms of one frame, in order. */
+static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wrap) {
+    bench_ed b;
+    memset(&b, 0, sizeof b);
+    b.cap = to_mb * 1024 * 1024 + 8 * 1024 * 1024;
+    b.buf = malloc(b.cap);
+    size_t len = gen(b.buf, from_mb * 1024 * 1024, false, lang);
+    char *nt = malloc(to_mb * 1024 * 1024 + 4096);
+    gen(nt, to_mb * 1024 * 1024, false, lang);
+    b.lang = lang; b.wrap = wrap; b.big = true; b.rev = 1;
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1200, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    frames(ui, &b, 3, 0);
+    cui_code_editor_goto(ui, "ed", b.r.line_count / 2, 1);
+    frames(ui, &b, 2, 0);
+    double c0 = now();
+    cui_code_editor_edit(ui, "ed", 0, (int)len, nt, 0, 0);
+    double call = (now() - c0) * 1000;
+    double e1 = frames(ui, &b, 1, 0), e2 = frames(ui, &b, 1, 0), e3 = frames(ui, &b, 1, 0);
+    int nl = b.r.line_count;
+    cui_input_key(ui, CUI_KEY_Z, true, CUI_MOD_PRIMARY);
+    double u1 = frames(ui, &b, 1, 0), u2 = frames(ui, &b, 1, 0);
+    int ok_undo = b.r.length == (int)len;
+    cui_input_key(ui, CUI_KEY_Z, true, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    double r1 = frames(ui, &b, 1, 0), r2 = frames(ui, &b, 1, 0);
+    int ok_redo = b.r.line_count == nl;
+    /* the app swaps in another text of the new size and bumps the revision */
+    gen(b.buf, to_mb * 1024 * 1024, true, lang);
+    b.rev = 2;
+    double v1 = frames(ui, &b, 1, 0), v2 = frames(ui, &b, 1, 0);
+    printf("replace %2zu -> %2zu MB %-8s %-4s | edit call %5.1f frames %6.1f %6.1f %6.1f | undo %6.1f %6.1f | redo %6.1f %6.1f | new .revision %6.1f %6.1f ms | undo %s redo %s\n",
+           from_mb, to_mb, lang, wrap ? "wrap" : "", call, e1, e2, e3, u1, u2, r1, r2, v1, v2, ok_undo ? "ok" : "BAD", ok_redo ? "ok" : "BAD");
+    fflush(stdout);
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    free(b.buf); free(nt);
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--replace")) {   /* --replace [FROM_MB TO_MB] */
+        size_t f = argc > 3 ? (size_t)atoi(argv[2]) : 20, t = argc > 3 ? (size_t)atoi(argv[3]) : 50;
+        static const char *const rl[] = { "text", "c", "markdown", "json" };
+        for (int w = 0; w < 2; w++) for (int l = 0; l < 4; l++) replace_all(f, t, rl[l], w);
+        return 0;
+    }
     size_t sizes[8] = { 1, 10, 100 };
     int ns = 3;
     bool bigs[2] = { true, false };   /* with .revision first: the way an app opens a big file */

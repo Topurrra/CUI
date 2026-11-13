@@ -8,6 +8,13 @@
  * visual rows at the view width (see "soft wrapping" below). */
 #include "cui_internal.h"
 
+#if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64)
+#include <emmintrin.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+#define CUI__ED_SSE2 1
+#endif
 
 #define CUI__ED_SALT  0xED17C0DEu
 #define CUI__ED_BAR   12.0f     /* scrollbar zones along the right and bottom edges */
@@ -19,6 +26,10 @@
  * them where it happened (cui__ed_splice). They are made again from the whole text only
  * when the text changed outside the editor: the app's `.revision` says so, or without one a
  * hash of the text taken each frame does. */
+
+/* An edit of more lines than this gets its wrap counts the way a new text does: a guess for
+ * every line, counted when in view, in one pass. */
+#define CUI__ED_BIG_LINES 4096
 
 /* The line index: ls[i] is the byte line i starts at, ls[nl] = len + 1. */
 typedef struct {
@@ -57,6 +68,7 @@ typedef struct {
 typedef struct {
     int at, del_n, ins_n;       /* the bytes [at, at + del_n) became [at, at + ins_n) */
     char *data;                 /* the removed bytes, then the inserted ones */
+    char *ins;                  /* or, for a big edit: the inserted bytes apart (the caller's own copy, kept as it is), and data holds only the removed ones */
     int caret, group;           /* the caret before the edit */
 } cui__ed_rec;
 typedef struct {
@@ -84,7 +96,7 @@ typedef struct {
     int pend_a, pend_c, pend_line, pend_col;
     bool pend_edit;             /* cui_code_editor_edit: replace [pend_es, pend_ee) with pend_text, then select */
     int pend_es, pend_ee, pend_sa, pend_sc;
-    char *pend_text;
+    char *pend_text; int pend_n, pend_nl; bool pend_cr;   /* its length, line breaks, and whether it has carriage returns */
     float focus_t;
     cui__ed_wc *wc;             /* wrap cache, only while `.wrap` is on */
     cui__ed_mc *mc;             /* line states, for the languages with a state (markdown, yaml, xml...) and those with block comments */
@@ -109,11 +121,172 @@ typedef struct {
     bool changed, refused, reveal, center;
     bool wrap;                  /* soft wrapping on; wcols is the row width in columns */
     int wcols;
+    int hint_cr, hint_nl;       /* for the next replace of cui_code_editor_edit's text, read while it was copied: 1 no carriage returns, 2 some; line breaks + 1 (0: not known) */
 } cui__ed;
 static void cui__ed_wrap_splice(cui__ed *E, int la, int lb, int k);
+static void cui__ed_wrap_sync(cui__ed *E);
 static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k);
 
 /* ---- text model ---- */
+
+/* ---- byte scans ----
+ * The libc scans run at about 4 GB/s here; a 50 MB text is read a few times when it is
+ * replaced as a whole (a carriage return, the line breaks twice), so these go at memory
+ * speed with SSE2 where it is baseline, and fall back to memchr elsewhere. */
+
+#if defined(CUI__ED_SSE2)
+static int cui__ed_ctz(unsigned m) {
+#if defined(_MSC_VER)
+    unsigned long i;
+    _BitScanForward(&i, m);
+    return (int)i;
+#else
+    return __builtin_ctz(m);
+#endif
+}
+static int cui__ed_ctz64(uint64_t m) {
+#if defined(_MSC_VER)
+    unsigned long i;
+    _BitScanForward64(&i, m);
+    return (int)i;
+#else
+    return __builtin_ctzll(m);
+#endif
+}
+#endif
+
+/* the first c in p[0, n), or NULL */
+static const char *cui__ed_find_byte(const char *p, size_t n, char c) {
+#if defined(CUI__ED_SSE2)
+    const __m128i v = _mm_set1_epi8(c);
+    size_t i = 0;
+    for (; i + 64 <= n; i += 64) {
+        __m128i x0 = _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + i)), v);
+        __m128i x1 = _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + i + 16)), v);
+        __m128i x2 = _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + i + 32)), v);
+        __m128i x3 = _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + i + 48)), v);
+        if (_mm_movemask_epi8(_mm_or_si128(_mm_or_si128(x0, x1), _mm_or_si128(x2, x3)))) break;
+    }
+    for (; i + 16 <= n; i += 16) {
+        unsigned m = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(p + i)), v));
+        if (m) return p + i + cui__ed_ctz(m);
+    }
+    for (; i < n; i++) if (p[i] == c) return p + i;
+    return NULL;
+#else
+    return memchr(p, c, n);
+#endif
+}
+
+/* how many c in p[0, n) */
+static size_t cui__ed_count_byte(const char *p, size_t n, char c) {
+    size_t total = 0;
+#if defined(CUI__ED_SSE2)
+    const __m128i v = _mm_set1_epi8(c), zero = _mm_setzero_si128();
+    while (n >= 16) {
+        size_t blocks = CUI_MIN(n / 16, (size_t)255);   /* a byte lane holds up to 255 hits */
+        __m128i acc = zero;
+        for (size_t j = 0; j < blocks; j++) acc = _mm_sub_epi8(acc, _mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)p + j), v));
+        __m128i sum = _mm_sad_epu8(acc, zero);
+        total += (size_t)_mm_cvtsi128_si32(sum) + (size_t)_mm_cvtsi128_si32(_mm_srli_si128(sum, 8));
+        p += blocks * 16; n -= blocks * 16;
+    }
+    for (; n > 0; n--) total += *p++ == c;
+#else
+    for (const char *e = p + n; (p = memchr(p, c, (size_t)(e - p))) != NULL; p++) total++;
+#endif
+    return total;
+}
+
+/* the line breaks of s[a, b): out[k] = the byte after the k-th one; how many */
+static int cui__ed_fill_nl(const char *s, int a, int b, int *out) {
+    int k = 0, i = a;
+#if defined(CUI__ED_SSE2)
+    const __m128i v = _mm_set1_epi8('\n');
+    for (; i + 64 <= b; i += 64) {   /* one mask for 64 bytes: the loop ends once per block, not per 16 bytes */
+        uint64_t m = 0;
+        for (int q = 0; q < 4; q++)
+            m |= (uint64_t)(unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(s + i + q * 16)), v)) << (q * 16);
+        while (m) { out[k++] = i + cui__ed_ctz64(m) + 1; m &= m - 1; }
+    }
+    for (; i + 16 <= b; i += 16) {
+        unsigned m = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_loadu_si128((const __m128i *)(s + i)), v));
+        while (m) { out[k++] = i + cui__ed_ctz(m) + 1; m &= m - 1; }
+    }
+#endif
+    for (; i < b; i++) if (s[i] == '\n') out[k++] = i + 1;
+    return k;
+}
+
+/* d = buf + a gets t[0, n) and the line breaks of it go to out, as cui__ed_fill_nl does: the
+ * text is read once, not twice (the second time from memory, for a big one) */
+static int cui__ed_copy_fill(char *buf, int a, const char *t, int n, int *out) {
+    int k = 0, i = 0;
+#if defined(CUI__ED_SSE2)
+    const __m128i v = _mm_set1_epi8('\n');
+    for (; i + 64 <= n; i += 64) {
+        uint64_t m = 0;
+        for (int q = 0; q < 4; q++) {
+            __m128i x = _mm_loadu_si128((const __m128i *)(t + i + q * 16));
+            _mm_storeu_si128((__m128i *)(buf + a + i + q * 16), x);
+            m |= (uint64_t)(unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(x, v)) << (q * 16);
+        }
+        while (m) { out[k++] = a + i + cui__ed_ctz64(m) + 1; m &= m - 1; }
+    }
+#endif
+    memcpy(buf + a + i, t + i, (size_t)(n - i));
+    return k + cui__ed_fill_nl(buf, a + i, a + n, out + k);
+}
+
+/* the length of a zero-terminated string, in aligned blocks (they never cross a page, so
+ * reading the rest of the one the terminator is in is safe) */
+static size_t cui__ed_strlen(const char *s) {
+#if defined(CUI__ED_SSE2)
+    const char *p = s;
+    while (((uintptr_t)p & 15) != 0) { if (!*p) return (size_t)(p - s); p++; }
+    const __m128i zero = _mm_setzero_si128();
+    for (;; p += 16) {
+        unsigned m = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_load_si128((const __m128i *)p), zero));
+        if (m) return (size_t)(p - s) + (size_t)cui__ed_ctz(m);
+    }
+#else
+    return strlen(s);
+#endif
+}
+
+static const char *cui__ed_rec_ins(const cui__ed_rec *q) { return q->ins ? q->ins : q->data + q->del_n; }
+static void cui__ed_rec_free(cui_ctx *ui, cui__ed_rec *q) { cui__free(ui, q->data); cui__free(ui, q->ins); }
+
+/* d[0, n) = s[0, n), and in the same pass: whether s holds a carriage return, and how many
+ * line breaks (cui_code_editor_edit reads the text once anyway, to keep it). */
+static size_t cui__ed_copy_scan(char *d, const char *s, size_t n, bool *has_cr) {
+    size_t total = 0;
+    *has_cr = false;
+#if defined(CUI__ED_SSE2)
+    const __m128i vn = _mm_set1_epi8('\n'), vr = _mm_set1_epi8('\r'), zero = _mm_setzero_si128();
+    __m128i crs = zero;
+    while (n >= 16) {
+        size_t blocks = CUI_MIN(n / 16, (size_t)255);
+        __m128i acc = zero;
+        for (size_t j = 0; j < blocks; j++) {
+            __m128i x = _mm_loadu_si128((const __m128i *)s + j);
+            _mm_storeu_si128((__m128i *)d + j, x);
+            acc = _mm_sub_epi8(acc, _mm_cmpeq_epi8(x, vn));
+            crs = _mm_or_si128(crs, _mm_cmpeq_epi8(x, vr));
+        }
+        __m128i sum = _mm_sad_epu8(acc, zero);
+        total += (size_t)_mm_cvtsi128_si32(sum) + (size_t)_mm_cvtsi128_si32(_mm_srli_si128(sum, 8));
+        s += blocks * 16; d += blocks * 16; n -= blocks * 16;
+    }
+    if (_mm_movemask_epi8(crs)) *has_cr = true;
+    for (; n > 0; n--, s++, d++) { *d = *s; total += *s == '\n'; if (*s == '\r') *has_cr = true; }
+#else
+    memcpy(d, s, n);
+    *has_cr = cui__ed_find_byte(s, n, '\r') != NULL;
+    total = cui__ed_count_byte(s, n, '\n');
+#endif
+    return total;
+}
 
 /* A hash of the whole text (four lanes, so it runs at memory speed): without the app's
  * revision, the editor finds out this way whether the text changed since the last frame. */
@@ -144,20 +317,23 @@ static void cui__ed_maxlen(cui__ed_ix *ix) {
  * offsets are for the old text). */
 static void cui__ed_rebuild(cui_ctx *ui, cui__ed_state *st, const char *buf, int len) {
     cui__ed_ix *ix = &st->ix;
-    const char *end = buf + len, *p = buf;
-    int n = 1;
-    while ((p = memchr(p, '\n', (size_t)(end - p))) != NULL) { n++; p++; }
-    CUI__GROW(ui, ix->ls, 0, ix->cap, n + 1);
-    int k = 1;
+    int n = 1;   /* one pass: the index grows by the segment as it is read */
+    CUI__GROW(ui, ix->ls, 0, ix->cap, 2);
     ix->ls[0] = 0;
-    for (p = buf; (p = memchr(p, '\n', (size_t)(end - p))) != NULL; p++) ix->ls[k++] = (int)(p - buf) + 1;
+    for (int a = 0; a < len; a += 16384) {
+        int b = CUI_MIN(len, a + 16384);
+        CUI__GROW(ui, ix->ls, n, ix->cap, (b - a) + 2);   /* at most a line break a byte */
+        n += cui__ed_fill_nl(buf, a, b, ix->ls + n);
+    }
+    CUI__GROW(ui, ix->ls, n, ix->cap, 1);
     ix->ls[n] = len + 1;
+    if (ix->cap - n > n / 4 + 4096) { ix->ls = cui__realloc(ui, ix->ls, sizeof(int) * (size_t)(n + 1)); ix->cap = n + 1; }
     ix->nl = n; ix->len = len; ix->ok = true;
     cui__ed_maxlen(ix);
     if (st->wc) st->wc->ok = false;
     if (st->mc) st->mc->ok = false;
     cui__ed_hist *h = &st->hist;
-    for (int i = 0; i < h->n; i++) cui__free(ui, h->r[i].data);
+    for (int i = 0; i < h->n; i++) cui__ed_rec_free(ui, &h->r[i]);
     h->n = h->pos = 0; h->bytes = 0;
     st->gen++;
 }
@@ -169,7 +345,7 @@ static void cui__ed_rebuild(cui_ctx *ui, cui__ed_state *st, const char *buf, int
 static int cui__ed_text_sync(cui_ctx *ui, cui__ed_state *st, char *buf, size_t cap, int rev) {
     cui__ed_ix *ix = &st->ix;
     if (rev && ix->ok && ix->rev == rev && (size_t)ix->len < cap && buf[ix->len] == 0) return ix->len;
-    const char *z = memchr(buf, 0, cap);
+    const char *z = cui__ed_find_byte(buf, cap, 0);
     if (!z) { buf[cap - 1] = 0; z = buf + cap - 1; }   /* never read past the capacity */
     int len = (int)(z - buf);
     uint64_t h = rev ? 0 : cui__ed_hash_text(buf, (size_t)len);
@@ -180,7 +356,7 @@ static int cui__ed_text_sync(cui_ctx *ui, cui__ed_state *st, char *buf, size_t c
 
 /* Bytes [a, b) of the text became n bytes at a: the line index, the wrap counts and the
  * line states follow, each patched where the edit was. */
-static void cui__ed_reindex(cui__ed *E, int a, int b, int n) {
+static void cui__ed_reindex(cui__ed *E, int a, int b, int n, const char *t) {
     cui__ed_ix *ix = &E->st->ix;
     int la = 0, lb = 0;
     {   /* the lines a and b were on, before the edit */
@@ -192,20 +368,24 @@ static void cui__ed_reindex(cui__ed *E, int a, int b, int n) {
     }
     bool longest = false;   /* the edit touched a longest line: it may be shorter now */
     for (int i = la; i <= lb && !longest; i++) longest = ix->ls[i + 1] - 1 - ix->ls[i] >= ix->maxlen;
-    int k = 0;
-    for (const char *p = E->buf + a, *end = E->buf + a + n; (p = memchr(p, '\n', (size_t)(end - p))) != NULL; p++) k++;
+    bool fused = E->hint_nl != 0;   /* the line breaks are known: the new bytes are copied in as they are indexed */
+    int k = fused ? E->hint_nl - 1 : (int)cui__ed_count_byte(E->buf + a, (size_t)n, '\n');
+    E->hint_nl = 0;
     int d = k - (lb - la), delta = n - (b - a);
     CUI__GROW(E->ui, ix->ls, 0, ix->cap, ix->nl + d + 1);
     memmove(ix->ls + la + 1 + k, ix->ls + lb + 1, sizeof(int) * (size_t)(ix->nl - lb));
     ix->nl += d;
     for (int i = la + 1 + k; i <= ix->nl; i++) ix->ls[i] += delta;
-    int j = la + 1;
-    for (const char *p = E->buf + a, *end = E->buf + a + n; (p = memchr(p, '\n', (size_t)(end - p))) != NULL; p++) ix->ls[j++] = (int)(p - E->buf) + 1;
+    if (fused) cui__ed_copy_fill(E->buf, a, t, n, ix->ls + la + 1);
+    else cui__ed_fill_nl(E->buf, a, a + n, ix->ls + la + 1);
     ix->len = E->len;
     if (longest) cui__ed_maxlen(ix);
     else for (int i = la; i <= la + k; i++) ix->maxlen = CUI_MAX(ix->maxlen, ix->ls[i + 1] - 1 - ix->ls[i]);
     E->ls = ix->ls; E->nl = ix->nl; E->maxlen = ix->maxlen;
-    if (E->wrap && E->st->wc && E->st->wc->ok) cui__ed_wrap_splice(E, la, lb, k);
+    if (E->wrap && E->st->wc && E->st->wc->ok) {
+        if (k > CUI__ED_BIG_LINES || lb - la > CUI__ED_BIG_LINES) { E->st->wc->ok = false; cui__ed_wrap_sync(E); }   /* guesses for all, as when opening */
+        else cui__ed_wrap_splice(E, la, lb, k);
+    }
     if (E->st->mc && E->st->mc->ok) cui__ed_mc_splice(E->ui, E->st->mc, la, lb, k);
     E->st->gen++;
 }
@@ -327,13 +507,6 @@ static int cui__ed_line_rows(const cui__ed *E, int line) {
     return cui__ed_wrap_walk(E, ls, le, NULL, 0);
 }
 
-/* The rows of a line that fits (1), or minus a guess from its length. */
-static int cui__ed_line_guess(const cui__ed *E, int line) {
-    int ls = E->ls[line], n = cui__ed_end(E, line) - ls;
-    if (n <= E->wcols && !memchr(E->buf + ls, '\t', (size_t)n)) return 1;
-    return -CUI_MAX(1, (n + E->wcols - 1) / E->wcols);
-}
-
 static void cui__ed_wc_free(cui_ctx *ui, cui__ed_state *st) {
     if (!st->wc) return;
     cui__free(ui, st->wc->rows); cui__free(ui, st->wc->pre); cui__free(ui, st->wc);
@@ -347,7 +520,7 @@ static void cui__ed_mc_free(cui_ctx *ui, cui__ed_state *st) {
 static void cui__ed_dtor(cui_ctx *ui, void *data) {
     cui__ed_state *st = data;
     cui__ed_wc_free(ui, st); cui__ed_mc_free(ui, st);
-    for (int i = 0; i < st->hist.n; i++) cui__free(ui, st->hist.r[i].data);
+    for (int i = 0; i < st->hist.n; i++) cui__ed_rec_free(ui, &st->hist.r[i]);
     cui__free(ui, st->hist.r);
     cui__free(ui, st->ix.ls);
     cui__free(ui, st->pend_text);
@@ -377,10 +550,16 @@ static void cui__ed_wrap_sync(cui__ed *E) {
     if (wc->ok && wc->n == nl && wc->key == key) return;
     cui__ed_wc_grow(ui, wc, nl + 1);
     int sum = 0;
+    const char *tab_at = NULL, *tend = E->buf + E->len;   /* the next tab: one scan finds them all, line by line */
     for (int i = 0; i < nl; i++) {
-        wc->rows[i] = cui__ed_line_guess(E, i);
+        int ls = E->ls[i], n = cui__ed_end(E, i) - ls, r;
+        if (n <= E->wcols) {   /* fits: one row, unless a tab may widen it (then its count is found when in view) */
+            if (!tab_at || tab_at < E->buf + ls) { tab_at = cui__ed_find_byte(E->buf + ls, (size_t)(E->len - ls), '\t'); if (!tab_at) tab_at = tend; }
+            r = tab_at >= E->buf + ls + n ? 1 : -1;
+        } else r = -((n + E->wcols - 1) / E->wcols);
+        wc->rows[i] = r;
         wc->pre[i] = sum;
-        sum += abs(wc->rows[i]);
+        sum += abs(r);
     }
     wc->pre[nl] = sum;
     wc->n = nl; wc->ok = true; wc->key = key;
@@ -477,9 +656,9 @@ static int cui__ed_vpick(const cui__ed *E, int vrow, float x, bool *aff) {
 /* Bytes [a, b) become t[0, n): one move of the text after them. */
 static void cui__ed_splice(cui__ed *E, int a, int b, const char *t, int n) {
     memmove(E->buf + a + n, E->buf + b, (size_t)(E->len - b + 1));
-    memcpy(E->buf + a, t, (size_t)n);
+    if (!E->hint_nl) memcpy(E->buf + a, t, (size_t)n);   /* else reindex copies it */
     E->len += n - (b - a);
-    cui__ed_reindex(E, a, b, n);
+    cui__ed_reindex(E, a, b, n, t);
 }
 
 /* ---- undo ---- */
@@ -490,7 +669,7 @@ static void cui__ed_hist_trim(cui_ctx *ui, cui__ed_hist *h) {
     while (h->n > 0 && (h->r[h->n - 1].group - h->r[0].group + 1 > CUI__UNDO_MAX ||
                         (h->bytes > CUI__ED_UNDO_BYTES && h->r[0].group != h->r[h->n - 1].group))) {
         int g = h->r[0].group, k = 0;
-        while (k < h->n && h->r[k].group == g) { h->bytes -= (size_t)(h->r[k].del_n + h->r[k].ins_n); cui__free(ui, h->r[k].data); k++; }
+        while (k < h->n && h->r[k].group == g) { h->bytes -= (size_t)(h->r[k].del_n + h->r[k].ins_n); cui__ed_rec_free(ui, &h->r[k]); k++; }
         memmove(h->r, h->r + k, sizeof *h->r * (size_t)(h->n - k));
         h->n -= k; h->pos -= k;
     }
@@ -500,14 +679,14 @@ static void cui__ed_hist_trim(cui_ctx *ui, cui__ed_hist *h) {
  * and room for the new ones (filled by the caller). kind: 1 typing, 2 deleting, 3 other; as in
  * the text fields, edits of the same kind at the caret within a second are one step, and
  * typing or deleting next to the last record grows that record. */
-static char *cui__ed_record(cui__ed *E, int a, int b, int m, int kind) {
+static char *cui__ed_record(cui__ed *E, int a, int b, int m, int kind, char *own) {
     cui_ctx *ui = E->ui;
     cui__ed_hist *h = &E->st->hist;
     cui_edit_state *e = &E->st->ed;
-    bool merge = ui->time - e->last_edit < 1.0 && h->pos > 0 && h->pos == h->n && kind == e->last_kind && kind != 3 && e->cursor == e->last_cursor;
+    bool merge = !own && ui->time - e->last_edit < 1.0 && h->pos > 0 && !h->r[h->pos - 1].ins && h->pos == h->n && kind == e->last_kind && kind != 3 && e->cursor == e->last_cursor;
     e->last_edit = ui->time;
     e->last_kind = kind;
-    for (int i = h->pos; i < h->n; i++) { h->bytes -= (size_t)(h->r[i].del_n + h->r[i].ins_n); cui__free(ui, h->r[i].data); }
+    for (int i = h->pos; i < h->n; i++) { h->bytes -= (size_t)(h->r[i].del_n + h->r[i].ins_n); cui__ed_rec_free(ui, &h->r[i]); }
     h->n = h->pos;
     int del = b - a;
     h->bytes += (size_t)(del + m);
@@ -535,11 +714,12 @@ static char *cui__ed_record(cui__ed *E, int a, int b, int m, int kind) {
     q->at = a; q->del_n = del; q->ins_n = m;
     q->caret = e->cursor;
     q->group = h->group;
-    q->data = cui__alloc(ui, (size_t)(del + m) + 1);
+    q->ins = own;
+    q->data = cui__alloc(ui, (size_t)(own ? del : del + m) + 1);
     memcpy(q->data, E->buf + a, (size_t)del);
     h->pos = h->n;
     cui__ed_hist_trim(ui, h);
-    return h->n ? h->r[h->n - 1].data + del : NULL;
+    return !own && h->n ? h->r[h->n - 1].data + del : NULL;
 }
 
 /* One step back, or forward with redo; false when there is none (or it no longer fits). The
@@ -558,7 +738,7 @@ static bool cui__ed_undo(cui__ed *E, bool redo) {
     int caret = 0;
     while (redo ? h->pos < h->n && h->r[h->pos].group == g : h->pos > 0 && h->r[h->pos - 1].group == g) {
         const cui__ed_rec *q = &h->r[redo ? h->pos++ : --h->pos];
-        if (redo) { cui__ed_splice(E, q->at, q->at + q->del_n, q->data + q->del_n, q->ins_n); caret = q->at + q->ins_n; }
+        if (redo) { cui__ed_splice(E, q->at, q->at + q->del_n, cui__ed_rec_ins(q), q->ins_n); caret = q->at + q->ins_n; }
         else { cui__ed_splice(E, q->at, q->at + q->ins_n, q->data, q->del_n); caret = q->caret; }
     }
     e->cursor = e->anchor = CUI_CLAMP(caret, 0, E->len);
@@ -566,23 +746,42 @@ static bool cui__ed_undo(cui__ed *E, bool redo) {
     return true;
 }
 
-/* Replace [a, b) with t. An edit that does not fit in the buffer is refused
- * whole and reported; the caret lands after the new text. */
-static bool cui__ed_replace(cui__ed *E, int a, int b, const char *t, int n, int kind) {
-    if (E->ro) return false;
-    int m = 0;
-    for (int i = 0; i < n; i++) if (t[i] != '\r') m++;
-    if ((size_t)(E->len - (b - a) + m) + 1 > E->cap) { E->refused = true; return false; }
-    if (m == 0 && b == a) return false;
+/* Edits this big keep the caller's text as the record's inserted bytes instead of copying it. */
+#define CUI__ED_KEEP_BYTES 65536
+
+/* Replace [a, b) with t[0, n). An edit that does not fit in the buffer is refused whole and
+ * reported; the caret lands after the new text. Carriage returns are left out. *own is t when
+ * the caller gave its own allocation: it may be changed in place and, for a big edit, becomes
+ * the undo record's (then *own is NULL: the caller has nothing to free). */
+static bool cui__ed_replace_x(cui__ed *E, int a, int b, const char *t, int n, int kind, char **own) {
+    if (E->ro) { E->hint_nl = E->hint_cr = 0; return false; }
+    const char *cr = E->hint_cr == 1 ? NULL : cui__ed_find_byte(t, (size_t)n, '\r');
+    E->hint_cr = 0;
+    int m = cr ? n - (int)cui__ed_count_byte(cr, (size_t)(n - (int)(cr - t)), '\r') : n;
+    if ((size_t)(E->len - (b - a) + m) + 1 > E->cap) { E->refused = true; E->hint_nl = 0; return false; }
+    if (m == 0 && b == a) { E->hint_nl = 0; return false; }
+    if (cr && own && *own) {   /* squeezed in place */
+        char *o = *own + (cr - t);
+        for (const char *p = cr; p < t + n; p++) if (*p != '\r') *o++ = *p;
+        cr = NULL;
+    }
     cui_edit_state *e = &E->st->ed;
-    char *ins = cui__ed_record(E, a, b, m, kind), *o = ins;   /* the new bytes go in the record, without carriage returns */
-    for (int i = 0; i < n; i++) if (t[i] != '\r') *o++ = t[i];
-    cui__ed_splice(E, a, b, ins, m);
+    bool keep = own && *own && m >= CUI__ED_KEEP_BYTES;
+    char *ins = cui__ed_record(E, a, b, m, kind, keep ? *own : NULL);
+    if (!keep) {   /* the new bytes go in the record, without carriage returns */
+        if (!cr) memcpy(ins, t, (size_t)m);
+        else { char *o = ins; for (int i = 0; i < n; i++) if (t[i] != '\r') *o++ = t[i]; }
+    }
+    cui__ed_splice(E, a, b, keep ? *own : ins, m);
+    if (keep) *own = NULL;
     e->cursor = e->anchor = e->last_cursor = a + m;
     E->changed = E->reveal = true;
     E->st->pref_col = -1;
     E->st->aff_pos = -1;
     return true;
+}
+static bool cui__ed_replace(cui__ed *E, int a, int b, const char *t, int n, int kind) {
+    return cui__ed_replace_x(E, a, b, t, n, kind, NULL);
 }
 
 static void cui__ed_move(cui__ed *E, int to, bool extend) {
@@ -630,9 +829,12 @@ static int cui__ed_partner(char c, int *dir) {
     }
 }
 
+#define CUI__ED_BRACKET_REACH (1 << 20)   /* a partner further than this is not looked for: the walk is a byte loop */
+
 static int cui__ed_match(const char *s, int len, int at) {
     int dir = 0, other = cui__ed_partner(s[at], &dir), depth = 0;
-    for (int i = at; i >= 0 && i < len; i += dir) {
+    int lo = CUI_MAX(0, at - CUI__ED_BRACKET_REACH), hi = CUI_MIN(len, at + CUI__ED_BRACKET_REACH);
+    for (int i = at; i >= lo && i < hi; i += dir) {
         if (s[i] == s[at]) depth++;
         else if (s[i] == other && --depth == 0) return i;
     }
@@ -1395,11 +1597,12 @@ void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int cursor)
 
 void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int end, const char *text, int sel_anchor, int sel_cursor) {
     cui__ed_state *s = cui__ed_get(ui, id);
-    size_t n = text ? strlen(text) : 0;
+    size_t n = text ? cui__ed_strlen(text) : 0;
     cui__free(ui, s->pend_text);
     s->pend_text = cui__alloc(ui, n + 1);
-    if (n) memcpy(s->pend_text, text, n);
+    s->pend_nl = (int)cui__ed_copy_scan(s->pend_text, text ? text : "", n, &s->pend_cr);
     s->pend_text[n] = 0;
+    s->pend_n = (int)n;
     s->pend_edit = true;
     s->pend_es = start; s->pend_ee = end;
     s->pend_sa = sel_anchor; s->pend_sc = sel_cursor;
@@ -1477,9 +1680,9 @@ static void cui__edf_requests(cui__edf *f) {
     cui_ctx *ui = E->ui;
     if (st->pend_edit) {
         int a = CUI_CLAMP(st->pend_es, 0, E->len), b = CUI_CLAMP(st->pend_ee, a, E->len);
-        int n = (int)strlen(st->pend_text), m = 0;
-        for (int i = 0; i < n; i++) if (st->pend_text[i] != '\r') m++;
-        if (!E->ro && cui__ed_replace(E, a, b, st->pend_text, n, 3)) {
+        E->hint_cr = st->pend_cr ? 2 : 1; E->hint_nl = st->pend_nl + 1;
+        if (cui__ed_replace_x(E, a, b, st->pend_text, st->pend_n, 3, &st->pend_text)) {
+            int m = e->cursor - a;   /* the new text's length: the caret is after it */
             e->last_edit = 0;
             int na = st->pend_sa < 0 ? a + m : CUI_MIN(st->pend_sa, E->len);
             int nc = st->pend_sc < 0 ? na : CUI_MIN(st->pend_sc, E->len);
