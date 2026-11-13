@@ -915,7 +915,7 @@ function siteFooter() {
 const NEW = new Set(['status-tag', 'ratio-slider', 'gradient-slider', 'step-slider', 'palette-strip', 'aspect-ratio-picker',
                      'option-field-with-action', 'seed-field', 'grouped-toolbar', 'format-bar', 'live-cursors', 'canvas-controls',
                      'result-card', 'selection-bar', 'voice-waveform', 'voice-recorder', 'voice-note', 'voice-session',
-                     'pattern-meter', 'veil'].filter((id) => CAT.items[id]));
+                     'pattern-meter', 'veil', 'dither-spinners', 'status-spinner', 'skeleton-group'].filter((id) => CAT.items[id]));
 const newBadge = (id, cls = 'new-badge') => (NEW.has(id) ? h('span', { class: cls, title: 'Recently added' }, 'New') : null);
 
 // the query part of a hash: #/components?q=grid&cat=charts
