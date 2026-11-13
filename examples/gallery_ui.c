@@ -685,6 +685,13 @@ static void page_charts(cui_ctx *ui, gallery *g) {
             }
         }
     }
+    section(ui, "Pattern meter", "Each part has a color and a density, so it reads in grayscale too. Hover a part or a legend entry.");
+    cui_card(ui, .gap = 24) {
+        static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };
+        static bool gray;
+        cui_pattern_meter(ui, "storage", parts, 4, .total = 256, .label = "Storage", .unit = "GB", .grayscale = gray);
+        cui_checkbox(ui, "Grayscale", &gray);
+    }
     section(ui, "Stacked bars and gauges", NULL);
     cui_box(ui, .dir = CUI_GRID, .columns = 2, .min_column_width = 260, .gap = 16) {
         cui_card(ui) {

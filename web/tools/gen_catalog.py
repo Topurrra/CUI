@@ -304,7 +304,8 @@ MAIN_CAT = {
     "Tabs": "navigation", "Sidebar navigation": "navigation", "Breadcrumb, pagination and stepper": "navigation",
     "Dropdown and context menu": "overlays", "Popover": "overlays", "Tooltip": "overlays", "Dialog": "overlays",
     "Sheet": "overlays", "Command palette": "overlays",
-    "Toast": "feedback", "Alert": "feedback", "Progress, meter, spinner and skeleton": "feedback", "Empty state": "feedback",
+    "Toast": "feedback", "Alert": "feedback", "Progress, meter, spinner and skeleton": "feedback", "Pattern meter": "feedback",
+    "Empty state": "feedback",
     "Table": "data", "List and tree": "data", "Accordion": "data", "Timeline and progress ring": "data",
     "Reorderable list": "data", "Charts": "charts",
 }

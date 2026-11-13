@@ -226,6 +226,27 @@ SCENE(dither_progress) {
         cui_progress(ui, 0, .label = "Syncing library", .indeterminate = true, .dither = true);
     }
 }
+static cui_id pm_bar;   /* the first meter's bar, for the pointer */
+static void pm_meter(cui_ctx *ui, const char *id, bool gray) {
+    static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };
+    cui_pattern_meter(ui, id, parts, 4, .total = 256, .label = "Storage", .unit = "GB", .grayscale = gray);
+}
+SCENE(pattern_meter) {
+    cui_column(ui, .gap = 28, UPTO(600)) {
+        pm_meter(ui, "storage", false);
+        pm_bar = cui_last_id(ui);
+        pm_meter(ui, "storage-gray", true);
+    }
+}
+/* the pointer on the second part of the first meter */
+static void scene_pattern_meter_hover(cui_ctx *ui, int f) {
+    if (f < 0) {
+        cui_rect r = cui_get_rect(ui, pm_bar);
+        if (-f - 1 == 4) cui_input_mouse_move(ui, r.x + r.w * 0.42f, r.y + r.h * 0.5f);
+        return;
+    }
+    frame_wrap(ui, body_pattern_meter);
+}
 SCENE(badges) {
     cui_column(ui, .gap = 16) {
         cui_row(ui, .gap = 8, .wrap = true) {
@@ -4420,6 +4441,7 @@ int main(int argc, char **argv) {
         { "toast", scene_toast, 420, 220, true }, { "tooltip", scene_tooltip, 260, 150, false },
         { "alerts", scene_alerts, 620, 210, true }, { "feedback", scene_feedback, 520, 220, false },
         { "dither-progress", scene_dither_progress, 620, 150, true, false, CUI_ACCENT_NEUTRAL },
+        { "pattern-meter", scene_pattern_meter_hover, 660, 280, true },
         { "badges", scene_badges, 600, 160, true }, { "cards", scene_cards, 700, 230, true },
         { "empty-state", scene_empty, 580, 340, true }, { "table", scene_table, 680, 250, true },
         { "tree-list", scene_tree, 660, 230, false }, { "accordion", scene_accordion, 580, 200, false },

@@ -1012,6 +1012,32 @@ CUI_API void cui_donut_chart_ex(cui_ctx *ui, const char *id, const float *values
 CUI_API void cui_sparkline(cui_ctx *ui, const float *values, int count, cui_size width, float height, cui_color color);
 CUI_API void cui_gauge(cui_ctx *ui, const char *label, float value, float size);
 
+/* Pattern meter: a stacked usage bar (storage, budgets, quotas) whose parts differ in color
+ * and in the density of their dots, so it still reads in grayscale, in print and without
+ * telling hues apart. One dot of space parts the parts, and the rest of `total` is free
+ * space in the track color. Hovering a part, or its legend entry, steps the others back and
+ * shows its name, value and share above the bar; the keyboard does the same with Left and
+ * Right. Returns the part shown, or -1. */
+typedef struct cui_meter_part {
+    const char *name;          /* in the legend and the readout */
+    float value;               /* in the meter's units */
+    cui_color color;           /* default: the series palette, in order */
+    float density;             /* share of dots lit, 0..1; 0 takes the next of 1, 0.66, 0.42, 0.24, 0.14, 0.08 */
+} cui_meter_part;
+typedef struct cui_pattern_meter_opts {
+    int _;
+    float total;               /* the whole bar; 0 means the sum of the parts (no free space) */
+    const char *label;         /* the title over the bar, e.g. "Storage" */
+    const char *unit;          /* after every value, e.g. "GB" */
+    const char *format;        /* printf format of a value, default "%g" */
+    const char *free_label;    /* the legend entry of the free space, default "Free"; "" leaves it out */
+    bool grayscale;            /* every part in the foreground color, told apart by density alone */
+    bool no_legend;
+    float height;              /* points, default 18 */
+    cui_size width;            /* default: fill */
+} cui_pattern_meter_opts;
+CUI_API int cui_pattern_meter_ex(cui_ctx *ui, const char *id, const cui_meter_part *parts, int count, const cui_pattern_meter_opts *opts);
+
 /* Images */
 CUI_API cui_texture cui_image_create(cui_ctx *ui, int w, int h, const void *rgba);
 CUI_API cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h);   /* PNG/JPEG via stb_image */
@@ -4932,6 +4958,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_line_chart(ui, id, s, n, ...)   cui_line_chart_ex((ui), (id), (s), (n), CUI__OPTS(cui_chart_opts, __VA_ARGS__))
 #define cui_bar_chart(ui, id, s, n, ...)    cui_bar_chart_ex((ui), (id), (s), (n), CUI__OPTS(cui_chart_opts, __VA_ARGS__))
 #define cui_donut_chart(ui, id, v, l, n, ...) cui_donut_chart_ex((ui), (id), (v), (l), (n), CUI__OPTS(cui_chart_opts, __VA_ARGS__))
+#define cui_pattern_meter(ui, id, parts, n, ...) cui_pattern_meter_ex((ui), (id), (parts), (n), CUI__OPTS(cui_pattern_meter_opts, __VA_ARGS__))
 #define cui_image(ui, tex, ...)             cui_image_ex((ui), (tex), CUI__OPTS(cui_image_opts, __VA_ARGS__))
 #define cui_radio_cards(ui, id, ch, n, idx, ...) cui_radio_cards_ex((ui), (id), (ch), (n), (idx), CUI__OPTS(cui_radio_cards_opts, __VA_ARGS__))
 #define cui_tag_input(ui, id, buf, cap, ...) cui_tag_input_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_tag_opts, __VA_ARGS__))

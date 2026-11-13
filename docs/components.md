@@ -535,6 +535,24 @@ cui_progress(ui, 0.62f, .label = "Exporting clip.mp4", .show_value = true, .dith
 cui_progress(ui, 0, .label = "Syncing library", .indeterminate = true, .dither = true);
 ```
 
+## Pattern meter
+
+A stacked usage bar for storage, budgets and quotas. Every part has a color and its own density of dots, so the bar still reads in grayscale, in print and for people who cannot tell the hues apart.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/pattern-meter-dark.png"><img src="images/components/pattern-meter.png" alt="Pattern meter"></picture>
+
+```c
+static const cui_meter_part parts[] = { { "Photos", 81 }, { "Video", 58 }, { "Apps", 41 }, { "Docs", 32 } };
+int shown = cui_pattern_meter(ui, "storage", parts, 4, .total = 256, .label = "Storage", .unit = "GB");
+cui_pattern_meter(ui, "print", parts, 4, .total = 256, .label = "Storage", .unit = "GB", .grayscale = true);
+```
+
+Parts follow each other from the start of the bar, parted by one dot of the surface behind it, and what is left of `total` is free space in the track color. Each `cui_meter_part` is a name, a value in the meter's units, a `color` (the series palette in order when unset) and a `density` from 0 to 1; 0 takes the next step of 1, 0.66, 0.42, 0.24, 0.14 and 0.08. The header shows `label` and the amount used ("212 / 256 GB"); hovering a part or its legend entry steps the other parts back, thinner and closer to the track, and the header shows that part's name, value and share ("Video · 58 GB · 23%"). The legend under the bar repeats each part's dither as a swatch, then the free space, named by `free_label` ("Free"; an empty string leaves it out). `grayscale` draws every part in the text color, told apart by density alone. Other options: `format` for the values (`"%g"`), `no_legend`, `height` (18 points) and `width`. With `total` 0 the parts fill the bar.
+
+Returns the part being shown, hovered or chosen with the keys, or -1. Up to 32 parts are drawn.
+
+Keyboard: Tab focuses the bar. Left and Right step through the parts (mirrored right to left), Home and End go to the first and last, and Escape clears the choice.
+
 ## Badge, avatar and keycap
 
 Small labels: a badge for a status or a count, an avatar for a person, and a keycap for a keyboard key.

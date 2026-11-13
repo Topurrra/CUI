@@ -215,10 +215,90 @@ static void test_progress(void) {
     cui_destroy(ui);
 }
 
+/* ------------------------------------------------------------------------ */
+/* pattern meter                                                            */
+
+typedef struct { int shown; bool gray; cui_id bar; } meter_case;
+static void build_meter(cui_ctx *ui, void *u) {
+    meter_case *c = u;
+    static const cui_meter_part parts[] = { { "Photos", 50 }, { "Video", 30 }, { "Apps", 20 } };
+    cui_box(ui, .width = CUI_PX(400)) {
+        c->shown = cui_pattern_meter(ui, "m", parts, 3, .total = 200, .label = "Storage", .unit = "GB", .grayscale = c->gray);
+        c->bar = cui_last_id(ui);
+    }
+}
+
+static void test_meter(void) {
+    printf("pattern meter\n");
+    cui_ctx *ui = new_ctx(480, 200, true);
+    meter_case c;
+    memset(&c, 0, sizeof c);
+    run(ui, build_meter, &c, 3);
+    CHECK_EQ(c.shown, -1);
+    cui_rect r = cui_get_rect(ui, c.bar);
+    CHECK(r.w > 390 && r.h == 18);
+    float y = r.y + r.h * 0.5f;
+    /* parts take 25%, 15% and 10% of the bar; the rest is free */
+    move(ui, build_meter, &c, r.x + r.w * 0.10f, y); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 0);
+    move(ui, build_meter, &c, r.x + r.w * 0.30f, y); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 1);
+    move(ui, build_meter, &c, r.x + r.w * 0.45f, y); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 2);
+    move(ui, build_meter, &c, r.x + r.w * 0.75f, y); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, -1);
+    /* the legend: the first entry's swatch starts the row 10 points under the bar */
+    move(ui, build_meter, &c, r.x + 7, r.y + r.h + 10 + 8); run(ui, build_meter, &c, 1);
+    CHECK_EQ(c.shown, 0);
+    cui_input_mouse_leave(ui);
+    run(ui, build_meter, &c, 2);
+    CHECK_EQ(c.shown, -1);
+    /* the keyboard: Tab to the bar, then step through the parts */
+    key(ui, build_meter, &c, CUI_KEY_TAB);
+    key(ui, build_meter, &c, CUI_KEY_RIGHT); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 0);
+    key(ui, build_meter, &c, CUI_KEY_RIGHT); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 1);
+    key(ui, build_meter, &c, CUI_KEY_END); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 2);
+    key(ui, build_meter, &c, CUI_KEY_RIGHT); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 2);
+    key(ui, build_meter, &c, CUI_KEY_ESCAPE); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, -1);
+    key(ui, build_meter, &c, CUI_KEY_LEFT); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 2);
+    key(ui, build_meter, &c, CUI_KEY_HOME); run(ui, build_meter, &c, 1); CHECK_EQ(c.shown, 0);
+    cui_destroy(ui);
+
+    /* grayscale: every lit dot in the bar is the text color, no hue anywhere */
+    ui = new_ctx(480, 200, true);
+    memset(&c, 0, sizeof c);
+    c.gray = true;
+    run(ui, build_meter, &c, 3);
+    r = cui_get_rect(ui, c.bar);
+    image im = render(ui);
+    int hue = 0, lit = 0;
+    for (float yy = r.y + 2; yy < r.y + r.h - 2; yy += 1)
+        for (float x = r.x + 8; x < r.x + r.w - 8; x += 1) {
+            const unsigned char *p = at(im, x, yy);
+            int mx = CUI_MAX(p[0], CUI_MAX(p[1], p[2])), mn = CUI_MIN(p[0], CUI_MIN(p[1], p[2]));
+            hue += mx - mn > 6;
+            lit += p[0] > 200;
+        }
+    CHECK_EQ(hue, 0);
+    CHECK(lit > 0);
+    free(im.px);
+    cui_destroy(ui);
+
+    /* right to left: the first part is at the right end */
+    g_rtl = true;
+    ui = new_ctx(480, 200, true);
+    memset(&c, 0, sizeof c);
+    run(ui, build_meter, &c, 3);
+    r = cui_get_rect(ui, c.bar);
+    move(ui, build_meter, &c, r.x + r.w * 0.92f, r.y + r.h * 0.5f); run(ui, build_meter, &c, 1);
+    CHECK_EQ(c.shown, 0);
+    move(ui, build_meter, &c, r.x + r.w * 0.08f, r.y + r.h * 0.5f); run(ui, build_meter, &c, 1);
+    CHECK_EQ(c.shown, -1);
+    g_rtl = false;
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_primitive();
     test_progress();
+    test_meter();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
