@@ -755,11 +755,14 @@ int cui__edit_word_left(const char *s, int pos);
 int cui__edit_word_right(const char *s, int len, int pos);
 
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */
-typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types, plain; } cui__lang;
+typedef struct { const char *const *kw; const char *const *types; const char *line_comment, *line_comment2; bool block_comments, hash_preproc, backtick, no_caps_types, plain, markdown; } cui__lang;
 typedef struct { int start, len; uint8_t kind; } cui__tok;
 #define CUI__TK_COUNT 10   /* token kinds; colors from cui__syntax_colors */
 cui__lang cui__lang_for(const char *lang);
 /* Tokenize one line. *in_block carries an open block comment between lines. */
+/* markdown, one line: the multi-line state is an int (0 none); start it at CUI__MD_START on line 0 to find front matter */
+#define CUI__MD_START 5
+int cui__tokenize_md(const char *s, int n, int *state, cui__tok *out, int cap);
 int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap);
 /* The same, by language name as the code block takes it ("c", "py", "json"...). */
 int cui__tokenize_lang(const char *lang, const char *s, int n, bool *in_block, cui__tok *out, int cap);

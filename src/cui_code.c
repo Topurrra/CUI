@@ -39,7 +39,7 @@ static const char *const kw_sh[] = { "if", "then", "else", "elif", "fi", "for", 
 static const char *const none[] = { NULL };
 
 cui__lang cui__lang_for(const char *lang) {
-    cui__lang l = { none, none, NULL, NULL, false, false, false, false };
+    cui__lang l = { none, none, NULL, NULL, false, false, false, false, false, false };
     if (!lang) return l;
     if (!strcmp(lang, "c") || !strcmp(lang, "cpp") || !strcmp(lang, "c++") || !strcmp(lang, "h")) {
         l.kw = kw_c; l.types = ty_c; l.line_comment = "//"; l.block_comments = true; l.hash_preproc = true;
@@ -53,6 +53,8 @@ cui__lang cui__lang_for(const char *lang) {
         l.kw = kw_go; l.types = ty_go; l.line_comment = "//"; l.block_comments = true; l.backtick = true;
     } else if (!strcmp(lang, "shell") || !strcmp(lang, "sh") || !strcmp(lang, "bash")) {
         l.kw = kw_sh; l.line_comment = "#"; l.no_caps_types = true;
+    } else if (!strcmp(lang, "markdown") || !strcmp(lang, "md")) {
+        l.markdown = true;
     } else if (!strcmp(lang, "text") || !strcmp(lang, "plain")) {
         l.plain = true;
     }
@@ -66,6 +68,278 @@ static bool cui__in_list(const char *const *list, const char *s, int n) {
 static bool cui__ident_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (unsigned char)c >= 0x80; }
 static bool cui__ident_char(char c) { return cui__ident_start(c) || (c >= '0' && c <= '9'); }
 
+/* ---- markdown ---------------------------------------------------------- */
+
+/* The multi-line state of a markdown line: 0 none; MD_OPEN a block of unknown
+ * kind (all that the bool of the other callers can say); MD_FENCE (fence char
+ * and length in the upper bits); MD_FM front matter; MD_CMT an HTML comment.
+ * CUI__MD_START marks the first line, where front matter can begin. */
+enum { MD_NONE, MD_OPEN, MD_FENCE, MD_FM, MD_CMT };
+
+typedef struct { cui__tok *out; int cap, count; } cui__mdc;
+
+static void cui__md_e(cui__mdc *m, int st, int len, int kind) {
+    if (len > 0 && m->count < m->cap) { m->out[m->count].start = st; m->out[m->count].len = len; m->out[m->count].kind = (uint8_t)kind; m->count++; }
+}
+static bool cui__md_ws(char c) { return c == ' ' || c == '\t' || c == '\r'; }
+static bool cui__md_alnum(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (unsigned char)c >= 0x80; }
+static int cui__md_trim(const char *s, int i, int n) { while (n > i && cui__md_ws(s[n - 1])) n--; return n; }
+
+/* a run of three or more ` or ~ at i (at most three spaces in): its length, 0 if none */
+static int cui__md_fence(const char *s, int i, int n, char *ch) {
+    if (i > 3 || i >= n || (s[i] != '`' && s[i] != '~')) return 0;
+    int k = i;
+    while (k < n && s[k] == s[i]) k++;
+    *ch = s[i];
+    return k - i >= 3 ? k - i : 0;
+}
+static bool cui__md_is_hr(const char *s, int i, int n) {
+    int e = cui__md_trim(s, i, n), cnt = 0;
+    if (i > 3 || i >= e || (s[i] != '-' && s[i] != '*' && s[i] != '_')) return false;
+    for (int k = i; k < e; k++) { if (s[k] == s[i]) cnt++; else if (s[k] != ' ' && s[k] != '\t') return false; }
+    return cnt >= 3;
+}
+/* the line from i is exactly w, up to trailing white space */
+static bool cui__md_is(const char *s, int i, int n, const char *w) {
+    int e = cui__md_trim(s, i, n), l = (int)strlen(w);
+    return e - i == l && strncmp(s + i, w, (size_t)l) == 0;
+}
+static bool cui__md_has(const char *s, int i, int n, const char *w) { return i + (int)strlen(w) <= n && strncmp(s + i, w, strlen(w)) == 0; }
+
+/* the start of the closer of an emphasis run (c, k long) searched in [from, to), or -1 */
+static int cui__md_close(const char *s, int from, int to, char c, int k) {
+    for (int j = from; j < to; j++) {
+        if (s[j] == '\\') { j++; continue; }
+        if (s[j] != c) continue;
+        int r = j;
+        while (r < to && s[r] == c) r++;
+        if (r - j == k && j > from && !cui__md_ws(s[j - 1]) && (c != '_' || r >= to || !cui__md_alnum(s[r]))) return j;
+        j = r - 1;
+    }
+    return -1;
+}
+
+/* the ] that matches the [ at i, or -1 */
+static int cui__md_bracket(const char *s, int i, int to) {
+    int d = 0;
+    for (int j = i; j < to; j++) {
+        if (s[j] == '\\') j++;
+        else if (s[j] == '[') d++;
+        else if (s[j] == ']' && --d == 0) return j;
+    }
+    return -1;
+}
+
+/* [[note]], [[note|label]] and ![[embed]] starting at i, whose [[ is at b: the end, or -1 */
+static int cui__md_wiki(cui__mdc *m, const char *s, int i, int b, int to) {
+    int j = b + 2, bar = -1;
+    while (j + 1 < to && !(s[j] == ']' && s[j + 1] == ']') && s[j] != '[') { if (s[j] == '|' && bar < 0) bar = j; j++; }
+    if (j + 1 >= to || s[j] != ']' || j == b + 2) return -1;
+    cui__md_e(m, i, b + 2 - i, TK_PUNCT);
+    if (bar < 0) cui__md_e(m, b + 2, j - b - 2, TK_FUNC);
+    else {
+        cui__md_e(m, b + 2, bar - b - 2, TK_COMMENT);
+        cui__md_e(m, bar, 1, TK_PUNCT);
+        cui__md_e(m, bar + 1, j - bar - 1, TK_FUNC);
+    }
+    cui__md_e(m, j, 2, TK_PUNCT);
+    return j + 2;
+}
+
+/* [text](url) and ![alt](src) starting at i, whose [ is at b: the end, or -1 */
+static int cui__md_link(cui__mdc *m, const char *s, int i, int b, int to) {
+    int j = cui__md_bracket(s, b, to), d = 0, k;
+    if (j < 0 || j + 1 >= to || s[j + 1] != '(') return -1;
+    for (k = j + 1; k < to; k++) { if (s[k] == '(') d++; else if (s[k] == ')' && --d == 0) break; }
+    if (k >= to) return -1;
+    cui__md_e(m, i, b + 1 - i, TK_PUNCT);
+    cui__md_e(m, b + 1, j - b - 1, TK_FUNC);
+    cui__md_e(m, j, 2, TK_PUNCT);
+    cui__md_e(m, j + 2, k - j - 2, TK_COMMENT);
+    cui__md_e(m, k, 1, TK_PUNCT);
+    return k + 1;
+}
+
+/* inline spans in [i, to) */
+static void cui__md_inline(cui__mdc *m, const char *s, int i, int to, bool table, int *state) {
+    int ts = i;
+#define FLUSH(at) cui__md_e(m, ts, (at) - ts, TK_TEXT)
+    while (i < to) {
+        char c = s[i];
+        if (c == '\\' && i + 1 < to) { i += 2; continue; }
+        if (c == '`') {
+            int k = i, end = -1;
+            while (k < to && s[k] == '`') k++;
+            for (int j = k; j < to && end < 0; j++) {
+                if (s[j] != '`') continue;
+                int r = j;
+                while (r < to && s[r] == '`') r++;
+                if (r - j == k - i) end = r;
+                j = r - 1;
+            }
+            if (end < 0) { i = k; continue; }
+            FLUSH(i); cui__md_e(m, i, end - i, TK_STRING); i = ts = end;
+            continue;
+        }
+        if (c == '<' && cui__md_has(s, i, to, "<!--")) {
+            int j = i + 4;
+            while (j < to && !cui__md_has(s, j, to, "-->")) j++;
+            FLUSH(i);
+            if (j < to) { cui__md_e(m, i, j + 3 - i, TK_COMMENT); i = ts = j + 3; continue; }
+            cui__md_e(m, i, to - i, TK_COMMENT);
+            *state = MD_CMT;
+            return;
+        }
+        if (c == '[' || (c == '!' && i + 1 < to && s[i + 1] == '[')) {
+            int b = c == '!' ? i + 1 : i, end;
+            int hold = m->count;
+            FLUSH(i);
+            end = b + 1 < to && s[b + 1] == '[' ? cui__md_wiki(m, s, i, b, to) : cui__md_link(m, s, i, b, to);
+            if (end >= 0) { i = ts = end; continue; }
+            m->count = hold;      /* not a link: plain text */
+            i = b + 1;
+            continue;
+        }
+        if (c == '*' || c == '_' || c == '~') {
+            int k = i;
+            while (k < to && s[k] == c) k++;
+            int run = k - i, cl = -1;
+            if ((c == '~' ? run == 2 : run <= 3) && k < to && !cui__md_ws(s[k]) && (c != '_' || i == 0 || !cui__md_alnum(s[i - 1])))
+                cl = cui__md_close(s, k, to, c, run);
+            if (cl < 0) { i = k; continue; }
+            FLUSH(i);
+            cui__md_e(m, i, run, TK_PUNCT);
+            cui__md_e(m, k, cl - k, c == '~' ? TK_COMMENT : TK_TYPE);
+            cui__md_e(m, cl, run, TK_PUNCT);
+            i = ts = cl + run;
+            continue;
+        }
+        if (c == '|' && table) { FLUSH(i); cui__md_e(m, i, 1, TK_PUNCT); i = ts = i + 1; continue; }
+        i++;
+    }
+    FLUSH(to);
+#undef FLUSH
+}
+
+/* a front matter line: key: value */
+static void cui__md_fm_line(cui__mdc *m, const char *s, int i, int n) {
+    int k = i;
+    if (i < n && s[i] == '#') { cui__md_e(m, i, n - i, TK_COMMENT); return; }
+    if (i < n && s[i] == '-' && (i + 1 == n || s[i + 1] == ' ')) { cui__md_e(m, i, 1, TK_PUNCT); cui__md_e(m, i + 1, n - i - 1, TK_TEXT); return; }
+    while (k < n && (cui__md_alnum(s[k]) || s[k] == '_' || s[k] == '-' || s[k] == '.')) k++;
+    if (k > i && k < n && s[k] == ':') {
+        cui__md_e(m, i, k - i, TK_FUNC);
+        cui__md_e(m, k, 1, TK_PUNCT);
+        cui__md_e(m, k + 1, n - k - 1, TK_TEXT);
+        return;
+    }
+    cui__md_e(m, i, n - i, TK_TEXT);
+}
+
+/* Tokenize one markdown line. *state is the multi-line state between lines. */
+int cui__tokenize_md(const char *s, int n, int *state, cui__tok *out, int cap) {
+    cui__mdc m = { out, cap, 0 };
+    int i = 0, st = *state & 15, e;
+    char ch;
+    while (i < n && (s[i] == ' ' || s[i] == '\t')) i++;
+    cui__md_e(&m, 0, i, TK_TEXT);
+    e = cui__md_trim(s, i, n);
+    if (st == CUI__MD_START) {
+        if (i == 0 && cui__md_is(s, i, n, "---")) { cui__md_e(&m, i, n - i, TK_COMMENT); *state = MD_FM; return m.count; }
+        st = MD_NONE;
+    }
+    if (st == MD_FM || (st == MD_OPEN && cui__md_is(s, i, n, "---"))) {
+        if (cui__md_is(s, i, n, "---") || cui__md_is(s, i, n, "...")) { cui__md_e(&m, i, n - i, TK_COMMENT); *state = MD_NONE; }
+        else { cui__md_fm_line(&m, s, i, n); *state = MD_FM; }
+        return m.count;
+    }
+    if (st == MD_FENCE || st == MD_OPEN) {
+        int len = cui__md_fence(s, i, e, &ch);
+        bool close = len > 0 && e - i == len && (st == MD_OPEN || (ch == ((*state & 16) ? '~' : '`') && len >= (*state >> 8)));
+        if (close) { cui__md_e(&m, i, n - i, TK_COMMENT); *state = MD_NONE; return m.count; }
+        if (st == MD_OPEN) {      /* maybe the end of an HTML comment */
+            for (int k = i; k + 2 < n; k++)
+                if (strncmp(s + k, "-->", 3) == 0 && !memchr(s + i, '`', (size_t)(k - i))) {
+                    cui__md_e(&m, i, k + 3 - i, TK_COMMENT);
+                    *state = MD_NONE;
+                    cui__md_inline(&m, s, k + 3, n, false, state);
+                    return m.count;
+                }
+        }
+        cui__md_e(&m, i, n - i, TK_STRING);
+        return m.count;      /* the state stays */
+    }
+    if (st == MD_CMT) {
+        int k = i;
+        while (k < n && !cui__md_has(s, k, n, "-->")) k++;
+        if (k < n) {
+            cui__md_e(&m, i, k + 3 - i, TK_COMMENT);
+            *state = MD_NONE;
+            cui__md_inline(&m, s, k + 3, n, false, state);
+        } else cui__md_e(&m, i, n - i, TK_COMMENT);
+        return m.count;
+    }
+    *state = MD_NONE;
+    {   /* a fence opens */
+        int len = cui__md_fence(s, i, n, &ch);
+        if (len && !(ch == '`' && memchr(s + i + len, '`', (size_t)(n - i - len)))) {
+            cui__md_e(&m, i, n - i, TK_COMMENT);
+            *state = MD_FENCE | (ch == '~' ? 16 : 0) | (len << 8);
+            return m.count;
+        }
+    }
+    if (i <= 3 && i < n && s[i] == '#') {
+        int k = i;
+        while (k < n && s[k] == '#') k++;
+        if (k - i <= 6 && (k == n || cui__md_ws(s[k]))) { cui__md_e(&m, i, n - i, TK_KEYWORD); return m.count; }
+    }
+    if (cui__md_is_hr(s, i, n)) { cui__md_e(&m, i, n - i, TK_PUNCT); return m.count; }
+    while (i < n && s[i] == '>') {      /* quote markers */
+        int k = i + 1;
+        cui__md_e(&m, i, 1, TK_PUNCT);
+        while (k < n && s[k] == ' ') k++;
+        cui__md_e(&m, i + 1, k - i - 1, TK_TEXT);
+        i = k;
+    }
+    if (i + 1 < n && s[i] == '[' && s[i + 1] == '!') {      /* a callout head */
+        int k = i;
+        while (k < n && s[k] != ']') k++;
+        if (k < n) {
+            k++;
+            if (k < n && (s[k] == '+' || s[k] == '-')) k++;
+            cui__md_e(&m, i, k - i, TK_PREPROC);
+            cui__md_inline(&m, s, k, n, false, state);
+            return m.count;
+        }
+    }
+    {   /* a list item */
+        int k = i;
+        while (k < n && s[k] >= '0' && s[k] <= '9') k++;
+        bool num = k > i && k - i <= 9 && k < n && (s[k] == '.' || s[k] == ')');
+        if (num) k++;
+        else k = i < n && (s[i] == '-' || s[i] == '*' || s[i] == '+') ? i + 1 : -1;
+        if (k > 0 && k < n && s[k] == ' ') {
+            int a = k;
+            while (a < n && s[a] == ' ') a++;
+            cui__md_e(&m, i, k - i, TK_PUNCT);
+            cui__md_e(&m, k, a - k, TK_TEXT);
+            i = a;
+            if (i + 2 < n && s[i] == '[' && (s[i + 1] == ' ' || s[i + 1] == 'x' || s[i + 1] == 'X') && s[i + 2] == ']' && (i + 3 == n || s[i + 3] == ' ')) {
+                cui__md_e(&m, i, 3, TK_CONST);
+                i += 3;
+            }
+        }
+    }
+    bool table = i < n && s[i] == '|';
+    if (table) {      /* a delimiter row |---|:-:| is all punctuation */
+        bool dash = false, only = true;
+        for (int k = i; k < e; k++) { if (s[k] == '-') dash = true; else if (!strchr("|: \t", s[k])) only = false; }
+        if (dash && only) { cui__md_e(&m, i, n - i, TK_PUNCT); return m.count; }
+    }
+    cui__md_inline(&m, s, i, n, table, state);
+    return m.count;
+}
+
 /* Tokenize one line. *in_block carries an open block comment between lines. */
 int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_block, cui__tok *out, int cap) {
     int count = 0, i = 0;
@@ -76,6 +350,12 @@ int cui__tokenize(const cui__lang *L, bool json, const char *s, int n, bool *in_
         while (i < n && (s[i] == ' ' || s[i] == '\t')) i++;
         if (i > 0) EMIT(0, i, TK_TEXT);
         if (i < n) EMIT(i, n - i, TK_TEXT);
+        return count;
+    }
+    if (L->markdown) {      /* the bool can only say that a block is open */
+        int ms = *in_block ? 1 : 0;
+        count = cui__tokenize_md(s, n, &ms, out, cap);
+        *in_block = ms != 0;
         return count;
     }
     while (i < n) {
@@ -200,6 +480,7 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     float fh = cui__font_line_height(ui, CUI_FONT_MONO, p->size);
     float x0 = r.x + p->pad + p->gutter, y = r.y + p->pad;
     bool block = false;
+    int mdst = CUI__MD_START;
     int line = 1, i = 0;
     cui__tok toks[256];
     while (i <= p->len) {
@@ -214,7 +495,8 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
             float w = cui__text_width(ui, CUI_FONT_MONO, p->size, ln, -1, true);
             cui__draw_text_line(ui, CUI_FONT_MONO, p->size, r.x + p->pad + p->gutter - 16 - w, ty, p->gutter_c, ln, -1, true);
         }
-        int nt = cui__tokenize(&p->lang, p->json, p->code + i, e - i, &block, toks, 256);
+        int nt = p->lang.markdown ? cui__tokenize_md(p->code + i, e - i, &mdst, toks, 256)
+                                  : cui__tokenize(&p->lang, p->json, p->code + i, e - i, &block, toks, 256);
         float x = x0;
         for (int k = 0; k < nt; k++) {
             const char *s = p->code + i + toks[k].start;
