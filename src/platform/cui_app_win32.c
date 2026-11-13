@@ -296,7 +296,7 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         if (n > 64) n = 64;
         POINT pt = { 0, 0 };
         DragQueryPoint(drop, &pt);
-        char *paths[64];
+        char *paths[64] = { 0 };   /* zeroed: MinGW cannot tell that only the first `got` are read */
         int got = 0;
         for (UINT i = 0; i < n; i++) {
             UINT len = DragQueryFileW(drop, i, NULL, 0);
