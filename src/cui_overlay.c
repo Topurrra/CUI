@@ -989,26 +989,19 @@ static int cui__weekday(int y, int m, int d) {
 
 typedef struct { int view_y, view_m; bool init; } cui__cal_state;
 
-bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
-    cui_id id = cui_make_id(ui, id_str);
-    cui__cal_state *st = cui_state(ui, id, sizeof *st);
-    cui_date today = cui_date_today();
-    if (!st->init) {
-        cui_date base = (value && value->year) ? *value : today;
-        st->view_y = base.year; st->view_m = base.month; st->init = true;
-    }
-    bool changed = false;
-    cui_push_id(ui, id_str);
-    /* 34px day cells, down to 28 when the parent is narrow (phones) */
-    cui_rect cpr = cui__prev_rect(ui, id);
-    float cs = cpr.w > 0 ? floorf((cpr.w - 12) / 7) : 34;
-    cs = cs > 34 ? 34 : cs < 28 ? 28 : cs;
-    int col = cui__node_new(ui, id);
-    ui->nodes[col].gap = 8;
-    cui__soft_width(&ui->nodes[col], CUI_FIT, 7 * 34 + 6 * 2);
-    ui->nodes[col].min_w = 7 * 28 + 6 * 2;
-    ui->nodes[col].flags |= CUI_NF_ADAPTIVE;
-    cui__open(ui, col);
+/* What the calendar's build phases share. */
+typedef struct {
+    cui_id id;
+    cui__cal_state *st;
+    cui_date *value;
+    cui_date today;
+    float cs;                  /* day cell size */
+    bool changed;
+} cui__calendar_build;
+
+/** The title and the month buttons. */
+static void cui__calendar_head(cui_ctx *ui, cui__calendar_build *b) {
+    cui__cal_state *st = b->st;
     int head = cui__node_new(ui, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].gap = 2; ui->nodes[head].pad[3] = 6;
     cui__open(ui, head);
@@ -1024,6 +1017,13 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     bo.tooltip = "Next month";
     if (cui_icon_button_ex(ui, CUI_ICON_CHEVRON_RIGHT, &bo)) { if (++st->view_m > 12) { st->view_m = 1; st->view_y++; } }
     cui__close(ui);
+}
+
+/** The weekday names and six weeks of days. */
+static void cui__calendar_days(cui_ctx *ui, cui__calendar_build *b) {
+    cui__cal_state *st = b->st;
+    cui_date *value = b->value, today = b->today;
+    float cs = b->cs;
     cui_box gb;
     memset(&gb, 0, sizeof gb);
     gb.dir = CUI_GRID; gb.columns = 7; gb.gap = 2;
@@ -1046,7 +1046,7 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
         if (day < 1) { day += pdim; m = pm; y = py; outside = true; }
         else if (day > dim) { day -= dim; m = st->view_m == 12 ? 1 : st->view_m + 1; y = st->view_m == 12 ? st->view_y + 1 : st->view_y; outside = true; }
         int key = y * 10000 + m * 100 + day;
-        cui_id did = cui__hash(&key, sizeof key, id);
+        cui_id did = cui__hash(&key, sizeof key, b->id);
         cui_interact r = cui__interact(ui, did, CUI_IF_FOCUSABLE);
         float hv_v = cui__hover_fade(ui, did, r.hovered, CUI__T_HOVER), *hv = &hv_v;
         bool sel = value && value->year == y && value->month == m && value->day == day;
@@ -1078,13 +1078,36 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
         if (r.clicked && value) {
             value->year = y; value->month = m; value->day = day;
             if (outside) { st->view_y = y; st->view_m = m; }
-            changed = true;
+            b->changed = true;
         }
     }
     cui__close(ui);
+}
+
+bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
+    cui_id id = cui_make_id(ui, id_str);
+    cui__cal_state *st = cui_state(ui, id, sizeof *st);
+    cui__calendar_build b = { id, st, value, cui_date_today(), 34, false };
+    if (!st->init) {
+        cui_date base = (value && value->year) ? *value : b.today;
+        st->view_y = base.year; st->view_m = base.month; st->init = true;
+    }
+    cui_push_id(ui, id_str);
+    /* 34px day cells, down to 28 when the parent is narrow (phones) */
+    cui_rect cpr = cui__prev_rect(ui, id);
+    float cs = cpr.w > 0 ? floorf((cpr.w - 12) / 7) : 34;
+    b.cs = cs > 34 ? 34 : cs < 28 ? 28 : cs;
+    int col = cui__node_new(ui, id);
+    ui->nodes[col].gap = 8;
+    cui__soft_width(&ui->nodes[col], CUI_FIT, 7 * 34 + 6 * 2);
+    ui->nodes[col].min_w = 7 * 28 + 6 * 2;
+    ui->nodes[col].flags |= CUI_NF_ADAPTIVE;
+    cui__open(ui, col);
+    cui__calendar_head(ui, &b);
+    cui__calendar_days(ui, &b);
     cui__close(ui);
     cui_pop_id(ui);
-    return changed;
+    return b.changed;
 }
 
 bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const cui_date_opts *o) {
