@@ -758,6 +758,7 @@ float cui_animate_spring(cui_ctx *ui, cui_id id, float target, float duration, f
 /** Advance timers by elapsed time and cap only the animation step after idle. */
 void cui_begin_frame(cui_ctx *ui, float dt) {
     if (ui->in_frame) cui_end_frame(ui);
+    CUI__PROBE(CUI_PROBE_BEGIN);
     if (!isfinite(dt) || dt < 0) dt = 0;
     /* at most an hour of clock per frame: a first dt of "seconds since 1970" (a last time of 0)
      * would otherwise put the clock where a float cannot tell frames apart, and the spinner,
@@ -842,15 +843,29 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
     cui__open(ui, root);
 
     cui__widgets_begin_frame(ui);
+    CUI__PROBE(CUI_PROBE_BUILD);
+}
+
+cui_probe_fn cui__probe_fn;
+void *cui__probe_user;
+void cui_set_probe(cui_probe_fn fn, void *user) { cui__probe_user = user; cui__probe_fn = fn; }
+
+void cui_frame_memory(cui_ctx *ui, size_t *used, size_t *capacity, size_t *peak) {
+    if (used) *used = ui ? ui->arena_used : 0;
+    if (capacity) *capacity = ui ? ui->arena_cap : 0;
+    if (peak) *peak = ui ? CUI_MAX(ui->peak_arena, ui->arena_used) : 0;
 }
 
 void cui_end_frame(cui_ctx *ui) {
     if (!ui->in_frame) return;
+    CUI__PROBE(CUI_PROBE_LAYOUT);
     cui__widgets_end_frame(ui);
     while (ui->parent_depth > 0) cui__close(ui);
 
     cui__layout(ui);
+    CUI__PROBE(CUI_PROBE_PAINT);
     cui__paint(ui);
+    CUI__PROBE(CUI_PROBE_PAINT_END);
 
     ui->edit_prev = ui->edit != NULL;
     /* caret blink, tooltips and toasts ask for wakeups through ui->wakeup */

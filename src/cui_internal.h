@@ -48,6 +48,11 @@
 
 #define CUI_PI 3.14159265358979323846f
 
+/* the frame probe (cui_set_probe): one pointer test when nobody listens */
+extern cui_probe_fn cui__probe_fn;
+extern void *cui__probe_user;
+#define CUI__PROBE(mark) do { if (cui__probe_fn) cui__probe_fn(cui__probe_user, (mark)); } while (0)
+
 #define CUI_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define CUI_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define CUI_CLAMP(x, lo, hi) CUI_MIN(CUI_MAX((x), (lo)), (hi))

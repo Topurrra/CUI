@@ -202,6 +202,35 @@ CUI_API float cui_dpi_scale(cui_ctx *ui);
 CUI_API void cui_begin_frame(cui_ctx *ui, float dt);
 CUI_API void cui_end_frame(cui_ctx *ui);
 
+/* Frame probe: a hook for profilers. When set, CUI calls it at the boundaries of a frame's phases
+ * and the hook reads the clock itself (CUI has no clock of its own in the core). When not set the
+ * cost is one test of a pointer at each boundary: no clock reads, no calls, no allocation.
+ *
+ * In the order they happen in a frame:
+ *   CUI_PROBE_BEGIN     cui_begin_frame starts (input, state and font upkeep run next)
+ *   CUI_PROBE_BUILD     cui_begin_frame is done; your frame code (the components) runs next
+ *   CUI_PROBE_LAYOUT    cui_end_frame starts: building is over, layout begins
+ *   CUI_PROBE_PAINT     layout is done, the draw list is built next
+ *   CUI_PROBE_PAINT_END the draw list is built (cui_end_frame finishes right after)
+ *   CUI_PROBE_RENDER    cui_app: the renderer starts (GPU commands, or the software raster)
+ *   CUI_PROBE_PRESENT   cui_app: rendering is done, the swap or blit starts (this waits for the display with vsync)
+ *   CUI_PROBE_DONE      cui_app: the frame is on screen
+ *   CUI_PROBE_SLEEP     cui_app: nothing is left to do, the loop waits for input or a timer
+ *   CUI_PROBE_WAKE      cui_app: the wait is over
+ * Each call is the start of the phase it names and the end of the one before. Apps that drive
+ * cui_begin_frame/cui_end_frame themselves see BEGIN, BUILD, LAYOUT, PAINT and PAINT_END only. The hook
+ * must be quick and must not call into CUI. One hook per process; pass NULL to remove it. */
+typedef enum cui_probe_mark {
+    CUI_PROBE_BEGIN = 0, CUI_PROBE_BUILD, CUI_PROBE_LAYOUT, CUI_PROBE_PAINT, CUI_PROBE_PAINT_END,
+    CUI_PROBE_RENDER, CUI_PROBE_PRESENT, CUI_PROBE_DONE, CUI_PROBE_SLEEP, CUI_PROBE_WAKE
+} cui_probe_mark;
+typedef void (*cui_probe_fn)(void *user, cui_probe_mark mark);
+CUI_API void cui_set_probe(cui_probe_fn fn, void *user);
+
+/* How much the per-frame scratch memory holds: bytes used so far in this frame (valid after
+ * cui_end_frame), its capacity, and the most it needed lately. Any of the outputs may be NULL. */
+CUI_API void cui_frame_memory(cui_ctx *ui, size_t *used, size_t *capacity, size_t *peak);
+
 /* True while something animates or input is still settling. Event driven
  * apps can sleep until the next input event when this is false. */
 CUI_API bool cui_needs_redraw(cui_ctx *ui);

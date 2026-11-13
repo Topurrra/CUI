@@ -120,6 +120,23 @@ Measured on that laptop (Windows 11, Intel graphics, 150% scale) with mdr and ed
 
 Memory there is mostly the GPU driver: a window of that size with an OpenGL 3.3 context and nothing drawn has a working set of 52 to 69 MB (depending on the pixel format), against 12 MB without OpenGL. CUI asks for no depth or stencil buffer (the driver used to add a 24 + 8 bit one, 7 to 14 MB), the glyph atlas starts at 512 x 512, and the system emoji font is mapped rather than read, so its pages are shared with the system's file cache (Segoe UI Emoji took 12 MB of the app's own memory once an emoji showed). An idle app's working set went from about 76 to about 69 MB; its own allocations are a few MB. When memory matters more than GPU offload, the software renderer keeps the same apps near 20 MB.
 
+## Frame probe
+
+To see where a frame's time goes in your own app, install a probe. CUI calls it at the boundaries between a frame's phases and leaves the clock to the hook, so nothing is read, called or allocated when no probe is set (the cost is one test of a pointer at each of nine places per frame).
+
+```c
+static double t_mark[CUI_PROBE_WAKE + 1];
+static void probe(void *user, cui_probe_mark m) { t_mark[m] = my_clock(); }
+
+cui_set_probe(probe, NULL);      /* NULL removes it */
+```
+
+Each call is the start of the phase it names and the end of the one before: `CUI_PROBE_BEGIN` (`cui_begin_frame` starts: input, state and font upkeep), `BUILD` (your component code runs), `LAYOUT`, `PAINT` (the draw list is built), `PAINT_END`; with `cui_app`: `RENDER` (the GPU commands or the software raster), `PRESENT` (the swap or blit, which waits for the display with vsync), `DONE`, then `SLEEP` and `WAKE` around the wait for input. An app that calls `cui_begin_frame` and `cui_end_frame` itself sees the first five only. The hook must be quick and must not call into CUI; there is one hook per process.
+
+`cui_frame_memory(ui, &used, &capacity, &peak)` gives the bytes the frame arena has handed out in this frame, its capacity, and the most it needed lately.
+
+`tests/test_probe.c` checks the order of the marks, that a removed hook is silent, and the memory figures.
+
 ## What keeps it low
 
 - **Nothing happens without a reason.** With no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that wait (the caret, tooltips, toasts) set `cui_next_wakeup`, and `cui_request_wakeup` does the same for an app's own timers.

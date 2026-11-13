@@ -214,8 +214,10 @@ void cui__app_render(cui_app *app) {
     const cui_draw_data *dd = cui_get_draw_data(app->ui);
     int w = dd->width_px, h = dd->height_px;
     if (w <= 0 || h <= 0) return;
+    CUI__PROBE(CUI_PROBE_RENDER);
     if (app->gl) {
         cui_gl_render(app->gl, dd, true);
+        CUI__PROBE(CUI_PROBE_PRESENT);
         cui__plat_gl_swap(app);
     } else {
         if (w != app->sw_w || h != app->sw_h) {
@@ -225,6 +227,7 @@ void cui__app_render(cui_app *app) {
         }
         if (!app->sw_pixels) return;
         cui_sw_render(app->sw, dd, app->sw_pixels, w, h, w * 4, CUI_SW_BGRA);
+        CUI__PROBE(CUI_PROBE_PRESENT);
         int dx, dy, dw, dh;
         bool changed = cui_sw_last_damage(app->sw, &dx, &dy, &dw, &dh);
         if (app->force_present || !app->presented_once || (changed && !cui__plat_present_part(app, app->sw_pixels, w, h, w * 4, dx, dy, dw, dh)))
@@ -233,6 +236,7 @@ void cui__app_render(cui_app *app) {
     }
     app->presented_once = true;
     app->last_present = cui__plat_now();
+    CUI__PROBE(CUI_PROBE_DONE);
 }
 
 static void cui__app_begin(cui_app *app) {
@@ -303,7 +307,9 @@ bool cui_app_frame(cui_app *app) {
         timeout = wake >= 0 ? wake : -1;
     }
     if (app->gl_starting && (timeout < 0 || timeout > 0.1)) timeout = 0.1;   /* the thread wakes the loop too; this is in case it cannot */
+    CUI__PROBE(CUI_PROBE_SLEEP);
     cui__plat_wait(app, timeout);
+    CUI__PROBE(CUI_PROBE_WAKE);
     if (!app->running) return false;
     if (app->gl_starting) cui__app_take_gl(app, false);
     cui__app_begin(app);
