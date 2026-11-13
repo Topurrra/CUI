@@ -1205,8 +1205,10 @@ int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizo
     st->tx = cui__clampf(st->tx, 0, max_x);
     cui__tween(ui, &st->y, st->ty, 0.14f);
     cui__tween(ui, &st->x, st->tx, 0.14f);
-    if (fabsf(st->y - st->ty) < 0.25f) st->y = st->ty;
-    if (fabsf(st->x - st->tx) < 0.25f) st->x = st->tx;
+    /* snap when close; far down a long list a float can't step by less than its ulp
+     * (0.25 px past 2 million), so a fixed 0.25 px threshold could leave it animating forever */
+    if (fabsf(st->y - st->ty) < CUI_MAX(0.25f, fabsf(st->ty) * 1e-6f)) st->y = st->ty;
+    if (fabsf(st->x - st->tx) < CUI_MAX(0.25f, fabsf(st->tx) * 1e-6f)) st->x = st->tx;
     bool recent = st->last_activity > 0 && ui->time - st->last_activity < 0.9;
     bool show = recent || st->hover_bar || st->drag_y;
     if (recent) cui__wakeup_after(ui, (float)(0.9 - (ui->time - st->last_activity)) + 0.01f);

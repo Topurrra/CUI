@@ -7810,6 +7810,29 @@ static int ced_walk_down(cui_ctx *ui, ced_ctx *c, int n) {
     return c->r.cursor;
 }
 
+/* A long log that follows its newest line must settle: far down the list a float
+ * can't step by less than 0.25 px, and the scroll used to keep animating there. */
+static cui_log_buffer g_bigl;
+static void build_big_log(cui_ctx *ui, void *user) {
+    (void)user;
+    cui_log_view(ui, "biglog", &g_bigl, .height = 400);
+}
+static void test_log_view_settles(void) {
+    enum { N = 120000 };
+    static cui_log_line lines[N + 16];
+    static char text[N * 48];
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, false);          /* the bug only shows with real animation */
+    cui_log_init(&g_bigl, lines, N + 16, text, sizeof text);
+    for (int i = 0; i < N; i++) cui_log_append(&g_bigl, CUI_LOG_INFO, "line %d of the log", i);
+    run(ui, build_big_log, NULL, 600);          /* ten seconds of frames: long enough to settle */
+    CHECK(!cui_needs_redraw(ui));
+    cui_log_append(&g_bigl, CUI_LOG_WARN, "one more");
+    run(ui, build_big_log, NULL, 600);
+    CHECK(!cui_needs_redraw(ui));
+    cui_destroy(ui);
+}
+
 static void test_code_editor_mdwrite(void) {
     printf("code editor: markdown list continuation, Tab in lists, cui_code_editor_edit\n");
     cui_ctx *ui = new_ctx();
@@ -9652,6 +9675,7 @@ int main(void) {
     test_code_editor_markdown();
     test_code_editor_langs();
     test_code_editor_mdwrite();
+    test_log_view_settles();
     test_code_editor_big();
     test_diff();
     test_dials();

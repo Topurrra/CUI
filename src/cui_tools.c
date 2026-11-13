@@ -924,7 +924,12 @@ static void cui__lvf_follow(cui__lvf *f, float total_h) {
     else if (!s->follow && (f->wheel < 0 || ss->drag_y || f->key_end) && ss->ty >= max_y - 1) s->follow = true;
     if (s->follow) {
         float bottom = CUI_MAX(0, total_h - f->view_h);
-        if (ss->ty != bottom) { ss->ty = bottom; f->ui->animating = true; }
+        /* The scroll view clamps ty to its own measured content height, which can differ
+         * from total_h by the list's padding or float rounding; aiming past that clamp
+         * asked for a new frame forever on long logs. Aim at what it will accept (new
+         * lines raise max_y on the next frame, and follow moves down then). */
+        float want = ss->content_h > 0 ? CUI_MIN(bottom, max_y) : bottom;
+        if (fabsf(ss->ty - want) > 0.5f) { ss->ty = want; f->ui->animating = true; }
     }
 }
 
