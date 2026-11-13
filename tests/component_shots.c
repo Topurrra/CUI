@@ -3746,7 +3746,8 @@ SCENE(step_slider) {
     }
 }
 
-static cui_color cc_palette[5] = { CUI_RGB(0xeef0f5), CUI_RGB(0x5c6370), CUI_RGB(0x37c6d0), CUI_RGB(0x1f3a5f), CUI_RGB(0xf2bd68) };
+static cui_color cc_palette[5] = {   /* plain initializers: a static array cannot hold CUI_RGB's compound literals in MSVC */
+    { 0xee, 0xf0, 0xf5, 255 }, { 0x5c, 0x63, 0x70, 255 }, { 0x37, 0xc6, 0xd0, 255 }, { 0x1f, 0x3a, 0x5f, 255 }, { 0xf2, 0xbd, 0x68, 255 } };
 static bool cc_locked[5] = { false, true, false, true, false };
 static uint32_t cc_palette_seed = 7;
 static void body_palette_strip(cui_ctx *ui) {

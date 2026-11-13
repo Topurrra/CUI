@@ -1642,7 +1642,8 @@ static void page_creative(cui_ctx *ui) {
     static float hue = 190, kelvin = 5600, opacity = 0.72f;
     static bool picking;
     static int variations = 3, generated = 0;
-    static cui_color palette[5] = { CUI_RGB(0xeef0f5), CUI_RGB(0x5c6370), CUI_RGB(0x37c6d0), CUI_RGB(0x1f3a5f), CUI_RGB(0xf2bd68) };
+    static cui_color palette[5] = {   /* plain initializers: a static array cannot hold CUI_RGB's compound literals in MSVC */
+        { 0xee, 0xf0, 0xf5, 255 }, { 0x5c, 0x63, 0x70, 255 }, { 0x37, 0xc6, 0xd0, 255 }, { 0x1f, 0x3a, 0x5f, 255 }, { 0xf2, 0xbd, 0x68, 255 } };
     static bool locked[5];
     static uint32_t palette_seed = 7;
     static int aspect = 1, background = 0, format = 0, saved_as = -1;
