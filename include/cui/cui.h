@@ -1614,9 +1614,13 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
  *     if (r.changed) recompile(src);
  *     cui_textf(ui, "Ln %d, Col %d", r.line, r.column);
  *
- * Lines never wrap; long ones scroll sideways while the gutter stays. Only
+ * Lines do not wrap: long ones scroll sideways while the gutter stays; with
+ * `.wrap` they break at the view width instead (after a space or punctuation
+ * where possible, else inside the word), continuation rows keep the line's
+ * indentation, the gutter numbers each line once and nothing scrolls sideways.
+ * Up and Down move by row, Home and End go to the row's start and end. Only
  * the lines in view are tokenized and drawn, so files of tens of thousands
- * of lines stay fast. An edit that would not fit in the capacity is refused
+ * of lines stay fast, wrapped or not. An edit that would not fit in the capacity is refused
  * whole (r.refused). Keys when focused: arrows, Ctrl+arrows by word, Home
  * (first character, then column 0), End, Page Up/Down, Ctrl+Home/End;
  * Shift extends; Ctrl+A; Ctrl+C/X/V (the whole line without a selection);
@@ -1638,6 +1642,7 @@ typedef struct cui_code_editor_opts {
     bool use_tabs;             /* indent with tab characters instead of spaces */
     bool read_only;
     bool no_line_numbers;      /* hides the gutter of line numbers */
+    bool wrap;                 /* soft wrap long lines at the view width instead of scrolling sideways */
     bool autofocus;
     const char *placeholder;   /* shown while the text is empty */
     const cui_text_mark *marks;   /* ranges to highlight (search results, regex matches), sorted by start */

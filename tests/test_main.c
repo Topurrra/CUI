@@ -6436,7 +6436,7 @@ typedef struct {
     char buf[2048];
     char *big; size_t cap;     /* an outside buffer instead of buf, or a smaller capacity for buf */
     const char *lang;
-    bool ro;
+    bool ro, wrap;
     char other[32];
     cui_code_editor_result r;
     bool any_changed;
@@ -6446,7 +6446,7 @@ static void build_ced(cui_ctx *ui, void *u) {
     cui_column(ui, .pad = 20, .gap = 12) {
         char *b = c->big ? c->big : c->buf;
         size_t cap = c->cap ? c->cap : sizeof c->buf;
-        c->r = cui_code_editor(ui, "ed", b, cap, .lang = c->lang, .read_only = c->ro, .height = 300, .width = CUI_PX(600));
+        c->r = cui_code_editor(ui, "ed", b, cap, .lang = c->lang, .read_only = c->ro, .wrap = c->wrap, .height = 300, .width = CUI_PX(600));
         c->any_changed |= c->r.changed;
         cui_input(ui, "after", c->other, sizeof c->other, .width = CUI_PX(200));
     }
@@ -6790,6 +6790,156 @@ static void test_code_editor(void) {
     }
     CHECK(ok);
     cui_destroy(ui);
+}
+
+/* A first line of `first` followed by a second line "z": the rows the first takes, counted by
+ * pressing Down from the start until the caret is on line 2. */
+static int ced_rows(cui_ctx *ui, ced_ctx *c, const char *first) {
+    snprintf(c->buf, sizeof c->buf, "%s\nz", first);
+    ced_sel(ui, c, 0, 0);
+    int n = 1;
+    while (n < 80) {
+        key(ui, build_ced, c, CUI_KEY_DOWN, 0);
+        if (c->r.line == 2) break;
+        n++;
+    }
+    return n;
+}
+static const char *ced_repeat(char *out, size_t cap, const char *unit, int times) {
+    out[0] = 0;
+    for (int i = 0; i < times && strlen(out) + strlen(unit) + 1 < cap; i++) strcat(out, unit);
+    return out;
+}
+
+static void test_code_editor_wrap(void) {
+    printf("code editor: soft wrap rows, caret motion, clicks, edits, large files\n");
+    cui_ctx *ui = new_ctx();
+    static ced_ctx c;
+    static char line[1500];
+    memset(&c, 0, sizeof c);
+    c.wrap = false;
+    run(ui, build_ced, &c, 3);
+    cui_rect er = rect_of(ui, cui_make_id(ui, "ed"));
+
+    /* without wrap a long line is one row: Down leaves it at once */
+    CHECK(ced_rows(ui, &c, ced_repeat(line, sizeof line, "a", 300)) == 1);
+
+    /* with wrap: the width W in characters is where a second row begins */
+    c.wrap = true;
+    run(ui, build_ced, &c, 3);
+    int W = 0;
+    for (int n = 1; n < 200 && !W; n++)
+        if (ced_rows(ui, &c, ced_repeat(line, sizeof line, "a", n)) == 2) W = n - 1;
+    CHECK(W >= 40 && W <= 110);
+    CHECK(ced_rows(ui, &c, ced_repeat(line, sizeof line, "a", W)) == 1);
+    CHECK(ced_rows(ui, &c, ced_repeat(line, sizeof line, "a", 2 * W)) == 2);
+    CHECK(ced_rows(ui, &c, ced_repeat(line, sizeof line, "a", 2 * W + 1)) == 3);
+    CHECK(ced_rows(ui, &c, "") == 1);
+
+    /* Down moves within the line, keeping the column; Up comes back */
+    ced_repeat(line, sizeof line, "a", 3 * W);
+    ced_text(&c, line);
+    ced_sel(ui, &c, 5, 5);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.line == 1 && c.r.cursor == W + 5);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.line == 1 && c.r.cursor == 2 * W + 5);
+    key(ui, build_ced, &c, CUI_KEY_UP, 0);
+    key(ui, build_ced, &c, CUI_KEY_UP, 0);
+    CHECK(c.r.cursor == 5);
+    key(ui, build_ced, &c, CUI_KEY_END, 0);
+    CHECK(c.r.line == 1 && c.r.cursor == W);   /* the end of the row, not the line */
+    key(ui, build_ced, &c, CUI_KEY_END, 0);
+    CHECK(c.r.cursor == W);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    key(ui, build_ced, &c, CUI_KEY_HOME, 0);
+    CHECK(c.r.cursor == W);   /* the start of the row it is on */
+    key(ui, build_ced, &c, CUI_KEY_HOME, 0);
+    CHECK(c.r.cursor == 0);   /* again: the line's */
+
+    /* breaks fall after spaces */
+    ced_repeat(line, sizeof line, "alpha ", 40);
+    ced_text(&c, line);
+    ced_sel(ui, &c, 0, 0);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.cursor > 0 && c.r.cursor <= W && c.buf[c.r.cursor - 1] == ' ');
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.buf[c.r.cursor - 1] == ' ');
+
+    /* continuation rows keep the indentation: the first holds W columns, the next W - 4 characters */
+    snprintf(line, sizeof line, "    ");
+    for (int i = 0; i < 3 * W; i++) strcat(line, "b");
+    ced_text(&c, line);
+    ced_sel(ui, &c, 0, 0);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.cursor == W);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.cursor == 2 * W - 4);
+
+    /* a click on a continuation row puts the caret in that row, at that column */
+    ced_repeat(line, sizeof line, "0123456789", 20);
+    ced_text(&c, line);
+    run(ui, build_ced, &c, 2);
+    er = rect_of(ui, cui_make_id(ui, "ed"));
+    float lh = 21, x0 = er.x + 26 + 2 * 7.8f + 8, y1 = er.y + 1 + 6 + lh * 1.5f;
+    click_at(ui, build_ced, &c, x0 + 10 * 7.8f, y1);
+    CHECK(c.r.focused && c.r.line == 1 && c.r.cursor == W + 10);
+    click_at(ui, build_ced, &c, x0 + 1, y1);
+    CHECK(c.r.cursor == W);
+    click_at(ui, build_ced, &c, er.x + 590, er.y + 1 + 6 + lh * 0.5f);   /* past the end of row 0: its end, drawn on row 0 */
+    CHECK(c.r.cursor == W);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.cursor >= 2 * W - 1 && c.r.cursor <= 2 * W);
+    /* a double click selects the word under it, across no row boundary */
+    click_at(ui, build_ced, &c, x0 + 10 * 7.8f, y1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_ced, &c, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_ced, &c, 1);
+    CHECK(c.r.anchor == 0 && c.r.cursor == (int)strlen(c.buf));   /* one long word */
+
+    /* typing and deleting re-wrap that line: W characters fit one row, W + 1 need two */
+    ced_repeat(line, sizeof line, "a", W);
+    strcat(line, "\nz");
+    ced_text(&c, line);
+    ced_sel(ui, &c, W, W);
+    type(ui, build_ced, &c, "a");
+    CHECK(c.r.changed && c.r.cursor == W + 1);
+    key(ui, build_ced, &c, CUI_KEY_HOME, CUI_MOD_CTRL);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.line == 1 && c.r.cursor == W);
+    ced_sel(ui, &c, W + 1, W + 1);
+    key(ui, build_ced, &c, CUI_KEY_BACKSPACE, 0);
+    key(ui, build_ced, &c, CUI_KEY_HOME, CUI_MOD_CTRL);
+    key(ui, build_ced, &c, CUI_KEY_DOWN, 0);
+    CHECK(c.r.line == 2);
+    cui_destroy(ui);
+
+    /* 10 000 wrapped lines: typing, paging and go to line stay quick */
+    ui = new_ctx();
+    memset(&c, 0, sizeof c);
+    c.lang = "c";
+    c.wrap = true;
+    run(ui, build_ced, &c, 3);
+    size_t big_n = 10000 * 150;
+    char *big = malloc(big_n);
+    size_t off = 0;
+    for (int i = 0; i < 10000; i++)
+        off += (size_t)snprintf(big + off, big_n - off, i % 10 == 0 ? "    value_%05d = compute(%d, \"a string literal long enough to wrap around the editor\", %d, %d, %d);\n" : "x_%d;\n", i, i, i, i, i);
+    c.big = big; c.cap = big_n + 64;
+    clock_t t0 = clock();
+    run(ui, build_ced, &c, 3);
+    CHECK(c.r.line_count == 10001);
+    cui_code_editor_goto(ui, "ed", 5000, 1);
+    run(ui, build_ced, &c, 2);
+    CHECK(c.r.line == 5000);
+    for (int i = 0; i < 30; i++) type(ui, build_ced, &c, "q");
+    CHECK(c.r.line == 5000 && c.r.column == 31);
+    for (int i = 0; i < 30; i++) key(ui, build_ced, &c, CUI_KEY_PAGE_DOWN, 0);
+    CHECK(c.r.line > 5000);
+    double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    CHECK(secs < 5.0);
+    printf("  10k wrapped lines: %.3f s\n", secs);
+    cui_destroy(ui);
+    free(big);
 }
 
 /* diff viewer ---------------------------------------------------------- */
@@ -8198,6 +8348,7 @@ int main(void) {
     test_markdown_images();
     test_markdown_callout_fold_keys();
     test_code_editor();
+    test_code_editor_wrap();
     test_diff();
     test_dials();
     test_candles();

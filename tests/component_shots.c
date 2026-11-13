@@ -1180,6 +1180,27 @@ static void body_code_editor(cui_ctx *ui) {
         }
     }
 }
+static char edw_src[1024] =
+    "// Soft wrap: a long line breaks at the view width, after a space where it can, and the rows after the first keep the indentation.\n"
+    "static void tile_cache_note(void) {\n"
+    "    const char *note = \"A string literal that is longer than the view is cut inside a word only when there is no better place to break it.\";\n"
+    "    if (cache_is_cold) { log_line(\"cold cache: every tile is decoded again, which costs a frame\", frame, tiles); }\n"
+    "}\n";
+static void body_code_editor_wrap(cui_ctx *ui);
+static void scene_code_editor_wrap(cui_ctx *ui, int f) {
+    if (f < 0) {
+        int t = -f - 1;
+        if (t == 3) {
+            const char *at = strstr(edw_src, "only when");
+            if (at) { int pos = (int)(at - edw_src) + 4; cui_code_editor_select(ui, "editor-wrap", pos, pos); }
+        }
+        return;
+    }
+    frame_wrap(ui, body_code_editor_wrap);
+}
+static void body_code_editor_wrap(cui_ctx *ui) {
+    cui_code_editor(ui, "editor-wrap", edw_src, sizeof edw_src, .lang = "c", .height = 250, .wrap = true);
+}
 /* ---- tool panels ---- */
 SCENE(inspector) {
     static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 }, scale[3] = { 1, 1, 1 };
@@ -4613,6 +4634,7 @@ int main(int argc, char **argv) {
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true }, { "markdown-images", scene_markdown_images, 560, 600, true },
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true },
         { "code-editor", scene_code_editor, 760, 446, true },
+        { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
