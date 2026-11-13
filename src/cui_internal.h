@@ -820,6 +820,29 @@ bool cui__edit_is_word(unsigned char c);
 int cui__edit_word_left(const char *s, int pos);
 int cui__edit_word_right(const char *s, int len, int pos);
 
+/* ---- text documents (cui_textdoc.c): the piece table behind cui_text_doc, and byte scans ---- */
+const char *cui__find_byte(const char *p, size_t n, char c);        /* memchr at memory speed */
+const char *cui__find_byte_back(const char *p, size_t n, char c);   /* the last c in p[0, n) */
+size_t cui__count_byte(const char *p, size_t n, char c);
+int cui__fill_nl(const char *s, int a, int b, int *out);            /* out[k]: the byte after the k-th '\n' of s[a, b); how many */
+/* One edit as the document logged it: bytes [a, b0) became [a, b1); before it, a was on line la
+ * and b0 on line lb; the new bytes hold k line breaks. Editors patch their caches from these. */
+typedef struct { unsigned rev; int a, b0, b1, la, lb, k; } cui__tsplice;
+#define CUI__DOC_LOG 256
+int cui__doc_line_start(const cui_text_doc *d, int line);   /* line past the last: length + 1 (as the editor's index) */
+int cui__doc_line_of(const cui_text_doc *d, int pos);
+/* the piece holding byte pos: returns p with p[0] = byte *cs, valid to *ce; NULL at the end */
+const char *cui__doc_chunk(const cui_text_doc *d, int pos, int *cs, int *ce);
+/* Replace [a, b) with t[0, n): own (when not NULL) is t, given away (release(own, user), NULL: free);
+ * caret is kept for undo; merge joins the step to the last one when it continues it (typing on,
+ * deleting on) or else makes it part of the same undo group. */
+bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *own, void (*release)(char *, void *), void *user,
+                   int caret, bool merge);
+bool cui__doc_undo(cui_text_doc *d, bool redo, int *caret);
+const cui__tsplice *cui__doc_splice_at(const cui_text_doc *d, unsigned rev);   /* valid for the last CUI__DOC_LOG revisions after base_rev */
+unsigned cui__doc_base_rev(const cui_text_doc *d);
+int cui__doc_maxlen(const cui_text_doc *d);
+
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */
 typedef struct {
     const char *const *kw; const char *const *types; const char *line_comment, *line_comment2;

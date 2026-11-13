@@ -1807,6 +1807,78 @@ CUI_API bool cui_markdown_apply_task(char *text, const cui_markdown_result *resu
 #define cui_markdown(ui, id, text, ...) cui_markdown_ex((ui), (id), (text), CUI__OPTS(cui_markdown_opts, __VA_ARGS__))
 #endif
 
+/* ---- Text document ---- */
+
+/* A text document: the text of an editor kept as a piece table, so an edit costs about the same
+ * at any size and anywhere in the text (a 100 MB file types near the top as fast as near the
+ * end), and memory stays near the size of the text: no spare capacity, no second copy. Needs no
+ * cui_ctx; one thread at a time (snapshots below are for other threads). Offsets are bytes.
+ *
+ *     cui_text_doc *d = cui_text_doc_adopt(bytes, len, NULL, NULL);   // takes a malloc'd text, no copy
+ *     cui_code_editor(ui, "code", NULL, 0, .doc = d, .lang = "c");     // edits it; two editors may share it
+ *     if (cui_text_doc_revision(d) != saved_rev) ...                  // dirty
+ *
+ * The bytes a document was made from are never written: edits go to append-only buffers and the
+ * text is a list of pieces of those, in a balanced tree that knows the bytes and line breaks of
+ * every subtree. Undo keeps pieces, not bytes, so undoing a replace of the whole text is cheap.
+ * Bytes are kept as given (the code editor drops carriage returns before they get here). */
+typedef struct cui_text_doc cui_text_doc;
+/* a document holding a copy of text[0, len) (len < 0: up to the NUL; NULL: empty) */
+CUI_API cui_text_doc *cui_text_doc_new(const char *text, int len);
+/* a document over text[0, len) itself, no copy: it must not change afterwards, and it is given
+ * back with release(text, user) (NULL: free()) when the document and its snapshots let go */
+CUI_API cui_text_doc *cui_text_doc_adopt(char *text, int len, void (*release)(char *text, void *user), void *user);
+CUI_API void cui_text_doc_free(cui_text_doc *doc);
+/* replaces the whole text (a copy, or adopted as above) and clears the undo history; editors
+ * showing the document start over as with a new text */
+CUI_API void cui_text_doc_set(cui_text_doc *doc, const char *text, int len);
+CUI_API void cui_text_doc_set_adopt(cui_text_doc *doc, char *text, int len, void (*release)(char *text, void *user), void *user);
+CUI_API int cui_text_doc_length(const cui_text_doc *doc);
+CUI_API int cui_text_doc_line_count(const cui_text_doc *doc);   /* line breaks + 1 */
+/* the first byte of a line (0 based; past the last line: the length), and where it ends (its line
+ * break, or the length for the last line); the line holding byte pos. O(log n) each. */
+CUI_API int cui_text_doc_line_start(const cui_text_doc *doc, int line);
+CUI_API int cui_text_doc_line_end(const cui_text_doc *doc, int line);
+CUI_API int cui_text_doc_line_of(const cui_text_doc *doc, int pos);
+CUI_API int cui_text_doc_longest_line(const cui_text_doc *doc);   /* bytes; an edit that shortens the longest leaves it (an upper bound) */
+/* copies bytes [start, start + len) to out (clamped to the text); returns how many */
+CUI_API int cui_text_doc_read(const cui_text_doc *doc, int start, int len, char *out);
+CUI_API int cui_text_doc_char(const cui_text_doc *doc, int pos);   /* the byte at pos (0 to 255), or -1 past the end */
+/* bytes [start, end) (end < 0: to the end) as one malloc'd NUL terminated string; free() it.
+ * For a function that needs the text in one piece: on another thread, use a snapshot. */
+CUI_API char *cui_text_doc_copy(const cui_text_doc *doc, int start, int end, int *len);
+/* Reads the text where it lies, without copying, a piece at a time:
+ *     cui_text_doc_iter it = cui_text_doc_iter_at(d, 0, -1);
+ *     while (cui_text_doc_iter_next(&it)) fwrite(it.p, 1, it.len, f);   // it.pos: offset of it.p[0] */
+typedef struct cui_text_doc_iter { const char *p; int len, pos; const cui_text_doc *doc_; int end_; } cui_text_doc_iter;
+CUI_API cui_text_doc_iter cui_text_doc_iter_at(const cui_text_doc *doc, int start, int end);
+CUI_API bool cui_text_doc_iter_next(cui_text_doc_iter *it);
+/* changes with every edit, undo and set: compare with a number kept at save time for dirty */
+CUI_API unsigned cui_text_doc_revision(const cui_text_doc *doc);
+/* replaces bytes [start, end) with text[0, len) (len < 0: up to the NUL) as one undo step; editors
+ * showing the document follow (their carets move with the text). False when nothing changed. */
+CUI_API bool cui_text_doc_replace(cui_text_doc *doc, int start, int end, const char *text, int len);
+/* the undo history (shared by every editor on the document; an editor's Ctrl+Z uses it too). The
+ * caret goes where it was before the step undone, or after the step redone. */
+CUI_API bool cui_text_doc_undo(cui_text_doc *doc, int *caret);
+CUI_API bool cui_text_doc_redo(cui_text_doc *doc, int *caret);
+CUI_API bool cui_text_doc_can_undo(const cui_text_doc *doc);
+CUI_API bool cui_text_doc_can_redo(const cui_text_doc *doc);
+CUI_API void cui_text_doc_clear_history(cui_text_doc *doc);
+CUI_API size_t cui_text_doc_memory(const cui_text_doc *doc);     /* bytes it holds: buffers, line index, tree, history */
+CUI_API int cui_text_doc_piece_count(const cui_text_doc *doc);
+/* A snapshot: the text as it is now, frozen, for reading on any thread (a save, a formatter, a
+ * search on a worker) while the document goes on being edited. Taking one costs O(pieces) and
+ * copies no text; take it on the document's thread, read and free it on any. */
+typedef struct cui_text_snap cui_text_snap;
+CUI_API cui_text_snap *cui_text_doc_snapshot(const cui_text_doc *doc);
+CUI_API void cui_text_snap_free(cui_text_snap *snap);
+CUI_API int cui_text_snap_length(const cui_text_snap *snap);
+CUI_API int cui_text_snap_read(const cui_text_snap *snap, int start, int len, char *out);
+CUI_API char *cui_text_snap_copy(const cui_text_snap *snap, int *len);   /* the whole text, malloc'd, NUL terminated */
+CUI_API int cui_text_snap_chunks(const cui_text_snap *snap);             /* the text as runs of bytes, in order */
+CUI_API const char *cui_text_snap_chunk(const cui_text_snap *snap, int i, int *len);
+
 /* ---- Code editor ---- */
 
 /* Code editor: editable code with the code block's highlighting, a line
@@ -1866,6 +1938,9 @@ typedef struct cui_code_editor_opts {
     int revision;              /* big files: nonzero promises the text changes only through the editor while it stays the same,
                                 * so the editor keeps its line index between frames instead of reading the whole text each
                                 * frame. Change it whenever your code writes the buffer (loading a file, replacing all). */
+    cui_text_doc *doc;         /* edit this document instead of buf and cap (pass NULL, 0): no capacity, edits cost the
+                                * same anywhere at any size, and every editor given the same document shares it (and its
+                                * undo history), each following the others' edits. `.revision` is not needed. */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
