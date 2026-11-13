@@ -82,6 +82,9 @@ typedef struct {
     bool bar_focus;             /* give the bar's field focus this frame */
     bool pend_sel, pend_goto, pend_find, init;
     int pend_a, pend_c, pend_line, pend_col;
+    bool pend_edit;             /* cui_code_editor_edit: replace [pend_es, pend_ee) with pend_text, then select */
+    int pend_es, pend_ee, pend_sa, pend_sc;
+    char *pend_text;
     float focus_t;
     cui__ed_wc *wc;             /* wrap cache, only while `.wrap` is on */
     cui__ed_mc *mc;             /* line states, for the languages with a state (markdown, yaml, xml...) and those with block comments */
@@ -347,6 +350,7 @@ static void cui__ed_dtor(cui_ctx *ui, void *data) {
     for (int i = 0; i < st->hist.n; i++) cui__free(ui, st->hist.r[i].data);
     cui__free(ui, st->hist.r);
     cui__free(ui, st->ix.ls);
+    cui__free(ui, st->pend_text);
     for (int i = 0; i < st->ed.undo_count; i++) cui__free(ui, st->ed.undo[i]);   /* the text fields' history, unused here */
 }
 
@@ -917,10 +921,70 @@ static void cui__ed_indent(cui__ed *E, bool out) {
     e->anchor = map[1];
 }
 
+/* A markdown list item on line [ls, le): `pre` is where the marker starts (after the
+ * indentation and any `>` quote), `mark` the end of the marker and its space, `content` where
+ * the text starts (after a task box), `num` the number of an ordered item or -1. */
+typedef struct { int pre, mark, content, num; char delim; bool task; } cui__ed_mdi;
+static bool cui__ed_md_item(const char *s, int ls, int le, cui__ed_mdi *it) {
+    int i = ls;
+    for (;;) {
+        while (i < le && cui__ed_ws(s[i])) i++;
+        if (i < le && s[i] == '>') i++; else break;
+    }
+    it->pre = i; it->num = -1; it->delim = 0; it->task = false;
+    if (i + 1 < le && (s[i] == '-' || s[i] == '*' || s[i] == '+') && s[i + 1] == ' ') it->mark = i + 2;
+    else {
+        int j = i, v = 0;
+        while (j < le && j - i < 9 && s[j] >= '0' && s[j] <= '9') v = v * 10 + (s[j++] - '0');
+        if (j == i || j + 1 >= le || (s[j] != '.' && s[j] != ')') || s[j + 1] != ' ') return false;
+        it->num = v; it->delim = s[j]; it->mark = j + 2;
+    }
+    it->content = it->mark;
+    int m = it->mark;
+    if (m + 2 < le && s[m] == '[' && (s[m + 1] == ' ' || s[m + 1] == 'x' || s[m + 1] == 'X') && s[m + 2] == ']' && (m + 3 == le || s[m + 3] == ' ')) {
+        it->task = true;
+        it->content = m + 3 < le ? m + 4 : m + 3;
+    }
+    return true;
+}
+
+/* Enter in a markdown list: the next item (numbers count on, a task starts unchecked), or,
+ * on an empty item, the marker goes. False: not a list line, or the caret is before the text. */
+static bool cui__ed_md_newline(cui__ed *E) {
+    cui_edit_state *e = &E->st->ed;
+    int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+    int line = cui__ed_line_of(E, s0), ls = E->ls[line], le = cui__ed_end(E, line);
+    cui__ed_mdi it;
+    if (!cui__ed_md_item(E->buf, ls, le, &it) || s0 < it.content) return false;
+    if (s0 == s1) {
+        int k = it.content;
+        while (k < le && cui__ed_ws(E->buf[k])) k++;
+        if (k == le) {   /* an empty item: end the list, keep a quote's prefix */
+            int keep = 0;
+            for (int i = ls; i < it.pre; i++) if (E->buf[i] == '>') keep = it.pre - ls;
+            if (!cui__ed_replace(E, ls, le, E->buf + ls, keep, 3)) return false;
+            e->cursor = e->anchor = e->last_cursor = ls + keep;
+            return true;
+        }
+    }
+    int pre = it.pre - ls;
+    char *t = cui__frame_alloc(E->ui, (size_t)pre + 32);
+    int n = 0;
+    t[n++] = '\n';
+    memcpy(t + n, E->buf + ls, (size_t)pre); n += pre;
+    if (it.num >= 0) n += snprintf(t + n, 24, "%d%c ", it.num + 1, it.delim);
+    else { memcpy(t + n, E->buf + it.pre, 2); n += 2; }
+    if (it.task) { memcpy(t + n, "[ ] ", 4); n += 4; }
+    if (!cui__ed_replace(E, s0, s1, t, n, 3)) return false;
+    e->cursor = e->anchor = e->last_cursor = s0 + n;
+    return true;
+}
+
 /* Enter: a new line at the indentation of this one, a level deeper after an
  * opening brace (C-like languages) or a colon (Python); between a pair of
  * braces the closing one moves down a line of its own. */
 static void cui__ed_newline(cui__ed *E, int lang_kind) {
+    if (lang_kind == 3 && cui__ed_md_newline(E)) return;
     cui_edit_state *e = &E->st->ed;
     int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
     int line = cui__ed_line_of(E, s0), ls = E->ls[line];
@@ -1329,6 +1393,19 @@ void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int cursor)
     ui->animating = true;
 }
 
+void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int end, const char *text, int sel_anchor, int sel_cursor) {
+    cui__ed_state *s = cui__ed_get(ui, id);
+    size_t n = text ? strlen(text) : 0;
+    cui__free(ui, s->pend_text);
+    s->pend_text = cui__alloc(ui, n + 1);
+    if (n) memcpy(s->pend_text, text, n);
+    s->pend_text[n] = 0;
+    s->pend_edit = true;
+    s->pend_es = start; s->pend_ee = end;
+    s->pend_sa = sel_anchor; s->pend_sc = sel_cursor;
+    ui->animating = true;
+}
+
 void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query) {
     cui__ed_state *s = cui__ed_get(ui, id);
     if (!query) { s->mode = 0; return; }
@@ -1349,9 +1426,10 @@ void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *query, con
     ui->animating = true;
 }
 
-/* how Enter indents: 1 braces (C, C++, JavaScript, TypeScript, Rust, Go,
+/* how Enter indents: 3 markdown lists, 1 braces (C, C++, JavaScript, TypeScript, Rust, Go,
  * JSON), 2 colons (Python), 0 neither */
 static int cui__ed_lang_kind(const char *lang) {
+    if (lang && (!strcmp(lang, "markdown") || !strcmp(lang, "md"))) return 3;
     static const char *const braces[] = { "c", "cpp", "c++", "h", "js", "ts", "javascript", "typescript", "rust", "rs", "go", "json" };
     if (!lang) return 0;
     for (int i = 0; i < CUI_COUNTOF(braces); i++) if (!strcmp(lang, braces[i])) return 1;
@@ -1397,6 +1475,22 @@ static void cui__edf_requests(cui__edf *f) {
     cui__ed_state *st = E->st;
     cui_edit_state *e = &st->ed;
     cui_ctx *ui = E->ui;
+    if (st->pend_edit) {
+        int a = CUI_CLAMP(st->pend_es, 0, E->len), b = CUI_CLAMP(st->pend_ee, a, E->len);
+        int n = (int)strlen(st->pend_text), m = 0;
+        for (int i = 0; i < n; i++) if (st->pend_text[i] != '\r') m++;
+        if (!E->ro && cui__ed_replace(E, a, b, st->pend_text, n, 3)) {
+            e->last_edit = 0;
+            int na = st->pend_sa < 0 ? a + m : CUI_MIN(st->pend_sa, E->len);
+            int nc = st->pend_sc < 0 ? na : CUI_MIN(st->pend_sc, E->len);
+            if (st->pend_sa < 0 && st->pend_sc >= 0) na = nc;
+            e->anchor = na; e->cursor = e->last_cursor = nc;
+        }
+        ui->focus = f->lid;
+        cui__free(ui, st->pend_text);
+        st->pend_text = NULL;
+        st->pend_edit = false;
+    }
     if (st->pend_sel) {
         e->anchor = CUI_CLAMP(st->pend_a, 0, E->len);
         e->cursor = CUI_CLAMP(st->pend_c, 0, E->len);
@@ -1711,7 +1805,13 @@ static void cui__edf_edit_keys(cui__edf *f) {
     for (int rep = ui->kpressed[CUI_KEY_ENTER]; rep > 0 && !prim; rep--) cui__ed_newline(E, f->lang_kind);
     if (cui_key_pressed(ui, CUI_KEY_TAB) && !(f->mods & CUI_MOD_CTRL)) {
         s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
-        if (shift || s1 > s0) cui__ed_indent(E, shift);
+        bool item = false;
+        if (f->lang_kind == 3 && s1 == s0) {   /* a list item indents as a line, wherever the caret is */
+            int ln = cui__ed_line_of(E, s0);
+            cui__ed_mdi it;
+            item = cui__ed_md_item(E->buf, E->ls[ln], cui__ed_end(E, ln), &it);
+        }
+        if (shift || s1 > s0 || item) cui__ed_indent(E, shift);
         else {
             int col = cui__ed_caret_col(E, s0), n = E->use_tabs ? 1 : E->tab - col % E->tab;
             char sp[17];
@@ -2198,6 +2298,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     if (E.changed && !o->revision) st->ix.hash = cui__ed_hash_text(buf, (size_t)E.len);   /* next frame: the text is as the editor left it */
     res.changed = E.changed;
     res.refused = E.refused;
+    res.bar_open = st->mode != 0;
     res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.rid || ui->focus == f.gid;
     res.cursor = e->cursor; res.anchor = e->anchor;
     res.line = f.caret_line + 1; res.column = f.caret_col + 1;

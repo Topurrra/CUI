@@ -78,6 +78,7 @@ static cui_key cui__mac_key(NSEvent *e) {
     case ',': return CUI_KEY_COMMA;
     case '.': return CUI_KEY_PERIOD;
     case '/': return CUI_KEY_SLASH;
+    case '\\': return CUI_KEY_BACKSLASH;
     default: return CUI_KEY_NONE;
     }
 }

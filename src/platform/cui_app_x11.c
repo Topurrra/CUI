@@ -488,6 +488,7 @@ static cui_key cui__x11_key(KeySym ks) {
     case XK_comma: return CUI_KEY_COMMA;
     case XK_period: return CUI_KEY_PERIOD;
     case XK_slash: return CUI_KEY_SLASH;
+    case XK_backslash: return CUI_KEY_BACKSLASH;
     default: return CUI_KEY_NONE;
     }
 }

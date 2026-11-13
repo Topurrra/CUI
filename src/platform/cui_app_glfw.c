@@ -56,6 +56,7 @@ static cui_key cui__glfw_key(int k) {
     case GLFW_KEY_COMMA: return CUI_KEY_COMMA;
     case GLFW_KEY_PERIOD: return CUI_KEY_PERIOD;
     case GLFW_KEY_SLASH: return CUI_KEY_SLASH;
+    case GLFW_KEY_BACKSLASH: return CUI_KEY_BACKSLASH;
     default: return CUI_KEY_NONE;
     }
 }

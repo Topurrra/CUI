@@ -236,6 +236,7 @@ typedef enum cui_key {
     CUI_KEY_MINUS, CUI_KEY_EQUAL, CUI_KEY_COMMA, CUI_KEY_PERIOD, CUI_KEY_SLASH,
     CUI_KEY_F1, CUI_KEY_F2, CUI_KEY_F3, CUI_KEY_F4, CUI_KEY_F5, CUI_KEY_F6,
     CUI_KEY_F7, CUI_KEY_F8, CUI_KEY_F9, CUI_KEY_F10, CUI_KEY_F11, CUI_KEY_F12,
+    CUI_KEY_BACKSLASH,
     CUI_KEY_COUNT
 } cui_key;
 
@@ -297,6 +298,7 @@ CUI_API const char *cui_get_clipboard_text(cui_ctx *ui);
 /* Queries, useful for app level shortcuts. */
 CUI_API bool cui_key_pressed(cui_ctx *ui, cui_key key);          /* pressed this frame (with repeat) */
 CUI_API bool cui_key_down(cui_ctx *ui, cui_key key);
+CUI_API void cui_key_consume(cui_ctx *ui, cui_key key);       /* takes this frame's press away from whatever reads keys after this call (an app handling a key its editor would also act on) */
 CUI_API bool cui_shortcut(cui_ctx *ui, int mods, cui_key key);   /* e.g. cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_K) */
 CUI_API int cui_key_mods(cui_ctx *ui);
 CUI_API cui_vec2 cui_mouse_pos(cui_ctx *ui);
@@ -1793,6 +1795,7 @@ typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
     bool refused;              /* an edit did not fit in the capacity and was dropped */
     bool focused;              /* the editor or its find bar has the keyboard */
+    bool bar_open;             /* the find or go to line bar is showing (so `focused` may mean its field) */
     int cursor, anchor;        /* caret and the other end of the selection, byte offsets */
     int line, column;          /* the caret, 1 based; columns count tabs to their stop */
     int line_count, length;    /* lines, and bytes of text */
@@ -1806,6 +1809,11 @@ CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, c
 CUI_API void cui_code_editor_goto(cui_ctx *ui, const char *id, int line, int column);
 /* On the next frame: select bytes anchor..cursor, focus and scroll there. */
 CUI_API void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int cursor);
+/* On the editor's next frame: replace bytes [start, end) with text as ONE undoable edit
+ * (through the editor's own edit path), then select [sel_anchor, sel_cursor] in the new text;
+ * both negative puts the caret after the inserted text; one negative takes the other's value.
+ * Focuses the editor. An edit that would not fit the capacity is refused whole (`refused`). */
+CUI_API void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int end, const char *text, int sel_anchor, int sel_cursor);
 /* Opens the find bar with query and selects the next match (NULL closes). */
 CUI_API void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query);
 /* Opens the find bar with the replace row, query and replacement filled in

@@ -576,6 +576,7 @@ void cui_input_focus(cui_ctx *ui, bool focused) {
 }
 
 bool cui_key_pressed(cui_ctx *ui, cui_key k) { return k > 0 && k < CUI_KEY_COUNT && ui->kpressed[k] > 0; }
+void cui_key_consume(cui_ctx *ui, cui_key k) { if (k > 0 && k < CUI_KEY_COUNT) ui->kpressed[k] = 0; }
 bool cui_key_down(cui_ctx *ui, cui_key k) { return k > 0 && k < CUI_KEY_COUNT && ui->kdown[k]; }
 int cui_key_mods(cui_ctx *ui) { return ui->mods; }
 bool cui_shortcut(cui_ctx *ui, int mods, cui_key key) {

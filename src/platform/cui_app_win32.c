@@ -151,6 +151,7 @@ static cui_key cui__win32_key(WPARAM vk) {
     case VK_OEM_COMMA: return CUI_KEY_COMMA;
     case VK_OEM_PERIOD: return CUI_KEY_PERIOD;
     case VK_OEM_2: return CUI_KEY_SLASH;
+    case VK_OEM_5: return CUI_KEY_BACKSLASH;
     default: return CUI_KEY_NONE;
     }
 }

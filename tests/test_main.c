@@ -7810,6 +7810,125 @@ static int ced_walk_down(cui_ctx *ui, ced_ctx *c, int n) {
     return c->r.cursor;
 }
 
+static void test_code_editor_mdwrite(void) {
+    printf("code editor: markdown list continuation, Tab in lists, cui_code_editor_edit\n");
+    cui_ctx *ui = new_ctx();
+    static ced_ctx c;
+    memset(&c, 0, sizeof c);
+    c.lang = "markdown";
+    run(ui, build_ced, &c, 3);
+#define MD_ENTER(text, at) do { ced_text(&c, text); ced_sel(ui, &c, at, at); key(ui, build_ced, &c, CUI_KEY_ENTER, 0); } while (0)
+    MD_ENTER("- one", 5);
+    CHECK(strcmp(c.buf, "- one\n- ") == 0 && c.r.cursor == 8);
+    MD_ENTER("* one", 5);
+    CHECK(strcmp(c.buf, "* one\n* ") == 0);
+    MD_ENTER("+ one", 5);
+    CHECK(strcmp(c.buf, "+ one\n+ ") == 0);
+    MD_ENTER("9. nine", 7);
+    CHECK(strcmp(c.buf, "9. nine\n10. ") == 0);
+    MD_ENTER("1) a", 4);
+    CHECK(strcmp(c.buf, "1) a\n2) ") == 0);
+    MD_ENTER("- [ ] todo", 10);
+    CHECK(strcmp(c.buf, "- [ ] todo\n- [ ] ") == 0);
+    MD_ENTER("- [x] done", 10);
+    CHECK(strcmp(c.buf, "- [x] done\n- [ ] ") == 0);
+    MD_ENTER("  - nested", 10);
+    CHECK(strcmp(c.buf, "  - nested\n  - ") == 0);
+    MD_ENTER("> - quoted", 10);
+    CHECK(strcmp(c.buf, "> - quoted\n> - ") == 0);
+    MD_ENTER("- split here", 8);   /* the rest of the line moves to the new item */
+    CHECK(strcmp(c.buf, "- split \n- here") == 0 && c.r.cursor == 11);
+    /* an empty item ends the list */
+    MD_ENTER("- one\n- ", 8);
+    CHECK(strcmp(c.buf, "- one\n") == 0 && c.r.cursor == 6);
+    MD_ENTER("1. a\n2. ", 8);
+    CHECK(strcmp(c.buf, "1. a\n") == 0);
+    MD_ENTER("> - a\n> - ", 10);
+    CHECK(strcmp(c.buf, "> - a\n> ") == 0);
+    /* not a list: a plain Enter for bold text and a rule */
+    MD_ENTER("**bold**", 8);
+    CHECK(strcmp(c.buf, "**bold**\n") == 0);
+    MD_ENTER("---", 3);
+    CHECK(strcmp(c.buf, "---\n") == 0);
+    MD_ENTER("- one", 1);   /* the caret before the text: a plain Enter */
+    CHECK(strcmp(c.buf, "-\n one") == 0);
+    /* one undo step */
+    MD_ENTER("- one", 5);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "- one") == 0);
+    /* other languages do not continue */
+    c.lang = "text";
+    MD_ENTER("- one", 5);
+    CHECK(strcmp(c.buf, "- one\n") == 0);
+    c.lang = "md";
+
+    /* Tab and Shift+Tab in a list */
+    ced_text(&c, "- a\n- b\n- c");
+    ced_sel(ui, &c, 7, 7);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "- a\n    - b\n- c") == 0 && c.r.cursor == 11);
+    key(ui, build_ced, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    CHECK(strcmp(c.buf, "- a\n- b\n- c") == 0 && c.r.cursor == 7);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "- a\n- b\n- c") == 0);
+    ced_sel(ui, &c, 0, 11);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "    - a\n    - b\n    - c") == 0);
+    ced_text(&c, "1. a\n2. b");
+    ced_sel(ui, &c, 4, 4);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);   /* numbering untouched */
+    CHECK(strcmp(c.buf, "    1. a\n2. b") == 0);
+    ced_text(&c, "plain");   /* not a list: a Tab types spaces as before */
+    ced_sel(ui, &c, 0, 0);
+    key(ui, build_ced, &c, CUI_KEY_TAB, 0);
+    CHECK(strcmp(c.buf, "    plain") == 0);
+
+    /* cui_code_editor_edit: one undoable edit, then the selection */
+    ced_text(&c, "hello world");
+    ced_sel(ui, &c, 0, 0);
+    c.any_changed = false;
+    cui_code_editor_edit(ui, "ed", 6, 11, "**world**", -1, -1);
+    run(ui, build_ced, &c, 1);
+    CHECK(strcmp(c.buf, "hello **world**") == 0 && c.any_changed);
+    CHECK(c.r.cursor == 15 && c.r.anchor == 15 && c.r.length == 15);
+    cui_code_editor_edit(ui, "ed", 8, 13, "WORLD", 8, 13);
+    run(ui, build_ced, &c, 1);
+    CHECK(strcmp(c.buf, "hello **WORLD**") == 0 && c.r.anchor == 8 && c.r.cursor == 13);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello **world**") == 0);
+    key(ui, build_ced, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(strcmp(c.buf, "hello world") == 0);
+    cui_code_editor_edit(ui, "ed", 5, 5, "[]()", 6, -1);   /* a caret inside */
+    run(ui, build_ced, &c, 1);
+    CHECK(strcmp(c.buf, "hello[]() world") == 0 && c.r.cursor == 6 && c.r.anchor == 6);
+    cui_code_editor_edit(ui, "ed", 100, 200, "!", -1, -1);   /* out of range clamps to the end */
+    run(ui, build_ced, &c, 1);
+    CHECK(strcmp(c.buf, "hello[]() world!") == 0);
+    /* an edit that does not fit is refused whole */
+    c.cap = 20; c.any_refused = false;
+    ced_text(&c, "0123456789012345");
+    cui_code_editor_edit(ui, "ed", 0, 0, "abcdefghij", -1, -1);
+    run(ui, build_ced, &c, 1);
+    CHECK(strcmp(c.buf, "0123456789012345") == 0 && c.any_refused);
+    /* a read only editor refuses edits */
+    c.cap = 0; c.ro = true;
+    ced_text(&c, "ro");
+    cui_code_editor_edit(ui, "ed", 0, 0, "x", -1, -1);
+    run(ui, build_ced, &c, 1);
+    CHECK(strcmp(c.buf, "ro") == 0);
+#undef MD_ENTER
+    /* small API pieces that go with it */
+    CHECK(strcmp(cui_key_name(CUI_KEY_BACKSLASH), "\\") == 0);
+    c.ro = false; c.lang = "md";
+    ced_text(&c, "a");
+    ced_sel(ui, &c, 0, 0);
+    CHECK(!c.r.bar_open);
+    key(ui, build_ced, &c, CUI_KEY_F, CUI_MOD_PRIMARY);
+    CHECK(c.r.bar_open);
+    cui_destroy(ui);
+}
+
 static void test_code_editor_big(void) {
     printf("code editor: plain, revision, edits patch the line index\n");
     static ced_ctx c, fresh;
@@ -9532,6 +9651,7 @@ int main(void) {
     test_code_editor_wrap();
     test_code_editor_markdown();
     test_code_editor_langs();
+    test_code_editor_mdwrite();
     test_code_editor_big();
     test_diff();
     test_dials();
