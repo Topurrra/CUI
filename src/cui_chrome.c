@@ -948,15 +948,31 @@ static void cui__paint_status_progress(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
-void cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progress_opts *o) {
+bool cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progress_opts *o) {
     cui_status_progress_opts d;
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     bool icon_only;
     float lw = o->label ? cui__text_width(ui, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), o->label, cui__display_len(o->label), true) + 8 : 0;
-    if (!cui__status_fits(ui, lw, false, o->width > 0 ? o->width : 64, &icon_only)) return;
-    int i = cui__status_row(ui, 0);
+    if (!cui__status_fits(ui, lw, false, o->width > 0 ? o->width : 64, &icon_only)) return false;
+    cui_id id = 0;
+    cui_interact r = { 0 };
+    cui__status_item_state *st = NULL;
+    if (o->clickable) {   /* label and bar are one item, like cui_status_bar_item_ex */
+        id = cui_make_id(ui, o->label && o->label[0] ? o->label : (o->tooltip ? o->tooltip : "#status-progress"));
+        r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
+        st = cui_state(ui, id, sizeof *st);
+        cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+        cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
+    }
+    int i = cui__status_row(ui, id);
     ui->nodes[i].gap = 8;
+    if (o->clickable) {
+        cui_node *n = &ui->nodes[i];
+        n->bg = r.pressed ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), st->hover);
+        cui__mark_interactive(ui, i, CUI_IF_FOCUSABLE);
+        if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+    }
     cui__open(ui, i);
     if (o->label) cui__status_label(ui, o->label, cui__display_len(o->label), CUI_C(ui, TEXT_SECONDARY));
     int bar = cui__leaf(ui, 0, CUI_PX(o->width > 0 ? o->width : 64), CUI_PX(4));
@@ -972,6 +988,12 @@ void cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progr
     ui->nodes[bar].paint = cui__paint_status_progress;
     ui->nodes[bar].paint_data = p;
     cui__close(ui);
+    if (!o->clickable) return false;
+    cui__focus_ring(ui, i, st->focus);
+    ui->last_id = id;
+    ui->last_node = i;
+    if (o->tooltip) cui_tooltip(ui, o->tooltip);
+    return r.clicked && !cui_is_disabled(ui);
 }
 
 /* ------------------------------------------------------------------------ */

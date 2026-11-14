@@ -3654,8 +3654,8 @@ CUI_API void cui_status_bar_text_ex(cui_ctx *ui, const char *text, const cui_sta
 /* A small clickable item ("Ln 12, Col 4", "UTF-8"). Returns true when clicked. */
 CUI_API bool cui_status_bar_item_ex(cui_ctx *ui, const char *label, const cui_status_item_opts *opts);
 /* A small progress bar with an optional label. value is 0..1. */
-typedef struct cui_status_progress_opts { int _; const char *label; bool indeterminate; float width; } cui_status_progress_opts;
-CUI_API void cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progress_opts *opts);
+typedef struct cui_status_progress_opts { int _; const char *label; bool indeterminate; float width; bool clickable; const char *tooltip; } cui_status_progress_opts;
+CUI_API bool cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progress_opts *opts);
 
 /* Document tabs: editor style tabs. Clicking selects (*selected is
  * updated), the x or a middle click asks to close, dragging reorders, and

@@ -2807,6 +2807,56 @@ static void build_dtabs(cui_ctx *ui, void *u) {
     }
 }
 
+typedef struct { bool clickable; int clicks; cui_id last; } sbp_ctx;
+static void build_sbp(cui_ctx *ui, void *u) {
+    sbp_ctx *s = u;
+    cui_column(ui, .width = CUI_FILL) {
+        cui_status_bar(ui, "sbp") {
+            if (cui_status_bar_progress(ui, 0.5f, .label = "Indexing", .clickable = s->clickable, .tooltip = "Show tasks")) s->clicks++;
+            s->last = cui_last_id(ui);
+        }
+    }
+}
+
+static void test_status_progress_click(void) {
+    printf("status bar progress: clickable\n");
+    sbp_ctx s = { false, 0, 0 };
+    cui_ctx *ui = new_ctx();
+    run(ui, build_sbp, &s, 3);
+    int base = cui_get_draw_data(ui)->vertex_count;
+    cui_rect r = rect_of(ui, cui_make_id(ui, "sbp"));
+    click_at(ui, build_sbp, &s, r.x + 20, r.y + r.h / 2);
+    CHECK(s.clicks == 0);
+    CHECK(cui_get_draw_data(ui)->vertex_count == base);   /* zero options: same pixels, no hover fill */
+    cui_destroy(ui);
+
+    s = (sbp_ctx){ true, 0, 0 };
+    ui = new_ctx();
+    run(ui, build_sbp, &s, 3);
+    int idle = cui_get_draw_data(ui)->vertex_count;
+    CHECK(idle == base);
+    cui_id id = scoped_id(ui, "sbp", "Indexing");
+    cui_rect it = rect_of(ui, id);
+    CHECK(it.w > 0);
+    cui_input_mouse_move(ui, it.x + 5, it.y + it.h / 2);
+    run(ui, build_sbp, &s, 2);
+    CHECK(cui_get_draw_data(ui)->vertex_count > idle);    /* hover fill */
+    CHECK(s.last == id);
+    click_at(ui, build_sbp, &s, it.x + 5, it.y + it.h / 2);
+    CHECK(s.clicks == 1);
+    cui_input_mouse_move(ui, 700, 300);
+    run(ui, build_sbp, &s, 2);
+    cui_input_key(ui, CUI_KEY_TAB, true, 0); cui_input_key(ui, CUI_KEY_TAB, false, 0);
+    run(ui, build_sbp, &s, 2);
+    cui_input_key(ui, CUI_KEY_ENTER, true, 0); cui_input_key(ui, CUI_KEY_ENTER, false, 0);
+    run(ui, build_sbp, &s, 2);
+    CHECK(s.clicks == 2);
+    cui_input_key(ui, CUI_KEY_SPACE, true, 0); cui_input_key(ui, CUI_KEY_SPACE, false, 0);
+    run(ui, build_sbp, &s, 2);
+    CHECK(s.clicks == 3);
+    cui_destroy(ui);
+}
+
 static void test_chrome(void) {
     printf("app chrome: menu bar, toolbar, status bar, document tabs\n");
     /* menu bar: click opens, hover switches, Enter picks, outside click closes */
@@ -12036,6 +12086,7 @@ int main(void) {
     test_toast_deadline();
     test_reorder();
     test_chrome();
+    test_status_progress_click();
     test_find_from_code_and_marks();
     test_doc_tabs_context();
     test_submenu();
