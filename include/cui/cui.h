@@ -1840,7 +1840,7 @@ CUI_API int cui_text_doc_line_count(const cui_text_doc *doc);   /* line breaks +
 CUI_API int cui_text_doc_line_start(const cui_text_doc *doc, int line);
 CUI_API int cui_text_doc_line_end(const cui_text_doc *doc, int line);
 CUI_API int cui_text_doc_line_of(const cui_text_doc *doc, int pos);
-CUI_API int cui_text_doc_longest_line(const cui_text_doc *doc);   /* bytes; an edit that shortens the longest leaves it (an upper bound) */
+CUI_API int cui_text_doc_longest_line(const cui_text_doc *doc);   /* in bytes */
 /* copies bytes [start, start + len) to out (clamped to the text); returns how many */
 CUI_API int cui_text_doc_read(const cui_text_doc *doc, int start, int len, char *out);
 CUI_API int cui_text_doc_char(const cui_text_doc *doc, int pos);   /* the byte at pos (0 to 255), or -1 past the end */
@@ -1853,8 +1853,11 @@ CUI_API char *cui_text_doc_copy(const cui_text_doc *doc, int start, int end, int
 typedef struct cui_text_doc_iter { const char *p; int len, pos; const cui_text_doc *doc_; int end_; } cui_text_doc_iter;
 CUI_API cui_text_doc_iter cui_text_doc_iter_at(const cui_text_doc *doc, int start, int end);
 CUI_API bool cui_text_doc_iter_next(cui_text_doc_iter *it);
-/* changes with every edit, undo and set: compare with a number kept at save time for dirty */
+/* changes with every edit, undo and set (editors use it to know what they have seen) */
 CUI_API unsigned cui_text_doc_revision(const cui_text_doc *doc);
+/* the text's state in its undo history: an edit or set gives a new id, undo and redo go back to the ids the text had
+ * there. Kept at save time it makes a dirty flag that clears again when undo returns to the saved text. */
+CUI_API unsigned cui_text_doc_state(const cui_text_doc *doc);
 /* replaces bytes [start, end) with text[0, len) (len < 0: up to the NUL) as one undo step; editors
  * showing the document follow (their carets move with the text). False when nothing changed. */
 CUI_API bool cui_text_doc_replace(cui_text_doc *doc, int start, int end, const char *text, int len);
@@ -1865,6 +1868,9 @@ CUI_API bool cui_text_doc_redo(cui_text_doc *doc, int *caret);
 CUI_API bool cui_text_doc_can_undo(const cui_text_doc *doc);
 CUI_API bool cui_text_doc_can_redo(const cui_text_doc *doc);
 CUI_API void cui_text_doc_clear_history(cui_text_doc *doc);
+/* how many undo steps are kept (default 1000; the oldest go first). Steps hold pieces, not bytes, so a step that
+ * replaced the whole text costs a few bytes; the text it removed stays in memory while a step refers to it. */
+CUI_API void cui_text_doc_set_history(cui_text_doc *doc, int steps);
 CUI_API size_t cui_text_doc_memory(const cui_text_doc *doc);     /* bytes it holds: buffers, line index, tree, history */
 CUI_API int cui_text_doc_piece_count(const cui_text_doc *doc);
 /* A snapshot: the text as it is now, frozen, for reading on any thread (a save, a formatter, a
@@ -1884,7 +1890,9 @@ CUI_API const char *cui_text_snap_chunk(const cui_text_snap *snap, int i, int *l
 /* Code editor: editable code with the code block's highlighting, a line
  * number gutter and a monospace grid, for shader editors, script consoles
  * and config files. You own the text: a NUL terminated buffer and its
- * capacity, edited in place.
+ * capacity, edited in place, or for big files a cui_text_doc (`.doc`, pass
+ * NULL and 0 for the buffer): a piece table, where an edit costs the same
+ * anywhere at any size and two editors share one document.
  *
  *     static char src[64 * 1024] = "void main() {\n}\n";
  *     cui_code_editor_result r = cui_code_editor(ui, "shader", src, sizeof src,
@@ -1985,7 +1993,8 @@ CUI_API void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int en
  * editor changed (its bytes overlap the splice) can no longer be undone exactly, so undo
  * stops there: it and every older step are dropped (redo steps go, as after any edit).
  * Undo never writes over the other editor's text. A splice that does not fit the text (or
- * a negative value) makes the editor read the whole text again, like a new `.revision`. */
+ * a negative value) makes the editor read the whole text again, like a new `.revision`.
+ * Editors on one cui_text_doc (`.doc`) need none of this: they follow the document. */
 CUI_API void cui_code_editor_splice(cui_ctx *ui, cui_id editor, int start, int removed, int inserted);
 /* Opens the find bar with query and selects the next match (NULL closes). */
 CUI_API void cui_code_editor_find(cui_ctx *ui, const char *id, const char *query);

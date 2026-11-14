@@ -841,6 +841,7 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
 bool cui__doc_undo(cui_text_doc *d, bool redo, int *caret);
 const cui__tsplice *cui__doc_splice_at(const cui_text_doc *d, unsigned rev);   /* valid for the last CUI__DOC_LOG revisions after base_rev */
 unsigned cui__doc_base_rev(const cui_text_doc *d);
+unsigned cui__doc_serial(const cui_text_doc *d);   /* unique per document in the process */
 int cui__doc_maxlen(const cui_text_doc *d);
 
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */

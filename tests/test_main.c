@@ -8691,6 +8691,374 @@ static void diff_key(cui_ctx *ui, diff_ctx *d, cui_key k, int mods) {
     run(ui, build_diff, d, 1);
 }
 
+/* ---- code editor on a cui_text_doc ---- */
+
+static int pd_min(int a, int b) { return a < b ? a : b; }
+
+/* One editor, on a buffer (doc NULL) or on a document: everything else the same. */
+typedef struct {
+    char *buf; size_t cap;
+    cui_text_doc *doc;
+    const char *lang;
+    bool wrap, plain, ro;
+    cui_text_mark marks[3]; int nmarks;
+    cui_code_editor_result r;
+} pd_ctx;
+static void build_pd(cui_ctx *ui, void *u) {
+    pd_ctx *c = u;
+    cui_column(ui, .pad = 20, .gap = 12) {
+        if (c->doc) c->r = cui_code_editor(ui, "ed", NULL, 0, .doc = c->doc, .lang = c->lang, .wrap = c->wrap, .plain = c->plain, .read_only = c->ro,
+                                           .height = 300, .width = CUI_PX(600), .marks = c->marks, .mark_count = c->nmarks);
+        else c->r = cui_code_editor(ui, "ed", c->buf, c->cap, .lang = c->lang, .wrap = c->wrap, .plain = c->plain, .read_only = c->ro,
+                                    .height = 300, .width = CUI_PX(600), .marks = c->marks, .mark_count = c->nmarks);
+    }
+}
+
+/* the frame as drawn: positions and colors of every vertex */
+static uint64_t pd_draw_hash(cui_ctx *ui, int *count) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    uint64_t h = 1469598103934665603ull;
+    for (int i = 0; i < dd->vertex_count; i++) {
+        const cui_vertex *v = &dd->vertices[i];
+        int32_t q[4] = { (int32_t)lroundf(v->x * 64), (int32_t)lroundf(v->y * 64), 0, 0 };
+        memcpy(&q[2], &v->color, 4);
+        memcpy(&q[3], &v->border_color, 4);
+        for (int k = 0; k < 4; k++) h = (h ^ (uint32_t)q[k]) * 1099511628211ull;
+    }
+    *count = dd->vertex_count;
+    return h;
+}
+
+/* where two frames differ: the first vertex that does */
+static void pd_first_diff(cui_ctx *ua, cui_ctx *ub) {
+    const cui_draw_data *da = cui_get_draw_data(ua), *db = cui_get_draw_data(ub);
+    for (int i = 0; i < da->vertex_count && i < db->vertex_count; i++) {
+        const cui_vertex *p = &da->vertices[i], *q = &db->vertices[i];
+        if (fabsf(p->x - q->x) > 0.01f || fabsf(p->y - q->y) > 0.01f || memcmp(&p->color, &q->color, 4) || memcmp(&p->border_color, &q->border_color, 4)) {
+            printf("  vertex %d of %d/%d: (%.1f, %.1f) #%02x%02x%02x%02x vs (%.1f, %.1f) #%02x%02x%02x%02x\n", i, da->vertex_count, db->vertex_count, p->x, p->y,
+                   p->color.r, p->color.g, p->color.b, p->color.a, q->x, q->y, q->color.r, q->color.g, q->color.b, q->color.a);
+            return;
+        }
+    }
+}
+
+/* both editors agree: the text, what they report, and what they drew; NULL or what differs */
+static const char *pd_differs(cui_ctx *ua, const pd_ctx *a, cui_ctx *ub, const pd_ctx *b) {
+    int n = 0;
+    char *t = cui_text_doc_copy(b->doc, 0, -1, &n);
+    bool same_text = n == (int)strlen(a->buf) && memcmp(t, a->buf, (size_t)n) == 0;
+    free(t);
+    if (!same_text) return "text";
+    const cui_code_editor_result *x = &a->r, *y = &b->r;
+    if (x->cursor != y->cursor || x->anchor != y->anchor) return "selection";
+    if (x->line != y->line || x->column != y->column || x->line_count != y->line_count || x->length != y->length) return "caret line";
+    if (x->changed != y->changed || x->refused != y->refused || x->focused != y->focused || x->bar_open != y->bar_open) return "flags";
+    if (x->splice_start != y->splice_start || x->splice_removed != y->splice_removed || x->splice_inserted != y->splice_inserted) return "splice";
+    if (x->bracket != y->bracket || x->bracket_match != y->bracket_match) return "brackets";
+    if (x->find_matches != y->find_matches || x->find_index != y->find_index) return "find";
+    int na, nb;
+    uint64_t ha = pd_draw_hash(ua, &na), hb = pd_draw_hash(ub, &nb);
+    if (na != nb || ha != hb) { pd_first_diff(ua, ub); return "drawing"; }
+    return NULL;
+}
+
+static char *pd_random_text(unsigned *rng, int lines) {
+    static const char *frag[] = { "int x = f(a, b);", "/* a comment", "still in it */ y++;", "```", "# heading", "  - item [ ] task", "\tif (q) { r(); }",
+                                  "x\ty\tz", "\xc3\xa9t\xc3\xa9 \xf0\x9f\x98\x80 done", "{", "}", "", "key: value # c", "<a b=\"c\">d</a>",
+                                  "tile tile TILE tiled", "a long line that goes on and on past the width of the view, (with [brackets] {and} more words) to wrap twice or more" };
+    size_t cap = (size_t)lines * 160 + 16, n = 0;
+    char *s = malloc(cap);
+    for (int i = 0; i < lines; i++) {
+        *rng = *rng * 1664525u + 1013904223u;
+        const char *f = frag[(*rng >> 8) % (sizeof frag / sizeof frag[0])];
+        n += (size_t)snprintf(s + n, cap - n, "%s%s", f, i + 1 < lines || (*rng >> 20) % 2 ? "\n" : "");
+    }
+    s[n] = 0;
+    return s;
+}
+
+/* The same random input to an editor on a buffer and one on a document: after every frame they
+ * hold the same text, report the same and draw the same (colors, wrapped rows, find matches,
+ * brackets, marks, the caret). */
+static void test_code_editor_doc_parity(void) {
+    printf("code editor: on a cui_text_doc, the same as on a buffer under random input\n");
+    static const char *langs[] = { "c", "markdown", "yaml", "text", "js", "xml" };
+    static const cui_key keys[] = { CUI_KEY_TAB, CUI_KEY_ENTER, CUI_KEY_ESCAPE, CUI_KEY_BACKSPACE, CUI_KEY_DELETE, CUI_KEY_LEFT,
+                                    CUI_KEY_RIGHT, CUI_KEY_UP, CUI_KEY_DOWN, CUI_KEY_HOME, CUI_KEY_END, CUI_KEY_PAGE_UP,
+                                    CUI_KEY_PAGE_DOWN, CUI_KEY_A, CUI_KEY_C, CUI_KEY_V, CUI_KEY_X, CUI_KEY_Z, CUI_KEY_Y,
+                                    CUI_KEY_F, CUI_KEY_G, CUI_KEY_H };
+    static const char *texts[] = { "a", "}", "{", "(", ")", " ", "\xc3\xa9", "\xf0\x9f\x98\x80", ":", "\"", "/*", "*/", "\t", "tile", "- ", "1. " };
+    static const char *queries[] = { "tile", "a", "(\\w+)\\(", "e", "x\\ty", "[", "TILE" };
+    int frames_total = 0;
+    for (int mode = 0; mode < 12; mode++) {
+        unsigned rng = 1000u + (unsigned)mode * 7919u;
+        char *start = pd_random_text(&rng, 30 + mode * 6);
+        static pd_ctx A, B;
+        memset(&A, 0, sizeof A); memset(&B, 0, sizeof B);
+        A.cap = 1 << 18;
+        A.buf = calloc(1, A.cap);
+        snprintf(A.buf, A.cap, "%s", start);
+        B.doc = cui_text_doc_new(start, -1);
+        cui_text_doc_set_history(B.doc, 48);   /* as many steps as the buffer's editor keeps */
+        A.lang = B.lang = langs[mode % 6];
+        A.wrap = B.wrap = (mode / 6) % 2;
+        A.plain = B.plain = mode == 9;
+        A.nmarks = B.nmarks = 2;
+        A.marks[0] = B.marks[0] = (cui_text_mark){ 10, 30, 1, 0, 0 };
+        A.marks[1] = B.marks[1] = (cui_text_mark){ 120, 140, 0, 3, CUI_MARK_WAVY };
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        run(ua, build_pd, &A, 3); run(ub, build_pd, &B, 3);
+        cui_rect er = rect_of(ua, cui_make_id(ua, "ed"));
+        cui_code_editor_select(ua, "ed", 0, 0); cui_code_editor_select(ub, "ed", 0, 0);
+        run(ua, build_pd, &A, 1); run(ub, build_pd, &B, 1);
+        const char *why = NULL;
+        int f = 0;
+        for (; f < 700 && !why; f++) {
+            rng = rng * 1664525u + 1013904223u;
+            unsigned r = rng >> 8;
+            cui_ctx *both[2] = { ua, ub };
+            int len = (int)strlen(A.buf);
+            for (int k = 0; k < 2; k++) {   /* exactly the same calls on both */
+                cui_ctx *ui = both[k];
+                switch (r % 12) {
+                case 0: cui_input_mouse_move(ui, er.x - 10 + (float)((r >> 4) % 640), er.y - 10 + (float)((r >> 14) % 330)); break;
+                case 1: cui_input_mouse_button(ui, CUI_MOUSE_LEFT, (r >> 5) & 1); break;
+                case 2: cui_input_scroll(ui, 0, (float)((int)(r >> 9 & 7) - 3)); break;
+                case 3: case 4: case 5: { cui_key kk = keys[(r >> 4) % (sizeof keys / sizeof keys[0])]; int m = (r >> 12) % 5 == 0 ? CUI_MOD_PRIMARY : (r >> 12) % 5 == 1 ? CUI_MOD_SHIFT : 0;
+                          cui_input_key(ui, kk, true, m); cui_input_key(ui, kk, false, m); break; }
+                case 6: case 7: cui_input_key(ui, CUI_KEY_NONE, false, 0); cui_input_text(ui, texts[(r >> 4) % (sizeof texts / sizeof texts[0])]); break;
+                case 8: if ((r >> 4) % 6 == 0) cui_code_editor_find_ex(ui, "ed", queries[(r >> 8) % 7], (int)((r >> 12) % 8));
+                        else if ((r >> 4) % 6 == 1) cui_code_editor_replace(ui, "ed", queries[(r >> 8) % 7], "<$1>");
+                        else if ((r >> 4) % 6 == 2) cui_code_editor_find(ui, "ed", NULL);
+                        else { int a = len ? (int)((r >> 6) % (unsigned)len) : 0; cui_code_editor_select(ui, "ed", a, pd_min(len, a + (int)((r >> 16) % 9))); }
+                        break;
+                case 9: { int a = len ? (int)((r >> 6) % (unsigned)len) : 0, b = pd_min(len, a + (int)((r >> 18) % 30));
+                          cui_code_editor_edit(ui, "ed", a, b, (r >> 4) % 3 ? "new\ntext {x}\r\n" : "", -1, (r >> 5) % 2 ? a : -1); break; }
+                case 10: cui_code_editor_goto(ui, "ed", 1 + (int)((r >> 4) % 60), 1 + (int)((r >> 10) % 20)); break;
+                default:
+                    if ((r >> 4) % 25 == 0) snprintf(g_clip, sizeof g_clip, "%s", (r >> 9) & 1 ? "pasted\r\n\ttext {}\n" : "x");
+                    if ((r >> 4) % 30 == 1 && k == 0) { A.ro = B.ro = !A.ro; }
+                    if ((r >> 4) % 40 == 2 && k == 0) { A.wrap = B.wrap = !A.wrap; }
+                    break;
+                }
+            }
+            run(ua, build_pd, &A, 1);
+            run(ub, build_pd, &B, 1);
+            why = pd_differs(ua, &A, ub, &B);
+        }
+        frames_total += f;
+        if (why) printf("  mode %d (%s%s): differs after %d frames: %s\n", mode, A.lang, A.wrap ? ", wrap" : "", f, why);
+        CHECK(why == NULL);
+        /* undo everything there is, on both */
+        A.ro = B.ro = false;
+        cui_code_editor_select(ua, "ed", 0, 0); cui_code_editor_select(ub, "ed", 0, 0);
+        run(ua, build_pd, &A, 1); run(ub, build_pd, &B, 1);
+        for (int i = 0; i < 60 && !why; i++) {
+            key(ua, build_pd, &A, CUI_KEY_Z, CUI_MOD_PRIMARY); key(ub, build_pd, &B, CUI_KEY_Z, CUI_MOD_PRIMARY);
+            why = pd_differs(ua, &A, ub, &B);
+        }
+        if (why) printf("  mode %d: differs while undoing: %s\n", mode, why);
+        CHECK(why == NULL);
+        cui_destroy(ua); cui_destroy(ub);
+        cui_text_doc_free(B.doc);
+        free(A.buf); free(start);
+    }
+    printf("  %d frames compared\n", frames_total);
+}
+
+/* two editors on one document (a split view): no splices to pass, one undo history */
+typedef struct {
+    cui_text_doc *doc;
+    bool wrap, show_b;
+    const char *lang;
+    cui_code_editor_result r[2];
+} dd_ctx;
+static void build_dd(cui_ctx *ui, void *u) {
+    dd_ctx *c = u;
+    cui_row(ui, .gap = 8) {
+        c->r[0] = cui_code_editor(ui, "a", NULL, 0, .doc = c->doc, .lang = c->lang, .wrap = c->wrap, .height = 300, .width = CUI_PX(380));
+        if (c->show_b) c->r[1] = cui_code_editor(ui, "b", NULL, 0, .doc = c->doc, .lang = c->lang, .wrap = c->wrap, .height = 300, .width = CUI_PX(380));
+    }
+}
+static void dd_sel(cui_ctx *ui, dd_ctx *c, const char *id, int a, int b) { cui_code_editor_select(ui, id, a, b); run(ui, build_dd, c, 1); }
+static bool dd_text_is(const dd_ctx *c, const char *s) {
+    int n = 0;
+    char *t = cui_text_doc_copy(c->doc, 0, -1, &n);
+    bool same = n == (int)strlen(s) && memcmp(t, s, (size_t)n) == 0;
+    free(t);
+    return same;
+}
+
+static void test_code_editor_doc_shared(void) {
+    printf("code editor: two editors on one cui_text_doc, and the app editing it\n");
+    static dd_ctx c;
+    memset(&c, 0, sizeof c);
+    c.lang = "c"; c.show_b = true;
+    c.doc = cui_text_doc_new("0123456789\nabcdefghij\n", -1);
+    cui_ctx *ui = new_ctx();
+    run(ui, build_dd, &c, 2);
+    dd_sel(ui, &c, "b", 8, 8);
+    dd_sel(ui, &c, "a", 2, 5);
+    type(ui, build_dd, &c, "XY");
+    CHECK(dd_text_is(&c, "01XY56789\nabcdefghij\n"));
+    CHECK(c.r[0].changed && c.r[0].splice_start == 2 && c.r[0].splice_removed == 3 && c.r[0].splice_inserted == 2);
+    CHECK(!c.r[1].changed && c.r[1].cursor == 7 && c.r[1].length == c.r[0].length && c.r[1].line_count == 3);
+    /* undo is the document's: Ctrl+Z in the other editor undoes it */
+    dd_sel(ui, &c, "b", 0, 0);
+    key(ui, build_dd, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(dd_text_is(&c, "0123456789\nabcdefghij\n") && c.r[1].cursor == 5);
+    run(ui, build_dd, &c, 1);
+    CHECK(c.r[0].length == 22);
+    key(ui, build_dd, &c, CUI_KEY_Y, CUI_MOD_PRIMARY);
+    CHECK(dd_text_is(&c, "01XY56789\nabcdefghij\n"));
+    /* typing in one editor joins its own undo step, not one made in the other between */
+    dd_sel(ui, &c, "a", 0, 0);
+    type(ui, build_dd, &c, "p");
+    dd_sel(ui, &c, "b", 22, 22);
+    type(ui, build_dd, &c, "q");
+    dd_sel(ui, &c, "a", 1, 1);
+    type(ui, build_dd, &c, "r");
+    CHECK(dd_text_is(&c, "pr01XY56789\nabcdefghij\nq"));
+    key(ui, build_dd, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(dd_text_is(&c, "p01XY56789\nabcdefghij\nq"));
+    key(ui, build_dd, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(dd_text_is(&c, "p01XY56789\nabcdefghij\n"));
+    /* the app edits the document: both editors follow, carets move with the text */
+    dd_sel(ui, &c, "b", 15, 15);
+    CHECK(cui_text_doc_replace(c.doc, 0, 0, "//\n", -1));
+    run(ui, build_dd, &c, 1);
+    CHECK(c.r[1].cursor == 18 && c.r[0].line_count == 4 && c.r[1].line_count == 4);
+    CHECK(cui_text_doc_undo(c.doc, NULL));
+    run(ui, build_dd, &c, 1);
+    CHECK(c.r[1].cursor == 15 && dd_text_is(&c, "p01XY56789\nabcdefghij\n"));
+    /* a new text for the document: the editors start over */
+    cui_text_doc_set(c.doc, "fresh\n", -1);
+    run(ui, build_dd, &c, 1);
+    CHECK(c.r[0].length == 6 && c.r[1].length == 6 && c.r[1].cursor <= 6 && !cui_text_doc_can_undo(c.doc));
+    cui_destroy(ui);
+
+    /* an edit above the other editor's view keeps its lines in view where they are */
+    char *big = malloc(200000);
+    int n = 0;
+    for (int i = 0; i < 4000; i++) n += snprintf(big + n, 200000 - (size_t)n, "line %d\n", i);
+    cui_text_doc_set(c.doc, big, n);
+    for (int w = 0; w < 2; w++) {
+        c.wrap = w;
+        ui = new_ctx();
+        run(ui, build_dd, &c, 2);
+        cui_code_editor_goto(ui, "b", 2000, 1);
+        run(ui, build_dd, &c, 3);
+        int top = c.r[1].line;
+        dd_sel(ui, &c, "a", 10, 10);
+        for (int i = 0; i < 5; i++) key(ui, build_dd, &c, CUI_KEY_ENTER, 0);
+        run(ui, build_dd, &c, 1);
+        cui_rect rb = rect_of(ui, cui_make_id(ui, "b"));
+        click_at(ui, build_dd, &c, rb.x + 120, rb.y + rb.h / 2);   /* the line at the middle of b's view */
+        CHECK(c.r[1].line >= top + 5 - 8 && c.r[1].line <= top + 5 + 8);
+        cui_destroy(ui);
+    }
+
+    /* random edits in both editors and by the app, wrapped or not, C or markdown: each editor's
+     * caches agree with an editor that just opened the text (lines, colors drawn) */
+    for (int mode = 0; mode < 4; mode++) {
+        unsigned rng = 77u + (unsigned)mode;
+        char *start = pd_random_text(&rng, 60);
+        cui_text_doc_set(c.doc, start, -1);
+        c.wrap = mode & 1; c.lang = mode & 2 ? "markdown" : "c";
+        ui = new_ctx();
+        run(ui, build_dd, &c, 2);
+        bool ok = true;
+        for (int step = 0; step < 150 && ok; step++) {
+            rng = rng * 1664525u + 1013904223u;
+            unsigned r = rng >> 8;
+            int len = cui_text_doc_length(c.doc), a = len ? (int)((r >> 4) % (unsigned)len) : 0;
+            const char *id = (r & 1) ? "b" : "a";
+            static const char *ins[] = { "q", "\n", "/*", "*/", "```\n", "tile\n\n", "\t{", "}" };
+            switch ((r >> 20) % 6) {
+            case 0: case 1: dd_sel(ui, &c, id, a, a); type(ui, build_dd, &c, ins[(r >> 8) % 8]); break;
+            case 2: dd_sel(ui, &c, id, a, pd_min(len, a + 5)); key(ui, build_dd, &c, CUI_KEY_BACKSPACE, 0); break;
+            case 3: cui_text_doc_replace(c.doc, a, pd_min(len, a + 3), ins[(r >> 8) % 8], -1); run(ui, build_dd, &c, 1); break;
+            case 4: dd_sel(ui, &c, id, a, a); key(ui, build_dd, &c, CUI_KEY_Z, CUI_MOD_PRIMARY); break;
+            default: dd_sel(ui, &c, id, a, a); key(ui, build_dd, &c, CUI_KEY_ENTER, 0); break;
+            }
+            run(ui, build_dd, &c, 1);   /* an edit in b reaches a, drawn before it, on the next frame */
+            int lines = cui_text_doc_line_count(c.doc);
+            ok = c.r[0].line_count == lines && c.r[1].line_count == lines && c.r[0].length == cui_text_doc_length(c.doc) && c.r[1].length == c.r[0].length;
+            if (ok && step % 10 == 9) {   /* drawn the same as by editors that start from the text as it is */
+                int ca = (int)(r % (unsigned)(len + 1)), cb = (int)((r >> 7) % (unsigned)(len + 1)), n1, n2;
+                dd_ctx f = c;
+                char *txt = cui_text_doc_copy(c.doc, 0, -1, NULL);
+                f.doc = cui_text_doc_new(txt, -1);
+                free(txt);
+                cui_ctx *u2 = new_ctx();
+                run(u2, build_dd, &f, 2);
+                cui_ctx *both[2] = { ui, u2 };
+                dd_ctx *bc[2] = { &c, &f };
+                for (int k = 0; k < 2; k++) {   /* from the top, then to the same carets: the views scroll the same way */
+                    for (int l = 1; c.wrap && l <= lines; l += 6) {   /* wrapped: every line seen, so no row count is a guess in either */
+                        cui_code_editor_goto(both[k], "a", l, 1); cui_code_editor_goto(both[k], "b", l, 1);
+                        run(both[k], build_dd, bc[k], 1);
+                    }
+                    cui_code_editor_select(both[k], "a", 0, 0); cui_code_editor_select(both[k], "b", 0, 0);
+                    run(both[k], build_dd, bc[k], 1);
+                    cui_code_editor_select(both[k], "a", ca, ca); cui_code_editor_select(both[k], "b", cb, cb);
+                    run(both[k], build_dd, bc[k], 2);
+                }
+                uint64_t h1 = pd_draw_hash(ui, &n1), h2 = pd_draw_hash(u2, &n2);
+                ok = n1 == n2 && h1 == h2 && f.r[0].line == c.r[0].line && f.r[1].line == c.r[1].line;
+                if (!ok) { printf("  mode %d step %d: drawn differently from a fresh editor (%d vs %d vertices)\n", mode, step, n1, n2); pd_first_diff(ui, u2); }
+                cui_destroy(u2);
+                cui_text_doc_free(f.doc);
+            }
+        }
+        CHECK(ok);
+        cui_destroy(ui);
+        free(start);
+    }
+    free(big);
+    cui_text_doc_free(c.doc);
+}
+
+/* a big document: typing near the top costs about what it costs near the end */
+static void test_code_editor_doc_big(void) {
+    printf("code editor: a 24 MB cui_text_doc types as fast near the top as near the end\n");
+    size_t cap = 24u << 20;
+    char *t = malloc(cap);
+    size_t n = 0;
+    for (int i = 0; n + 200 < cap; i++) n += (size_t)snprintf(t + n, cap - n, "%08d value = compute(%d, \"x\"); /* tile */\n", i, i);
+    static pd_ctx c;
+    memset(&c, 0, sizeof c);
+    c.doc = cui_text_doc_adopt(t, (int)n, NULL, NULL);
+    c.lang = "c";
+    cui_ctx *ui = new_ctx();
+    run(ui, build_pd, &c, 3);
+    int lines = c.r.line_count;
+    double cost[2];
+    for (int k = 0; k < 2; k++) {
+        cui_code_editor_goto(ui, "ed", k ? lines - 2 : 3, 5);
+        run(ui, build_pd, &c, 2);
+        clock_t t0 = clock();
+        for (int i = 0; i < 40; i++) type(ui, build_pd, &c, "a");
+        cost[k] = (double)(clock() - t0) / CLOCKS_PER_SEC / 40;
+    }
+    CHECK(c.r.length == (int)n + 80);
+    CHECK(cost[0] < cost[1] * 3 + 0.002);
+    printf("  %d lines: %.2f ms a key near the top, %.2f near the end\n", lines, cost[0] * 1000, cost[1] * 1000);
+    /* replace all, then one undo puts it all back */
+    cui_code_editor_replace(ui, "ed", "tile", "TILE!");
+    run(ui, build_pd, &c, 3);
+    for (int i = 0; i < 20 && c.r.find_matches < lines - 1; i++) run(ui, build_pd, &c, 1);
+    CHECK(c.r.find_matches == lines - 1);
+    key(ui, build_pd, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    CHECK(c.r.length == (int)n + 80 + lines - 1);
+    key(ui, build_pd, &c, CUI_KEY_ESCAPE, 0);
+    key(ui, build_pd, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);
+    CHECK(c.r.length == (int)n + 80);
+    CHECK(cui_text_doc_memory(c.doc) < (size_t)n * 2 + (8u << 20));   /* the replaced text is kept for redo; no copies */
+    cui_destroy(ui);
+    cui_text_doc_free(c.doc);
+}
+
 static void test_diff(void) {
     printf("diff viewer: Myers, words, folds, navigation, rows, limits\n");
     cui_diff_hunk h[64];
@@ -11091,6 +11459,9 @@ int main(void) {
     test_code_editor_big();
     test_code_editor_replace_all();
     test_code_editor_shared();
+    test_code_editor_doc_parity();
+    test_code_editor_doc_shared();
+    test_code_editor_doc_big();
     test_diff();
     test_diff_prepared();
     test_dials();

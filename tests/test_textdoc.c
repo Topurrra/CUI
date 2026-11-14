@@ -43,6 +43,7 @@ static bool same(const cui_text_doc *d, const ref *r, bool full) {
     int lines = ref_lines(r);
     ok = ok && cui_text_doc_line_count(d) == lines;
     if (!ok) return false;
+    if (cui_text_doc_longest_line(d) != ref_maxlen(r)) return false;
     if (full) {
         int n = 0;
         char *c = cui_text_doc_copy(d, 0, -1, &n);
@@ -60,7 +61,7 @@ static bool same(const cui_text_doc *d, const ref *r, bool full) {
             if (pos < r->n) { ok = ok && cui_text_doc_char(d, pos) == (unsigned char)r->s[pos]; k += r->s[pos] == '\n'; }
         }
         ok = ok && cui_text_doc_char(d, r->n) == -1;
-        ok = ok && cui_text_doc_longest_line(d) >= ref_maxlen(r);
+        ok = ok && cui_text_doc_longest_line(d) == ref_maxlen(r);
         cui_text_doc_iter it = cui_text_doc_iter_at(d, 0, -1);
         int at = 0;
         while (ok && cui_text_doc_iter_next(&it)) { ok = it.pos == at && it.len > 0 && memcmp(it.p, r->s + at, (size_t)it.len) == 0; at += it.len; }
@@ -153,6 +154,8 @@ static void test_undo(void) {
     enum { STATES = 64 };
     char *states[STATES + 1];
     int lens[STATES + 1];
+    unsigned ids[STATES + 1];   /* cui_text_doc_state at each */
+    ids[0] = cui_text_doc_state(d);
     states[0] = malloc((size_t)r.n + 1); memcpy(states[0], r.s, (size_t)r.n + 1); lens[0] = r.n;
     for (int i = 1; i <= STATES; i++) {
         int a = (int)(rnd() % (unsigned)(r.n + 1)), b = a + (int)(rnd() % 10);
@@ -164,6 +167,8 @@ static void test_undo(void) {
         cui_text_doc_replace(d, a, b, t, n);
         ref_replace(&r, a, b, t, n);
         states[i] = malloc((size_t)r.n + 1); memcpy(states[i], r.s, (size_t)r.n + 1); lens[i] = r.n;
+        ids[i] = cui_text_doc_state(d);
+        CHECK(ids[i] != ids[i - 1]);
     }
     bool ok = true;
     int cur = STATES;
@@ -175,12 +180,14 @@ static void test_undo(void) {
         ref_set(&r, states[cur], lens[cur]);
         ok = ok && same(d, &r, step % 100 == 0) && caret >= -1 && caret <= r.n;
         ok = ok && cui_text_doc_can_undo(d) == (cur > 0) && cui_text_doc_can_redo(d) == (cur < STATES);
+        ok = ok && cui_text_doc_state(d) == ids[cur];   /* back at a step, the state it had there */
     }
     CHECK(ok);
     /* an edit after undoing drops the redo steps */
     while (cur > 10) { cui_text_doc_undo(d, NULL); cur--; }
     cui_text_doc_replace(d, 0, 0, "new", 3);
     CHECK(!cui_text_doc_can_redo(d));
+    for (int i = 0; i <= STATES; i++) CHECK(cui_text_doc_state(d) != ids[i]);
     CHECK(cui_text_doc_undo(d, NULL));
     ref_set(&r, states[10], lens[10]);
     CHECK(same(d, &r, true));

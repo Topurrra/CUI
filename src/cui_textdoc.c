@@ -160,6 +160,7 @@ typedef struct {
     cui__tpc *del, *ins;
     int ndel, nins, cdel, cins;
     int caret, group;
+    unsigned after;             /* the text's state id after it */
 } cui__trec;
 
 struct cui_text_doc {
@@ -170,9 +171,13 @@ struct cui_text_doc {
     int added;                  /* bytes appended so far: add buffers grow with it */
     uint32_t seed;
     unsigned rev, base_rev;     /* base_rev: the last revision the whole text was set */
-    int maxlen;                 /* the longest line in bytes (an edit that shortens it leaves it: an upper bound) */
+    unsigned serial;            /* unique among the documents of a process: an editor told a new one at an old one's address knows */
+    unsigned state, states, base_state;   /* the text's state id; ids given so far; the state before the oldest undo step */
+    int maxlen, maxcnt;         /* the longest line in bytes, and how many lines are that long */
+    bool maxstale;              /* an edit replaced too many lines to count them out: measure all again */
     cui__tsplice log[CUI__DOC_LOG];
-    cui__trec *h; int hn, hcap, hpos, hgroup;
+    cui__trec *h; int hn, hcap, hpos;
+    int hmax;                   /* undo groups kept */
     cui__tpc *tmp; int tmpn, tmpcap;      /* scratch: pieces taken out by an edit */
 };
 
@@ -343,9 +348,9 @@ static bool cui__td_extend(cui_text_doc *d, int t, int k, int bi, int at, int n,
     else if (k < ll + len) return false;
     else if (k == ll + len) {
         ok = TN(t).buf == bi && TN(t).start + len == at;
-        if (ok) { TN(t).len += n; TN(t).nl += nlc; }
+        if (ok && n >= 0) { TN(t).len += n; TN(t).nl += nlc; }
     } else ok = cui__td_extend(d, TN(t).r, k - ll - len, bi, at, n, nlc);
-    if (ok) { TN(t).sl += n; TN(t).snl += nlc; }
+    if (ok && n >= 0) { TN(t).sl += n; TN(t).snl += nlc; }   /* n < 0: only whether it can */
     return ok;
 }
 
@@ -401,35 +406,55 @@ const char *cui__doc_chunk(const cui_text_doc *d, int pos, int *cs, int *ce) {
     return NULL;
 }
 
-static void cui__td_maxlen_walk(const cui_text_doc *d, int t, int *pos, int *last, int *m) {
+/* The longest line, exactly, and how many lines are that long: an edit takes the lengths of the
+ * lines it replaces out of the count and puts the new ones in; only when the last line of the
+ * longest length got shorter is every line measured again (from the line break index, not the
+ * bytes). */
+static void cui__td_maxlen_walk(const cui_text_doc *d, int t, int *pos, int *last, int *m, int *cnt) {
     if (!t) return;
     const cui__tnode *x = &TN(t);
-    cui__td_maxlen_walk(d, x->l, pos, last, m);
+    cui__td_maxlen_walk(d, x->l, pos, last, m, cnt);
     const int *nl = d->b[x->buf].nl;
     for (int i = 0; i < x->nl; i++) {
-        int at = *pos + nl[x->nl0 + i] - x->start;
-        if (at - *last > *m) *m = at - *last;
+        int at = *pos + nl[x->nl0 + i] - x->start, n = at - *last;
+        if (n > *m) { *m = n; *cnt = 1; } else if (n == *m) (*cnt)++;
         *last = at + 1;
     }
     *pos += x->len;
-    cui__td_maxlen_walk(d, x->r, pos, last, m);
+    cui__td_maxlen_walk(d, x->r, pos, last, m, cnt);
 }
 static void cui__td_maxlen_all(cui_text_doc *d) {
-    int pos = 0, last = 0, m = 0;
-    cui__td_maxlen_walk(d, d->root, &pos, &last, &m);
-    if (pos - last > m) m = pos - last;
-    d->maxlen = m;
+    int pos = 0, last = 0, m = 0, cnt = 0;
+    cui__td_maxlen_walk(d, d->root, &pos, &last, &m, &cnt);
+    if (pos - last > m) { m = pos - last; cnt = 1; } else if (pos - last == m) cnt++;
+    d->maxlen = m; d->maxcnt = cnt; d->maxstale = false;
 }
 
-/* lines [la, la + k] were just written: the longest line may be one of them */
-static void cui__td_maxlen_new(cui_text_doc *d, int la, int k) {
-    if (k > 1024) { cui__td_maxlen_all(d); return; }
+/* lines [la, lb] are about to be replaced: their lengths leave the count */
+static void cui__td_max_out(cui_text_doc *d, int la, int lb) {
+    if (d->maxstale) return;
+    if (lb - la > 1024) { d->maxstale = true; return; }
     int s = cui__doc_line_start(d, la);
-    for (int i = la; i <= la + k; i++) {
+    for (int i = la; i <= lb; i++) {
         int e = cui__doc_line_start(d, i + 1) - 1;
-        if (e - s > d->maxlen) d->maxlen = e - s;
+        if (e - s == d->maxlen) d->maxcnt--;
         s = e + 1;
     }
+}
+
+/* lines [la, la + k] were just written: their lengths join the count */
+static void cui__td_max_in(cui_text_doc *d, int la, int k) {
+    if (!d->maxstale && k <= 1024) {
+        int s = cui__doc_line_start(d, la);
+        for (int i = la; i <= la + k; i++) {
+            int e = cui__doc_line_start(d, i + 1) - 1;
+            if (e - s > d->maxlen) { d->maxlen = e - s; d->maxcnt = 1; }
+            else if (e - s == d->maxlen) d->maxcnt++;
+            s = e + 1;
+        }
+        if (d->maxcnt > 0) return;
+    }
+    cui__td_maxlen_all(d);
 }
 
 /* ---- editing ---- */
@@ -444,6 +469,7 @@ static void cui__td_log(cui_text_doc *d, int a, int b0, int b1, int la, int lb, 
  * left in d->tmp. Logged as one splice. */
 static void cui__td_put(cui_text_doc *d, int a, int b, const cui__tpc *pc, int npc, int n, int k) {
     int la = cui__doc_line_of(d, a), lb = b == a ? la : cui__doc_line_of(d, b);
+    cui__td_max_out(d, la, lb);
     d->tmpn = 0;
     cui__td_reserve(d, npc + 2);
     int A, R, M, B;
@@ -455,7 +481,7 @@ static void cui__td_put(cui_text_doc *d, int a, int b, const cui__tpc *pc, int n
         if (pc[i].len > 0) mid = cui__td_merge(d, mid, cui__td_node(d, pc[i].buf, pc[i].start, pc[i].len));
     d->root = cui__td_merge(d, cui__td_merge(d, A, mid), B);
     cui__td_log(d, a, b, a + n, la, lb, k);
-    if (n > 0) cui__td_maxlen_new(d, la, k);
+    cui__td_max_in(d, la, k);
 }
 
 static void cui__td_rec_free(cui__trec *q) { free(q->del); free(q->ins); }
@@ -474,9 +500,9 @@ static void cui__td_pcs_add(cui__tpc **arr, int *n, int *cap, cui__tpc p, bool f
 }
 
 static void cui__td_trim(cui_text_doc *d) {
-    while (d->hn > 0 && d->h[d->hn - 1].group - d->h[0].group + 1 > CUI__TD_HISTORY) {
+    while (d->hn > 0 && d->h[d->hn - 1].group - d->h[0].group + 1 > d->hmax) {
         int g = d->h[0].group, k = 0;
-        while (k < d->hn && d->h[k].group == g) cui__td_rec_free(&d->h[k++]);
+        while (k < d->hn && d->h[k].group == g) { d->base_state = d->h[k].after; cui__td_rec_free(&d->h[k++]); }
         memmove(d->h, d->h + k, sizeof *d->h * (size_t)(d->hn - k));
         d->hn -= k; d->hpos -= k;
     }
@@ -502,7 +528,7 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
         if (b == a && q->del_n == 0 && a == q->at + q->ins_n) joined = true;
         else if (n == 0 && q->ins_n == 0 && (b == q->at || a == q->at)) joined = true;
     }
-    int group = merge && d->hn > 0 ? d->h[d->hn - 1].group : ++d->hgroup;
+    int group = d->hn > 0 ? d->h[d->hn - 1].group + (merge ? 0 : 1) : 1;   /* numbered on from the last step kept, as the editor's own history */
     if (!joined) {
         CUI__TD_GROW(d->h, d->hn, d->hcap, 1);
         q = &d->h[d->hn++];
@@ -512,10 +538,13 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
     }
     /* the text: typing on grows the piece before it; anything else is split, cut and joined */
     int la = cui__doc_line_of(d, a);
-    if (b == a && bi >= 0 && cui__td_extend(d, d->root, a, bi, start, n, nlc)) {
+    bool typing = b == a && bi >= 0 && cui__td_extend(d, d->root, a, bi, start, -1, 0);   /* (a check: can it grow?) */
+    if (typing) {
+        cui__td_max_out(d, la, la);
+        cui__td_extend(d, d->root, a, bi, start, n, nlc);
         d->tmpn = 0;
         cui__td_log(d, a, a, a + n, la, la, nlc);
-        cui__td_maxlen_new(d, la, nlc);
+        cui__td_max_in(d, la, nlc);
     } else {
         cui__tpc pc = { bi, start, n };
         cui__td_put(d, a, b, &pc, n > 0 ? 1 : 0, n, nlc);
@@ -527,6 +556,7 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
         q->del_n += b - a;
     }
     if (n > 0) { cui__td_pcs_add(&q->ins, &q->nins, &q->cins, (cui__tpc){ bi, start, n }, false); q->ins_n += n; }
+    q->after = d->state = ++d->states;
     cui__td_trim(d);
     return true;
 }
@@ -555,12 +585,14 @@ bool cui__doc_undo(cui_text_doc *d, bool redo, int *caret) {
             c = q->caret;
         }
     }
+    d->state = d->hpos > 0 ? d->h[d->hpos - 1].after : d->base_state;
     if (caret) *caret = c;
     return true;
 }
 
 const cui__tsplice *cui__doc_splice_at(const cui_text_doc *d, unsigned rev) { return &d->log[rev % CUI__DOC_LOG]; }
 unsigned cui__doc_base_rev(const cui_text_doc *d) { return d->base_rev; }
+unsigned cui__doc_serial(const cui_text_doc *d) { return d->serial; }
 int cui__doc_maxlen(const cui_text_doc *d) { return d->maxlen; }
 
 /* ---- the public API ---- */
@@ -585,6 +617,7 @@ static void cui__td_set(cui_text_doc *d, char *own, const char *text, int len, v
     } else if (own) { if (release) release(own, user); else free(own); }
     d->rev++;
     d->base_rev = d->rev;
+    d->state = d->base_state = ++d->states;
     cui__td_maxlen_all(d);
 }
 
@@ -597,6 +630,9 @@ static cui_text_doc *cui__td_alloc(void) {
     d->nn = 1;
     d->add = -1;
     d->seed = 0x9E3779B9u;
+    d->hmax = CUI__TD_HISTORY;
+    static volatile long serials;
+    d->serial = (unsigned)cui__td_atomic_add(&serials, 1);
     return d;
 }
 
@@ -711,11 +747,20 @@ bool cui_text_doc_undo(cui_text_doc *d, int *caret) { return d && cui__doc_undo(
 bool cui_text_doc_redo(cui_text_doc *d, int *caret) { return d && cui__doc_undo(d, true, caret); }
 bool cui_text_doc_can_undo(const cui_text_doc *d) { return d && d->hpos > 0; }
 bool cui_text_doc_can_redo(const cui_text_doc *d) { return d && d->hpos < d->hn; }
+void cui_text_doc_set_history(cui_text_doc *d, int steps) {
+    if (!d) return;
+    d->hmax = steps > 0 ? steps : CUI__TD_HISTORY;
+    cui__td_trim(d);
+}
+
 void cui_text_doc_clear_history(cui_text_doc *d) {
     if (!d) return;
     for (int i = 0; i < d->hn; i++) cui__td_rec_free(&d->h[i]);
     d->hn = d->hpos = 0;
+    d->base_state = d->state;
 }
+
+unsigned cui_text_doc_state(const cui_text_doc *d) { return d ? d->state : 0; }
 
 size_t cui_text_doc_memory(const cui_text_doc *d) {
     if (!d) return 0;
