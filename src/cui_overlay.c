@@ -539,6 +539,11 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
     if (!anchor || !text) return;
     cui__tooltip_state *tt = cui__tooltip_get(ui);
     bool hovered = ui->hot == anchor && ui->active == 0 && !ui->mdown[0];
+    /* a menu or popover above the pointer owns it; one opened from this control already
+     * says what the control does, so its tooltip stays quiet while that is open */
+    if (hovered && ui->hot_layer != ui->current_layer) hovered = false;
+    for (int i = 0; hovered && i < ui->popup_count; i++)
+        if (ui->popups[i].open && ui->popups[i].anchor == anchor) hovered = false;
     if (hovered) {
         if (ui->tooltip_id != anchor) {
             ui->tooltip_id = anchor;

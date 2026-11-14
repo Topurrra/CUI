@@ -3808,6 +3808,37 @@ static void test_tooltip_hover_delay(void) {
     }
 }
 
+static int paint_tooltip_popover(cui_ctx *ui, float elapsed, bool show_hint, bool open) {
+    cui_begin_frame(ui, elapsed);
+    cui_button(ui, "Anchor");
+    if (show_hint) cui_tooltip(ui, "Tooltip");
+    if (open) cui_popover_open(ui, "pop");
+    cui_popover(ui, "pop") { cui_text(ui, "Menu body"); }
+    cui_end_frame(ui);
+    return cui_get_draw_data(ui)->vertex_count;
+}
+
+/** A popover opened from the control hides that control's tooltip while it is open. */
+static void test_tooltip_hidden_by_own_popover(void) {
+    printf("tooltip: hidden while a popover from the same control is open\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, true);
+    cui_input_mouse_leave(ui);
+    paint_tooltip_popover(ui, 0.01f, true, false);
+    cui_vec2 pos = center(rect_of(ui, cui_make_id(ui, "Anchor")));
+    cui_input_mouse_move(ui, pos.x, pos.y);
+    int bare = paint_tooltip_popover(ui, 0.01f, false, false);
+    for (int i = 0; i < 4; i++) paint_tooltip_popover(ui, 0.3f, true, false);
+    int with_tip = paint_tooltip_popover(ui, 0.3f, true, false);
+    CHECK(with_tip > bare);                       /* the tooltip shows on hover */
+    paint_tooltip_popover(ui, 0.01f, true, true);  /* open the popover from the button */
+    for (int i = 0; i < 6; i++) paint_tooltip_popover(ui, 0.3f, true, false);
+    int open_hint = paint_tooltip_popover(ui, 0.3f, true, false);
+    int open_bare = paint_tooltip_popover(ui, 0.3f, false, false);
+    CHECK(open_hint == open_bare);                /* no tooltip while it is open */
+    cui_destroy(ui);
+}
+
 static void test_truncated_tooltip(void) {
     printf("text: a truncated label shows its whole text on hover, and its row still clicks\n");
     cui_ctx *ui = new_ctx();
@@ -11977,6 +12008,7 @@ int main(void) {
     test_pretty_wrap();
     test_truncated_tooltip();
     test_tooltip_hover_delay();
+    test_tooltip_hidden_by_own_popover();
     test_truncated_tooltip_covered();
     test_number_roll();
     test_stress();
