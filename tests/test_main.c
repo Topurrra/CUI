@@ -11410,6 +11410,114 @@ static void build_oc(cui_ctx *ui, void *u) {
 }
 static float oc_h(cui_ctx *ui, const char *id) { return cui_get_rect(ui, cui_make_id(ui, id)).h; }
 
+/* additive options: doc tabs baseline, active fill, height; instant fold ------ */
+
+typedef struct { int sel; cui_doc_tabs_opts o; cui_doc_tab tabs[2]; } dto_ctx;
+static void build_dto(cui_ctx *ui, void *u) {
+    dto_ctx *d = u;
+    cui_column(ui, .width = CUI_FILL) { cui_doc_tabs_ex(ui, "dt", d->tabs, 2, &d->sel, &d->o); }
+}
+/* the pixel of the baseline row at x, after rendering the strip with `o` */
+static cui_color dto_pixel(const cui_doc_tabs_opts *o, bool under_selected, float *tab_h, float *tab_bottom) {
+    static unsigned char px[800 * 600 * 4];
+    cui_ctx *ui = new_ctx();
+    dto_ctx d = { 0, *o, { { "alpha.c", NULL, NULL, false }, { "beta.c", NULL, NULL, false } } };
+    run(ui, build_dto, &d, 3);
+    cui_rect a = rect_of(ui, scoped_id(ui, "dt", "alpha.c")), b = rect_of(ui, scoped_id(ui, "dt", "beta.c"));
+    cui_sw_render(g_sw, cui_get_draw_data(ui), px, 800, 600, 800 * 4, CUI_SW_RGBA);
+    int y = (int)(a.y + a.h - 1);
+    int x = under_selected ? (int)(a.x + a.w / 2) : (int)(b.x + b.w + 100);   /* past the last tab */
+    if (tab_h) *tab_h = a.h;
+    if (tab_bottom) *tab_bottom = a.y + a.h;
+    cui_color c = { px[(y * 800 + x) * 4], px[(y * 800 + x) * 4 + 1], px[(y * 800 + x) * 4 + 2], 255 };
+    cui_destroy(ui);
+    return c;
+}
+static bool dto_same(cui_color a, cui_color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+
+static void test_doc_tabs_new_opts(void) {
+    printf("doc tabs: no_active_underline, no_baseline, active_fill, height\n");
+    cui_doc_tabs_opts zero = { 0 };
+    float th = 0, tb = 0;
+    cui_color base_under = dto_pixel(&zero, true, &th, &tb);
+    cui_color base_past = dto_pixel(&zero, false, NULL, NULL);
+    /* the strip is CUI_DOC_TABS_HEIGHT tall: the column starts at 0 */
+    CHECK(CUI_DOC_TABS_HEIGHT == 36 && tb == (float)CUI_DOC_TABS_HEIGHT && th == (float)CUI_DOC_TABS_HEIGHT - 4);
+    /* a baseline is drawn past the tabs by default and is not the page background */
+    cui_doc_tabs_opts nb = { .no_baseline = true };
+    CHECK(!dto_same(dto_pixel(&nb, false, NULL, NULL), base_past));
+    /* with the baseline off the tabs themselves are unchanged */
+    CHECK(dto_same(dto_pixel(&nb, true, NULL, NULL), base_under));
+    /* no_active_underline leaves the rest of the baseline alone */
+    cui_doc_tabs_opts nu = { .no_active_underline = true };
+    CHECK(dto_same(dto_pixel(&nu, false, NULL, NULL), base_past));
+    /* an opaque default fill covers the baseline under the selected tab either way */
+    CHECK(dto_same(dto_pixel(&nu, true, NULL, NULL), base_under));
+    /* a translucent fill shows the difference */
+    cui_doc_tabs_opts tf = { .active_fill = { 255, 0, 0, 40 } };
+    cui_doc_tabs_opts tfn = { .active_fill = { 255, 0, 0, 40 }, .no_active_underline = true };
+    cui_color with_line = dto_pixel(&tf, true, NULL, NULL), without_line = dto_pixel(&tfn, true, NULL, NULL);
+    CHECK(!dto_same(with_line, without_line));
+    CHECK(!dto_same(with_line, base_under));
+    /* an opaque fill is used as given */
+    cui_doc_tabs_opts of = { .active_fill = { 255, 0, 0, 255 } };
+    cui_color red = dto_pixel(&of, true, NULL, NULL);
+    CHECK(red.r == 255 && red.g == 0 && red.b == 0);
+}
+
+typedef struct { bool open_tool, open_think, instant; } fold_ctx;
+static void build_fold(cui_ctx *ui, void *u) {
+    fold_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 10, .width = CUI_PX(600)) {
+        cui_column(ui, .id = "wrap_tool") {
+            cui_tool_call(ui, "tool", "web_search", .status = CUI_TASK_DONE, .input = "{\"q\": 1}", .output = "{\"r\": 2}", .open = &a->open_tool, .instant = a->instant);
+        }
+        cui_column(ui, .id = "wrap_think") {
+            cui_reasoning(ui, "think", .seconds = 3, .open = &a->open_think, .instant = a->instant) { cui_text(ui, "thoughts"); }
+        }
+    }
+}
+
+static void test_instant_fold(void) {
+    printf("tool call and reasoning: instant\n");
+    for (int pass = 0; pass < 2; pass++) {
+        bool instant = pass == 1;
+        cui_ctx *ui = new_ctx();
+        cui_set_reduced_motion(ui, false);
+        fold_ctx a = { .instant = instant };
+        run(ui, build_fold, &a, 3);
+        float tool_closed = oc_h(ui, "wrap_tool"), think_closed = oc_h(ui, "wrap_think");
+        a.open_tool = a.open_think = true;
+        run(ui, build_fold, &a, 1);
+        float tool_1 = oc_h(ui, "wrap_tool"), think_1 = oc_h(ui, "wrap_think");
+        run(ui, build_fold, &a, 3);
+        float tool_4 = oc_h(ui, "wrap_tool");
+        run(ui, build_fold, &a, 240);
+        float tool_open = oc_h(ui, "wrap_tool"), think_open = oc_h(ui, "wrap_think");
+        CHECK(tool_open > tool_closed + 20 && think_open > think_closed + 5);
+        if (instant) { CHECK_NEAR(tool_1, tool_open, 0.01); CHECK_NEAR(think_1, think_open, 0.01); }
+        else CHECK(tool_4 < tool_open - 1);   /* the spring: zero keeps today's motion */
+        a.open_tool = a.open_think = false;
+        run(ui, build_fold, &a, 1);
+        if (instant) { CHECK_NEAR(oc_h(ui, "wrap_tool"), tool_closed, 0.01); CHECK_NEAR(oc_h(ui, "wrap_think"), think_closed, 0.01); }
+        else CHECK(oc_h(ui, "wrap_tool") > tool_closed + 1);
+        cui_destroy(ui);
+    }
+    /* the keyboard stays on the header across the toggle */
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, false);
+    fold_ctx a = { .instant = true };
+    run(ui, build_fold, &a, 3);
+    cui_rect hr = cui_get_rect(ui, cui_make_id(ui, "tool"));
+    click_at(ui, build_fold, &a, hr.x + hr.w / 2, hr.y + hr.h / 2);
+    CHECK(a.open_tool);
+    key(ui, build_fold, &a, CUI_KEY_ENTER, 0);
+    CHECK(!a.open_tool);
+    key(ui, build_fold, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.open_tool);
+    cui_destroy(ui);
+}
+
 static void test_open_pointer(void) {
     printf("tool call and reasoning: caller-owned open state\n");
     cui_ctx *ui = new_ctx();
@@ -11688,6 +11796,8 @@ int main(void) {
     test_scroll_pending_and_stick();
     test_markdown_preserve_whitespace();
     test_open_pointer();
+    test_doc_tabs_new_opts();
+    test_instant_fold();
     test_explicit_lengths();
     test_code_editor();
     test_code_editor_replace();

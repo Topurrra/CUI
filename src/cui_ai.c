@@ -71,7 +71,8 @@ bool cui_reasoning_begin(cui_ctx *ui, const char *id_str, const cui_reasoning_op
     st->was_thinking = o->thinking;
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked) { st->open = !st->open; st->user_set = true; if (o->open) *o->open = st->open; }
-    cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+    if (o->instant) { st->f.t.x = st->open ? 1.0f : 0.0f; st->f.t.v = 0; }
+    else cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
     cui__tween(ui, &st->f.hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     int wrap = cui__node_new(ui, 0);
     ui->nodes[wrap].w = CUI_FILL; ui->nodes[wrap].gap = 0;
@@ -211,7 +212,8 @@ void cui_tool_call_ex(cui_ctx *ui, const char *id_str, const char *name, const c
     cui_interact r = cui__interact(ui, id, expandable ? CUI_IF_FOCUSABLE : 0);
     if (r.clicked && expandable) { st->open = !st->open; if (o->open) *o->open = st->open; }
     if (!st->f.init) { st->f.t.x = st->open ? 1.0f : 0.0f; st->f.init = true; }
-    cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
+    if (o->instant) { st->f.t.x = st->open ? 1.0f : 0.0f; st->f.t.v = 0; }
+    else cui__spring(ui, &st->f.t, st->open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
     cui__tween(ui, &st->f.hover, r.hovered && expandable ? 1.0f : 0.0f, CUI__T_HOVER);
     int wrap = cui__node_new(ui, 0);
     cui_node *wn = &ui->nodes[wrap];

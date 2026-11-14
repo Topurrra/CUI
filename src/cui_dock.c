@@ -23,7 +23,7 @@
 #define CUI__DK_LABEL  128
 #define CUI__DK_DEPTH  40          /* nesting accepted by cui_dock_load */
 #define CUI__DK_TILE   32.0f       /* drop target */
-#define CUI__DK_STRIP  36.0f       /* fallback strip height before the first layout */
+#define CUI__DK_STRIP  ((float)CUI_DOC_TABS_HEIGHT)       /* fallback strip height before the first layout */
 
 enum { DK_FREE = 0, DK_LEAF, DK_SPLIT };
 enum { DK_NONE = 0, DK_CENTER, DK_LEFT, DK_RIGHT, DK_TOP, DK_BOTTOM };

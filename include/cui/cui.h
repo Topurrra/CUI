@@ -2690,6 +2690,7 @@ typedef struct cui_reasoning_opts {
     float seconds;             /* time spent, for the header: "Thinking for 12s", then "Thought for 12s" */
     const char *title;         /* header text to show instead of the "Thinking" and "Thought for" lines */
     bool *open;                /* you keep whether it is open: read every frame, written when the header is clicked. NULL: kept in CUI state, which is dropped after about 300 frames out of sight */
+    bool instant;              /* opening and closing jump to the final height, with no spring, and the body is the right height on the frame of the toggle */
 } cui_reasoning_opts;
 CUI_API bool cui_reasoning_begin(cui_ctx *ui, const char *id, const cui_reasoning_opts *opts);
 CUI_API void cui_reasoning_end(cui_ctx *ui);
@@ -2709,6 +2710,7 @@ typedef struct cui_tool_call_opts {
     /* byte lengths for the strings above, 0: strlen (the string then need not end in a NUL).
      * input and output are copied into frame memory only while the card is open. */
     int name_length, detail_length, input_length, output_length;
+    bool instant;              /* opening and closing jump to the final height, with no spring, and the body is the right height on the frame of the toggle */
 } cui_tool_call_opts;
 CUI_API void cui_tool_call_ex(cui_ctx *ui, const char *id, const char *name, const cui_tool_call_opts *opts);
 
@@ -3618,11 +3620,17 @@ typedef struct cui_doc_tab {
     const char *tooltip;
     bool dirty;                /* unsaved changes: a dot in place of the x, which returns under the pointer */
 } cui_doc_tab;
+/* The strip's height in points: 4 above the tabs, then the tabs. Put it in a fixed-height box
+ * when the strip sits beside other things. */
+#define CUI_DOC_TABS_HEIGHT 36
 typedef struct cui_doc_tabs_opts {
     int _;
     bool shortcuts;            /* Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PageUp/Down and Ctrl+W (Cmd+W on macOS) work from anywhere in the window */
     bool no_close;             /* tabs have no x and cannot be closed (middle click, Delete and Ctrl+W do nothing) */
     bool no_reorder;           /* tabs cannot be dragged or moved with Shift+Left/Right */
+    bool no_active_underline;  /* the strip's baseline is not drawn under the selected tab, whatever its fill */
+    bool no_baseline;          /* no baseline under the strip at all */
+    cui_color active_fill;     /* fill of the selected tab (default CUI_COLOR_SURFACE) */
 } cui_doc_tabs_opts;
 typedef struct cui_doc_tabs_result {
     bool changed;              /* *selected changed (click, keys or a move) */

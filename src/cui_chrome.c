@@ -978,7 +978,8 @@ void cui_status_bar_progress_ex(cui_ctx *ui, float value, const cui_status_progr
 /* Document tabs                                                            */
 /* ------------------------------------------------------------------------ */
 
-#define CUI__DTAB_H 32.0f
+#define CUI__DTAB_PAD_TOP 4.0f
+#define CUI__DTAB_H ((float)CUI_DOC_TABS_HEIGHT - CUI__DTAB_PAD_TOP)
 #define CUI__DTAB_GAP 2.0f
 
 typedef struct {
@@ -1019,6 +1020,20 @@ static void cui__paint_dirty_dot(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_circle(ui, ctr, 4.0f, cui_alpha(p->c, p->alpha));
 }
 
+/* the strip's baseline, left out under the selected tab when asked */
+typedef struct { cui_color c; int skip_node; } cui__dtabs_edge_paint;
+static void cui__paint_dtabs_edge(cui_ctx *ui, cui_node *n, void *data) {
+    cui__dtabs_edge_paint *p = data;
+    cui_rect r = n->rect;
+    float y = r.y + r.h - 1;
+    if (p->skip_node < 0) { cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, 1 }, CUI_CORNERS(0), p->c); return; }
+    cui_rect t = ui->nodes[p->skip_node].rect;
+    float x0 = CUI_MAX(r.x, t.x), x1 = CUI_MIN(r.x + r.w, t.x + t.w);
+    if (x1 <= x0) { cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, 1 }, CUI_CORNERS(0), p->c); return; }
+    if (x0 > r.x) cui_draw_rect(ui, (cui_rect){ r.x, y, x0 - r.x, 1 }, CUI_CORNERS(0), p->c);
+    if (x1 < r.x + r.w) cui_draw_rect(ui, (cui_rect){ x1, y, r.x + r.w - x1, 1 }, CUI_CORNERS(0), p->c);
+}
+
 /* one frame of the tab strip: what its phases share */
 typedef struct {
     cui_ctx *ui;
@@ -1034,6 +1049,7 @@ typedef struct {
     bool have;                          /* every tab has last frame's geometry */
     int pose_from, pose_to;             /* a drag in progress: the tab, where it would land */
     float pose_x;                       /* and the dragged tab's x */
+    cui__dtabs_edge_paint *edge;        /* the baseline, NULL when there is none */
 } cui__dtf;
 
 /* identities and last frame's geometry */
@@ -1268,7 +1284,7 @@ static void cui__dtf_build_tab(cui__dtf *f, int k, int vis_sel, float rad, float
     n->tx = ts->x.x;
     if (active || dragged) {
         cui__folder_paint *fp = CUI_PAINT_DATA(ui, cui__folder_paint);
-        fp->bg = active ? CUI_C(ui, SURFACE) : CUI_C(ui, SURFACE_RAISED);
+        fp->bg = active ? (cui__color_set(o->active_fill) ? cui_color_of(ui, o->active_fill) : CUI_C(ui, SURFACE)) : CUI_C(ui, SURFACE_RAISED);
         fp->border = CUI_C(ui, BORDER);
         fp->r = rad;
         fp->full = dragged;
@@ -1283,6 +1299,7 @@ static void cui__dtf_build_tab(cui__dtf *f, int k, int vis_sel, float rad, float
         n->radius.br = n->radius.bl = rad;
         n->flags |= CUI_NF_ON_TOP;
     }
+    if (active && o->no_active_underline && f->edge) f->edge->skip_node = i;
     cui__mark_interactive(ui, i, active ? CUI_IF_FOCUSABLE : 0);
     if (tr.hovered || dragged) cui__set_cursor(ui, dragged ? CUI_CURSOR_MOVE : CUI_CURSOR_HAND);
     cui__open(ui, i);
@@ -1346,12 +1363,19 @@ cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_d
     cui_node *cn = &ui->nodes[col];
     cn->flags &= ~(uint32_t)CUI_NF_SCROLL_Y;
     cn->self_align = CUI_ALIGN_STRETCH;
-    cui__bar_edge(ui, col, false);
+    if (!o->no_baseline) {
+        cui__dtabs_edge_paint *ep = CUI_PAINT_DATA(ui, cui__dtabs_edge_paint);
+        ep->c = CUI_C(ui, BORDER);
+        ep->skip_node = -1;
+        f.edge = ep;
+        cn->paint = cui__paint_dtabs_edge;
+        cn->paint_data = ep;
+    }
     ss->fade = cui__backdrop(ui);   /* the strip has no fill of its own: fade into what it sits on */
     int row = cui__node_new(ui, f.id ^ 0x5707u);
     cui_node *rn = &ui->nodes[row];
     rn->dir = CUI_ROW; rn->align = CUI_ALIGN_END; rn->gap = CUI__DTAB_GAP;
-    rn->pad[0] = 4; rn->pad[1] = rn->pad[3] = 6;
+    rn->pad[0] = CUI__DTAB_PAD_TOP; rn->pad[1] = rn->pad[3] = 6;
     cui__open(ui, row);
     float rad = CUI__R_ITEM(ui);
     float fs = cui__fs(ui, ui->theme.text_body);
