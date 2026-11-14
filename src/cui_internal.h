@@ -844,6 +844,8 @@ const cui__tsplice *cui__doc_splice_at(const cui_text_doc *d, unsigned rev);   /
 unsigned cui__doc_base_rev(const cui_text_doc *d);
 unsigned cui__doc_serial(const cui_text_doc *d);   /* unique per document in the process */
 int cui__doc_maxlen(const cui_text_doc *d);
+/* every line's length in bytes, in order (line_count of them), from the index alone: emit gets them in batches */
+void cui__doc_line_lengths(const cui_text_doc *d, void (*emit)(void *u, const int *lens, int n), void *u);
 /* Many stretches replaced as one edit (Replace all, found on another thread): [a, b) becomes the parts
  * in order, bytes [at, at + len) of the text (at >= 0) or of r (at < 0: from -at - 1). r and rnl (its
  * rnn line break offsets, or NULL) are taken. O(parts + pieces in [a, b)), one undo step. */
@@ -851,12 +853,17 @@ typedef struct { int at, len; } cui__tpart;
 bool cui__doc_edit_parts(cui_text_doc *d, int a, int b, const cui__tpart *parts, int np, char *r, int rn, int *rnl, int rnn, int caret);
 /* a snapshot of bytes [a, b) only (O(log n + its pieces)); its pieces with their offsets in the document */
 cui_text_snap *cui__doc_snapshot_range(const cui_text_doc *d, int a, int b);
+/* a prepared text (cui_text_prepare) as one edit and undo step: O(pieces), its bytes and line breaks taken as they are */
+bool cui__doc_edit_prepared(cui_text_doc *d, int a, int b, cui_text_prepared *t, int caret);
+/* takes a prepared text apart: its bytes (returned), length, line breaks and longest line; t is freed */
+char *cui__prepared_take(cui_text_prepared *t, int *len, int **nl, int *nn, int *maxlen, int *maxcnt);
 const char *cui__snap_piece(const cui_text_snap *s, int i, int *a, int *b);
 int cui__snap_pieces(const cui_text_snap *s);
-/* the code editor's limits for work on another thread (tests lower them): line states found on the UI
- * thread in a frame (bytes of text), the document length from which Replace all runs on a thread, and the
- * most bytes of a buffer one job for line states copies */
-extern int cui__ed_sync_bytes, cui__ed_rall_bytes, cui__ed_copy_bytes;
+/* the code editor's limits (tests lower them): line states found on the UI thread in a frame (bytes of text), the
+ * document length from which Replace all runs on a thread, the most bytes of a buffer one job for line states copies,
+ * the bytes left to count from which the find bar counts on a thread, and the length from which a line is "very long"
+ * (only what is in view of it is read) */
+extern int cui__ed_sync_bytes, cui__ed_rall_bytes, cui__ed_copy_bytes, cui__ed_count_bytes, cui__ed_long_bytes;
 
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */
 typedef struct {

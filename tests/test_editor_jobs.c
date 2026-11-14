@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #if defined(_WIN32)
 #include <windows.h>
 static void nap_ms(int ms) { Sleep((DWORD)ms); }
@@ -26,8 +27,8 @@ static unsigned g_rng = 4242u;
 static unsigned rnd(void) { g_rng = g_rng * 1664525u + 1013904223u; return g_rng >> 8; }
 
 /* the limits: everything on jobs (and a buffer copied a few kilobytes a job), or all at once */
-static void jobs_on(void) { cui__ed_sync_bytes = 1; cui__ed_rall_bytes = 0; cui__ed_copy_bytes = 3000; }
-static void jobs_off(void) { cui__ed_sync_bytes = 1 << 30; cui__ed_rall_bytes = 1 << 30; cui__ed_copy_bytes = 1 << 30; }
+static void jobs_on(void) { cui__ed_sync_bytes = 1; cui__ed_rall_bytes = 0; cui__ed_copy_bytes = 3000; cui__ed_count_bytes = 0; }
+static void jobs_off(void) { cui__ed_sync_bytes = 1 << 30; cui__ed_rall_bytes = 1 << 30; cui__ed_copy_bytes = 1 << 30; cui__ed_count_bytes = 1 << 30; }
 
 static cui_ctx *new_ctx(void) {
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
@@ -61,10 +62,11 @@ static void frame2(cui_ctx *ua, ej *A, cui_ctx *ub, ej *B) {
 /* frames of both until A has nothing at work (B runs as many, so both are at the same time); false
  * when it never got there */
 static bool settle2(cui_ctx *ua, ej *A, cui_ctx *ub, ej *B, int *seen) {
-    for (int i = 0; i < 4000; i++) {
+    /* by the clock, not a count of frames: on a loaded machine (a parallel ctest) a job may take seconds */
+    for (clock_t t0 = clock(); clock() - t0 < 60 * CLOCKS_PER_SEC;) {
         frame2(ua, A, ub, B);
         if (A->r.working && seen) (*seen)++;
-        if (!A->r.working) return true;
+        if (!A->r.working && !B->r.working) return true;
         nap_ms(1);
     }
     return false;
@@ -243,7 +245,8 @@ static void test_replace(void) {
         }
         if (!why) {   /* and both editors show the same after it */
             for (int i = 0; i < 3; i++) frame2(ua, &A, ub, &B);
-            if (draw_hash(ua) != draw_hash(ub) || A.r.line_count != B.r.line_count) why = "drawing after";
+            if (!settle2(ua, &A, ub, &B, NULL)) why = "jobs never done";   /* A's line states and count of the new text may be on jobs */
+            else if (draw_hash(ua) != draw_hash(ub) || A.r.line_count != B.r.line_count) why = "drawing after";
         }
         if (why) printf("  mode %d (\"%s\" -> \"%s\", flags %d%s%s): %s\n", mode, q->q, q->with, q->flags, sparse ? ", far apart" : "", pieces ? ", pieces" : "", why);
         CHECK(why == NULL);
@@ -396,14 +399,300 @@ static void test_freed(void) {
     jobs_off();
 }
 
+/* matches of q (lowercase letters) in t, as the find bar counts them: not overlapping, within lines */
+static int count_in(const char *t, const char *q) {
+    int k = 0;
+    for (const char *p = t; (p = strstr(p, q)) != NULL; p += strlen(q)) k++;
+    return k;
+}
+
+/* The find bar's count on a job (a document with more to count than cui__ed_count_bytes) next to one counted on the
+ * UI thread: the same count and index once done; edits made while the job runs (its blocks are moved through them, the
+ * ones they reach counted again); a new query while it runs (dropped, counted for the new one); the bar closed while
+ * it runs (dropped at once, nothing put in). */
+static void test_count(void) {
+    printf("the find bar's count on a job: the same as counted at once\n");
+    int n;
+    char *t = big_text(6, &n);
+    for (int how = 0; how < 5; how++) {
+        ej A, B;
+        ej_make(&A, t, true, "text"); ej_make(&B, t, true, "text");
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        for (int i = 0; i < 2; i++) frame2(ua, &A, ub, &B);
+        cui_code_editor_find(ua, "ed", "tile"); cui_code_editor_find(ub, "ed", "tile");
+        frame2(ua, &A, ub, &B);
+        CHECK(A.r.working);   /* 6 MB of lines: counted on a job */
+        const char *q = "tile";
+        if (how == 1 || how == 4) {   /* edits while it runs: above, inside and below what it counts, some adding matches */
+            for (int e = 0; e < (how == 4 ? 300 : 6); e++) {
+                int len = cui_text_doc_length(A.doc), at = (int)(rnd() % (unsigned)len), del = (int)(rnd() % 40);
+                if (at + del > len) del = len - at;
+                const char *ins = e % 3 == 0 ? "tile\ntile " : e % 3 == 1 ? "x" : "";
+                cui_text_doc_replace(A.doc, at, at + del, ins, -1); cui_text_doc_replace(B.doc, at, at + del, ins, -1);
+                frame2(ua, &A, ub, &B);
+            }
+        } else if (how == 2) {   /* a new query while it runs */
+            q = "x y";
+            cui_code_editor_find(ua, "ed", q); cui_code_editor_find(ub, "ed", q);
+            frame2(ua, &A, ub, &B);
+        } else if (how == 3) {   /* the bar closed while it runs: dropped at once */
+            cui_code_editor_find(ua, "ed", NULL); cui_code_editor_find(ub, "ed", NULL);
+            frame2(ua, &A, ub, &B);
+            CHECK(!A.r.working);
+            for (int i = 0; i < 20; i++) { nap_ms(2); frame2(ua, &A, ub, &B); }
+            CHECK(!A.r.working && A.r.find_matches == 0);
+            cui_code_editor_find(ua, "ed", q); cui_code_editor_find(ub, "ed", q);
+        }
+        CHECK(settle2(ua, &A, ub, &B, NULL));
+        for (int i = 0; i < 40; i++) frame2(ua, &A, ub, &B);   /* B counts a megabyte a frame */
+        int m;
+        char *now_ = cui_text_doc_copy(A.doc, 0, -1, &m);
+        int want = count_in(now_, q);
+        free(now_);
+        if (A.r.find_matches != want || B.r.find_matches != want || A.r.find_index != B.r.find_index)
+            printf("  case %d: %d and %d matches (want %d), index %d and %d\n", how, A.r.find_matches, B.r.find_matches, want, A.r.find_index, B.r.find_index);
+        CHECK(A.r.find_matches == want && B.r.find_matches == want && A.r.find_index == B.r.find_index);
+        cui_destroy(ua); cui_destroy(ub);
+        ej_free(&A); ej_free(&B);
+    }
+    free(t);
+    jobs_off();
+}
+
+/* ---- very long lines ---- */
+
+static void frame_long(cui_ctx *ua, ej *A, cui_ctx *ub, ej *B) {   /* A reads only what is in view of a long line, B all of it */
+    jobs_off();
+    cui__ed_long_bytes = 1000; frame1(ua, A);
+    cui__ed_long_bytes = 1 << 30; frame1(ub, B);
+    cui__ed_long_bytes = 16384;
+}
+static void key2(cui_ctx *ua, cui_ctx *ub, cui_key k, int mods) {
+    cui_input_key(ua, k, true, mods); cui_input_key(ua, k, false, mods);
+    cui_input_key(ub, k, true, mods); cui_input_key(ub, k, false, mods);
+}
+/* the frames as they show: how many pixels differ (geometry out of view may differ: a selection that starts far left) */
+static int pixel_diff(cui_ctx *ua, cui_ctx *ub) {
+    const cui_draw_data *da = cui_get_draw_data(ua), *db = cui_get_draw_data(ub);
+    int w = da->width_px, h = da->height_px, cnt = 0;
+    if (db->width_px != w || db->height_px != h) return w * h;
+    uint32_t *pa = calloc((size_t)w * (size_t)h, 4), *pb = calloc((size_t)w * (size_t)h, 4);
+    cui_sw_render(g_sw, da, pa, w, h, w * 4, CUI_SW_BGRA);
+    cui_sw_render(g_sw, db, pb, w, h, w * 4, CUI_SW_BGRA);
+    for (int i = 0; i < w * h; i++) cnt += pa[i] != pb[i];
+    free(pa); free(pb);
+    return cnt;
+}
+static const char *long_differs(cui_ctx *ua, const ej *A, cui_ctx *ub, const ej *B) {
+    const cui_code_editor_result *x = &A->r, *y = &B->r;
+    if (x->cursor != y->cursor || x->anchor != y->anchor) return "caret";
+    if (x->line != y->line || x->column != y->column) return "line or column";
+    if (x->find_matches != y->find_matches || x->find_index != y->find_index) return "find";
+    if (x->bracket != y->bracket || x->bracket_match != y->bracket_match) return "brackets";
+    if (pixel_diff(ua, ub) > 32) return "drawing";   /* (a few: B's selection a million pixels wide rounds its corners less exactly) */
+    return NULL;
+}
+
+/* A line of 200 KB (JSON objects, some multibyte characters and tabs) among short lines, shown by an editor that reads
+ * only the stretch of it in view and by one that reads it whole: at the start, the middle and the end of the line, they
+ * draw the same (colours included: the stretch starts after a comma), and keys, clicks, selections and find give the
+ * same caret, columns, counts and highlights. */
+static void test_long_lines(void) {
+    printf("very long lines: only what is in view is read, the same as reading all\n");
+    size_t cap = 220000 + 1024, n = 0;
+    char *t = malloc(cap);
+    n += (size_t)snprintf(t + n, cap - n, "{\n\"a\": [1, 2],\n");
+    for (int i = 0; n + 100 < 200000; i++)
+        n += (size_t)snprintf(t + n, cap - n, i % 9 == 4 ? "{\"k\":%d,\"s\":\"ab \xc3\xa9t\xc3\xa9\"},\t" : "{\"k\":%d,\"s\":\"ab [x]\"},", i);
+    n += (size_t)snprintf(t + n, cap - n, "{}\n\"z\": 0\n}\n");
+    const char *langs[2] = { "json", "text" };
+    int cases = 0;
+    for (int round = 0; round < 4; round++) {
+        ej A, B;
+        ej_make(&A, t, round % 2 == 0, langs[round / 2]); ej_make(&B, t, round % 2 == 0, langs[round / 2]);
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        for (int i = 0; i < 2; i++) frame_long(ua, &A, ub, &B);
+        static const int cols[] = { 1, 700, 52000, 120000, 160000 };
+        for (int c = 0; c < 6; c++) {
+            if (c < 5) { cui_code_editor_goto(ua, "ed", 3, cols[c]); cui_code_editor_goto(ub, "ed", 3, cols[c]); }
+            else key2(ua, ub, CUI_KEY_END, 0);
+            for (int i = 0; i < 2; i++) frame_long(ua, &A, ub, &B);
+            const char *why = long_differs(ua, &A, ub, &B);
+            if (why) printf("  round %d, column %d: %s differs (%d:%d against %d:%d)\n", round, c < 5 ? cols[c] : -1, why, A.r.line, A.r.column, B.r.line, B.r.column);
+            CHECK(!why);
+            /* keys: by character, word, line end, up and down (the column kept), a selection */
+            static const cui_key keys[] = { CUI_KEY_RIGHT, CUI_KEY_LEFT, CUI_KEY_RIGHT, CUI_KEY_UP, CUI_KEY_DOWN, CUI_KEY_DOWN, CUI_KEY_UP, CUI_KEY_LEFT, CUI_KEY_HOME, CUI_KEY_END };
+            static const int mods[] = { 0, CUI_MOD_PRIMARY, CUI_MOD_SHIFT, 0, 0, 0, 0, CUI_MOD_SHIFT | CUI_MOD_PRIMARY, CUI_MOD_SHIFT, 0 };
+            for (int k = 0; k < 10 && c != 0; k++) {
+                key2(ua, ub, keys[k], mods[k]);
+                frame_long(ua, &A, ub, &B);
+                why = long_differs(ua, &A, ub, &B);
+                if (why) printf("  round %d, column %d, key %d: %s differs (%d:%d against %d:%d)\n", round, c < 5 ? cols[c] : -1, k, why, A.r.line, A.r.column, B.r.line, B.r.column);
+                CHECK(!why);
+                cases++;
+            }
+            /* a click on the long line (its row is the fourth), and a drag */
+            cui_code_editor_goto(ua, "ed", 3, c < 5 ? cols[c] : 199000); cui_code_editor_goto(ub, "ed", 3, c < 5 ? cols[c] : 199000);
+            for (int i = 0; i < 2; i++) frame_long(ua, &A, ub, &B);
+            float y = 78;   /* the third line: the long one */
+            cui_input_mouse_move(ua, 300, y); cui_input_mouse_move(ub, 300, y);
+            cui_input_mouse_button(ua, CUI_MOUSE_LEFT, true); cui_input_mouse_button(ub, CUI_MOUSE_LEFT, true);
+            frame_long(ua, &A, ub, &B);
+            cui_input_mouse_move(ua, 420, y); cui_input_mouse_move(ub, 420, y);
+            frame_long(ua, &A, ub, &B);
+            cui_input_mouse_button(ua, CUI_MOUSE_LEFT, false); cui_input_mouse_button(ub, CUI_MOUSE_LEFT, false);
+            frame_long(ua, &A, ub, &B);
+            why = long_differs(ua, &A, ub, &B);
+            if (why) printf("  round %d, column %d, click: %s differs (%d:%d against %d:%d)\n", round, c < 5 ? cols[c] : -1, why, A.r.line, A.r.column, B.r.line, B.r.column);
+            CHECK(!why && A.r.cursor != A.r.anchor);
+        }
+        /* find: the count, each step and the highlights in view */
+        cui_code_editor_find(ua, "ed", "ab \xc3\xa9"); cui_code_editor_find(ub, "ed", "ab \xc3\xa9");
+        for (int i = 0; i < 3; i++) frame_long(ua, &A, ub, &B);
+        for (int k = 0; k < 6; k++) {
+            const char *why = long_differs(ua, &A, ub, &B);
+            if (why) printf("  round %d, find step %d: %s differs (%d of %d against %d of %d)\n", round, k, why, A.r.find_index, A.r.find_matches, B.r.find_index, B.r.find_matches);
+            CHECK(!why && A.r.find_matches > 300);
+            key2(ua, ub, CUI_KEY_ENTER, k % 3 == 2 ? CUI_MOD_SHIFT : 0);
+            for (int i = 0; i < 2; i++) frame_long(ua, &A, ub, &B);
+        }
+        cui_destroy(ua); cui_destroy(ub);
+        ej_free(&A); ej_free(&B);
+    }
+    printf("  %d keys compared\n", cases);
+    /* typing far along the long line: the index keeps what lies before the edit; the caret column stays right */
+    {
+        ej A, B;
+        ej_make(&A, t, true, "json"); ej_make(&B, t, true, "json");
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        for (int i = 0; i < 2; i++) frame_long(ua, &A, ub, &B);
+        cui_code_editor_goto(ua, "ed", 3, 150000); cui_code_editor_goto(ub, "ed", 3, 150000);
+        frame_long(ua, &A, ub, &B);
+        for (int k = 0; k < 8; k++) {
+            int at = k % 2 ? 1000 : 160000;   /* before and after the caret */
+            const char *ins = k % 3 ? "x\xc3\xa9" : "\t";
+            int la = cui_text_doc_line_start(A.doc, 3) + at;
+            cui_text_doc_replace(A.doc, la, la, ins, -1); cui_text_doc_replace(B.doc, la, la, ins, -1);
+            cui_input_text(ua, "y"); cui_input_text(ub, "y");
+            for (int i = 0; i < 2; i++) frame_long(ua, &A, ub, &B);
+            const char *why = long_differs(ua, &A, ub, &B);
+            if (why) printf("  typing %d: %s differs (%d:%d against %d:%d)\n", k, why, A.r.line, A.r.column, B.r.line, B.r.column);
+            CHECK(!why);
+        }
+        cui_destroy(ua); cui_destroy(ub);
+        ej_free(&A); ej_free(&B);
+    }
+    /* wrapped: cut every row's width of columns; the caret's row and column, up and down, Home and End agree with that */
+    {
+        size_t m = 150000;
+        char *w = malloc(m + 16);
+        memcpy(w, "short\n", 6);
+        for (size_t i = 6; i < m; i++) w[i] = (char)('a' + i % 23);
+        memcpy(w + m, "\nend\n", 6);
+        ej A;
+        ej_make(&A, w, true, "text");
+        A.wrap = true;
+        cui_ctx *ua = new_ctx();
+        cui__ed_long_bytes = 1000;
+        for (int i = 0; i < 3; i++) frame1(ua, &A);
+        cui_code_editor_goto(ua, "ed", 2, 1);
+        frame1(ua, &A);
+        cui_input_key(ua, CUI_KEY_END, true, 0); cui_input_key(ua, CUI_KEY_END, false, 0);
+        frame1(ua, &A);
+        int W = A.r.cursor - 6;   /* End goes to the end of the first row: the row's width */
+        CHECK(W > 20 && W < 200);
+        bool ok = W > 0;
+        for (int r = 1; r < 40 && ok; r++) {   /* down a row at a time: the same column of the next row */
+            cui_input_key(ua, CUI_KEY_HOME, true, 0); cui_input_key(ua, CUI_KEY_HOME, false, 0);
+            frame1(ua, &A);
+            cui_input_key(ua, CUI_KEY_DOWN, true, 0); cui_input_key(ua, CUI_KEY_DOWN, false, 0);
+            cui_input_key(ua, CUI_KEY_RIGHT, true, 0); cui_input_key(ua, CUI_KEY_RIGHT, false, 0);
+            frame1(ua, &A);
+            ok = A.r.cursor == 6 + r * W + 1;
+            if (!ok) printf("  wrapped row %d: caret %d, want %d\n", r, A.r.cursor, 6 + r * W + 1);
+        }
+        CHECK(ok);
+        cui_code_editor_goto(ua, "ed", 2, 100001);   /* far down the line: its row from its column */
+        for (int i = 0; i < 2; i++) frame1(ua, &A);
+        cui_input_key(ua, CUI_KEY_HOME, true, 0); cui_input_key(ua, CUI_KEY_HOME, false, 0);
+        frame1(ua, &A);
+        CHECK(A.r.cursor == 6 + (100000 / W) * W);
+        cui_input_key(ua, CUI_KEY_END, true, 0); cui_input_key(ua, CUI_KEY_END, false, 0);
+        frame1(ua, &A);
+        CHECK(A.r.cursor == 6 + (100000 / W + 1) * W);
+        cui_input_key(ua, CUI_KEY_END, true, CUI_MOD_PRIMARY); cui_input_key(ua, CUI_KEY_END, false, CUI_MOD_PRIMARY);
+        for (int i = 0; i < 2; i++) frame1(ua, &A);
+        CHECK(A.r.cursor == (int)m + 5 && A.r.line == 4);
+        cui__ed_long_bytes = 16384;
+        cui_destroy(ua);
+        ej_free(&A);
+        free(w);
+    }
+    free(t);
+}
+
+/* cui_code_editor_edit_prepared (the text prepared as on a worker) against cui_code_editor_edit with the same text: on
+ * documents and buffers, wrapped or not, whole and partial replaces; the same text, caret, size and drawing, one undo
+ * step back to the old text, and redo. */
+static void frame_off(cui_ctx *ua, ej *A, cui_ctx *ub, ej *B) { jobs_off(); frame1(ua, A); frame1(ub, B); }   /* nothing on jobs */
+static void test_prepared(void) {
+    printf("code editor: a prepared text against the same text given whole\n");
+    jobs_off();
+    for (int round = 0; round < 12; round++) {
+        bool doc = round % 2 == 0, wrap = round % 3 == 0;
+        const char *lang = round % 4 < 2 ? "c" : "markdown";
+        char *t0 = random_text(3000, false), *t1 = random_text(round % 5 == 0 ? 12000 : 400, false);
+        size_t n1 = strlen(t1);
+        if (round % 4 == 1) for (size_t i = 7; i < n1; i += 97) t1[i] = '\r';   /* carriage returns are dropped, either way */
+        ej A, B;
+        ej_make(&A, t0, doc, lang); ej_make(&B, t0, doc, lang);
+        A.wrap = B.wrap = wrap;
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        for (int i = 0; i < 3; i++) frame_off(ua, &A, ub, &B);
+        cui_code_editor_goto(ua, "ed", 1500, 3); cui_code_editor_goto(ub, "ed", 1500, 3);
+        frame_off(ua, &A, ub, &B);
+        int len = A.r.length, a = round % 3 == 1 ? 0 : (int)(rnd() % (unsigned)len), b = round % 3 == 1 ? len : a + (int)(rnd() % 5000);
+        if (b > len) b = len;
+        int sel = round % 2 ? -1 : 10;
+        char *own = malloc(n1 + 1);
+        memcpy(own, t1, n1 + 1);
+        cui_code_editor_edit_prepared(ua, "ed", a, b, cui_text_prepare(own, n1), sel, sel);
+        cui_code_editor_edit(ub, "ed", a, b, t1, sel, sel);
+        for (int i = 0; i < 3; i++) frame_off(ua, &A, ub, &B);
+        const char *why = differs(ua, &A, ub, &B);
+        if (why) printf("  round %d (%s%s): %s differs after the edit\n", round, doc ? "doc" : "buffer", wrap ? ", wrap" : "", why);
+        CHECK(!why);
+        for (int k = 0; k < 2; k++) {   /* one undo step back to the old text, then redo */
+            cui_input_key(ua, CUI_KEY_Z, true, CUI_MOD_PRIMARY | (k ? CUI_MOD_SHIFT : 0));
+            cui_input_key(ub, CUI_KEY_Z, true, CUI_MOD_PRIMARY | (k ? CUI_MOD_SHIFT : 0));
+            for (int i = 0; i < 3; i++) frame_off(ua, &A, ub, &B);
+            if (k == 0) {
+                int n;
+                char *now_ = text_of(&A, &n);
+                CHECK(n == (int)strlen(t0) && memcmp(now_, t0, (size_t)n) == 0);
+                free(now_);
+            }
+            why = differs(ua, &A, ub, &B);
+            if (why) printf("  round %d: %s differs after %s\n", round, why, k ? "redo" : "undo");
+            CHECK(!why);
+        }
+        cui_destroy(ua); cui_destroy(ub);
+        ej_free(&A); ej_free(&B);
+        free(t0); free(t1);
+    }
+}
+
 int main(void) {
     g_sw = cui_sw_create();
-    int sync_bytes = cui__ed_sync_bytes, rall_bytes = cui__ed_rall_bytes, copy_bytes = cui__ed_copy_bytes;
+    test_prepared();
+    test_long_lines();
+    int sync_bytes = cui__ed_sync_bytes, rall_bytes = cui__ed_rall_bytes, copy_bytes = cui__ed_copy_bytes, count_bytes = cui__ed_count_bytes;
     test_states();
     test_replace();
     test_stale();
+    test_count();
     test_freed();
-    cui__ed_sync_bytes = sync_bytes; cui__ed_rall_bytes = rall_bytes; cui__ed_copy_bytes = copy_bytes;
+    cui__ed_sync_bytes = sync_bytes; cui__ed_rall_bytes = rall_bytes; cui__ed_copy_bytes = copy_bytes; cui__ed_count_bytes = count_bytes;
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

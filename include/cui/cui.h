@@ -1884,6 +1884,25 @@ CUI_API int cui_text_snap_read(const cui_text_snap *snap, int start, int len, ch
 CUI_API char *cui_text_snap_copy(const cui_text_snap *snap, int *len);   /* the whole text, malloc'd, NUL terminated */
 CUI_API int cui_text_snap_chunks(const cui_text_snap *snap);             /* the text as runs of bytes, in order */
 CUI_API const char *cui_text_snap_chunk(const cui_text_snap *snap, int i, int *len);
+/* A prepared text: a big new text made ready on any thread (a formatter's worker), so that putting it
+ * in a document or an editor costs O(pieces) on the UI thread and reads none of its bytes:
+ *
+ *     // on the worker, after formatting into out (malloc'd):
+ *     cui_text_prepared *p = cui_text_prepare(out, out_len);           // takes out; NULL: no memory (out freed)
+ *     // later, on the UI thread:
+ *     cui_code_editor_edit_prepared(ui, "code", 0, len, p, 0, 0);       // ONE undo step; takes p
+ *
+ * cui_text_prepare takes ownership of text (malloc'd), drops its carriage returns in place, as the code
+ * editor does, and finds its line breaks and longest line. Touches nothing shared: call it on any thread.
+ * The functions that take a prepared text free it, whether they succeed or not. */
+typedef struct cui_text_prepared cui_text_prepared;
+CUI_API cui_text_prepared *cui_text_prepare(char *text, size_t len);
+CUI_API void cui_text_prepared_free(cui_text_prepared *prep);
+CUI_API int cui_text_prepared_length(const cui_text_prepared *prep);
+CUI_API const char *cui_text_prepared_text(const cui_text_prepared *prep);   /* its bytes (not NUL terminated) */
+/* replaces bytes [start, end) with the prepared text as one undo step, as cui_text_doc_replace does;
+ * takes prep. A replace of the whole text is O(pieces): even the longest line comes with it. */
+CUI_API bool cui_text_doc_replace_prepared(cui_text_doc *doc, int start, int end, cui_text_prepared *prep);
 
 /* ---- Code editor ---- */
 
@@ -1968,7 +1987,7 @@ typedef struct cui_code_editor_result {
                                 * them all, so a replace all is one splice from its first match to its last);
                                 * splice_start is -1 when the editor changed nothing. For cui_code_editor_splice. */
     bool working;              /* work for a big text runs on another thread: colors below an edit far above the view are
-                                * still being found, or Replace all is still finding its matches (the find bar says so).
+                                * still being found, Replace all is still finding its matches, or the find bar still counts them (it says so).
                                 * The editor asks for frames until it is done; nothing waits for it. */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
@@ -1982,6 +2001,10 @@ CUI_API void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int
  * both negative puts the caret after the inserted text; one negative takes the other's value.
  * Focuses the editor. An edit that would not fit the capacity is refused whole (`refused`). */
 CUI_API void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int end, const char *text, int sel_anchor, int sel_cursor);
+/* As cui_code_editor_edit with a prepared text (cui_text_prepare, made on a worker): takes prep. On an
+ * editor of a document (`.doc`) neither this call nor the frame that applies it copies or reads the text:
+ * O(pieces), still ONE undo step. On a buffer the bytes are copied in, as with cui_code_editor_edit. */
+CUI_API void cui_code_editor_edit_prepared(cui_ctx *ui, const char *id, int start, int end, cui_text_prepared *prep, int sel_anchor, int sel_cursor);
 /* Two editors on one buffer (a split view): when one of them changes the text, pass its
  * reported splice to the other editor, whose id is `cui_last_id(ui)` right after its call (or
  * cui_make_id in its id scope). On its next frame that editor patches its line index, wrap

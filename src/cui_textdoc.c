@@ -161,6 +161,8 @@ typedef struct {
     int ndel, nins, cdel, cins;
     int caret, group;
     unsigned after;             /* the text's state id after it */
+    int max0, cnt0, max1, cnt1; /* the longest line and how many are that long, before and after it: undo puts them back
+                                 * instead of measuring every line again after a big step */
 } cui__trec;
 
 struct cui_text_doc {
@@ -174,7 +176,9 @@ struct cui_text_doc {
     unsigned serial;            /* unique among the documents of a process: an editor told a new one at an old one's address knows */
     unsigned state, states, base_state;   /* the text's state id; ids given so far; the state before the oldest undo step */
     int maxlen, maxcnt;         /* the longest line in bytes, and how many lines are that long */
+    int hmaxlen, hmaxcnt;       /* with maxskip in an edit: the longest line of the new text (a prepared one, set whole) */
     bool maxstale;              /* an edit replaced too many lines to count them out: measure all again */
+    bool maxskip;               /* the edit under way knows the longest line already (undo, a prepared text): no counting */
     cui__tsplice log[CUI__DOC_LOG];
     cui__trec *h; int hn, hcap, hpos;
     int hmax;                   /* undo groups kept */
@@ -465,6 +469,33 @@ static void cui__td_maxlen_walk(const cui_text_doc *d, int t, int *pos, int *las
     *pos += x->len;
     cui__td_maxlen_walk(d, x->r, pos, last, m, cnt);
 }
+/* the length of every line in order, from the line break index (no text read), handed out in batches */
+typedef struct { int buf[1024]; int n; void (*emit)(void *, const int *, int); void *u; } cui__td_lens;
+static void cui__td_lens_walk(const cui_text_doc *d, int t, int *pos, int *last, cui__td_lens *o) {
+    if (!t) return;
+    const cui__tnode *x = &TN(t);
+    cui__td_lens_walk(d, x->l, pos, last, o);
+    const int *nl = d->b[x->buf].nl + x->nl0;
+    int base = *pos - x->start, lst = *last;
+    for (int i = 0; i < x->nl; i++) {
+        int at = base + nl[i];
+        o->buf[o->n++] = at - lst;
+        lst = at + 1;
+        if (o->n == 1024) { o->emit(o->u, o->buf, 1024); o->n = 0; }
+    }
+    *last = lst;
+    *pos += x->len;
+    cui__td_lens_walk(d, x->r, pos, last, o);
+}
+void cui__doc_line_lengths(const cui_text_doc *d, void (*emit)(void *u, const int *lens, int n), void *u) {
+    cui__td_lens o;
+    o.n = 0; o.emit = emit; o.u = u;
+    int pos = 0, last = 0;
+    cui__td_lens_walk(d, d->root, &pos, &last, &o);
+    o.buf[o.n++] = pos - last;
+    emit(u, o.buf, o.n);
+}
+
 static void cui__td_maxlen_all(cui_text_doc *d) {
     int pos = 0, last = 0, m = 0, cnt = 0;
     cui__td_maxlen_walk(d, d->root, &pos, &last, &m, &cnt);
@@ -474,7 +505,7 @@ static void cui__td_maxlen_all(cui_text_doc *d) {
 
 /* lines [la, lb] are about to be replaced: their lengths leave the count */
 static void cui__td_max_out(cui_text_doc *d, int la, int lb) {
-    if (d->maxstale) return;
+    if (d->maxstale || d->maxskip) return;
     if (lb - la > 1024) { d->maxstale = true; return; }
     int s = cui__doc_line_start(d, la);
     for (int i = la; i <= lb; i++) {
@@ -486,6 +517,7 @@ static void cui__td_max_out(cui_text_doc *d, int la, int lb) {
 
 /* lines [la, la + k] were just written: their lengths join the count */
 static void cui__td_max_in(cui_text_doc *d, int la, int k) {
+    if (d->maxskip) return;
     if (!d->maxstale && k <= 1024) {
         int s = cui__doc_line_start(d, la);
         for (int i = la; i <= la + k; i++) {
@@ -575,6 +607,7 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
         q = &d->h[d->hn++];
         memset(q, 0, sizeof *q);
         q->at = a; q->caret = caret; q->group = group;
+        q->max0 = d->maxlen; q->cnt0 = d->maxcnt;
         d->hpos = d->hn;
     }
     /* the text: typing on grows the piece before it; anything else is split, cut and joined */
@@ -597,6 +630,8 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
         q->del_n += b - a;
     }
     if (n > 0) { cui__td_pcs_add(&q->ins, &q->nins, &q->cins, (cui__tpc){ bi, start, n }, false); q->ins_n += n; }
+    if (d->maxskip) { d->maxlen = d->hmaxlen; d->maxcnt = d->hmaxcnt; d->maxstale = false; }   /* a whole prepared text: its own */
+    q->max1 = d->maxlen; q->cnt1 = d->maxcnt;
     q->after = d->state = ++d->states;
     cui__td_trim(d);
     return true;
@@ -630,6 +665,7 @@ bool cui__doc_edit_parts(cui_text_doc *d, int a, int b, const cui__tpart *parts,
     cui__trec *q = &d->h[d->hn++];
     memset(q, 0, sizeof *q);
     q->at = a; q->caret = caret; q->group = group;
+    q->max0 = d->maxlen; q->cnt0 = d->maxcnt;
     d->hpos = d->hn;
     int la = cui__doc_line_of(d, a), lb = cui__doc_line_of(d, b);
     cui__td_max_out(d, la, lb);
@@ -664,6 +700,7 @@ bool cui__doc_edit_parts(cui_text_doc *d, int a, int b, const cui__tpart *parts,
     q->del_n = b - a;
     q->ins = pc; q->nins = npc; q->cins = cpc;
     q->ins_n = (int)n;
+    q->max1 = d->maxlen; q->cnt1 = d->maxcnt;
     q->after = d->state = ++d->states;
     cui__td_trim(d);
     return true;
@@ -682,17 +719,22 @@ static int cui__td_pcs_nl(const cui_text_doc *d, const cui__tpc *pc, int n) {
 
 bool cui__doc_undo(cui_text_doc *d, bool redo, int *caret) {
     if (redo ? d->hpos >= d->hn : d->hpos <= 0) return false;
-    int g = d->h[redo ? d->hpos : d->hpos - 1].group, c = 0;
+    int g = d->h[redo ? d->hpos : d->hpos - 1].group, c = 0, mx = 0, mc = 0;
+    d->maxskip = true;   /* the text becomes the one before (after) the group: its longest line is kept in the records */
     while (redo ? d->hpos < d->hn && d->h[d->hpos].group == g : d->hpos > 0 && d->h[d->hpos - 1].group == g) {
         const cui__trec *q = &d->h[redo ? d->hpos++ : --d->hpos];
         if (redo) {
             cui__td_put(d, q->at, q->at + q->del_n, q->ins, q->nins, q->ins_n, cui__td_pcs_nl(d, q->ins, q->nins));
             c = q->at + q->ins_n;
+            mx = q->max1; mc = q->cnt1;
         } else {
             cui__td_put(d, q->at, q->at + q->ins_n, q->del, q->ndel, q->del_n, cui__td_pcs_nl(d, q->del, q->ndel));
             c = q->caret;
+            mx = q->max0; mc = q->cnt0;
         }
     }
+    d->maxskip = false;
+    d->maxlen = mx; d->maxcnt = mc; d->maxstale = false;
     d->state = d->hpos > 0 ? d->h[d->hpos - 1].after : d->base_state;
     if (caret) *caret = c;
     return true;
@@ -849,6 +891,76 @@ bool cui_text_doc_iter_next(cui_text_doc_iter *it) {
 bool cui_text_doc_replace(cui_text_doc *d, int start, int end, const char *text, int len) {
     if (!d) return false;
     return cui__doc_edit(d, start, end, text ? text : "", text ? cui__td_len_of(text, len) : 0, NULL, NULL, NULL, CUI_MAX(start, 0), false, NULL, 0);
+}
+
+/* ---- prepared texts ----
+ * A big new text (a formatter's output) made ready on the caller's worker thread: carriage returns
+ * dropped, line breaks found and the longest line measured there, so putting it in a document on
+ * the UI thread costs O(pieces) and reads none of its bytes. */
+
+struct cui_text_prepared {
+    char *p; int len;
+    int *nl, nn;                /* its line breaks (offsets of the line feeds) */
+    int maxlen, maxcnt;         /* its longest line, and how many are that long */
+};
+
+cui_text_prepared *cui_text_prepare(char *text, size_t len) {
+    if (!text) return NULL;
+    cui_text_prepared *t = calloc(1, sizeof *t);
+    if (!t || len > (size_t)INT_MAX - 2) { free(t); free(text); return NULL; }
+    /* carriage returns out, in place (the code editor never keeps them) */
+    const char *cr = cui__find_byte(text, len, '\r');
+    if (cr) {
+        char *w = text + (cr - text);
+        for (const char *q = cr; q < text + len; q++) if (*q != '\r') *w++ = *q;
+        len = (size_t)(w - text);
+    }
+    int n = (int)len, k = (int)cui__count_byte(text, len, '\n');
+    t->nl = malloc(sizeof(int) * (size_t)(k > 0 ? k : 1));
+    if (!t->nl) { free(t); free(text); return NULL; }
+    t->nn = cui__fill_nl(text, 0, n, t->nl);
+    int m = 0, cnt = 0, last = 0;
+    for (int i = 0; i < t->nn; i++) {
+        int at = --t->nl[i], w = at - last;   /* fill_nl gives the byte after the break */
+        if (w > m) { m = w; cnt = 1; } else if (w == m) cnt++;
+        last = at + 1;
+    }
+    if (n - last > m) { m = n - last; cnt = 1; } else if (n - last == m) cnt++;
+    t->p = text; t->len = n; t->maxlen = m; t->maxcnt = cnt;
+    return t;
+}
+
+void cui_text_prepared_free(cui_text_prepared *t) {
+    if (!t) return;
+    free(t->p); free(t->nl); free(t);
+}
+int cui_text_prepared_length(const cui_text_prepared *t) { return t ? t->len : 0; }
+const char *cui_text_prepared_text(const cui_text_prepared *t) { return t && t->p ? t->p : ""; }
+
+char *cui__prepared_take(cui_text_prepared *t, int *len, int **nl, int *nn, int *maxlen, int *maxcnt) {
+    char *p = t->p;
+    *len = t->len; *nl = t->nl; *nn = t->nn;
+    if (maxlen) *maxlen = t->maxlen;
+    if (maxcnt) *maxcnt = t->maxcnt;
+    free(t);
+    return p;
+}
+
+bool cui__doc_edit_prepared(cui_text_doc *d, int a, int b, cui_text_prepared *t, int caret) {
+    int len = TN(d->root).sl, n, *nl, nn, mx, mc;
+    a = CUI_CLAMP(a, 0, len); b = CUI_CLAMP(b, a, len);
+    char *p = cui__prepared_take(t, &n, &nl, &nn, &mx, &mc);
+    bool whole = a == 0 && b == len;   /* the new text is all of it: its longest line is the text's */
+    if (whole) { d->maxskip = true; d->hmaxlen = mx; d->hmaxcnt = mc; }
+    bool ok = cui__doc_edit(d, a, b, p, n, p, NULL, NULL, caret, false, nl, nn);
+    d->maxskip = false;
+    return ok;
+}
+
+bool cui_text_doc_replace_prepared(cui_text_doc *d, int start, int end, cui_text_prepared *t) {
+    if (!t) return false;
+    if (!d) { cui_text_prepared_free(t); return false; }
+    return cui__doc_edit_prepared(d, start, end, t, CUI_MAX(start, 0));
 }
 
 bool cui_text_doc_undo(cui_text_doc *d, int *caret) { return d && cui__doc_undo(d, false, caret); }

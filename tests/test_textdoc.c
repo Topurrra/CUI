@@ -24,6 +24,11 @@ static void ref_replace(ref *r, int a, int b, const char *t, int n) {
     memcpy(r->s + a, t, (size_t)n);
     r->n = nn;
 }
+static ref ref_dup(const ref *r) {   /* a copy, its terminator too */
+    ref c = { malloc((size_t)r->cap), r->n, r->cap };
+    memcpy(c.s, r->s, (size_t)r->cap);
+    return c;
+}
 static int ref_lines(const ref *r) { int k = 1; for (int i = 0; i < r->n; i++) k += r->s[i] == '\n'; return k; }
 static int ref_line_start(const ref *r, int line) {
     if (line <= 0) return 0;
@@ -263,7 +268,68 @@ static void test_big(void) {
     cui_text_doc_free(d);
 }
 
+/* a prepared text (cui_text_prepare, made on a worker): the same text as cui_text_doc_replace would make (without its
+ * carriage returns), as one undo step, and undo and redo give back the longest line without measuring it */
+static void test_prepared(void) {
+    printf("text doc: prepared texts against replace\n");
+    ref r = { 0 };
+    char base[3000];
+    random_text(base, (int)sizeof base);
+    cui_text_doc *d = cui_text_doc_new(base, (int)sizeof base);
+    ref_set(&r, base, (int)sizeof base);
+    bool ok = true;
+    for (int round = 0; round < 300 && ok; round++) {
+        int n = round % 7 == 0 ? 70000 + (int)(rnd() % 30000) : (int)(rnd() % 400);   /* some big enough for a buffer of their own */
+        char *t = malloc((size_t)n + 1), *plain = malloc((size_t)n + 1);
+        random_text(t, n);
+        for (int i = 0; i < n; i += 1 + (int)(rnd() % 50)) if (rnd() % 4 == 0) t[i] = '\r';
+        int m = 0;
+        for (int i = 0; i < n; i++) if (t[i] != '\r') plain[m++] = t[i];
+        cui_text_prepared *p = cui_text_prepare(t, (size_t)n);
+        ok = p && cui_text_prepared_length(p) == m && memcmp(cui_text_prepared_text(p), plain, (size_t)m) == 0;
+        CHECK(ok);
+        int a, b;
+        if (round % 5 == 0) { a = 0; b = r.n; }   /* the whole text: its longest line comes with it */
+        else { a = r.n ? (int)(rnd() % (unsigned)(r.n + 1)) : 0; b = a + (int)(rnd() % 3000); if (b > r.n) b = r.n; }
+        unsigned st0 = cui_text_doc_state(d);
+        int max0 = cui_text_doc_longest_line(d);
+        bool changed = cui_text_doc_replace_prepared(d, a, b, p);
+        ref_replace(&r, a, b, plain, m);
+        ok = ok && changed == (m > 0 || b > a) && same(d, &r, round % 20 == 0);
+        CHECK(ok);
+        if (changed && round % 3 == 0) {   /* one step back and forth */
+            ref save = ref_dup(&r);
+            CHECK(cui_text_doc_undo(d, NULL));
+            ok = ok && cui_text_doc_state(d) == st0 && cui_text_doc_longest_line(d) == max0;
+            CHECK(ok);
+            CHECK(cui_text_doc_redo(d, NULL));
+            ok = ok && same(d, &save, false);
+            CHECK(ok);
+            free(save.s);
+        }
+        free(plain);
+    }
+    /* many steps undone (the longest line right at each) and redone */
+    ref past = ref_dup(&r);
+    for (int i = 0; i < 40 && ok; i++) {
+        ok = cui_text_doc_undo(d, NULL);
+        int n = 0;
+        char *c = cui_text_doc_copy(d, 0, -1, &n);
+        ref now_ = { c, n, n + 1 };
+        ok = ok && cui_text_doc_longest_line(d) == ref_maxlen(&now_);
+        free(c);
+    }
+    CHECK(ok);
+    for (int i = 0; i < 40 && ok; i++) ok = cui_text_doc_redo(d, NULL);
+    CHECK(ok && same(d, &past, true));
+    CHECK(!cui_text_doc_replace_prepared(d, 0, 0, NULL));
+    CHECK(!cui_text_doc_replace_prepared(NULL, 0, 0, cui_text_prepare(malloc(4), 0)));   /* freed, not leaked */
+    cui_text_doc_free(d);
+    free(r.s); free(past.s);
+}
+
 int main(void) {
+    test_prepared();
     test_random_edits();
     test_undo();
     test_snapshot();

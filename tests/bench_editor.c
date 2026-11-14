@@ -13,6 +13,10 @@
  *     cui_bench_editor --doc [MB ...]    the same as the default, on a cui_text_doc (`.doc`)
  *     cui_bench_editor --shared-doc [MB ...]   two editors on one cui_text_doc
  *     cui_bench_editor --replace-doc [A B]     --replace on a cui_text_doc
+ *     cui_bench_editor --count [MB]       the find bar's match count of a document (default 100 MB)
+ *     cui_bench_editor --long [MB]        one line of MB (default 40): idle, sideways, End, typing, wrapped
+ *     cui_bench_editor --replace-prepared [A B]   --replace-doc with cui_text_prepare (as on a worker) and
+ *                                        cui_code_editor_edit_prepared
  *     cui_bench_editor --async [c|markdown|replace]   work handed to other threads, frames at 60 a second:
  *                                        Ctrl+End in a fresh 640 000 line file and a format of it (colors
  *                                        settling), typing meanwhile, Replace all of 860 000 matches in 100 MB
@@ -290,7 +294,7 @@ static void compare(size_t mb, const char *lang, bool wrap, bool doc) {
  * a text of another size (the way an app applies a formatter's output so that Ctrl Z undoes
  * it), then undo and redo; then the app swapping the text and changing .revision. Each
  * number is the ms of one frame, in order. */
-static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wrap, bool doc) {
+static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wrap, bool doc, bool prep) {
     bench_ed b;
     memset(&b, 0, sizeof b);
     b.cap = to_mb * 1024 * 1024 + 8 * 1024 * 1024;
@@ -307,8 +311,22 @@ static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wra
     frames(ui, &b, 3, 0);
     cui_code_editor_goto(ui, "ed", b.r.line_count / 2, 1);
     frames(ui, &b, 2, 0);
-    double c0 = now();
+    double c0 = now(), pw = 0;
+#if !defined(BENCH_NO_PREPARED)   /* the library before cui_text_prepare */
+    if (prep) {   /* the app's worker prepares it (timed apart: not the UI thread's); the call takes it */
+        size_t ntn = strlen(nt);
+        char *own = malloc(ntn + 1);
+        memcpy(own, nt, ntn + 1);
+        c0 = now();
+        cui_text_prepared *pt = cui_text_prepare(own, ntn);
+        pw = (now() - c0) * 1000;
+        c0 = now();
+        cui_code_editor_edit_prepared(ui, "ed", 0, (int)len, pt, 0, 0);
+    } else cui_code_editor_edit(ui, "ed", 0, (int)len, nt, 0, 0);
+#else
+    (void)prep;
     cui_code_editor_edit(ui, "ed", 0, (int)len, nt, 0, 0);
+#endif
     double call = (now() - c0) * 1000;
     double e1 = frames(ui, &b, 1, 0), e2 = frames(ui, &b, 1, 0), e3 = frames(ui, &b, 1, 0);
     int nl = b.r.line_count;
@@ -324,6 +342,7 @@ static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wra
     else gen(b.buf, to_mb * 1024 * 1024, true, lang);
     b.rev = 2;
     double v1 = frames(ui, &b, 1, 0) + v0, v2 = frames(ui, &b, 1, 0);
+    if (prep) printf("(prepare on the worker %5.1f ms) ", pw);
     printf("replace %2zu -> %2zu MB %-8s %-4s %-3s | edit call %5.1f frames %6.1f %6.1f %6.1f | undo %6.1f %6.1f | redo %6.1f %6.1f | new text %6.1f %6.1f ms | undo %s redo %s\n",
            from_mb, to_mb, lang, wrap ? "wrap" : "", doc ? "doc" : "", call, e1, e2, e3, u1, u2, r1, r2, v1, v2, ok_undo ? "ok" : "BAD", ok_redo ? "ok" : "BAD");
     fflush(stdout);
@@ -556,7 +575,139 @@ static void async_replace(size_t mb) {
     cui_text_doc_free(b.doc);
 }
 
+/* The find bar's match count on a document of mb MB: the bar opened with a query, frames at 60 a second until the count
+ * is final; then a typed character in the middle (the count follows the edit) and a new query. The worst frame, and how
+ * long until the count was right. */
+static void count_one(size_t mb, cui_ctx *ui, bench_ed *b, const char *query, const char *what) {
+    double t0 = now(), worst = 0, done_at = -1;
+    int last = -1, same = 0;
+    cui_code_editor_find(ui, "ed", query);
+    for (int i = 0; i < 6000 && same < 30; i++) {
+        double f0 = now();
+        frames(ui, b, 1, 0);
+        double ft = (now() - f0) * 1000;
+        if (ft > worst) worst = ft;
+        if (b->r.find_matches != last || b->r.working) { last = b->r.find_matches; same = 0; done_at = -1; }
+        else if (same++ == 0) done_at = (now() - t0) * 1000;
+        nap(1.0 / 60.0 - (now() - f0));
+    }
+    printf("count %zu MB %-14s | %8d matches, right after %7.1f ms | worst frame %6.2f ms\n", mb, what, last, done_at, worst);
+    fflush(stdout);
+}
+
+/* worst and mean of n frames, each timed alone, after `prep` input */
+static void frames_stat(cui_ctx *ui, bench_ed *b, int n, float scroll_x, double *worst, double *mean) {
+    *worst = 0; *mean = 0;
+    for (int i = 0; i < n; i++) {
+        if (scroll_x != 0) cui_input_scroll(ui, scroll_x, 0);
+        double t0 = now();
+        frames(ui, b, 1, 0);
+        double t = (now() - t0) * 1000;
+        if (t > *worst) *worst = t;
+        *mean += t / n;
+    }
+}
+
+/* One line of mb MB (minified JSON, as a formatter's minify or a log of one line makes): frames idle at the start,
+ * scrolling sideways, after a jump to the end (End) and idle there, typing there, and wrapped, scrolling down. */
+static void long_bench(size_t mb, const char *lang, bool wrap) {
+    size_t size = mb * 1024 * 1024, n = 1;
+    char *t = malloc(size + 256);
+    t[0] = '[';
+    for (int i = 0; n + 100 < size; i++) n += (size_t)sprintf(t + n, "{\"id\":%d,\"name\":\"item %d\",\"tags\":[\"a\",\"b\"],\"ok\":true},", i, i);
+    t[n++] = ']'; t[n] = 0;
+    bench_ed b;
+    memset(&b, 0, sizeof b);
+    b.lang = lang; b.wrap = wrap;
+    b.doc = cui_text_doc_adopt(t, (int)n, NULL, NULL);
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1200, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    double t0 = now();
+    frames(ui, &b, 1, 0);
+    double first = (now() - t0) * 1000, idle_w, idle_m, side_w, side_m, end_w, endm, type_w, type_m, down_w = 0, down_m = 0;
+    frames_stat(ui, &b, 20, 0, &idle_w, &idle_m);
+    cui_input_mouse_move(ui, 600, 400);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); frames(ui, &b, 1, 0);   /* focus: a click on the line */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); frames(ui, &b, 1, 0);
+    frames_stat(ui, &b, 30, wrap ? 0 : -5, &side_w, &side_m);
+    if (wrap) { for (int i = 0; i < 30; i++) cui_input_scroll(ui, 0, -10), frames(ui, &b, 1, 0); }
+    frames(ui, &b, 1, 0);
+    cui_input_key(ui, CUI_KEY_END, true, 0); cui_input_key(ui, CUI_KEY_END, false, 0);
+    t0 = now();
+    frames(ui, &b, 1, 0);
+    double jump = (now() - t0) * 1000;
+    frames_stat(ui, &b, 20, 0, &end_w, &endm);
+    type_w = 0; type_m = 0;
+    for (int i = 0; i < 20; i++) {
+        cui_input_text(ui, "x");
+        double f0 = now();
+        frames(ui, &b, 1, 0);
+        double ft = (now() - f0) * 1000;
+        if (ft > type_w) type_w = ft;
+        type_m += ft / 20;
+    }
+    int col_end = b.r.column;
+    if (wrap) {
+        cui_input_key(ui, CUI_KEY_HOME, true, CUI_MOD_PRIMARY); cui_input_key(ui, CUI_KEY_HOME, false, CUI_MOD_PRIMARY);
+        frames(ui, &b, 1, 0);
+        down_w = 0;
+        for (int i = 0; i < 30; i++) {
+            cui_input_scroll(ui, 0, -10);
+            double f0 = now();
+            frames(ui, &b, 1, 0);
+            double ft = (now() - f0) * 1000;
+            if (ft > down_w) down_w = ft;
+            down_m += ft / 30;
+        }
+    }
+    printf("long line %3zu MB %-5s %-4s | caret at column %d after End and typing | first %6.1f | idle %5.2f (%5.2f) | sideways %5.2f (%5.2f) | End %6.1f, then %5.2f (%5.2f) | typing at the end %5.2f (%5.2f)",
+           mb, lang, wrap ? "wrap" : "", col_end, first, idle_m, idle_w, side_m, side_w, jump, endm, end_w, type_m, type_w);
+    if (wrap) printf(" | scrolling down %5.2f (%5.2f)", down_m, down_w);
+    printf(" ms, mean (worst)\n");
+    fflush(stdout);
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    cui_text_doc_free(b.doc);
+}
+
+static void count_bench(size_t mb) {
+    size_t size = mb * 1024 * 1024;
+    char *t = malloc(size + 8192);
+    size_t len = gen(t, size, false, "text");
+    bench_ed b;
+    memset(&b, 0, sizeof b);
+    b.lang = "text";
+    b.doc = cui_text_doc_adopt(t, (int)len, NULL, NULL);
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1200, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    frames(ui, &b, 3, 0);
+    count_one(mb, ui, &b, "worker", "open");
+    cui_text_doc_replace(b.doc, (int)len / 2, (int)len / 2, "worker ", 7);   /* an edit in the middle */
+    count_one(mb, ui, &b, "worker", "after an edit");
+    count_one(mb, ui, &b, "request", "new query");
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    cui_text_doc_free(b.doc);
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--long")) {   /* --long [MB] */
+        size_t mb = argc > 2 ? (size_t)atoi(argv[2]) : 40;
+        long_bench(mb, "json", false);
+        long_bench(mb, "text", false);
+        long_bench(mb, "c", false);   /* a language with line states (block comments) */
+        long_bench(mb, "markdown", false);   /* states down to the last line in view */
+        long_bench(mb, "json", true);
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "--count")) {   /* --count [MB] */
+        count_bench(argc > 2 ? (size_t)atoi(argv[2]) : 100);
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "--async")) {   /* --async [c|markdown|replace] */
         bool all = argc < 3;
         if (all || !strcmp(argv[2], "c")) async_one("c");
@@ -574,11 +725,11 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    if (argc > 1 && (!strcmp(argv[1], "--replace") || !strcmp(argv[1], "--replace-doc"))) {   /* --replace[-doc] [FROM_MB TO_MB] */
-        bool doc = !strcmp(argv[1], "--replace-doc");
+    if (argc > 1 && (!strcmp(argv[1], "--replace") || !strcmp(argv[1], "--replace-doc") || !strcmp(argv[1], "--replace-prepared"))) {   /* --replace[-doc|-prepared] [FROM_MB TO_MB] */
+        bool prep = !strcmp(argv[1], "--replace-prepared"), doc = prep || !strcmp(argv[1], "--replace-doc");
         size_t f = argc > 3 ? (size_t)atoi(argv[2]) : 20, t = argc > 3 ? (size_t)atoi(argv[3]) : 50;
         static const char *const rl[] = { "text", "c", "markdown", "json" };
-        for (int w = 0; w < 2; w++) for (int l = 0; l < 4; l++) replace_all(f, t, rl[l], w, doc);
+        for (int w = 0; w < 2; w++) for (int l = 0; l < 4; l++) replace_all(f, t, rl[l], w, doc, prep);
         return 0;
     }
 
