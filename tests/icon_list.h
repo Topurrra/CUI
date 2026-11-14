@@ -219,4 +219,6 @@ static const struct { const char *name, *icon; } icon_list[] = {
     { "heading-6", CUI_ICON_HEADING_6 },
     { "text-quote", CUI_ICON_TEXT_QUOTE },
     { "square-code", CUI_ICON_SQUARE_CODE },
+    { "plug", CUI_ICON_PLUG },
+    { "puzzle", CUI_ICON_PUZZLE },
 };

@@ -224,5 +224,7 @@
 #define CUI_ICON_HEADING_6                "\xee\x8e\x8a"
 #define CUI_ICON_TEXT_QUOTE               "\xee\x92\x9e"
 #define CUI_ICON_SQUARE_CODE              "\xee\x85\xab"
+#define CUI_ICON_PLUG                     "\xef\xa3\xb0"
+#define CUI_ICON_PUZZLE                   "\xef\xa3\xb1"
 
 #endif /* CUI_ICONS_H */

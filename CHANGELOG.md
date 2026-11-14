@@ -122,6 +122,7 @@ Five components that read like an instrument, a new example that puts them toget
 
 ### Added
 
+- 2 more Lucide icons (now 221): `CUI_ICON_PLUG` and `CUI_ICON_PUZZLE` (`CUI_ICON_ARCHIVE` was already there). Drawn from the lucide-static 1.73.0 SVG paths (ISC) as filled outlines at private-use code points U+F8F0 and U+F8F1; every existing icon is unchanged.
 - **Instruments**, five components for interfaces that read like an instrument: values as dots, labels in the monospaced font, hairlines and one accent. See [Instruments](docs/components-more.md#instruments) and the gallery's new *Instruments* page.
   - **Dot-matrix chart** (`cui_dot_chart`): values as a grid of dots, lit up to each column's value and dim above it. Series stack, an accent series stands out, the pointer or the arrow keys show a readout, and a click returns where it landed.
   - **Chart annotations** (`cui_chart_annotation`): vertical lines, dashed thresholds and labelled points over the dot chart, the line chart and the bar chart. Labels that would overlap move to the other side of their line, then down.

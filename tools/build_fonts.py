@@ -49,6 +49,7 @@ chevrons-down-up git-commit-horizontal link-2 text-search scan-search pin calend
 chart-gantt maximize minimize app-window captions quote list-ordered heading-1 heading-2 table
 image-plus sigma
 strikethrough heading heading-3 heading-4 heading-5 heading-6 text-quote square-code
+plug puzzle
 """.split()
 
 

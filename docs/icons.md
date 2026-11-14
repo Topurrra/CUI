@@ -1,6 +1,6 @@
 # Icons
 
-CUI embeds 219 icons from [Lucide](https://lucide.dev) (ISC license). Each icon is a UTF-8 string, so it works on its own or inside any label:
+CUI embeds 221 icons from [Lucide](https://lucide.dev) (ISC license). Each icon is a UTF-8 string, so it works on its own or inside any label:
 
 ```c
 cui_icon(ui, CUI_ICON_ZAP, 16, CUI_COLOR_ACCENT);
@@ -68,7 +68,8 @@ cui_text(ui, CUI_ICON_CHECK " Saved");          /* inline, centered on the text 
 | `CUI_ICON_QUOTE` | `CUI_ICON_LIST_ORDERED` | `CUI_ICON_HEADING_1` | `CUI_ICON_HEADING_2` |
 | `CUI_ICON_TABLE` | `CUI_ICON_IMAGE_PLUS` | `CUI_ICON_SIGMA` | `CUI_ICON_STRIKETHROUGH` |
 | `CUI_ICON_HEADING` | `CUI_ICON_HEADING_3` | `CUI_ICON_HEADING_4` | `CUI_ICON_HEADING_5` |
-| `CUI_ICON_HEADING_6` | `CUI_ICON_TEXT_QUOTE` | `CUI_ICON_SQUARE_CODE` |  |
+| `CUI_ICON_HEADING_6` | `CUI_ICON_TEXT_QUOTE` | `CUI_ICON_SQUARE_CODE` | `CUI_ICON_PLUG` |
+| `CUI_ICON_PUZZLE` |  |  |  |
 
 ## Using any Lucide icon
 
