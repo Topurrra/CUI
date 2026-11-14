@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef CUI_TEST_WINDOWS_IMAGE_PATH
+#include <wchar.h>
+#endif
 
 static int g_failed, g_checks;
 #define CHECK(cond) do { g_checks++; if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
@@ -61,6 +64,46 @@ static void test_color(void) {
     CHECK(t.a == 0);
     cui_color a = cui_alpha(CUI_RGB(0x123456), 0.5f);
     CHECK(a.a == 128 && a.r == 0x12);
+}
+
+/* An allocator that fills the memory it adds with 0x01, as reused heap memory
+ * may be. The size lives in a header, so realloc knows which bytes are new. */
+static void *junk_alloc(size_t size, void *user) {
+    (void)user;
+    size_t *p = malloc(size + 16);
+    if (!p) return NULL;
+    p[0] = size;
+    memset((char *)p + 16, 0x01, size);
+    return (char *)p + 16;
+}
+static void *junk_realloc(void *ptr, size_t size, void *user) {
+    if (!ptr) return junk_alloc(size, user);
+    size_t *p = (size_t *)((char *)ptr - 16), old = p[0];
+    p = realloc(p, size + 16);
+    if (!p) return NULL;
+    p[0] = size;
+    if (size > old) memset((char *)p + 16 + old, 0x01, size - old);
+    return (char *)p + 16;
+}
+static void junk_free(void *ptr, void *user) { (void)user; if (ptr) free((char *)ptr - 16); }
+
+/* growing the state store rehashed before clearing the new slot, so leftover
+ * bytes there linked a phantom entry into a bucket and cut off its chain */
+static void test_state_store_grow(void) {
+    printf("state: values survive the store growing over reused memory\n");
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .allocator = { junk_alloc, junk_realloc, junk_free, NULL } });
+    /* an id picks its bucket by its low bits: 257 shares one with the leftover id 0x01010101 */
+    *(int *)cui_state(ui, 257, sizeof(int)) = 42;
+    bool kept = true;
+    for (cui_id k = 0; k < 5000 && kept; k++) {
+        cui_id id = 100000 + k;
+        if ((id & 0x7FF) == 257) continue;   /* the new entry itself must not land there (a lookup loop) */
+        *(int *)cui_state(ui, id, sizeof(int)) = (int)k;
+        kept = *(int *)cui_state(ui, 257, sizeof(int)) == 42;
+    }
+    CHECK(kept);
+    CHECK(*(int *)cui_state(ui, 100000 + 4000, sizeof(int)) == 4000);
+    cui_destroy(ui);
 }
 
 /* layout --------------------------------------------------------------- */
@@ -835,6 +878,83 @@ static uint32_t frame_hash(cui_ctx *ui) {
     return h;
 }
 
+/** Check that a settled indicator holds still with reduced motion and resumes normally. */
+static void check_indicator_motion(build_fn build) {
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 480, 240, 1);
+    cui_input_mouse_leave(ui);
+    run(ui, build, NULL, 12);
+    uint32_t still = frame_hash(ui);
+    CHECK(!cui_needs_redraw(ui));
+    run(ui, build, NULL, 9);
+    CHECK(frame_hash(ui) == still);
+    CHECK(!cui_needs_redraw(ui));
+
+    cui_set_reduced_motion(ui, false);
+    run(ui, build, NULL, 12);
+    uint32_t moving = frame_hash(ui);
+    CHECK(cui_needs_redraw(ui));
+    run(ui, build, NULL, 9);
+    CHECK(frame_hash(ui) != moving);
+    cui_destroy(ui);
+}
+
+/** Draw the typing indicator on its own so redraws are attributable to its dots. */
+static void build_typing_indicator(cui_ctx *ui, void *unused) {
+    (void)unused;
+    cui_typing_indicator(ui, "Jonas");
+}
+
+/** Reduced motion keeps the typing dots visible and still. */
+static void test_typing_indicator_motion(void) {
+    printf("typing indicator: reduced motion\n");
+    check_indicator_motion(build_typing_indicator);
+}
+
+/** Exercise a running plan step without any other animated controls. */
+static void build_running_plan_step(cui_ctx *ui, void *unused) {
+    (void)unused;
+    static const cui_plan_step step = { "Reading", NULL, CUI_TASK_RUNNING };
+    cui_agent_plan(ui, "plan", &step, 1);
+}
+
+/** Exercise the running glyph through its tool call entry point. */
+static void build_running_tool_call(cui_ctx *ui, void *unused) {
+    (void)unused;
+    cui_tool_call(ui, "tool", "Read file", .status = CUI_TASK_RUNNING);
+}
+
+/** Both callers of the running task glyph respect reduced motion. */
+static void test_running_task_motion(void) {
+    printf("running plan step: reduced motion\n");
+    check_indicator_motion(build_running_plan_step);
+    printf("running tool call: reduced motion\n");
+    check_indicator_motion(build_running_tool_call);
+}
+
+/** Exercise the plain spinner as used for a running pipeline job. */
+static void build_running_pipeline(cui_ctx *ui, void *unused) {
+    (void)unused;
+    static const char *const stages[] = { "Build" };
+    static const cui_pipeline_job job = { "Windows", 0, CUI_JOB_RUNNING, 1.0f, false };
+    cui_pipeline(ui, "pipeline", stages, 1, &job, 1);
+}
+
+/** Exercise the plain spinner as used for a running test. */
+static void build_running_test(cui_ctx *ui, void *unused) {
+    (void)unused;
+    static const cui_test_item items[] = { { "Suite", 0 }, { "Layout", 1, CUI_JOB_RUNNING, -1 } };
+    cui_test_explorer(ui, "tests", items, 2, .height = 180);
+}
+
+/** Both developer views hold their running indicator still with reduced motion. */
+static void test_running_job_motion(void) {
+    printf("running pipeline job: reduced motion\n");
+    check_indicator_motion(build_running_pipeline);
+    printf("running test: reduced motion\n");
+    check_indicator_motion(build_running_test);
+}
+
 static void test_textarea_and_clear(void) {
     printf("text input: textarea wheel, focus flags, clear button undo\n");
     cui_ctx *ui = new_ctx();
@@ -871,6 +991,42 @@ static void test_textarea_and_clear(void) {
     click_at(ui, build_area, &a, fr.x + fr.w / 3, fr.y + fr.h / 2);
     key(ui, build_area, &a, CUI_KEY_Z, CUI_MOD_PRIMARY);
     CHECK(strcmp(a.other, "keep me") == 0);
+    cui_destroy(ui);
+}
+
+static cui_rect g_ime_caret;
+static int g_ime_calls;
+static void ime_rect(void *u, cui_rect r) { (void)u; g_ime_caret = r; g_ime_calls++; }
+
+static void test_textarea_ime_caret(void) {
+    printf("text area: the IME is told the caret's line, not the whole area\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_platform(ui, &(cui_platform_iface){ .set_clipboard = clip_set, .get_clipboard = clip_get, .set_text_input_rect = ime_rect });
+    area_ctx a;
+    memset(&a, 0, sizeof a);
+    strcpy(a.buf, "one\ntwo\nthree");
+    run(ui, build_area, &a, 2);
+    CHECK(g_ime_calls == 0);   /* nothing focused */
+    cui_rect area = rect_of(ui, a.id);
+    click_at(ui, build_area, &a, area.x + 12, area.y + 10);   /* on the first line */
+    CHECK(g_ime_calls > 0);
+    cui_rect first = g_ime_caret;
+    CHECK(first.h > 0 && first.h < area.h / 2);
+    CHECK(first.y >= area.y && first.y + first.h <= area.y + area.h);
+    key(ui, build_area, &a, CUI_KEY_DOWN, 0);
+    cui_rect second = g_ime_caret;
+    CHECK_NEAR(second.y - first.y, first.h, 0.01);   /* one line lower, as tall */
+    CHECK_NEAR(second.h, first.h, 0.01);
+    key(ui, build_area, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_area, &a, CUI_KEY_END, 0);
+    cui_rect third = g_ime_caret;
+    CHECK_NEAR(third.y - first.y, 2 * first.h, 0.01);
+    CHECK(third.x > first.x + 10);   /* after "three" */
+    key(ui, build_area, &a, CUI_KEY_ENTER, 0);   /* a new, empty last line */
+    CHECK(strcmp(a.buf, "one\ntwo\nthree\n") == 0);
+    CHECK(g_ime_caret.y > third.y);   /* the area scrolls to keep it in view */
+    CHECK(g_ime_caret.y + g_ime_caret.h <= area.y + area.h);
+    CHECK(g_ime_caret.x < first.x + 12);
     cui_destroy(ui);
 }
 
@@ -1030,28 +1186,52 @@ static void test_number_edit_commit(void) {
 }
 
 /** Let the searchable popup own the only text editor in the frame. */
+typedef struct { int choice; bool searchable; } select_keys_ctx;
 static void build_searchable_select(cui_ctx *ui, void *user) {
+    select_keys_ctx *c = user;
     const char *items[] = { "Alpha", "Beta" };
-    cui_select(ui, "choice", items, 2, user, .searchable = true);
+    cui_select(ui, "choice", items, 2, &c->choice, .searchable = c->searchable);
 }
 
-/** Escape closes the search and leaves its trigger available to Enter. */
+/** Escape closes the search and leaves its trigger available to Enter, also
+ * while the list animates closed; Enter opens a plain select without picking. */
 static void test_searchable_select_reopen(void) {
     printf("searchable select: keyboard reopening after Escape\n");
+    for (int animated = 0; animated < 2; animated++) {
+        cui_ctx *ui = new_ctx();
+        cui_set_reduced_motion(ui, !animated);
+        select_keys_ctx c = { .searchable = true };
+        run(ui, build_searchable_select, &c, 2);
+        key(ui, build_searchable_select, &c, CUI_KEY_TAB, 0);
+        key(ui, build_searchable_select, &c, CUI_KEY_DOWN, 0);
+        run(ui, build_searchable_select, &c, 20);
+        CHECK(cui_wants_keyboard(ui));
+        key(ui, build_searchable_select, &c, CUI_KEY_ESCAPE, 0);
+        run(ui, build_searchable_select, &c, 20);
+        CHECK(!cui_wants_keyboard(ui));
+        key(ui, build_searchable_select, &c, CUI_KEY_ENTER, 0);
+        run(ui, build_searchable_select, &c, 20);
+        CHECK(cui_wants_keyboard(ui));
+        CHECK(c.choice == 0);
+        /* picking an item also gives the keyboard back to the trigger */
+        key(ui, build_searchable_select, &c, CUI_KEY_DOWN, 0);
+        key(ui, build_searchable_select, &c, CUI_KEY_ENTER, 0);
+        run(ui, build_searchable_select, &c, 20);
+        CHECK(c.choice == 1 && !cui_wants_keyboard(ui));
+        key(ui, build_searchable_select, &c, CUI_KEY_ENTER, 0);
+        run(ui, build_searchable_select, &c, 20);
+        CHECK(cui_wants_keyboard(ui) && c.choice == 1);
+        cui_destroy(ui);
+    }
     cui_ctx *ui = new_ctx();
-    int choice = 0;
-    run(ui, build_searchable_select, &choice, 2);
-    key(ui, build_searchable_select, &choice, CUI_KEY_TAB, 0);
-    key(ui, build_searchable_select, &choice, CUI_KEY_DOWN, 0);
-    run(ui, build_searchable_select, &choice, 1);
-    CHECK(cui_wants_keyboard(ui));
-    key(ui, build_searchable_select, &choice, CUI_KEY_ESCAPE, 0);
-    run(ui, build_searchable_select, &choice, 1);
-    CHECK(!cui_wants_keyboard(ui));
-    key(ui, build_searchable_select, &choice, CUI_KEY_ENTER, 0);
-    run(ui, build_searchable_select, &choice, 1);
-    CHECK(cui_wants_keyboard(ui));
-    CHECK(choice == 0);
+    select_keys_ctx c = { .searchable = false };
+    run(ui, build_searchable_select, &c, 2);
+    key(ui, build_searchable_select, &c, CUI_KEY_TAB, 0);
+    key(ui, build_searchable_select, &c, CUI_KEY_ENTER, 0);
+    run(ui, build_searchable_select, &c, 2);
+    key(ui, build_searchable_select, &c, CUI_KEY_DOWN, 0);
+    key(ui, build_searchable_select, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.choice == 1);
     cui_destroy(ui);
 }
 
@@ -1552,7 +1732,71 @@ static void test_swipe(void) {
     cui_destroy(ui);
 }
 
+/** Put the existing swipe row in a vertically scrolling area. */
+static void build_scroll_swipe(cui_ctx *ui, void *user) {
+    cui_scroll(ui, .id = "swipe page", .height = CUI_PX(200)) {
+        build_swipe(ui, user);
+        cui_gap(ui, 500);
+    }
+}
+
+/** Horizontal wheel motion reaches the row while the enclosing page stays put. */
+static void test_scroll_swipe(void) {
+    printf("swipe actions: horizontal wheel within a vertical scroll view\n");
+    cui_ctx *ui = new_ctx();
+    swipe_ctx a = { -1, 0 };
+    run(ui, build_scroll_swipe, &a, 3);
+    cui_rect row = rect_of(ui, a.row);
+    cui_input_mouse_move(ui, row.x + 250, row.y + row.h / 2);
+    run(ui, build_scroll_swipe, &a, 1);
+    cui_input_scroll(ui, -4, 0);
+    run(ui, build_scroll_swipe, &a, 16);
+    CHECK_NEAR(rect_of(ui, a.row).y, row.y, 0.01);
+    click_at(ui, build_scroll_swipe, &a, row.x + row.w - 30, row.y + row.h / 2);
+    CHECK(a.result == 101);
+    cui_destroy(ui);
+}
+
 /* pickers ------------------------------------------------------------------ */
+
+typedef struct { int day; float value; cui_id wheel, tape; } scroll_picker_case;
+
+/** Put the wheel and ruler inside a scrollable page with room to move. */
+static void build_scroll_pickers(cui_ctx *ui, void *user) {
+    scroll_picker_case *pickers = user;
+    static const char *const days[] = { "Monday", "Tuesday", "Wednesday" };
+    cui_scroll(ui, .id = "pickers", .height = CUI_PX(330)) {
+        cui_wheel_picker(ui, "day", days, 3, &pickers->day);
+        pickers->wheel = cui_last_id(ui);
+        cui_ruler_slider(ui, "Level", &pickers->value, 0, 100, .width = CUI_PX(180));
+        pickers->tape = cui_last_id(ui);
+        cui_gap(ui, 600);
+    }
+}
+
+/** Wheel input over each picker changes its value without scrolling its parent. */
+static void test_scroll_pickers(void) {
+    printf("pickers: wheel routing within a scroll view\n");
+    cui_ctx *ui = new_ctx();
+    scroll_picker_case pickers = { .day = 1, .value = 20 };
+    run(ui, build_scroll_pickers, &pickers, 3);
+    cui_rect wheel = rect_of(ui, pickers.wheel);
+    cui_vec2 p = center(wheel);
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_scroll_pickers, &pickers, 1);
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_scroll_pickers, &pickers, 2);
+    CHECK(pickers.day == 2);
+    CHECK_NEAR(rect_of(ui, pickers.wheel).y, wheel.y, 0.01);
+    p = center(rect_of(ui, pickers.tape));
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_scroll_pickers, &pickers, 1);
+    cui_input_scroll(ui, 0, -1);
+    run(ui, build_scroll_pickers, &pickers, 2);
+    CHECK_NEAR(pickers.value, 21, 0.01);
+    CHECK_NEAR(rect_of(ui, pickers.wheel).y, wheel.y, 0.01);
+    cui_destroy(ui);
+}
 
 static void test_date_math(void) {
     printf("dates: day numbers round trip\n");
@@ -1599,6 +1843,97 @@ static void build_pickers(cui_ctx *ui, void *u) {
 }
 static void build_pickers_root(cui_ctx *ui, void *u) {
     cui_row(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_START) { build_pickers(ui, u); }
+}
+
+typedef struct { bool disabled; int drops; cui_id id; } drop_target_case;
+
+/** Use the same drop target with and without a disabled scope. */
+static void build_drop_target(cui_ctx *ui, void *user) {
+    drop_target_case *target = user;
+    cui_push_disabled(ui, target->disabled);
+    target->drops = cui_dropzone(ui, "drop target", .accept = "png", .width = CUI_PX(300));
+    target->id = cui_last_id(ui);
+    cui_pop_disabled(ui);
+}
+
+/** A disabled drop target leaves the drop available to the application. */
+static void test_disabled_file_drop(void) {
+    printf("file drop: a disabled target does not claim the drop\n");
+    cui_ctx *ui = new_ctx();
+    drop_target_case target = { .disabled = true };
+    const char *paths[] = { "photo.png" };
+    run(ui, build_drop_target, &target, 3);
+    cui_vec2 p = center(rect_of(ui, target.id));
+    cui_input_file_drop(ui, paths, 1, p.x, p.y);
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    build_drop_target(ui, &target);
+    CHECK(target.drops == 0);
+    CHECK(cui_dropped_file_count(ui) == 1);
+    cui_end_frame(ui);
+    target.disabled = false;
+    cui_input_file_drop(ui, paths, 1, p.x, p.y);
+    run(ui, build_drop_target, &target, 1);
+    CHECK(target.drops == 1);
+    cui_destroy(ui);
+}
+
+#ifdef CUI_TEST_WINDOWS_IMAGE_PATH
+/** Load a generated PNG through the same UTF-8 path API used by avatar upload. */
+static void test_windows_image_path(void) {
+    printf("image load: UTF-8 path on Windows\n");
+    const wchar_t wide_name[] = L"cui-path-\x753b\x50cf.png";
+    const char utf8_name[] = "cui-path-\xe7\x94\xbb\xe5\x83\x8f.png";
+    const unsigned char pixel[4] = { 20, 40, 60, 255 };
+    const char fixture[] = "cui-image-path-fixture.png";
+    CHECK(cui_write_png(fixture, pixel, 1, 1, 4));
+    FILE *input = fopen(fixture, "rb");
+    FILE *output = _wfopen(wide_name, L"wb");
+    CHECK(input && output);
+    if (input && output) {
+        unsigned char data[256];
+        size_t count = fread(data, 1, sizeof data, input);
+        CHECK(feof(input) && fwrite(data, 1, count, output) == count);
+    }
+    if (input) fclose(input);
+    if (output) fclose(output);
+    remove(fixture);
+    cui_ctx *ui = new_ctx();
+    int w = 0, h = 0;
+    cui_texture image = cui_image_load(ui, utf8_name, &w, &h);
+    CHECK(image && w == 1 && h == 1);
+    if (image) cui_image_destroy(ui, image);
+    cui_destroy(ui);
+    _wremove(wide_name);
+}
+#endif
+
+typedef struct { const float *bins; int n; float lo, hi; } hist_bins_ctx;
+static void build_hist_bins(cui_ctx *ui, void *u) {
+    hist_bins_ctx *h = u;
+    cui_column(ui, .pad = 20, .width = CUI_PX(400)) { cui_histogram_slider(ui, "Price", h->bins, h->n, &h->lo, &h->hi, 0, 100); }
+}
+
+/* a negative bin count used to reach memcpy as a huge size, and NULL bins were read */
+static void test_histogram_slider_bins(void) {
+    printf("histogram slider: a negative count or no bins draws no bars\n");
+    cui_ctx *ui = new_ctx();
+    float *bins = malloc(sizeof(float) * 3);
+    bins[0] = 1; bins[1] = 4; bins[2] = 2;
+    hist_bins_ctx h = { NULL, -1, 20, 80 };
+    run(ui, build_hist_bins, &h, 2);
+    h.n = 4;                                   /* a count without data */
+    run(ui, build_hist_bins, &h, 2);
+    h.n = 0;
+    run(ui, build_hist_bins, &h, 2);
+    h.bins = bins; h.n = -5;
+    run(ui, build_hist_bins, &h, 2);
+    h.n = 3;
+    run(ui, build_hist_bins, &h, 2);
+    CHECK(h.lo == 20 && h.hi == 80);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "Price") ^ 0x4157u);
+    CHECK(r.w > 300 && r.h > 56);
+    free(bins);
+    cui_destroy(ui);
 }
 
 static void test_pickers(void) {
@@ -1891,6 +2226,49 @@ static void test_checklist(void) {
 
 /* data grid ------------------------------------------------------------------ */
 
+/* a cell text before the first row has no column yet: it used to read cols[-1] */
+typedef struct { cui_grid_column *gcols; cui_table_column *tcols; } early_cell_ctx;
+static void build_early_cells(cui_ctx *ui, void *u) {
+    early_cell_ctx *a = u;
+    cui_column(ui, .pad = 20, .gap = 12, .width = CUI_FILL, .height = CUI_FILL) {
+        int first, last;
+        if (cui_data_grid_begin(ui, "early_grid", a->gcols, 2, 2, &first, &last, .height = CUI_PX(200))) {
+            cui_data_grid_cell_text(ui, "too early");
+            for (int r = first; r < last; r++) {
+                cui_data_grid_row(ui, r);
+                cui_data_grid_cell_text(ui, "name");
+                cui_data_grid_cell_text(ui, "1");
+            }
+            cui_data_grid_end(ui);
+        }
+        if (cui_table_begin_ex(ui, "early_table", a->tcols, 2, NULL)) {
+            cui_table_cell_text(ui, "too early");
+            for (int r = 0; r < 2; r++) {
+                cui_table_row(ui, false);
+                cui_table_cell_text(ui, "name");
+                cui_table_cell_text(ui, "1");
+            }
+            cui_table_end(ui);
+        }
+    }
+}
+static void test_cell_text_before_row(void) {
+    printf("data grid, table: cell text before the first row\n");
+    cui_ctx *ui = new_ctx();
+    early_cell_ctx a;
+    a.gcols = calloc(2, sizeof *a.gcols);   /* on the heap, so a read before the array is caught */
+    a.tcols = calloc(2, sizeof *a.tcols);
+    a.gcols[0].title = a.tcols[0].title = "Name";
+    a.gcols[1].title = a.tcols[1].title = "Value";
+    a.gcols[1].align = a.tcols[1].align = CUI_TEXT_RIGHT;
+    run(ui, build_early_cells, &a, 3);
+    CHECK(rect_of(ui, cui_make_id(ui, "early_grid")).h > 100);
+    free(a.gcols);
+    free(a.tcols);
+    cui_destroy(ui);
+}
+
+
 typedef struct { bool sel[500]; cui_table_sort sort; char names[500][16]; int committed; int cursor; bool open; uint32_t filt[2]; char q[32]; int json_ok, json_bad; cui_id grid_id, tree_id, fb_id; } dgrid_ctx;
 static void build_dgrid(cui_ctx *ui, void *u) {
     dgrid_ctx *a = u;
@@ -1918,6 +2296,28 @@ static void build_dgrid(cui_ctx *ui, void *u) {
         a->json_bad = cui_json_view(ui, "j2", "{\"a\": [1, 2,}");
         cui_code_block(ui, "code", "int main(void) {\n    return 0; /* done */\n}\n", .lang = "c", .line_numbers = true);
     }
+}
+
+/** The JSON viewer accepts valid tokens and rejects malformed numbers and escapes. */
+static void test_json_tokens(void) {
+    printf("JSON viewer: number and escape grammar\n");
+    static const struct { const char *json; bool valid; } cases[] = {
+        { "0", true }, { "-0", true }, { "-2.1e-3", true }, { "0E+1", true },
+        { "\"\\u12aF\"", true }, { "{\"a\\tb\":[\"\\\"\\/\\\\\\b\\f\\n\\r\",1.25]}", true },
+        { "-", false }, { "01", false }, { "-01", false }, { "1.", false },
+        { "1e", false }, { "1e+", false }, { "1+2", false }, { "[1..2]", false },
+        { "\"\\q\"", false }, { "\"\\u12x4\"", false }, { "\"\\u12\"", false },
+        { "{\"\\q\":0}", false }, { "\"abc\\", false },
+    };
+    cui_ctx *ui = new_ctx();
+    for (int i = 0; i < (int)(sizeof cases / sizeof cases[0]); i++) {
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        bool ok = cui_json_view(ui, "value", cases[i].json);
+        cui_end_frame(ui);
+        if (ok != cases[i].valid) printf("  unexpected JSON result: %s\n", cases[i].json);
+        CHECK(ok == cases[i].valid);
+    }
+    cui_destroy(ui);
 }
 
 static void test_data_grid(void) {
@@ -2730,6 +3130,37 @@ static void test_reorder(void) {
     cui_destroy(ui);
 }
 
+/* a press on a row the list no longer has must not start a drag: the drag used
+ * slot geometry this frame never measured, and a later frame could commit it */
+typedef struct { int order[4]; int count; int changed; } reorder_n_ctx;
+static void build_reorder_n(cui_ctx *ui, void *u) {
+    reorder_n_ctx *r = u;
+    cui_column(ui, .pad = 20, .width = CUI_PX(300)) {
+        cui_reorder_begin(ui, "list", r->order, r->count);
+        for (int i = 0; i < r->count; i++) cui_reorder_item(ui, i) { cui_textf(ui, "Item %d", r->order[i]); }
+        if (cui_reorder_end(ui)) r->changed++;
+    }
+}
+static void test_reorder_shrink(void) {
+    printf("data: a reorder list that shrinks under a press starts no drag\n");
+    cui_ctx *ui = new_ctx();
+    reorder_n_ctx r = { { 0, 1, 2, 3 }, 4, 0 };
+    run(ui, build_reorder_n, &r, 3);
+    cui_input_mouse_move(ui, 150, 160);   /* the last row */
+    run(ui, build_reorder_n, &r, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_reorder_n, &r, 1);
+    r.count = 2;                          /* the pressed row is gone */
+    cui_input_mouse_move(ui, 150, 170);
+    run(ui, build_reorder_n, &r, 1);
+    r.count = 4;
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_reorder_n, &r, 3);
+    CHECK(r.changed == 0);
+    CHECK(r.order[0] == 0 && r.order[1] == 1 && r.order[2] == 2 && r.order[3] == 3);
+    cui_destroy(ui);
+}
+
 /* app chrome ------------------------------------------------------------- */
 
 static cui_id scoped_id(cui_ctx *ui, const char *scope, const char *name) {
@@ -3470,6 +3901,37 @@ static void test_dock(void) {
         CHECK(strncmp(t, "dock1 ", 6) == 0);
         for (int k = 0; k < DK_N; k++) CHECK(strstr(t, dk_names[k]) != NULL || !d.open[k]);
     }
+    cui_destroy(ui);
+}
+
+typedef struct { float width, ratio; } split_range_case;
+
+/** A horizontal split containing two measurable panes. */
+static void build_split_range(cui_ctx *ui, void *user) {
+    split_range_case *split = user;
+    cui_split(ui, "short split", &split->ratio, .width = CUI_PX(split->width), .height = CUI_PX(120)) {
+        cui_box(ui, .id = "first pane", .width = CUI_FILL, .height = CUI_FILL) {}
+        cui_split_next(ui);
+        cui_box(ui, .id = "second pane", .width = CUI_FILL, .height = CUI_FILL) {}
+    }
+}
+
+/** An undersized split fits both panes and reports a bounded drag ratio. */
+static void test_split_minimums(void) {
+    printf("split view: pane minimums at small widths\n");
+    cui_ctx *ui = new_ctx();
+    split_range_case split = { 100, 0.5f };
+    run(ui, build_split_range, &split, 4);
+    cui_rect first = rect_of(ui, cui_make_id(ui, "first pane"));
+    cui_rect second = rect_of(ui, cui_make_id(ui, "second pane"));
+    CHECK(first.w + second.w <= split.width);
+    drag(ui, build_split_range, &split, first.x + first.w, first.y + 50, 20, 4);
+    CHECK(split.ratio >= 0 && split.ratio <= 1);
+    split.width = 380;
+    run(ui, build_split_range, &split, 4);
+    first = rect_of(ui, cui_make_id(ui, "first pane"));
+    drag(ui, build_split_range, &split, first.x + first.w, first.y + 50, 245, 4);
+    CHECK(split.ratio > 0.6f && split.ratio < 0.7f);
     cui_destroy(ui);
 }
 
@@ -10703,6 +11165,26 @@ static void test_files(void) {
     cui_destroy(ui);
 }
 
+/* a names buffer filled exactly by the first entry: on Windows the next
+ * conversion only measured, and the entry after it pointed past the buffer */
+static void test_fs_list_full_names(void) {
+    printf("file browser: a names buffer that fills up exactly\n");
+    cui_file_entry ents[64];
+    char names[8192];
+    int n = cui_fs_list(NULL, ".", ents, 64, names, sizeof names, true);
+    CHECK(n > 1);
+    if (n < 2) return;
+    size_t cap = strlen(ents[0].name) + 1;   /* room for the first entry and nothing more */
+    char *exact = malloc(cap);
+    n = cui_fs_list(NULL, ".", ents, 64, exact, cap, true);
+    CHECK(n <= 1);
+    bool inside = true;
+    for (int i = 0; i < n; i++)
+        if (ents[i].name < exact || ents[i].name >= exact + cap || ents[i].name + strlen(ents[i].name) >= exact + cap) inside = false;
+    CHECK(inside);
+    free(exact);
+}
+
 /* ---- terminal ---- */
 static const char *tm_text(const cui_terminal_buffer *t, int i) {
     static char out[512];
@@ -11119,6 +11601,39 @@ static void test_renderer_move(void) {
     cui_sw_destroy(to);
 }
 
+/* ---- glyph atlas: a glyph wider than the atlas grows it, a huge one is skipped ---- */
+typedef struct { float dash, first; } wide_ctx;
+static void build_wide(cui_ctx *ui, void *u) {
+    wide_ctx *c = u;
+    if (c->first > 0) cui_draw_text(ui, CUI_FONT_BODY, c->first, (cui_vec2){ 0, 0 }, CUI_RGB(0), "H", -1);
+    cui_draw_text(ui, CUI_FONT_BODY, c->dash, (cui_vec2){ 0, 100 }, CUI_RGB(0), "\xe2\x80\x94", -1);   /* an em dash: wide and flat */
+}
+static void test_atlas_wide_glyph(void) {
+    printf("glyph atlas: a glyph wider than the atlas grows it, one too big for any atlas is skipped\n");
+    at_inner = cui_sw_iface(g_sw);
+    cui_renderer_iface r = at_inner;
+    r.texture_create = at_create;
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = r });
+    cui_set_viewport(ui, 20000, 20000, 1);
+    cui_set_reduced_motion(ui, true);
+    /* about 2000 pixels wide and 160 tall: the height fits the first atlas, the width does not */
+    wide_ctx c = { 2000, 0 };
+    run(ui, build_wide, &c, 2);
+    CHECK(at_w >= 2048);
+    /* compacting keeps the atlas wide enough for it while it is still drawn */
+    for (int i = 0; i < 700; i++) { cui_input_mouse_move(ui, (float)(i % 50), 5); run(ui, build_wide, &c, 1); }
+    CHECK(at_w >= 2048);
+    cui_destroy(ui);
+    /* about 12000 pixels wide, low enough in the atlas that its rows used to run past the end */
+    ui = cui_create(&(cui_ctx_desc){ .renderer = r });
+    cui_set_viewport(ui, 20000, 20000, 1);
+    cui_set_reduced_motion(ui, true);
+    c.dash = 12000; c.first = 60;
+    run(ui, build_wide, &c, 2);
+    CHECK(at_w < 4096);   /* skipped up front, not grown to the limit and then reset */
+    cui_destroy(ui);
+}
+
 /* ---- software renderer: incremental frames equal full ones ---- */
 static cui_sw_renderer *inc_a, *inc_b;
 static cui_texture inc_create(void *u, int w, int h, cui_texture_format f, const void *px) {
@@ -11198,6 +11713,48 @@ static void test_sw_incremental(void) {
     cui_destroy(ui);
     cui_sw_destroy(inc_a); cui_sw_destroy(inc_b);
     free(A); free(B);
+}
+
+/* ---- software renderer: empty textures and updates that hang over an edge ---- */
+typedef struct { cui_texture empty, quad; } swtex_ctx;
+static void build_swtex(cui_ctx *ui, void *u) {
+    swtex_ctx *c = u;
+    cui_draw_image(ui, c->empty, (cui_rect){ 50, 0, 40, 40 }, (cui_rect){ 0, 0, 1, 1 }, CUI_CORNERS(0), CUI_RGB(0xffffff));
+    cui_draw_image(ui, c->quad, (cui_rect){ 0, 0, 40, 40 }, (cui_rect){ 0, 0, 1, 1 }, CUI_CORNERS(0), CUI_RGB(0xffffff));
+}
+static void test_sw_texture_edges(void) {
+    printf("software renderer: an empty texture samples nothing, updates clip to the texture\n");
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_renderer_iface r = cui_sw_iface(sw);
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = r });
+    cui_set_viewport(ui, 100, 50, 1);
+    cui_set_reduced_motion(ui, true);
+    swtex_ctx c;
+    unsigned char blue[4 * 4 * 4], red[4 * 4 * 4], green[4 * 4 * 4];
+    for (int i = 0; i < 16; i++) {
+        unsigned char *b = blue + i * 4, *rd = red + i * 4, *g = green + i * 4;
+        b[0] = 0; b[1] = 0; b[2] = 255; b[3] = 255;
+        rd[0] = 255; rd[1] = 0; rd[2] = 0; rd[3] = 255;
+        g[0] = 0; g[1] = 255; g[2] = 0; g[3] = 255;
+    }
+    c.empty = r.texture_create(r.user, 0, 0, CUI_TEXTURE_RGBA8, blue);   /* was sampled at index -1 */
+    c.quad = r.texture_create(r.user, 4, 4, CUI_TEXTURE_RGBA8, blue);
+    r.texture_update(r.user, c.quad, 2, 0, 4, 4, red, 16);     /* two columns past the right edge */
+    r.texture_update(r.user, c.quad, -3, 0, 4, 4, green, 16);  /* three columns before the left one */
+    run(ui, build_swtex, &c, 1);
+    unsigned char *px = calloc(100 * 50, 4);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    cui_sw_render(sw, dd, px, 100, 50, 400, CUI_SW_RGBA);
+    /* texels are 10 points wide; sampling blends a little of the neighbor in */
+    unsigned char *t0 = px + (20 * 100 + 5) * 4, *t1 = px + (20 * 100 + 15) * 4, *t3 = px + (20 * 100 + 35) * 4;
+    CHECK(t0[0] < 40 && t0[1] > 200 && t0[2] < 40);      /* the last column of the left update */
+    CHECK(t1[0] < 40 && t1[1] < 40 && t1[2] > 200);      /* untouched */
+    CHECK(t3[0] > 200 && t3[1] < 40 && t3[2] < 40);      /* the first columns of the right update */
+    free(px);
+    cui_destroy(ui);
+    r.texture_destroy(r.user, c.empty);
+    r.texture_destroy(r.user, c.quad);
+    cui_sw_destroy(sw);
 }
 
 /* ---- the emoji texture goes when no emoji is drawn for a while ---- */
@@ -12121,6 +12678,7 @@ static void test_markdown_preserve_whitespace(void) {
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
+    test_state_store_grow();
     test_layout_row();
     test_layout_wrap();
     test_layout_center();
@@ -12141,6 +12699,7 @@ int main(void) {
     test_disabled_password_reveal();
     test_empty_field_caret();
     test_textarea_and_clear();
+    test_textarea_ime_caret();
     test_nested_textarea_wheel();
     test_nested_textarea_mixed_wheel();
     test_canvas_rail_wheel();
@@ -12152,17 +12711,26 @@ int main(void) {
     test_range_slider_keyboard();
     test_range_slider_context_menu();
     test_swipe();
+    test_scroll_swipe();
+    test_scroll_pickers();
     test_date_math();
     test_strings();
     test_sql_colors();
     test_calendar_years();
     test_date_picker_reopens_on_days();
     test_pickers();
+    test_disabled_file_drop();
+#ifdef CUI_TEST_WINDOWS_IMAGE_PATH
+    test_windows_image_path();
+#endif
+    test_histogram_slider_bins();
     test_disclosure();
     test_toc_positions();
     test_confirm_popover_keyboard();
     test_checklist();
     test_data_grid();
+    test_json_tokens();
+    test_cell_text_before_row();
     test_tree_table();
     test_tools();
     test_hex_view();
@@ -12204,11 +12772,14 @@ int main(void) {
     test_tour();
     test_photo();
     test_files();
+    test_fs_list_full_names();
     test_terminal();
     test_emoji();
     test_atlas_shrink();
     test_renderer_move();
+    test_atlas_wide_glyph();
     test_sw_incremental();
+    test_sw_texture_edges();
     test_emoji_release();
     test_emoji_text();
     test_planning();
@@ -12221,6 +12792,9 @@ int main(void) {
     test_media();
     test_viz();
     test_motion();
+    test_typing_indicator_motion();
+    test_running_task_motion();
+    test_running_job_motion();
     test_ai();
     test_text_capacity();
     test_dialog();
@@ -12231,6 +12805,7 @@ int main(void) {
     test_extras();
     test_toast_deadline();
     test_reorder();
+    test_reorder_shrink();
     test_chrome();
     test_status_progress_click();
     test_find_from_code_and_marks();
@@ -12242,6 +12817,7 @@ int main(void) {
     test_popover_close_self();
     test_dock();
     test_virtual_list();
+    test_split_minimums();
     test_theme();
     test_series_palette();
     test_radial_gauge_styles();

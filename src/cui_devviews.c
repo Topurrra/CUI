@@ -782,7 +782,7 @@ cui_blame_result cui_blame_ex(cui_ctx *ui, const char *id_str, const char *const
         int c = line_commit ? line_commit[i] : -1;
         if (c < 0 || c >= commit_count) c = -1;
         int pc = i > 0 && line_commit ? line_commit[i - 1] : -2;
-        bool run_start = i == 0 || pc != line_commit[i];
+        bool run_start = i == 0 || pc != (line_commit ? line_commit[i] : -1);
         cui_id rid = cui__hash(&i, sizeof i, id ^ 0xB1A4u);
         cui_id gid = rid ^ 0x6u;
         cui_interact gi = cui__interact(ui, gid, 0);

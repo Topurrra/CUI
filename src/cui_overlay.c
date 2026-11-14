@@ -394,6 +394,13 @@ void cui_menu_label(cui_ctx *ui, const char *text) {
 
 typedef struct { float hover, focus; char query[96]; } cui__select_state;
 
+/* The search field hands the keyboard back to the trigger once the list is closed. */
+static void cui__select_refocus(cui_ctx *ui, cui_id trigger, cui_id search, bool search_open, bool disabled) {
+    if (ui->focus != search || search_open) return;
+    ui->focus = disabled ? 0 : trigger;
+    ui->edit = NULL;
+}
+
 /** Hand focus back to the trigger when its search editor is dismissed. */
 bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, int count, int *index, const cui_select_opts *o) {
     cui_select_opts d;
@@ -415,7 +422,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
         if (!open) {
             cui__menu_nav *nav = cui_state(ui, pid ^ 0x4E4156u, sizeof *nav);
             nav->highlight = *index;
-            if (o->searchable && r.keyboard_activate) ui->kpressed[CUI_KEY_ENTER] = 0;
+            if (r.keyboard_activate) ui->kpressed[CUI_KEY_ENTER] = 0;   /* the Enter that opens the list does not also pick */
         }
     }
     if (p && !p->open && r.focus_visible && (cui_key_pressed(ui, CUI_KEY_DOWN) || cui_key_pressed(ui, CUI_KEY_UP))) {
@@ -473,7 +480,11 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
     cui_push_id_int(ui, (int)pid);
     cui_id sid = cui_make_id(ui, "#q");
     cui_pop_id(ui);
-    if (cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_START, 0, 6, 0, true)) {
+    bool building = cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_START, 0, 6, 0, true);
+    /* Esc or a click outside closed it just now: refocus before the field is built,
+     * because while the list animates out the field is disabled and drops the focus */
+    cui__select_refocus(ui, id, sid, p && p->open && o->searchable, disabled);
+    if (building) {
         if (o->searchable) {
             cui_input_opts io;
             memset(&io, 0, sizeof io);
@@ -519,10 +530,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
         cui__scroll_end_ex(ui);
         cui__popup_end(ui);
     }
-    if (ui->focus == sid && (!p || !p->open || !o->searchable)) {
-        ui->focus = disabled ? 0 : id;
-        ui->edit = NULL;
-    }
+    cui__select_refocus(ui, id, sid, p && p->open && o->searchable, disabled);   /* an item was picked */
     return *index != old;
 }
 

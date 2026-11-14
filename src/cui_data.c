@@ -464,7 +464,7 @@ void cui_table_cell(cui_ctx *ui) {
 void cui_table_cell_text(cui_ctx *ui, const char *text) {
     cui_table_cell(ui);
     struct cui_table_build *t = ui->building.table;
-    bool right = t && t->col - 1 < t->ncols && t->cols[t->col - 1].align == CUI_TEXT_RIGHT;
+    bool right = t && t->col >= 1 && t->col - 1 < t->ncols && t->cols[t->col - 1].align == CUI_TEXT_RIGHT;
     int tx = cui__text_node(ui, text, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
     ui->nodes[tx].line_height = 1.3f;
     if (right) ui->nodes[tx].flags |= CUI_NF_TABULAR;

@@ -844,6 +844,20 @@ static void test_regex(void) {
     CHECK(cui_regex_search(NULL, 0, "a", -1, 0, &m, NULL) == 0);
 }
 
+/* a (?: ) group has no capture slot: matching it used to write cap[-1] */
+static void test_regex_noncapture(void) {
+    printf("regex: non-capturing groups match and leave the captures around them intact\n");
+    int a = 0, b = 0;
+    CHECK(rx("(?:a)b", 0, "ab", 0, &a, &b) == 1 && a == 0 && b == 2);
+    CHECK(rx("(?:ab)+c", 0, "xababc", 0, &a, &b) == 1 && a == 1 && b == 6);
+    CHECK(rx("(?:a|b|c)*d", 0, "abcabcd", 0, &a, &b) == 1 && a == 0 && b == 7);
+    CHECK(rx("(?:x)y", 0, "xz", 0, &a, &b) == 0);
+    cui_regex_match m;
+    CHECK(cui_regex_search("(a)(?:b)(c)", 0, "abc", -1, 0, &m, NULL) == 1);
+    CHECK(m.groups == 2 && m.group_start[1] == 0 && m.group_end[1] == 1 && m.group_start[2] == 2 && m.group_end[2] == 3);
+    CHECK(cui_regex_search("x(?:y)?(z)?", 0, "x", -1, 0, &m, NULL) == 1 && m.groups == 1 && m.group_start[1] == -1);
+}
+
 typedef struct { char pat[128]; char text[512]; int flags; cui_regex_tester_result r; } rt_ctx;
 static void build_rt(cui_ctx *ui, void *u) {
     rt_ctx *c = u;
@@ -1085,6 +1099,25 @@ static void test_histogram(void) {
     cui_destroy(ui);
 }
 
+/* local time: a start far outside what struct tm holds made the zone offset read unset fields */
+typedef struct { double start, s0, s1; } th_far_ctx;
+static void build_th_far(cui_ctx *ui, void *u) {
+    th_far_ctx *c = u;
+    const cui_histogram_series se[] = { { "info", th_a, CUI_TONE_INFO } };
+    cui_time_histogram(ui, "far", c->start, 600, 48, se, 1, &c->s0, &c->s1);
+}
+static void test_histogram_far_time(void) {
+    printf("time histogram: local time at a start no calendar can show\n");
+    th_far_ctx c = { 1e17, 0, 0 };   /* about three billion years from now */
+    cui_ctx *ui = new_ctx(800, 400);
+    run(ui, build_th_far, &c, 2);
+    c.start = -1e17;
+    run(ui, build_th_far, &c, 2);
+    CHECK(cui_get_rect(ui, cui_make_id(ui, "far")).w > 300);
+    CHECK(c.s0 == 0 && c.s1 == 0);
+    cui_destroy(ui);
+}
+
 static const cui_coverage_file cv2_files[] = {
     { "src/core/a.c", 100, 90, 10, 9, 5, 5 }, { "src/core/b.c", 100, 50, 10, 2, 5, 1 }, { "src/text/c.c", 200, 20, 0, 0, 10, 1 }, { "main.c", 100, 100, 0, 0, 1, 1 },
 };
@@ -1148,6 +1181,21 @@ static void test_blame(void) {
     double ms = (double)(clock() - c0) / CLOCKS_PER_SEC * 1000 / 30;
     printf("  100k lines: first frame %.1f ms, then %.2f ms a frame\n", first, ms);
     CHECK(ms < 20);
+    cui_destroy(ui);
+}
+
+/* line_commit may be NULL (a file with no blame data); every row after the first used to read it */
+static void test_blame_no_commits(void) {
+    printf("blame: no commit data for the lines\n");
+    bl_ctx c;
+    memset(&c, 0, sizeof c);
+    c.clicked = -1; c.lines = bl2_lines; c.lc = NULL; c.n = 5;
+    cui_ctx *ui = new_ctx(900, 500);
+    run(ui, build_bl, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "blame"));
+    CHECK(r.h > 100);
+    click(ui, build_bl, &c, r.x + 40, r.y + 40);
+    CHECK(c.r.hovered == -1 && c.clicked == -1);   /* no commit to report */
     cui_destroy(ui);
 }
 
@@ -1283,6 +1331,7 @@ int main(void) {
     test_trace();
     test_random();
     test_regex();
+    test_regex_noncapture();
     test_regex_tester();
     test_url();
     test_test_explorer();
@@ -1290,8 +1339,10 @@ int main(void) {
     test_request();
     test_uptime();
     test_histogram();
+    test_histogram_far_time();
     test_coverage();
     test_blame();
+    test_blame_no_commits();
     test_flags();
     test_api();
     test_random2();

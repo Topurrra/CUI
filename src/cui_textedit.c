@@ -156,20 +156,6 @@ static void cui__paint_scrollable_edit(cui_ctx *ui, cui_node *n, void *data) {
     }
 }
 
-/** Take this editor's vertical delta after the enclosing view has handled X. */
-static float cui__textarea_wheel_delta(cui_ctx *ui, cui_id area) {
-    if (ui->scroll_target == area) {
-        float delta = ui->scroll_dy;
-        ui->scroll_dy = 0;
-        return delta;
-    }
-    cui__vertical_wheel *vertical = cui__state_lazy(ui, area ^ CUI__VERTICAL_WHEEL_STATE, sizeof *vertical, false);
-    if (!vertical || vertical->frame != ui->frame) return 0;
-    float delta = vertical->delta;
-    vertical->delta = 0;
-    return delta;
-}
-
 /* ---- editing primitives ---- */
 
 static bool cui__is_word(unsigned char c) { return c >= 128 || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
@@ -529,6 +515,13 @@ static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *r
     if (ui->platform.set_text_input_rect) {
         cui_rect cr = area;
         if (!c->multiline) cr.x = area.x + cui__x_at(ui, &c->measure, c->buf, len, e->cursor) - e->scroll_x;
+        else if (c->nlines > 0) {   /* the caret's line, so the candidate list opens under it, not under the whole area */
+            int ln = cui__line_of(c->lines, c->nlines, e->cursor);
+            const cui_text_layout_line *L = &c->lines[ln];
+            cr.x = area.x + cui__text_width(ui, c->font, c->size, c->buf + L->start, e->cursor - L->start, false);
+            cr.y = area.y + (float)ln * c->line_h - e->scroll_y;
+            cr.h = c->line_h;
+        }
         cr.w = 1;
         ui->platform.set_text_input_rect(ui->platform.user, cr);
     }
@@ -652,7 +645,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     bool password = o->password && !e->show_password;
     cui__edit_result er = cui__edit_logic(ui, id, e, buf, cap, multiline, password, o->read_only || disabled, area,
                                           font, size, line_h, rf);
-    float wheel = multiline && !disabled && area.h > 0 ? cui__textarea_wheel_delta(ui, area_id) : 0;
+    float wheel = multiline && !disabled && area.h > 0 ? cui__take_vertical_wheel(ui, area_id) : 0;
     if (wheel != 0) {
         /* wheel scrolls the text whether or not the field has focus */
         cui_text_layout_line *wl = NULL;
@@ -864,8 +857,6 @@ bool cui_number_ex(cui_ctx *ui, const char *id_str, double *value, double min, d
     memset(&io, 0, sizeof io);
     io.disabled = o->disabled;
     int f = cui__text_field(ui, id, st->text, sizeof st->text, &io, false, CUI__FIELD_BOXED, NULL);
-    int area = ui->nodes[ui->nodes[row].first].first;
-    /* find the field node (id) to add steppers inside its row */
     if (f & CUI_CHANGED) {
         char *end = NULL;
         double v = strtod(st->text, &end);
@@ -913,14 +904,10 @@ bool cui_number_ex(cui_ctx *ui, const char *id_str, double *value, double min, d
         if (strcmp(st->text, canonical) != 0) {
             const int len = (int)strlen(canonical);
             memcpy(st->text, canonical, (size_t)len + 1);
-            /* Layout already captured the draft. Keep its text and caret in sync. */
             cui_edit_state *edit = cui_state(ui, id, sizeof *edit);
             edit->cursor = edit->anchor = len;
             edit->scroll_x = 0;
-            cui__edit_paint *paint = ui->nodes[area].paint_data;
-            paint->buf = cui__frame_strdup(ui, st->text, len);
-            paint->len = paint->cursor = paint->anchor = len;
-            paint->scroll_x = 0;
+            cui_request_redraw(ui);   /* the field was built with the draft: show the value next frame, even when idle */
         }
     }
     st->last = *value;

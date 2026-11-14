@@ -324,7 +324,7 @@ function previewBlock(opts) {
       h('span', {}, `${s.tris.toLocaleString()} triangles`),
       h('span', {}, p.rendererName() + (p.fit < 1 ? `, shown at ${Math.round(p.fit * 100)}%` : '')),
       settings.speed !== 1 ? h('span', {}, `${settings.speed}× speed`) : null,
-      document.activeElement === p.canvas
+      p.hasKeyboard()
         ? h('span', { class: 'hint kbd-on' }, 'Keyboard goes to the preview. Click outside to leave.')
         : h('span', { class: 'hint' }, opts.fill ? 'Click inside to use the keyboard' : 'Click to focus, then Tab through it. Drag the corner to resize.')].filter(Boolean));
   }
@@ -1549,7 +1549,7 @@ function openSearch() {
 $('#search-open').addEventListener('click', openSearch);
 document.addEventListener('keydown', (e) => {
   const t = e.target;
-  if (t instanceof HTMLCanvasElement) return;   // the preview has the keyboard
+  if (t instanceof HTMLCanvasElement || t.classList?.contains('ime-proxy')) return;   // the preview has the keyboard
   const typing = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); return; }
   if (typing) return;

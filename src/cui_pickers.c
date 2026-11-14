@@ -749,6 +749,7 @@ static void cui__paint_wheel(cui_ctx *ui, cui_node *n, void *data) {
     cui_pop_clip(ui);
 }
 
+/** Build a wheel picker and apply input routed to its drum. */
 bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *items, int count, int *index, const cui_wheel_opts *o) {
     cui_wheel_opts d;
     memset(&d, 0, sizeof d);
@@ -802,8 +803,9 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
             st->vel = 0;
         }
     }
-    if (r.hovered && ui->scroll_dy != 0 && !st->dragging) {
-        st->wheel_acc -= ui->scroll_dy;
+    float wheel = r.hovered && !st->dragging ? cui__take_vertical_wheel(ui, id) : 0;
+    if (wheel != 0) {
+        st->wheel_acc -= wheel;
         int steps = (int)st->wheel_acc;
         if (steps == 0) steps = st->wheel_acc > 0 ? 1 : -1;
         st->wheel_acc = 0;
@@ -811,7 +813,6 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
         if (o->loop) { k %= count; if (k < 0) k += count; target += (float)steps; }
         else { k = CUI_CLAMP(k, 0, count - 1); target = (float)k; }
         *index = k;
-        ui->scroll_dy = 0;
     }
     if (ui->focus == id) {
         int dk = 0;
@@ -838,6 +839,10 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
     p->fg = CUI_C(ui, FOREGROUND);
     p->dim = CUI_C(ui, TEXT_MUTED);
     p->font_size = cui__fs(ui, ui->theme.text_body + 2);
+    if (!cui_is_disabled(ui) && !st->dragging && count > 1) {
+        if (o->loop || *index > 0) n->flags |= CUI_HIT_WHEEL_UP;
+        if (o->loop || *index < count - 1) n->flags |= CUI_HIT_WHEEL_DOWN;
+    }
     n->paint = cui__paint_wheel;
     n->paint_data = p;
     cui__focus_ring(ui, node, r.focus_visible ? 1.0f : 0.0f);
@@ -1046,6 +1051,7 @@ static void cui__paint_ruler(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_polygon(ui, tri, 3, p->marker);
 }
 
+/** Build a ruler slider, taking vertical wheel input before the enclosing view. */
 bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_ruler_opts *o) {
     cui_ruler_opts d;
     memset(&d, 0, sizeof d);
@@ -1081,12 +1087,13 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
             target = *value;
         }
     }
-    if (r.hovered && (ui->scroll_dx != 0 || ui->scroll_dy != 0) && !st->dragging) {
-        float dv = (ui->scroll_dx != 0 ? -ui->scroll_dx : -ui->scroll_dy) * step;
+    float wheel = r.hovered && !st->dragging ? cui__take_vertical_wheel(ui, rid) : 0;
+    if (r.hovered && (ui->scroll_dx != 0 || wheel != 0) && !st->dragging) {
+        float dv = (wheel != 0 ? -wheel : -ui->scroll_dx) * step;
         *value = cui__clampf(*value + (dv > 0 ? CUI_MAX(dv, step) : CUI_MIN(dv, -step)), min, max);
         *value = roundf((*value - min) / step) * step + min;
         target = *value;
-        ui->scroll_dx = ui->scroll_dy = 0;
+        if (wheel == 0) ui->scroll_dx = 0;
     }
     if (ui->focus == rid) {
         float k = (ui->mods & CUI_MOD_SHIFT) ? major : 1;
@@ -1119,6 +1126,10 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
     int tape = cui__leaf(ui, rid, CUI_FILL, CUI_PX(52));
     ui->nodes[tape].self_align = CUI_ALIGN_STRETCH;
     cui__mark_interactive(ui, tape, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
+    if (!cui_is_disabled(ui) && !st->dragging) {
+        if (*value > min) ui->nodes[tape].flags |= CUI_HIT_WHEEL_UP;
+        if (*value < max) ui->nodes[tape].flags |= CUI_HIT_WHEEL_DOWN;
+    }
     if (r.hovered || st->dragging) cui__set_cursor(ui, CUI_CURSOR_RESIZE_EW);
     cui__ruler_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->value = st->shown.x; p->min = min; p->max = max; p->step = step; p->spacing = spacing; p->major = major; p->format = fmt;
@@ -1162,6 +1173,7 @@ bool cui_histogram_slider_ex(cui_ctx *ui, const char *label, const float *bins, 
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     if (max <= min) max = min + 1;
+    if (bin_count < 0 || !bins) bin_count = 0;   /* a negative count would become a huge size below */
     const char *fmt = o->format ? o->format : "%.0f";
     cui_id id = cui_make_id(ui, label) ^ 0x4157u;
     int col = cui__node_new(ui, id);
@@ -1192,7 +1204,7 @@ bool cui_histogram_slider_ex(cui_ctx *ui, const char *label, const float *bins, 
     ui->nodes[bars].self_align = CUI_ALIGN_STRETCH;
     cui__hist_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->bins = cui__frame_alloc(ui, sizeof(float) * (size_t)CUI_MAX(1, bin_count));
-    memcpy((float *)p->bins, bins, sizeof(float) * (size_t)bin_count);
+    if (bin_count > 0) memcpy((float *)p->bins, bins, sizeof(float) * (size_t)bin_count);
     p->n = bin_count; p->lo_t = anim[0]; p->hi_t = anim[1]; p->tmax = tmax;
     p->on = cui__emphasis(ui);
     p->off = CUI_C(ui, CONTROL_TRACK);
@@ -1403,10 +1415,10 @@ bool cui_path_has_extension(const char *path, const char *accept) {
     return false;
 }
 
-/* Claims this frame's drop if it landed inside r. Returns accepted count. */
+/** Claim this frame's drop only for an enabled target. */
 static int cui__claim_drop(cui_ctx *ui, cui_rect r, const char *accept, int *rejected) {
     *rejected = 0;
-    if (ui->drop_count == 0 || ui->drop_claimed || r.w <= 0) return 0;
+    if (cui_is_disabled(ui) || ui->drop_count == 0 || ui->drop_claimed || r.w <= 0) return 0;
     if (!cui__rect_contains(r, ui->drop_x, ui->drop_y)) return 0;
     ui->drop_claimed = true;
     int ok = 0;
@@ -1477,6 +1489,7 @@ static void cui__paint_dropzone(cui_ctx *ui, cui_node *n, void *data) {
 
 typedef struct { float hover, drag; cui_spring lift; double done_at; int done_count, rejected; } cui__drop_state;
 
+/** Build a dropzone and show drag feedback only while it can accept a drop. */
 int cui_dropzone_ex(cui_ctx *ui, const char *id_str, const cui_dropzone_opts *o) {
     cui_dropzone_opts d;
     memset(&d, 0, sizeof d);
@@ -1488,7 +1501,7 @@ int cui_dropzone_ex(cui_ctx *ui, const char *id_str, const cui_dropzone_opts *o)
     int rejected = 0;
     int got = cui__claim_drop(ui, pr, o->accept, &rejected);
     if (got || rejected) { st->done_at = ui->time; st->done_count = got; st->rejected = rejected; }
-    bool over = ui->drag_hover && cui__rect_contains(pr, ui->drag_x, ui->drag_y);
+    bool over = !cui_is_disabled(ui) && ui->drag_hover && cui__rect_contains(pr, ui->drag_x, ui->drag_y);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->drag, over ? 1.0f : 0.0f, CUI__T_STATE);
     cui__spring(ui, &st->lift, over ? 1.0f : 0.0f, CUI_SPRING_SNAPPY);
@@ -1566,6 +1579,7 @@ static void cui__paint_avatar_overlay(cui_ctx *ui, cui_node *n, void *data) {
         cui_draw_rect_border(ui, cui__rect_inset(r, -4), CUI_CORNERS(rad + 4), cui__rgba(0, 0, 0, 0), cui_alpha(p->ring, p->ring_t), 2);
 }
 
+/** Build an avatar image target that only accepts drops while enabled. */
 int cui_avatar_upload(cui_ctx *ui, const char *id_str, const char *name, cui_texture *image, float size) {
     if (size <= 0) size = 88;
     cui_id id = cui_make_id(ui, id_str);
@@ -1586,7 +1600,7 @@ int cui_avatar_upload(cui_ctx *ui, const char *id_str, const char *name, cui_tex
         }
     }
     if (r.clicked) result = -1;
-    bool over = ui->drag_hover && cui__rect_contains(pr, ui->drag_x, ui->drag_y);
+    bool over = !cui_is_disabled(ui) && ui->drag_hover && cui__rect_contains(pr, ui->drag_x, ui->drag_y);
     cui__tween(ui, &st->hover, (r.hovered || over) ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->drag, over ? 1.0f : 0.0f, CUI__T_STATE);
     if (st->pop.x == 0) st->pop.x = 1;

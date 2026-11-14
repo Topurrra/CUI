@@ -238,7 +238,9 @@ cui_scroll(ui, .id = "messages", .gap = 8) {
 }
 ```
 
-A scroll area fills the remaining height of its parent by default, scrolls smoothly with the wheel or trackpad, and shows a thin scrollbar while scrolling or when hovered near the edge. The thumb can be dragged. Set `.horizontal = true` to scroll both ways. Jump with `cui_scroll_to(ui, "messages", 0)`.
+A scroll area fills the remaining height of its parent by default, scrolls smoothly with the wheel or trackpad, and shows a thin scrollbar while scrolling or when hovered near the edge. The thumb can be dragged. Set `.horizontal = true` to scroll both ways. A vertical-only area leaves horizontal wheel input available to its children. Jump with `cui_scroll_to(ui, "messages", 0)`.
+
+Over a wheel picker or ruler, vertical wheel input changes its value while it has room to move in that direction. At its limit the surrounding scroll area can receive the wheel.
 
 To read or set the position from code, use the same id string. `cui_scroll_get(ui, "messages")` returns a `cui_scroll_info` with `found` (false until the area has been built once), `y` (the offset now), `target_y`, `content_h`, `view_h` and `max_y` (`max(0, content_h - view_h)`), all from the latest layout. `cui_scroll_set(ui, "messages", y, instant)` sets the offset. The target waits for the frame's layout and is clamped to 0 and that layout's `max_y`, so it is right even when the content changes in the same frame, and on the area's first frame: `cui_scroll_set(ui, "messages", CUI_SCROLL_BOTTOM, true)` (or `cui_scroll_set_bottom(ui, "messages", true)`; any huge `y` works) puts a view at the bottom of its content the first time it is built. With `instant = true` the view jumps there in that layout instead of easing, which is what anchoring needs when items above the viewport change height (`cui_scroll_set(ui, id, info.y + growth, true)`) and restoring a saved offset on a view that was just shown again. A set on an id that has not been built yet creates its state and keeps the target until the area is built (state that is not built for about 300 frames is freed, and a waiting target with it). `cui_scroll_get` shows the result after the frame's layout, and creates nothing for an id that was never built. Neither call allocates per frame.
 
@@ -266,7 +268,7 @@ cui_split(ui, "main", &ratio, .min_first = 220, .min_second = 360) {
 }
 ```
 
-The divider highlights on hover and can be dragged. Use `.vertical = true` to split top and bottom.
+The divider highlights on hover and can be dragged. Use `.vertical = true` to split top and bottom. When the pane minimums cannot both fit, they share the space in proportion to their requested sizes.
 
 ## Reading layout results
 
