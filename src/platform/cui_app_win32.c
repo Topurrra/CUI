@@ -354,6 +354,7 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
         EndPaint(hwnd, &ps);
+        if (app) app->force_present = true;   /* software: the next frame shows the whole picture, not only what changed */
         if (w && w->in_size_move) cui__app_live_frame(app);
         cui_request_redraw(ui);
         return 0;
@@ -842,9 +843,21 @@ void cui__plat_wait(cui_app *app, double timeout) {
     }
 }
 
-bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int stride, int x, int y, int pw, int ph) {
-    (void)app; (void)bgra; (void)w; (void)h; (void)stride; (void)x; (void)y; (void)pw; (void)ph;
-    return false;   /* the whole buffer is shown each time */
+bool cui__plat_present_part(cui_app *app, const void *bgra, int width, int height, int stride, int x, int y, int pw, int ph) {
+    cui__win32 *w = cui__w(app);
+    if (w->show_pending || x < 0 || y < 0 || pw <= 0 || ph <= 0 || x + pw > width || y + ph > height) return false;
+    /* the rows from y on, as a top down DIB of ph rows: the source offset of a top down DIB is
+     * counted differently by different drivers, a pointer to the first row is not */
+    BITMAPINFO *bmi = &w->bmi;
+    memset(bmi, 0, sizeof *bmi);
+    bmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi->bmiHeader.biWidth = stride / 4;
+    bmi->bmiHeader.biHeight = -ph;
+    bmi->bmiHeader.biPlanes = 1;
+    bmi->bmiHeader.biBitCount = 32;
+    bmi->bmiHeader.biCompression = BI_RGB;
+    const uint8_t *rows = (const uint8_t *)bgra + (size_t)y * (size_t)stride;
+    return SetDIBitsToDevice(w->hdc, x, y, (DWORD)pw, (DWORD)ph, x, 0, 0, (UINT)ph, rows, bmi, DIB_RGB_COLORS) != 0;
 }
 
 double cui__plat_refresh_hz(cui_app *app) {

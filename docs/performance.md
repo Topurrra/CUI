@@ -91,6 +91,31 @@ Ten simulated minutes of each app, run one at a time on an otherwise idle machin
 - The terminal parses 328 MB of output per second and keeps 0.2 ms frames while 2 MB arrives every frame.
 - The emoji picker builds a frame in about 2 ms.
 
+### Scrolling with the software renderer
+
+`cui_bench_scroll` scrolls a whole window every frame and times each phase (median, 95th percentile and worst): a chat of 5,000 messages with a sidebar, a header and a composer, moved 53 points a frame as an app sweeping its transcript does; the code editor over a 3 MB text, scrolled with the wheel (`--scene editor`); or the gallery's pages (`--scene gallery`). `--window` runs it in a real window through `cui_app` and times it with the frame probe. `--check` draws every frame incrementally and, with a second renderer that gets the same textures, whole, and compares the two; ctest runs it on the chat (also with content moving by fractions of a pixel), the editor and every gallery page.
+
+A scroll changes every tile under the scrolled area, so the tile hashes alone redraw all of it. Four things make a scroll frame cheap:
+
+- **Tiles are hashed relative to themselves.** What is drawn over a tile counts by its shape and its position relative to the tile, and a shape that paints the whole tile alike (a panel or window background) counts by its color only. Content moved by whole pixels therefore hashes the same at its new place.
+- **Moved tiles are copied, not drawn.** The renderer matches the last frame's shapes to this frame's by content and x position, takes the distances they moved by (up to three: content moved by a fraction of a pixel puts its lines of text one pixel apart), and compares each changed tile with the part of the last frame that distance away. Tiles that match get their pixels moved, the others are drawn. The comparison is exact (positions are compared in double precision, so two shapes hash alike only when one is the other moved by whole pixels), and a frame is pixel for pixel what drawing it whole gives.
+- **Threads are kept.** Drawing is split by tile rows over worker threads started once (it used to start new threads for every rectangle of every frame), and each tile row draws only the shapes over it instead of looking at every triangle of the frame.
+- **Only the changed part is shown.** On Windows the rectangle that changed is copied to the window, not the whole frame.
+
+Measured on Windows 11 (8 threads, 150%, the median of three runs of 600 frames each):
+
+| Frame, ms (median / 95th percentile) | Before | After |
+|---|---|---|
+| Chat, 1180×780 at 150%, raster only | 2.1 / 2.5 | 1.2 / 1.4 |
+| Chat in a window, wake to frame on screen | 3.1 / 4.7 | 1.8 / 3.2 |
+| Code editor, 1180×780 at 150%, raster only | 3.6 / 4.0 | 1.6 / 2.1 |
+| Code editor in a window, wake to frame on screen | 3.7 / 5.1 | 3.0 / 4.4 |
+| A chat app's transcript of 5,000 items (its own benchmark, 1180×780), whole frame | 5.2 / 7.5 | 2.8 / 3.7 |
+
+In the chat 19% of the window is drawn and 30% moved per frame; the rest did not change. What is left in the editor's frame is mostly its own build (about 0.7 ms) and copying the window (about 0.8 ms: the line numbers change, so the whole window is shown). In the app, raster went from 4.0 to 1.8 ms and copying to the window from 0.9 to 0.6 ms (means).
+
+A shadow above or below its shape is now worked out once per row instead of for every pixel.
+
 ### Checks
 
 - AddressSanitizer and UndefinedBehaviorSanitizer runs of Chat and Pulse, and Valgrind runs of Notes and Mixer, report no errors.
@@ -141,7 +166,7 @@ Each call is the start of the phase it names and the end of the one before: `CUI
 
 - **Nothing happens without a reason.** With no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that wait (the caret, tooltips, toasts) set `cui_next_wakeup`, and `cui_request_wakeup` does the same for an app's own timers.
 - **Animation runs at the display's rate.** An animating window draws one frame per refresh (the rate comes from the system, 60 when it cannot tell). With OpenGL the swap waits for the display; when it does not (software OpenGL, vsync forced off by a driver setting), and with the software renderer, frames are paced by the clock. Events that arrive in between are taken in without starting a frame early.
-- **Only what changed is drawn** by the software renderer: 64 pixel tiles are hashed from the triangles over them, and only tiles whose hash changed, or whose triangles sample a part of a texture that was written, are drawn again. A frame with no change draws nothing.
+- **Only what changed is drawn** by the software renderer: 64 pixel tiles are hashed from what is drawn over them, relative to the tile, and only tiles whose hash changed, or whose triangles sample a part of a texture that was written, are drawn again. A frame with no change draws nothing. When content scrolled, the tiles whose content is what the last frame showed a whole number of pixels higher or lower are moved instead of drawn (see [Scrolling](#scrolling-with-the-software-renderer)).
 - **State lives as long as it is useful.** Every node with an id keeps last frame's rectangle; such entries go after 30 frames unused, state with data after about five seconds. Hover fades and buttons take no state until they are touched, and the table packs itself after a burst.
 - **Buffers come back down.** The glyph atlas moves the glyphs drawn lately into a smaller atlas when they fit; the emoji texture goes when no emoji has been drawn for 600 frames; and the per-frame buffers (vertices, indices, commands, nodes, the frame arena) shrink when they have been four times bigger than needed for 600 frames.
 - **Steady frames allocate almost nothing.** After warm-up the apps above make a few hundredths of an allocation per frame, mostly new state for things that came into view.

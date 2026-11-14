@@ -71,6 +71,14 @@ if(WIN32)
     target_link_libraries(cui_bench_diff PRIVATE psapi)
 endif()
 
+add_executable(cui_bench_scroll bench_scroll.c ../examples/gallery_ui.c ../examples/gallery_more.c)   # a whole window scrolling, software renderer, per phase
+target_link_libraries(cui_bench_scroll PRIVATE cui::cui)
+# incremental frames (moved pixels included) against frames drawn whole, while scrolling
+add_test(NAME cui_scroll_check COMMAND cui_bench_scroll --check --frames 240 --size 900x600)
+add_test(NAME cui_scroll_check_jitter COMMAND cui_bench_scroll --check --jitter --frames 240 --size 900x600 --scale 1)
+add_test(NAME cui_scroll_check_gallery COMMAND cui_bench_scroll --check --scene gallery --frames 800 --size 1000x700 --scale 1.25)
+add_test(NAME cui_scroll_check_editor COMMAND cui_bench_scroll --check --scene editor --frames 160 --size 900x600 --scale 1)
+
 add_executable(cui_component_shots component_shots.c)
 target_link_libraries(cui_component_shots PRIVATE cui::cui)
 

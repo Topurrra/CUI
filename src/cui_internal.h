@@ -202,6 +202,8 @@ cui_font cui__resolve_font(cui_ctx *ui, cui_font f);
  * once that is ready, and the atlas, emoji and images made before stay valid. */
 struct cui_sw_renderer;
 void cui__sw_move_textures(struct cui_sw_renderer *r, const cui_renderer_iface *to);
+/* the last frame: pixels moved by (0: none), and the share of the frame drawn and moved (0 to 1) */
+void cui__sw_last_stats(const struct cui_sw_renderer *r, int *shift, float *drawn, float *moved);
 typedef struct cui_xform { float scale, ox, oy, alpha, tx, ty; } cui_xform;
 
 typedef struct cui_draw_list {
