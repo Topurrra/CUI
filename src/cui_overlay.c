@@ -530,7 +530,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 /* Tooltip                                                                  */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { char text[256]; cui_id anchor, shown; cui_spring t, ox, oy; double last_shown; bool visible, passive; } cui__tooltip_state;
+typedef struct { char text[256]; cui_id anchor, shown, pressed; cui_spring t, ox, oy; double last_shown; bool visible, passive; } cui__tooltip_state;
 static cui__tooltip_state *cui__tooltip_get(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
 /** Hover starts cold until a tooltip has actually appeared. */
@@ -539,6 +539,12 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
     if (!anchor || !text) return;
     cui__tooltip_state *tt = cui__tooltip_get(ui);
     bool hovered = ui->hot == anchor && ui->active == 0 && !ui->mdown[0];
+    /* pressing the control dismisses its tooltip until the pointer leaves it, as on Windows
+     * and the web: whatever the click opened (often a menu the app draws elsewhere) speaks
+     * for the control now */
+    if (ui->hot == anchor && (ui->mdown[0] || ui->active == anchor)) tt->pressed = anchor;
+    else if (ui->hot != anchor && tt->pressed == anchor) tt->pressed = 0;
+    if (tt->pressed == anchor) hovered = false;
     /* a menu or popover above the pointer owns it; one opened from this control already
      * says what the control does, so its tooltip stays quiet while that is open */
     if (hovered && ui->hot_layer != ui->current_layer) hovered = false;

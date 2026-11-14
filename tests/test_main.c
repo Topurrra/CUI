@@ -3839,6 +3839,54 @@ static void test_tooltip_hidden_by_own_popover(void) {
     cui_destroy(ui);
 }
 
+static int paint_tooltip_press(cui_ctx *ui, float elapsed, bool show_hint, bool *open) {
+    cui_begin_frame(ui, elapsed);
+    cui_row(ui) {
+        if (cui_button(ui, "Plus")) { cui_popover_open(ui, "app-pop"); if (open) *open = true; }
+        if (show_hint) cui_tooltip(ui, "Attach files");
+        cui_button(ui, "Other");
+    }
+    /* drawn by the app after something else: not anchored to "Plus" */
+    cui_popover(ui, "app-pop", .placement = CUI_PLACE_TOP_START) { cui_text(ui, "Menu body"); }
+    cui_end_frame(ui);
+    return cui_get_draw_data(ui)->vertex_count;
+}
+
+/** A press dismisses the control's tooltip until the pointer leaves, so a popup the app
+ * opens on the click (anchored elsewhere) has no tooltip beside it. */
+static void test_tooltip_dismissed_by_press(void) {
+    printf("tooltip: a press hides it until the pointer leaves the control\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, true);
+    cui_input_mouse_leave(ui);
+    paint_tooltip_press(ui, 0.01f, true, NULL);
+    cui_vec2 pos = center(rect_of(ui, cui_make_id(ui, "Plus")));
+    cui_input_mouse_move(ui, pos.x, pos.y);
+    int bare = paint_tooltip_press(ui, 0.01f, false, NULL);
+    for (int i = 0; i < 4; i++) paint_tooltip_press(ui, 0.3f, true, NULL);
+    CHECK(paint_tooltip_press(ui, 0.3f, true, NULL) > bare);   /* shows on hover */
+    bool open = false;
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    paint_tooltip_press(ui, 0.01f, true, &open);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    paint_tooltip_press(ui, 0.01f, true, &open);
+    CHECK(open);
+    for (int i = 0; i < 6; i++) paint_tooltip_press(ui, 0.3f, true, NULL);
+    int hint = paint_tooltip_press(ui, 0.3f, true, NULL);
+    int no_hint = paint_tooltip_press(ui, 0.3f, false, NULL);
+    CHECK(hint == no_hint);                                     /* hidden while still hovered */
+    /* leave and come back: it shows again */
+    cui_popover_close(ui, "app-pop");
+    cui_input_mouse_leave(ui);
+    for (int i = 0; i < 3; i++) paint_tooltip_press(ui, 0.3f, true, NULL);
+    cui_input_mouse_move(ui, pos.x, pos.y);
+    for (int i = 0; i < 4; i++) paint_tooltip_press(ui, 0.3f, true, NULL);
+    hint = paint_tooltip_press(ui, 0.3f, true, NULL);
+    no_hint = paint_tooltip_press(ui, 0.3f, false, NULL);
+    CHECK(hint > no_hint);
+    cui_destroy(ui);
+}
+
 static void test_truncated_tooltip(void) {
     printf("text: a truncated label shows its whole text on hover, and its row still clicks\n");
     cui_ctx *ui = new_ctx();
@@ -12009,6 +12057,7 @@ int main(void) {
     test_truncated_tooltip();
     test_tooltip_hover_delay();
     test_tooltip_hidden_by_own_popover();
+    test_tooltip_dismissed_by_press();
     test_truncated_tooltip_covered();
     test_number_roll();
     test_stress();
