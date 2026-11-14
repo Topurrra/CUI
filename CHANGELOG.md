@@ -122,6 +122,8 @@ Five components that read like an instrument, a new example that puts them toget
 
 ### Added
 
+- **Window hit test for a custom title bar** (Windows): `cui_app_desc.hit_test` (with `hit_test_user`) answers `CUI_WINDOW_HIT_NONE`, `_CAPTION`, `_MIN`, `_MAX` or `_CLOSE` for a point of the window, so the empty part of your own bar drags and double-clicks like a title bar and the maximize button gets the Windows 11 Snap Layouts flyout. The system runs the three buttons; CUI still gets the pointer position over them for hover. Unset, nothing changes.
+- **Several files in the open dialog**: `cui_file_dialog_opts.multi`, and `cui_app_file_dialog_multi(app, opts, out, cap)`, which returns the count and packs the paths as NUL separated strings ending in a second NUL. Windows, macOS (AppleScript), zenity and kdialog; the web build returns 0.
 - 2 more Lucide icons (now 221): `CUI_ICON_PLUG` and `CUI_ICON_PUZZLE` (`CUI_ICON_ARCHIVE` was already there). Drawn from the lucide-static 1.73.0 SVG paths (ISC) as filled outlines at private-use code points U+F8F0 and U+F8F1; every existing icon is unchanged.
 - **Instruments**, five components for interfaces that read like an instrument: values as dots, labels in the monospaced font, hairlines and one accent. See [Instruments](docs/components-more.md#instruments) and the gallery's new *Instruments* page.
   - **Dot-matrix chart** (`cui_dot_chart`): values as a grid of dots, lit up to each column's value and dim above it. Series stack, an accent series stands out, the pointer or the arrow keys show a readout, and a click returns where it landed.

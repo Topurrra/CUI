@@ -68,7 +68,31 @@ typedef struct cui_app_desc {
      * The edges still resize, and the shadow, snapping and Alt+Space menu stay.
      * Ignored elsewhere (check cui_app_has_custom_titlebar). */
     bool custom_titlebar;
+    /* Windows, with custom_titlebar: tells the system what is under a point of the window, so
+     * the empty part of your bar drags and double-clicks like a title bar and the maximize
+     * button gets the Windows 11 Snap Layouts flyout. x and y are in logical points, as
+     * the cui_app_desc.width, from the window's top left corner. Return one of
+     * CUI_WINDOW_HIT_*; CUI_WINDOW_HIT_NONE (0) is the app's own surface, as without a
+     * callback. The window edges that resize come first and are not asked.
+     *
+     * It runs while Windows processes the pointer, between frames, not inside one: answer from
+     * the rectangles of the last frame (cui_get_rect, or cui_anchor) and do not build UI.
+     * The system handles clicks on the three button codes: it minimizes, maximizes or restores,
+     * and closes, so do not act on a click there yourself. CUI still gets the pointer position
+     * over them (hover) but no click. Unset: today's behavior, and ignored without
+     * custom_titlebar or off Windows. */
+    int (*hit_test)(void *user, float x, float y);
+    void *hit_test_user;        /* passed to hit_test */
 } cui_app_desc;
+
+/* What cui_app_desc.hit_test returns. */
+typedef enum cui_window_hit {
+    CUI_WINDOW_HIT_NONE = 0,    /* the app's own surface (clicks and hover reach CUI) */
+    CUI_WINDOW_HIT_CAPTION,     /* the title bar: drag to move, double-click to maximize, right-click for the system menu */
+    CUI_WINDOW_HIT_MIN,         /* the minimize button */
+    CUI_WINDOW_HIT_MAX,         /* the maximize / restore button (Snap Layouts on Windows 11) */
+    CUI_WINDOW_HIT_CLOSE        /* the close button */
+} cui_window_hit;
 
 CUI_API cui_app *cui_app_create(const cui_app_desc *desc);
 CUI_API void cui_app_destroy(cui_app *app);
@@ -123,8 +147,17 @@ typedef struct cui_file_dialog_opts {
     const char *filter_name;    /* e.g. "Images" */
     const char *filter;         /* extensions separated by ';', e.g. "png;jpg" */
     const char *default_name;   /* save dialogs */
+    bool multi;                 /* open dialogs: allow choosing several files (see below) */
 } cui_file_dialog_opts;
 CUI_API bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap);
+/* The same dialog with several files allowed (it sets .multi itself, and only CUI_FILE_OPEN
+ * honors it). Returns how many paths were chosen, 0 when cancelled or when they do not fit
+ * in cap bytes. The paths are UTF-8 and packed into out, each ending with a NUL, after the
+ * last one an extra NUL: "a.txt\0b.txt\0\0". Step through them:
+ *     for (const char *p = out; *p; p += strlen(p) + 1) use(p);
+ * Calling cui_app_file_dialog with .multi set fills out the same way and returns true, so
+ * out also reads as a plain string holding the first path. */
+CUI_API int cui_app_file_dialog_multi(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap);
 
 /* Opens a URL or file with the system's default handler. */
 CUI_API bool cui_app_open_url(const char *url);

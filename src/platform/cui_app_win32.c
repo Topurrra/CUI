@@ -279,6 +279,19 @@ static const char *cui__win32_get_clip(void *user) {
     return result;
 }
 
+/* The app's answer for a screen point inside its window, as a WM_NCHITTEST result. */
+static LRESULT cui__win32_hit(cui_app *app, HWND hwnd, POINT pt, float scale) {
+    if (!app->desc.hit_test) return HTCLIENT;
+    ScreenToClient(hwnd, &pt);
+    switch (app->desc.hit_test(app->desc.hit_test_user, (float)pt.x / scale, (float)pt.y / scale)) {
+    case CUI_WINDOW_HIT_CAPTION: return HTCAPTION;
+    case CUI_WINDOW_HIT_MIN: return HTMINBUTTON;
+    case CUI_WINDOW_HIT_MAX: return app->desc.fixed_size ? HTCLIENT : HTMAXBUTTON;
+    case CUI_WINDOW_HIT_CLOSE: return HTCLOSE;
+    default: return HTCLIENT;
+    }
+}
+
 static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     cui_app *app = (cui_app *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     if (!app) {
@@ -312,21 +325,51 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     case WM_NCHITTEST:
         /* custom title bar: the edges still resize; everything else is the app's */
         if (app->desc.custom_titlebar) {
-            if (IsZoomed(hwnd) || app->desc.fixed_size) return HTCLIENT;
             POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-            RECT wr;
-            GetWindowRect(hwnd, &wr);
-            int b = (int)(6 * s + 0.5f);
-            bool l = pt.x < wr.left + b, r = pt.x >= wr.right - b, t = pt.y < wr.top + b, d = pt.y >= wr.bottom - b;
-            if (t && l) return HTTOPLEFT;
-            if (t && r) return HTTOPRIGHT;
-            if (d && l) return HTBOTTOMLEFT;
-            if (d && r) return HTBOTTOMRIGHT;
-            if (t) return HTTOP;
-            if (d) return HTBOTTOM;
-            if (l) return HTLEFT;
-            if (r) return HTRIGHT;
-            return HTCLIENT;
+            if (!IsZoomed(hwnd) && !app->desc.fixed_size) {
+                RECT wr;
+                GetWindowRect(hwnd, &wr);
+                int b = (int)(6 * s + 0.5f);
+                bool l = pt.x < wr.left + b, r = pt.x >= wr.right - b, t = pt.y < wr.top + b, d = pt.y >= wr.bottom - b;
+                if (t && l) return HTTOPLEFT;
+                if (t && r) return HTTOPRIGHT;
+                if (d && l) return HTBOTTOMLEFT;
+                if (d && r) return HTBOTTOMRIGHT;
+                if (t) return HTTOP;
+                if (d) return HTBOTTOM;
+                if (l) return HTLEFT;
+                if (r) return HTRIGHT;
+            }
+            return cui__win32_hit(app, hwnd, pt, s);
+        }
+        break;
+    case WM_NCMOUSEMOVE:
+        /* over the app's caption or buttons the pointer arrives as a non-client message: pass the
+         * position on so hover shows, and ask for the matching leave */
+        if (app->desc.custom_titlebar && app->desc.hit_test && w) {
+            if (!w->tracking) {
+                TRACKMOUSEEVENT tme = { sizeof tme, TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
+                TrackMouseEvent(&tme);
+                w->tracking = true;
+            }
+            POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+            ScreenToClient(hwnd, &pt);
+            cui_input_mouse_move(ui, (float)pt.x / s, (float)pt.y / s);
+        }
+        break;
+    case WM_NCMOUSELEAVE:
+        if (w) w->tracking = false;
+        cui_input_mouse_leave(ui);
+        break;
+    case WM_NCLBUTTONDOWN:
+        /* the buttons are ours to run: the default would track the press and draw its own button */
+        if (app->desc.custom_titlebar && app->desc.hit_test && (wp == HTMINBUTTON || wp == HTMAXBUTTON || wp == HTCLOSE)) return 0;
+        break;
+    case WM_NCLBUTTONUP:
+        if (app->desc.custom_titlebar && app->desc.hit_test) {
+            if (wp == HTMINBUTTON) { ShowWindow(hwnd, SW_MINIMIZE); return 0; }
+            if (wp == HTMAXBUTTON) { ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE); return 0; }
+            if (wp == HTCLOSE) { PostMessageW(hwnd, WM_CLOSE, 0, 0); return 0; }
         }
         break;
     case WM_APP + 0x51:

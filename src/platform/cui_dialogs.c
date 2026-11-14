@@ -35,7 +35,11 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
     HWND owner = GetActiveWindow();
     WCHAR title[256];
     cui__to_wide(o->title ? o->title : (o->kind == CUI_FILE_SAVE ? "Save" : "Open"), title, 256);
-    WCHAR path[MAX_PATH * 4] = { 0 };
+    bool multi = o->multi && o->kind == CUI_FILE_OPEN;
+    int path_cap = multi ? 32768 : MAX_PATH * 4;   /* a multi selection returns the folder and every name in one buffer */
+    WCHAR *path = (WCHAR *)calloc((size_t)path_cap, sizeof(WCHAR));
+    if (!path) return false;
+    bool result = false;
     if (o->kind == CUI_FILE_FOLDER) {
         /* the new style folder dialog needs COM on this thread */
         HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -51,7 +55,7 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
             CoTaskMemFree(pidl);
         }
         if (SUCCEEDED(com)) CoUninitialize();
-        if (!ok) return false;
+        if (!ok) goto done;
     } else {
         /* filter: "Images\0*.png;*.jpg\0All files\0*.*\0\0" */
         WCHAR filter[512];
@@ -71,20 +75,57 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
         if (!fit) n = 0;
         if (!cui__w_append(filter, 511, &n, "All files") || !cui__w_append(filter, 511, &n, "*.*")) n = 0;
         filter[n] = 0;   /* list ends with an empty string */
-        if (o->default_name) cui__to_wide(o->default_name, path, MAX_PATH * 4);
+        if (o->default_name) cui__to_wide(o->default_name, path, path_cap);
         OPENFILENAMEW ofn;
         memset(&ofn, 0, sizeof ofn);
         ofn.lStructSize = sizeof ofn;
         ofn.hwndOwner = owner;
         ofn.lpstrFilter = filter;
         ofn.lpstrFile = path;
-        ofn.nMaxFile = MAX_PATH * 4;
+        ofn.nMaxFile = (DWORD)path_cap;
         ofn.lpstrTitle = title;
         ofn.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR | (o->kind == CUI_FILE_SAVE ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+        if (multi) ofn.Flags |= OFN_ALLOWMULTISELECT;
         BOOL ok = o->kind == CUI_FILE_SAVE ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
-        if (!ok) return false;
+        if (!ok) goto done;
     }
-    return WideCharToMultiByte(CP_UTF8, 0, path, -1, out, (int)cap, NULL, NULL) > 0;
+    if (!multi) {
+        result = WideCharToMultiByte(CP_UTF8, 0, path, -1, out, (int)cap, NULL, NULL) > 0;
+        if (result && strlen(out) + 2 <= cap) out[strlen(out) + 1] = 0;   /* packed list of one */
+        goto done;
+    }
+    {
+        /* one file: the full path. Several: the folder, then each name, every string ending
+         * in a NUL and the list in a second one. Packed as full paths, each ending in a NUL. */
+        const WCHAR *first = path, *next = first + wcslen(first) + 1;
+        size_t used = 0;
+        if (*next == 0) {   /* a single file */
+            int k = WideCharToMultiByte(CP_UTF8, 0, first, -1, NULL, 0, NULL, NULL);
+            if (k <= 0 || used + (size_t)k + 1 > cap) goto done;
+            WideCharToMultiByte(CP_UTF8, 0, first, -1, out, (int)cap, NULL, NULL);
+            used = (size_t)k;
+        } else {
+            size_t dirlen = wcslen(first);
+            for (const WCHAR *name = next; *name; name += wcslen(name) + 1) {
+                WCHAR full[MAX_PATH * 4];
+                size_t nl = wcslen(name);
+                if (dirlen + nl + 2 > MAX_PATH * 4) continue;
+                memcpy(full, first, dirlen * sizeof(WCHAR));
+                size_t at = dirlen;
+                if (at && full[at - 1] != L'\\' && full[at - 1] != L'/') full[at++] = L'\\';
+                memcpy(full + at, name, (nl + 1) * sizeof(WCHAR));
+                int k = WideCharToMultiByte(CP_UTF8, 0, full, -1, NULL, 0, NULL, NULL);
+                if (k <= 0 || used + (size_t)k + 1 > cap) { out[0] = 0; goto done; }
+                WideCharToMultiByte(CP_UTF8, 0, full, -1, out + used, (int)(cap - used), NULL, NULL);
+                used += (size_t)k;
+            }
+        }
+        out[used] = 0;
+        result = used > 0;
+    }
+done:
+    free(path);
+    return result;
 }
 
 bool cui__plat_open_url(const char *url) {
@@ -118,6 +159,31 @@ static bool cui__run_line(const char *cmd, char *out, size_t cap) {
     size_t n = strlen(out);
     while (n && (out[n - 1] == '\n' || out[n - 1] == '\r')) out[--n] = 0;
     return status == 0 && n > 0;
+}
+
+/* Runs a command and packs its output as a list of strings: the text is split at every
+ * `sep`, empty pieces are dropped, each string ends in a NUL and the list in a second one.
+ * True when at least one string was read and the command succeeded. */
+static bool cui__run_list(const char *cmd, char sep, char *out, size_t cap) {
+    if (cap < 3) return false;
+    FILE *f = popen(cmd, "r");
+    if (!f) return false;
+    size_t n = fread(out, 1, cap - 2, f);
+    int status = pclose(f);
+    size_t o = 0, i = 0;
+    while (i < n) {
+        size_t s = i;
+        while (i < n && out[i] != sep && out[i] != '\n' && out[i] != '\r') i++;
+        if (i > s) {
+            memmove(out + o, out + s, i - s);
+            o += i - s;
+            out[o++] = 0;
+        }
+        i++;
+    }
+    out[o] = 0;
+    if (o == 0) out[0] = 0;
+    return status == 0 && o > 0;
 }
 
 /* Starts a program without waiting for it and without leaving a zombie:
@@ -178,10 +244,14 @@ static bool cui__posix_file_dialog(const cui_file_dialog_opts *o, char *out, siz
             }
             snprintf(types + k, sizeof types - k, "}");
         }
-        snprintf(script, sizeof script, "POSIX path of (choose file with prompt \"%s\"%s)", title, types);
+        if (o->multi)
+            snprintf(script, sizeof script, "set o to \"\"\nrepeat with f in (choose file with prompt \"%s\"%s with multiple selections allowed)\nset o to o & POSIX path of f & linefeed\nend repeat\no", title, types);
+        else
+            snprintf(script, sizeof script, "POSIX path of (choose file with prompt \"%s\"%s)", title, types);
     }
     cui__shell_quote(quoted, sizeof quoted, script);
     snprintf(cmd, sizeof cmd, "osascript -e %s 2>/dev/null", quoted);
+    if (o->multi && o->kind == CUI_FILE_OPEN) return cui__run_list(cmd, '\n', out, cap);
     return cui__run_line(cmd, out, cap);
 }
 
@@ -196,6 +266,7 @@ static bool cui__posix_file_dialog(const cui_file_dialog_opts *o, char *out, siz
         size_t n = (size_t)snprintf(cmd, sizeof cmd, "zenity --file-selection --title=%s", title);
         if (o->kind == CUI_FILE_SAVE) n += (size_t)snprintf(cmd + n, sizeof cmd - n, " --save --confirm-overwrite");
         if (o->kind == CUI_FILE_FOLDER) n += (size_t)snprintf(cmd + n, sizeof cmd - n, " --directory");
+        if (o->multi && o->kind == CUI_FILE_OPEN) n += (size_t)snprintf(cmd + n, sizeof cmd - n, " --multiple --separator=\"$(printf '\\037')\"");
         if (o->kind == CUI_FILE_SAVE && o->default_name) n += (size_t)snprintf(cmd + n, sizeof cmd - n, " --filename=%s", name);
         if (o->filter && *o->filter && o->kind != CUI_FILE_FOLDER) {
             char spec[360];
@@ -224,11 +295,13 @@ static bool cui__posix_file_dialog(const cui_file_dialog_opts *o, char *out, siz
             snprintf(spec + k, sizeof spec - k, "|%s", o->filter_name ? o->filter_name : "Files");
             cui__shell_quote(filter, sizeof filter, spec);
         }
-        snprintf(cmd, sizeof cmd, "kdialog %s %s %s --title %s 2>/dev/null", mode, o->default_name ? name : "'.'", filter, title);
+        snprintf(cmd, sizeof cmd, "kdialog %s %s %s %s --title %s 2>/dev/null", mode, o->default_name ? name : "'.'", filter,
+                 o->multi && o->kind == CUI_FILE_OPEN ? "--multiple --separate-output" : "", title);
     } else {
         fprintf(stderr, "cui: install zenity or kdialog for file dialogs\n");
         return false;
     }
+    if (o->multi && o->kind == CUI_FILE_OPEN) return cui__run_list(cmd, '\037', out, cap);
     return cui__run_line(cmd, out, cap);
 }
 
@@ -241,6 +314,9 @@ bool cui__plat_open_url(const char *url) {
 
 bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap) {
     (void)app;
-    return cui__posix_file_dialog(o, out, cap);
+    bool ok = cui__posix_file_dialog(o, out, cap);
+    /* a single path is a list of one: the second NUL ends it */
+    if (ok && !(o->multi && o->kind == CUI_FILE_OPEN) && strlen(out) + 2 <= cap) out[strlen(out) + 1] = 0;
+    return ok;
 }
 #endif

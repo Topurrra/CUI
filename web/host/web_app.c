@@ -47,5 +47,6 @@ bool cui_app_is_software(cui_app *app) { (void)app; return true; }
 void *cui_app_native_window(cui_app *app) { (void)app; return NULL; }
 const char *cui_app_backend(cui_app *app) { (void)app; return "web"; }
 bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap) { (void)app; (void)opts; (void)out; (void)cap; return false; }
+int cui_app_file_dialog_multi(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap) { (void)app; (void)opts; (void)out; (void)cap; return 0; }
 bool cui_app_open_url(const char *url) { (void)url; return false; }
 bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height) { (void)app; (void)rgba; (void)width; (void)height; return false; }

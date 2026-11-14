@@ -378,5 +378,17 @@ bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *o
     return ok && out[0];
 }
 
+int cui_app_file_dialog_multi(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap) {
+    cui_file_dialog_opts d;
+    memset(&d, 0, sizeof d);
+    if (opts) d = *opts;
+    d.kind = CUI_FILE_OPEN;
+    d.multi = true;
+    if (!cui_app_file_dialog(app, &d, out, cap)) return 0;
+    int n = 0;
+    for (const char *p = out; *p; p += strlen(p) + 1) n++;
+    return n;
+}
+
 bool cui_app_open_url(const char *url) { return url && *url && cui__plat_open_url(url); }
 
