@@ -315,10 +315,9 @@ static void replace_all(size_t from_mb, size_t to_mb, const char *lang, bool wra
     double r1 = frames(ui, &b, 1, 0), r2 = frames(ui, &b, 1, 0);
     int ok_redo = b.r.line_count == nl;
     /* the app swaps in another text of the new size and bumps the revision (or sets the document) */
-    double v0 = now();
-    if (doc) { size_t n2 = gen(nt, to_mb * 1024 * 1024, true, lang); cui_text_doc_set(b.doc, nt, (int)n2); }
+    double v0 = 0;
+    if (doc) { size_t n2 = gen(nt, to_mb * 1024 * 1024, true, lang); v0 = now(); cui_text_doc_set(b.doc, nt, (int)n2); v0 = (now() - v0) * 1000; }   /* the set (a copy and its line breaks), not the making of the text */
     else gen(b.buf, to_mb * 1024 * 1024, true, lang);
-    v0 = doc ? (now() - v0) * 1000 : 0;
     b.rev = 2;
     double v1 = frames(ui, &b, 1, 0) + v0, v2 = frames(ui, &b, 1, 0);
     printf("replace %2zu -> %2zu MB %-8s %-4s %-3s | edit call %5.1f frames %6.1f %6.1f %6.1f | undo %6.1f %6.1f | redo %6.1f %6.1f | new text %6.1f %6.1f ms | undo %s redo %s\n",

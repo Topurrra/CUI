@@ -248,6 +248,18 @@ static void test_big(void) {
     printf("  adopt %.1f ms, %d edits %.2f us each, line lookup %.2f us, %d pieces, %.1f MB held for %.1f MB of text\n", load * 1000, 20000,
            edits / 20000 * 1e6, look / 200000 * 1e6, cui_text_doc_piece_count(d), cui_text_doc_memory(d) / 1048576.0, cui_text_doc_length(d) / 1048576.0);
     CHECK(edits / 20000 < 50e-6);
+    /* a snapshot for a worker: O(pieces), no copy; the copy is made where the snapshot is read */
+    t0 = now();
+    cui_text_snap *s = cui_text_doc_snapshot(d);
+    double snap = now() - t0;
+    t0 = now();
+    int n = 0;
+    char *flat = cui_text_snap_copy(s, &n);
+    double copy = now() - t0;
+    CHECK(flat && n == cui_text_doc_length(d));
+    free(flat);
+    cui_text_snap_free(s);
+    printf("  snapshot %.3f ms (%d pieces), its copy in one piece %.1f ms\n", snap * 1000, cui_text_doc_piece_count(d), copy * 1000);
     cui_text_doc_free(d);
 }
 
