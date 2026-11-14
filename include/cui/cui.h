@@ -784,6 +784,11 @@ typedef enum cui_placement {
 typedef struct cui_popover_opts { int _; cui_placement placement; float width; float pad; float gap; } cui_popover_opts;
 CUI_API bool cui_popover_begin(cui_ctx *ui, const char *id, const cui_popover_opts *opts);
 CUI_API void cui_popover_end(cui_ctx *ui);
+/* A popover anchored to the point (x, y) (points, window coordinates) instead of a component, with free content.
+ * Same open/close/toggle calls as any popover; `placement` is the side of the point the popover sits on, flipped
+ * and clamped to stay on screen. Pair with cui_popover_end, or use the cui_popover_at scope macro:
+ *     cui_popover_at(ui, "pick", x, y, CUI_PLACE_BOTTOM_START, .width = 240) { ... } */
+CUI_API bool cui_popover_at_begin(cui_ctx *ui, const char *id, float x, float y, cui_placement placement, const cui_popover_opts *opts);
 
 /* Guided tour: a spotlight on one control at a time, with a card beside it
  * that says what the control does, for onboarding and "what's new". The
@@ -815,7 +820,12 @@ enum { CUI_TOUR_NONE = 0, CUI_TOUR_NEXT, CUI_TOUR_BACK, CUI_TOUR_DONE, CUI_TOUR_
 /* What happened this frame: one of CUI_TOUR_*. */
 CUI_API int cui_tour_ex(cui_ctx *ui, const char *id, const cui_tour_step *steps, int count, int *step, const cui_tour_opts *opts);
 CUI_API void cui_popover_open(cui_ctx *ui, const char *id);
+/* Closes the popover with this id. TRAP: a popover pushes its own id while it builds its content, so inside a
+ * popover block cui_popover_close(ui, "same-id") builds the id under that pushed scope and misses the popover.
+ * From inside a popover use cui_popover_close_self; from outside (a button that opened it) this is fine. */
 CUI_API void cui_popover_close(cui_ctx *ui, const char *id);
+/* Closes the innermost open popover from inside its content (between cui_popover_begin and cui_popover_end). */
+CUI_API void cui_popover_close_self(cui_ctx *ui);
 CUI_API void cui_popover_toggle(cui_ctx *ui, const char *id);
 CUI_API bool cui_popover_is_open(cui_ctx *ui, const char *id);
 
@@ -837,6 +847,8 @@ CUI_API void cui_context_menu_end(cui_ctx *ui);
  * the frame a right click is reported (cui_doc_tabs_result.context), before the cui_context_menu block that
  * builds the menu. The menu closes as any context menu does. */
 CUI_API void cui_context_menu_open_at(cui_ctx *ui, const char *id, float x, float y);
+/* Closes the context menu with this id from code (the id it was built and opened with). */
+CUI_API void cui_context_menu_close(cui_ctx *ui, const char *id);
 
 typedef struct cui_menu_item_opts {
     int _;
@@ -847,8 +859,17 @@ typedef struct cui_menu_item_opts {
     bool checked;              /* a check mark at the right edge of the item */
     cui_font font;             /* the label's font, default CUI_FONT_BODY: a style menu shows each style in its own */
     float text_size;           /* the label's size in points, default the body size; the item grows to fit it */
+    bool submenu;              /* a chevron at the right edge; clicking does not close the menu (cui_submenu_begin sets it) */
 } cui_menu_item_opts;
 CUI_API bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *opts);
+/* Submenu: an item with a chevron that opens a menu to its right (to its left at the screen edge) while the
+ * parent stays open. Call it inside a menu or context menu, in place of cui_menu_item; the options are the
+ * item's. Hover opens it (a short grace delay lets the pointer cross other items on the way in), Right opens it
+ * from the keyboard, Left or Esc closes one level, and choosing a leaf item closes the whole chain. Submenus nest.
+ *     cui_submenu(ui, "Share", .icon = CUI_ICON_SHARE_2) { cui_menu_item(ui, "Copy link"); }
+ * cui_submenu_end is called only when cui_submenu_begin returned true. */
+CUI_API bool cui_submenu_begin(cui_ctx *ui, const char *label, const cui_menu_item_opts *opts);
+CUI_API void cui_submenu_end(cui_ctx *ui);
 CUI_API void cui_menu_separator(cui_ctx *ui);
 CUI_API void cui_menu_label(cui_ctx *ui, const char *text);
 
@@ -5488,6 +5509,8 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_tour(ui, id, steps, count, step, ...) cui_tour_ex((ui), (id), (steps), (count), (step), CUI__OPTS(cui_tour_opts, __VA_ARGS__))
 #define cui_menu(ui, label, ...)            CUI__SCOPE_IF(cui_menu_begin((ui), (label), CUI__OPTS(cui_menu_opts, __VA_ARGS__)), cui_menu_end(ui))
 #define cui_context_menu(ui, id)            CUI__SCOPE_IF(cui_context_menu_begin((ui), (id)), cui_context_menu_end(ui))
+#define cui_submenu(ui, label, ...)         CUI__SCOPE_IF(cui_submenu_begin((ui), (label), CUI__OPTS(cui_menu_item_opts, __VA_ARGS__)), cui_submenu_end(ui))
+#define cui_popover_at(ui, id, x, y, placement, ...) CUI__SCOPE_IF(cui_popover_at_begin((ui), (id), (x), (y), (placement), CUI__OPTS(cui_popover_opts, __VA_ARGS__)), cui_popover_end(ui))
 #define cui_menu_item(ui, label, ...)       cui_menu_item_ex((ui), (label), CUI__OPTS(cui_menu_item_opts, __VA_ARGS__))
 #define cui_dialog(ui, title, open, ...)    CUI__SCOPE_IF(cui_dialog_begin((ui), (title), (open), CUI__OPTS(cui_dialog_opts, __VA_ARGS__)), cui_dialog_end(ui))
 #define cui_dialog_footer(ui)               CUI__SCOPE(cui_dialog_footer_begin(ui), cui_dialog_footer_end(ui))

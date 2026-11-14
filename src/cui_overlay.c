@@ -62,6 +62,12 @@ static bool cui__layer_is_open_popup_after(cui_ctx *ui, cui_id layer, cui_popup 
 
 void cui_popover_open(cui_ctx *ui, const char *id) { cui__popup_set(ui, cui_make_id(ui, id), true); }
 void cui_popover_close(cui_ctx *ui, const char *id) { cui__popup_set(ui, cui_make_id(ui, id), false); }
+void cui_popover_close_self(cui_ctx *ui) {
+    for (int i = ui->pb_depth - 1; i >= 0; i--) {
+        cui__popup_build *b = &ui->pb_stack[i];
+        if (!b->menu) { cui__popup_set(ui, b->id, false); return; }
+    }
+}
 void cui_popover_toggle(cui_ctx *ui, const char *id) {
     cui_id pid = cui_make_id(ui, id);
     cui_popup *p = cui__popup_get(ui, pid, true);
@@ -108,6 +114,11 @@ bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, floa
         root = cui__float_begin(ui, id, z, 0, CUI__PLACE_POINT, 0);
         ui->nodes[root].fx = p->mouse.x;
         ui->nodes[root].fy = p->mouse.y;
+    } else if (p->point_anchor) {
+        root = cui__float_begin(ui, id, z, 0, placement, 6);
+        ui->nodes[root].fpos = true;
+        ui->nodes[root].fx = p->mouse.x;
+        ui->nodes[root].fy = p->mouse.y;
     } else {
         root = cui__float_begin(ui, id, z, anchor, placement, 6);
     }
@@ -116,7 +127,7 @@ bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, floa
     n->gap = gap;
     n->flags |= CUI_NF_HIT_OPAQUE;
     if (width > 0) n->w = CUI_PX(width);
-    else if (anchor && cui__has_prev_rect(ui, anchor)) n->min_w = cui__prev_rect(ui, anchor).w;
+    else if (anchor && !p->no_anchor_w && cui__has_prev_rect(ui, anchor)) n->min_w = cui__prev_rect(ui, anchor).w;
     n->min_w = CUI_MAX(n->min_w, menu ? 180.0f : 0.0f);
     n->max_h = 420;
     n->opacity = t;
@@ -167,6 +178,19 @@ bool cui_popover_begin(cui_ctx *ui, const char *id, const cui_popover_opts *o) {
 
 void cui_popover_end(cui_ctx *ui) { cui__popup_end(ui); }
 
+bool cui_popover_at_begin(cui_ctx *ui, const char *id, float x, float y, cui_placement placement, const cui_popover_opts *o) {
+    cui_popover_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui_id pid = cui_make_id(ui, id);
+    cui_popup *p = cui__popup_get(ui, pid, false);
+    if (!p) return false;
+    p->point_anchor = true;
+    p->at_mouse = false;
+    p->mouse.x = x; p->mouse.y = y;
+    return cui__popup_begin(ui, pid, 0, placement, o->width, o->pad > 0 ? o->pad : 16, o->gap > 0 ? o->gap : 10, false);
+}
+
 /* ------------------------------------------------------------------------ */
 /* Menus                                                                    */
 /* ------------------------------------------------------------------------ */
@@ -212,7 +236,7 @@ bool cui_context_menu_begin(cui_ctx *ui, const char *id) {
         cui__close_all_popups(ui);
         cui__popup_set(ui, pid, true);
         cui_popup *p = cui__popup_get(ui, pid, false);
-        if (p) { p->at_mouse = true; p->mouse.x = ui->mx; p->mouse.y = ui->my; }
+        if (p) { p->at_mouse = true; p->no_anchor_w = false; p->mouse.x = ui->mx; p->mouse.y = ui->my; }
     }
     if (!cui__popup_get(ui, pid, false)) return false;
     return cui__popup_begin(ui, pid, anchor, CUI_PLACE_BOTTOM_START, 0, 6, 0, true);
@@ -225,9 +249,11 @@ void cui_context_menu_open_at(cui_ctx *ui, const char *id, float x, float y) {
     cui__close_all_popups(ui);
     cui__popup_set(ui, pid, true);
     cui_popup *p = cui__popup_get(ui, pid, false);
-    if (p) { p->at_mouse = true; p->mouse.x = x; p->mouse.y = y; }
+    if (p) { p->at_mouse = true; p->no_anchor_w = true; p->mouse.x = x; p->mouse.y = y; }
     ui->animating = true;
 }
+
+void cui_context_menu_close(cui_ctx *ui, const char *id) { cui__popup_set(ui, cui_make_id(ui, id) ^ 0xC7Cu, false); }
 
 typedef struct { float hover; } cui__item_state;
 
@@ -269,6 +295,7 @@ bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *
     int t = cui__text_node(ui, label, cui__display_len(label), o->font, cui__fs(ui, ts), fg, false);
     ui->nodes[t].line_height = 1.3f;
     ui->nodes[t].w = CUI_FILL;
+    if (o->submenu) cui__icon_node(ui, CUI_ICON_CHEVRON_RIGHT, 16, CUI_C(ui, TEXT_SECONDARY));
     if (o->shortcut) {
         int s = cui__text_node(ui, o->shortcut, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
         ui->nodes[s].line_height = 1.3f;
@@ -277,11 +304,70 @@ bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *
     cui__close(ui);
     bool chosen = !disabled && (r.clicked || (hl && cui_key_pressed(ui, CUI_KEY_ENTER)));
     if (chosen) {
-        cui__close_all_popups(ui);
+        if (!o->submenu) cui__close_all_popups(ui);   /* a submenu item opens its menu instead */
         ui->kpressed[CUI_KEY_ENTER] = 0;
     }
     return chosen;
 }
+
+typedef struct { float hover_t, away_t; bool was_open, blocked; } cui__sub_state;
+
+bool cui_submenu_begin(cui_ctx *ui, const char *label, const cui_menu_item_opts *o) {
+    cui_menu_item_opts d;
+    memset(&d, 0, sizeof d);
+    if (o) d = *o;
+    d.submenu = true;
+    cui__popup_build *b = ui->pb_depth > 0 ? &ui->pb_stack[ui->pb_depth - 1] : NULL;
+    if (!b) return false;
+    cui_id parent = b->id;
+    cui_popup *pp = cui__popup_get(ui, parent, false);
+    cui__menu_nav *nav = cui_state(ui, parent ^ 0x4E4156u, sizeof *nav);
+    cui_id iid = cui_make_id(ui, label), sid = iid ^ 0x5B4Du;
+    bool pressed = cui_menu_item_ex(ui, label, &d);
+    int index = b->item_index - 1;
+    bool disabled = d.disabled || cui_is_disabled(ui);
+    cui_popup *p = cui__popup_get(ui, sid, true);
+    if (!p) return false;
+    cui__sub_state *st = cui_state(ui, sid, sizeof *st);
+    bool parent_open = pp && pp->open;
+    bool hovered = ui->hot == iid && !disabled;
+    if (!parent_open) p->open = false;
+    if (st->was_open && !p->open) st->blocked = true;   /* closed by Escape, Left or a click: wait for the pointer to leave */
+    if (!hovered) { st->blocked = false; st->hover_t = 0; }
+    if (parent_open && !disabled) {
+        bool other_open = nav->open_sub && nav->open_sub != sid;
+        if (hovered) st->hover_t += ui->dt;
+        bool want = !st->blocked && ((hovered && st->hover_t >= (other_open ? 0.25f : 0.0f)) || pressed);
+        bool kb = nav->highlight == index && nav->keyboard && cui__popup_is_topmost(ui, pp) && cui_key_pressed(ui, CUI_KEY_RIGHT);
+        if (kb) ui->kpressed[CUI_KEY_RIGHT] = 0;
+        if (!p->open && (want || kb)) {
+            if (other_open) cui__popup_set(ui, nav->open_sub, false);
+            cui__popup_set(ui, sid, true);
+            p->at_mouse = false;
+            if (kb || pressed) {
+                cui__menu_nav *sn = cui_state(ui, sid ^ 0x4E4156u, sizeof *sn);
+                sn->highlight = 0; sn->keyboard = true;
+            }
+            nav->open_sub = sid;
+            ui->animating = true;
+        } else if (hovered && other_open) ui->animating = true;
+    }
+    if (p->open) {
+        bool in_sub = ui->hot_layer == sid || cui__layer_is_open_popup_after(ui, ui->hot_layer, p);
+        if (hovered || in_sub) st->away_t = 0;
+        else if (ui->hot_layer == parent) {   /* a different item of the parent: close after a grace delay, so a diagonal move into the submenu survives */
+            st->away_t += ui->dt;
+            ui->animating = true;
+            if (st->away_t >= 0.25f) p->open = false;
+        }
+        if (p->open && cui__popup_is_topmost(ui, p) && cui_key_pressed(ui, CUI_KEY_LEFT)) { p->open = false; ui->kpressed[CUI_KEY_LEFT] = 0; }
+    } else st->away_t = 0;
+    if (!p->open && nav->open_sub == sid) nav->open_sub = 0;
+    st->was_open = p->open;
+    return cui__popup_begin(ui, sid, iid, CUI_PLACE_RIGHT_START, 0, 6, 0, true);
+}
+
+void cui_submenu_end(cui_ctx *ui) { cui__popup_end(ui); }
 
 void cui_menu_separator(cui_ctx *ui) {
     int box = cui__node_new(ui, 0);

@@ -11038,6 +11038,201 @@ static void test_doc_tabs_context(void) {
     cui_destroy(ui);
 }
 
+/* submenus, popover_at, context_menu_close, point-opened menu width, popover_close_self ---- */
+
+typedef struct {
+    cui_rect open, leaf, deep;     /* rects of the items, zero when not built this frame */
+    bool leaf_clicked, deep_clicked;
+    float wide;                    /* width of a component drawn before the menu */
+} sm_ctx;
+
+static void build_sm(cui_ctx *ui, void *u) {
+    sm_ctx *s = u;
+    s->open = s->leaf = s->deep = (cui_rect){ 0 };
+    s->leaf_clicked = s->deep_clicked = false;
+    if (s->wide > 0) cui_box(ui, .width = CUI_PX(s->wide), .height = CUI_PX(20)) {}
+    cui_context_menu(ui, "m") {
+        cui_menu_item(ui, "Open");
+        s->open = cui_get_rect(ui, cui_make_id(ui, "Open"));
+        cui_submenu(ui, "More", .icon = CUI_ICON_SHARE_2) {
+            if (cui_menu_item(ui, "Leaf")) s->leaf_clicked = true;
+            s->leaf = cui_get_rect(ui, cui_make_id(ui, "Leaf"));
+            cui_submenu(ui, "Deeper") {
+                if (cui_menu_item(ui, "Deep")) s->deep_clicked = true;
+                s->deep = cui_get_rect(ui, cui_make_id(ui, "Deep"));
+            }
+        }
+        cui_menu_item(ui, "Last");
+    }
+}
+
+/* opens the context menu "m" at a point the way an app does: inside a frame, before the menu is built */
+static void open_menu_at(cui_ctx *ui, sm_ctx *s, float x, float y) {
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_context_menu_open_at(ui, "m", x, y);
+    build_sm(ui, s);
+    cui_end_frame(ui);
+}
+
+static void test_submenu(void) {
+    printf("submenu: hover opens, parent stays, escape and left close one level, a leaf closes the chain\n");
+    cui_ctx *ui = new_ctx();
+    sm_ctx s;
+    memset(&s, 0, sizeof s);
+    open_menu_at(ui, &s, 100, 100);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.open.w > 0 && s.leaf.w == 0);
+    float mx = s.open.x + s.open.w / 2, my = s.open.y + s.open.h + s.open.h / 2;   /* the More item */
+    cui_input_mouse_move(ui, mx, my);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.leaf.w > 0);                       /* the submenu is open */
+    CHECK(s.open.w > 0);                       /* and the parent stays open */
+    CHECK(s.leaf.x >= s.open.x + s.open.w - 1);   /* to the right of the item */
+    /* a diagonal move: pass over the Last item for a few frames on the way to the submenu */
+    cui_input_mouse_move(ui, mx, s.open.y + 2.5f * s.open.h);
+    run(ui, build_sm, &s, 4);
+    CHECK(s.leaf.w > 0);                       /* the grace delay keeps it open */
+    cui_vec2 lc = center(s.leaf);
+    cui_input_mouse_move(ui, lc.x, lc.y);
+    run(ui, build_sm, &s, 20);
+    CHECK(s.leaf.w > 0 && s.open.w > 0);
+    /* Escape closes one level */
+    key(ui, build_sm, &s, CUI_KEY_ESCAPE, 0);
+    run(ui, build_sm, &s, 2);
+    CHECK(s.leaf.w == 0 && s.open.w > 0);
+    /* keyboard: Down twice highlights More, Right opens it, Left closes it */
+    cui_input_mouse_leave(ui);
+    run(ui, build_sm, &s, 2);
+    key(ui, build_sm, &s, CUI_KEY_DOWN, 0);
+    key(ui, build_sm, &s, CUI_KEY_DOWN, 0);
+    key(ui, build_sm, &s, CUI_KEY_RIGHT, 0);
+    run(ui, build_sm, &s, 2);
+    CHECK(s.leaf.w > 0 && s.open.w > 0);
+    key(ui, build_sm, &s, CUI_KEY_LEFT, 0);
+    run(ui, build_sm, &s, 2);
+    CHECK(s.leaf.w == 0 && s.open.w > 0);
+    /* a leaf click closes everything */
+    key(ui, build_sm, &s, CUI_KEY_RIGHT, 0);
+    run(ui, build_sm, &s, 2);
+    CHECK(s.leaf.w > 0);
+    lc = center(s.leaf);
+    click_at(ui, build_sm, &s, lc.x, lc.y);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.open.w == 0 && s.leaf.w == 0);
+    /* a nested submenu: a leaf two levels down closes the whole chain */
+    open_menu_at(ui, &s, 100, 100);
+    run(ui, build_sm, &s, 3);
+    cui_input_mouse_move(ui, s.open.x + s.open.w / 2, s.open.y + 1.5f * s.open.h);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.leaf.w > 0);
+    cui_input_mouse_move(ui, s.leaf.x + s.leaf.w / 2, s.leaf.y + 1.5f * s.leaf.h);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.deep.w > 0 && s.leaf.w > 0 && s.open.w > 0);
+    cui_vec2 dc = center(s.deep);
+    click_at(ui, build_sm, &s, dc.x, dc.y);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.open.w == 0 && s.leaf.w == 0 && s.deep.w == 0);
+    cui_destroy(ui);
+}
+
+static void test_submenu_flips_left(void) {
+    printf("submenu: flips to the left at the screen edge\n");
+    cui_ctx *ui = new_ctx();
+    sm_ctx s;
+    memset(&s, 0, sizeof s);
+    open_menu_at(ui, &s, 600, 100);
+    run(ui, build_sm, &s, 3);
+    cui_input_mouse_move(ui, s.open.x + s.open.w / 2, s.open.y + 1.5f * s.open.h);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.leaf.w > 0 && s.leaf.x + s.leaf.w <= s.open.x + 1);
+    cui_destroy(ui);
+}
+
+static void test_context_menu_close_and_width(void) {
+    printf("context menu: close from code; opened at a point it does not copy the last width\n");
+    cui_ctx *ui = new_ctx();
+    sm_ctx s;
+    memset(&s, 0, sizeof s);
+    s.wide = 400;
+    open_menu_at(ui, &s, 100, 100);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.open.w > 0 && s.open.w < 300);     /* before the fix this was 400 - 12 */
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_context_menu_close(ui, "m");
+    build_sm(ui, &s);
+    cui_end_frame(ui);
+    run(ui, build_sm, &s, 3);
+    CHECK(s.open.w == 0);
+    cui_destroy(ui);
+}
+
+typedef struct { cui_rect inside; int mode; } pa_ctx;
+
+static void build_pa(cui_ctx *ui, void *u) {
+    pa_ctx *s = u;
+    s->inside = (cui_rect){ 0 };
+    cui_button(ui, "Anchor");
+    cui_popover_at(ui, "pa", 300, 200, CUI_PLACE_BOTTOM_START, .width = 150) {
+        cui_button(ui, "Inside");
+        s->inside = cui_last_rect(ui);
+    }
+}
+
+static void test_popover_at(void) {
+    printf("popover_at: anchored to a point, closes from code\n");
+    cui_ctx *ui = new_ctx();
+    pa_ctx s;
+    memset(&s, 0, sizeof s);
+    run(ui, build_pa, &s, 3);
+    CHECK(s.inside.w == 0);
+    cui_popover_open(ui, "pa");
+    run(ui, build_pa, &s, 3);
+    CHECK(s.inside.w > 0);
+    CHECK_NEAR(s.inside.x, 300 + 16, 1.5);     /* the popover's left edge is the point, plus its padding */
+    CHECK(s.inside.y > 200);
+    CHECK(cui_popover_is_open(ui, "pa"));
+    cui_popover_close(ui, "pa");
+    run(ui, build_pa, &s, 3);
+    CHECK(s.inside.w == 0 && !cui_popover_is_open(ui, "pa"));
+    cui_destroy(ui);
+}
+
+static void build_close_self(cui_ctx *ui, void *u) {
+    pa_ctx *s = u;
+    s->inside = (cui_rect){ 0 };
+    cui_button(ui, "Anchor");
+    cui_popover(ui, "p", .width = 200) {
+        bool clicked = cui_button(ui, "Close me");
+        s->inside = cui_last_rect(ui);
+        if (clicked) {
+            if (s->mode == 0) cui_popover_close(ui, "p");   /* the trap: misses the popover */
+            else cui_popover_close_self(ui);
+        }
+    }
+}
+
+static void test_popover_close_self(void) {
+    printf("popover: close_self closes the popover it is called in; close with its own id from inside misses\n");
+    cui_ctx *ui = new_ctx();
+    pa_ctx s;
+    memset(&s, 0, sizeof s);
+    s.mode = 0;
+    run(ui, build_close_self, &s, 2);
+    cui_popover_open(ui, "p");
+    run(ui, build_close_self, &s, 3);
+    CHECK(s.inside.w > 0);
+    cui_vec2 c = center(s.inside);
+    click_at(ui, build_close_self, &s, c.x, c.y);
+    run(ui, build_close_self, &s, 3);
+    CHECK(cui_popover_is_open(ui, "p"));       /* the documented trap */
+    s.mode = 1;
+    c = center(s.inside);
+    click_at(ui, build_close_self, &s, c.x, c.y);
+    run(ui, build_close_self, &s, 3);
+    CHECK(!cui_popover_is_open(ui, "p") && s.inside.w == 0);
+    cui_destroy(ui);
+}
+
 /* app requests: scroll position, caller-owned open state, explicit lengths, plain selectable text ---- */
 
 typedef struct { int items; float item_h; } sp_ctx;
@@ -11546,6 +11741,11 @@ int main(void) {
     test_chrome();
     test_find_from_code_and_marks();
     test_doc_tabs_context();
+    test_submenu();
+    test_submenu_flips_left();
+    test_context_menu_close_and_width();
+    test_popover_at();
+    test_popover_close_self();
     test_dock();
     test_virtual_list();
     test_theme();

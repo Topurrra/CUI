@@ -897,7 +897,7 @@ static void cui__layout_float(cui_ctx *ui, int i) {
     else if (n->placement == CUI__PLACE_CENTER) { x = (vw - W) * 0.5f; y = (vh - H) * 0.5f; }
     else if (n->placement == CUI__PLACE_POINT) { x = n->fx; y = n->fy; }
     else {
-        cui_rect A = cui__anchor_rect(ui, n->anchor);
+        cui_rect A = n->fpos && !n->anchor ? (cui_rect){ n->fx, n->fy, 0, 0 } : cui__anchor_rect(ui, n->anchor);
         switch (n->placement) {
         case CUI_PLACE_BOTTOM_START: case CUI_PLACE_BOTTOM: case CUI_PLACE_BOTTOM_END:
             y = A.y + A.h + off;

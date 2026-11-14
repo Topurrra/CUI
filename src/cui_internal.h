@@ -468,6 +468,8 @@ typedef struct cui_popup {
     cui_rect anchor_rect;
     bool open;
     bool at_mouse;
+    bool no_anchor_w;          /* opened at a point from code: does not copy the last component's width */
+    bool point_anchor;         /* anchored to the point in `mouse` with the placement (cui_popover_at) */
     cui_vec2 mouse;
     uint64_t opened_frame;
     int z;                     /* stacking order: later opens are on top */
@@ -735,7 +737,7 @@ bool cui__keys_covered(cui_ctx *ui);   /* an open popup sits above the layer bei
 void cui__color_picker_open(cui_ctx *ui, cui_id id, cui_color value);   /* opens cui_color_picker's popover from code */
 /* a dashed rounded rectangle, the dashes continuing round the corners (cui_pickers.c: the dropzone, gantt plans) */
 void cui__draw_dashed_rrect(cui_ctx *ui, cui_rect r, float rad, cui_color c, float th, float dash, float gap);
-typedef struct { int highlight; int item_count; int prev_item_count; bool keyboard; } cui__menu_nav;
+typedef struct { int highlight; int item_count; int prev_item_count; bool keyboard; cui_id open_sub; } cui__menu_nav;
 typedef struct { cui_color bg, bg_hover, bg_press, fg, border, border_hover; } cui__btn_colors;
 cui__btn_colors cui__button_colors(cui_ctx *ui, cui_button_variant v, bool selected);
 bool cui__icon_button_id(cui_ctx *ui, cui_id id, const char *icon, const cui_button_opts *o);
