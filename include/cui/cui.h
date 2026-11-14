@@ -1985,6 +1985,12 @@ CUI_API bool cui_text_doc_replace_prepared(cui_text_doc *doc, int start, int end
  * the text in the full tone color. A mark with both zero is the old one. */
 enum { CUI_MARK_TINT = 0, CUI_MARK_WAVY, CUI_MARK_UNDERLINE };
 typedef struct cui_text_mark { int start, end; int color; int tone; int style; } cui_text_mark;
+/* A run of changed lines for the editor's gutter, as a version control tool shows them. kind is CUI_LINE_ADDED
+ * (a bar in the success tone), CUI_LINE_MODIFIED (a bar in the info tone) or CUI_LINE_DELETED (a small triangle
+ * in the danger tone on the boundary above first_line; line_count is ignored, first_line may be the line count
+ * for a deletion at the end). Lines are 0 based. See cui_code_editor_opts.line_marks. */
+enum { CUI_LINE_ADDED = 1, CUI_LINE_MODIFIED, CUI_LINE_DELETED };
+typedef struct cui_line_mark { int first_line, line_count, kind; } cui_line_mark;
 typedef struct cui_code_editor_opts {
     int _;
     const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown", "yaml", "toml", "ini", "xml", "html", "css", "powershell", "csharp", "java", "batch" (aliases as there); "text" for none */
@@ -2010,6 +2016,12 @@ typedef struct cui_code_editor_opts {
     cui_text_doc *doc;         /* edit this document instead of buf and cap (pass NULL, 0): no capacity, edits cost the
                                 * same anywhere at any size, and every editor given the same document shares it (and its
                                 * undo history), each following the others' edits. `.revision` is not needed. */
+    const cui_line_mark *line_marks;   /* change marks in the gutter, left of the line numbers (NULL, 0: none, nothing changes).
+                                * Sorted by first_line and not overlapping (a deletion goes before a range that starts at the
+                                * same line). The caller owns the array and keeps it valid for the frame; drawing costs
+                                * O(lines in view) (a binary search finds the first range in view). With wrap a mark spans
+                                * the rows of its lines. A press on a mark reports it in the result and does not select the line. */
+    int line_mark_count;       /* number of `line_marks` */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
@@ -2028,6 +2040,8 @@ typedef struct cui_code_editor_result {
                                 * splice_inserted bytes there (several edits in a frame: the smallest range that covers
                                 * them all, so a replace all is one splice from its first match to its last);
                                 * splice_start is -1 when the editor changed nothing. For cui_code_editor_splice. */
+    bool line_mark_clicked;    /* a press landed on a gutter change mark (`line_marks`) this frame */
+    int line_mark_index;       /* with it: the index of the range in `line_marks` */
     bool working;              /* work for a big text runs on another thread: colors below an edit far above the view are
                                 * still being found, Replace all is still finding its matches, or the find bar still counts them (it says so).
                                 * The editor asks for frames until it is done; nothing waits for it. */

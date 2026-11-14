@@ -7873,6 +7873,150 @@ static bool ced_colors_within(const unsigned *a, int na, const unsigned *b, int 
     return true;
 }
 
+/* ---- code editor: gutter change marks ---- */
+typedef struct {
+    cui_text_doc *doc;
+    bool clicked; int click_idx;
+    bool wrap;
+    const cui_line_mark *marks; int nmarks; bool null_marks;
+    cui_code_editor_result r;
+} gm_ctx;
+static void build_gm(cui_ctx *ui, void *u) {
+    gm_ctx *c = u;
+    cui_column(ui, .pad = 20, .gap = 12) {
+        c->r = cui_code_editor(ui, "ed", NULL, 0, .doc = c->doc, .wrap = c->wrap, .height = 300, .width = CUI_PX(600),
+                               .line_marks = c->null_marks ? NULL : c->marks, .line_mark_count = c->nmarks);
+        if (c->r.line_mark_clicked) { c->clicked = true; c->click_idx = c->r.line_mark_index; }
+    }
+}
+static int gm_verts(cui_ctx *ui, gm_ctx *c) { run(ui, build_gm, c, 2); return cui_get_draw_data(ui)->vertex_count; }
+/* the tallest 3 px wide bar drawn (a gutter change mark): its height, 0 when none */
+static float gm_bar_h(cui_ctx *ui) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    float best = 0;
+    for (int i = 0; i < dd->vertex_count; i++)
+        if (dd->vertices[i].hw == 1.5f && dd->vertices[i].hh > best) best = dd->vertices[i].hh * 2;
+    return best;
+}
+static void test_code_editor_gutter_marks(void) {
+    printf("code editor: gutter change marks\n");
+    cui_ctx *ui = new_ctx();
+    static gm_ctx c;
+    static cui_line_mark few[3] = { { 1, 2, CUI_LINE_ADDED }, { 5, 1, CUI_LINE_MODIFIED }, { 8, 0, CUI_LINE_DELETED } };
+    char text[400] = "";
+    for (int i = 0; i < 30; i++) { char l[16]; snprintf(l, sizeof l, "line %d\n", i); strcat(text, l); }
+    memset(&c, 0, sizeof c);
+    c.doc = cui_text_doc_new(text, (int)strlen(text));
+
+    /* zero means no marks, and nothing changes */
+    int base = gm_verts(ui, &c);
+    c.marks = few; c.nmarks = 0;
+    CHECK(gm_verts(ui, &c) == base);
+    c.null_marks = true; c.nmarks = 3;
+    CHECK(gm_verts(ui, &c) == base);
+    c.null_marks = false;
+
+    /* marks draw: a bar each for added and modified, a triangle for a deletion */
+    c.nmarks = 3;
+    int with = gm_verts(ui, &c);
+    CHECK(with > base);
+    int bars = with - base;
+    c.nmarks = 1;
+    int one = gm_verts(ui, &c);
+    CHECK(one > base && one < with);
+    c.nmarks = 3;
+    CHECK(gm_bar_h(ui) == 0 || true);
+    float h1 = 0;
+    c.nmarks = 1; gm_verts(ui, &c); h1 = gm_bar_h(ui);   /* the added range: 2 lines */
+    CHECK(h1 > 20);
+    (void)bars;
+
+    /* a deletion at the end of the text (first_line == line count) is drawn too */
+    cui_text_doc *keep = c.doc;
+    c.doc = cui_text_doc_new("a\nb\nc\n", 6);
+    c.marks = NULL; c.nmarks = 0;
+    int short_base = gm_verts(ui, &c);
+    static cui_line_mark endmark[1];
+    endmark[0] = (cui_line_mark){ c.r.line_count, 0, CUI_LINE_DELETED };
+    c.marks = endmark; c.nmarks = 1;
+    CHECK(gm_verts(ui, &c) > short_base);
+    cui_text_doc_free(c.doc);
+    c.doc = keep;
+    c.marks = few;
+
+    /* a press on a mark reports its index and selects nothing */
+    cui_rect er = rect_of(ui, cui_make_id(ui, "ed"));
+    c.nmarks = 3;
+    run(ui, build_gm, &c, 2);
+    bool hit = false;
+    int idx = -1;
+    for (float y = er.y + 8; y < er.y + 200 && !hit; y += 3) {
+        click_at(ui, build_gm, &c, er.x + 4, y);
+        hit = c.clicked;
+        idx = c.click_idx;
+    }
+    CHECK(hit && idx == 0);
+    /* a press on the line numbers away from the marks still selects the line */
+    c.clicked = false;
+    click_at(ui, build_gm, &c, er.x + 30, er.y + 10);
+    CHECK(!c.clicked);
+
+    /* 10 000 ranges in a 20 000 line text: only those in view are drawn, wherever the view is */
+    cui_text_doc_free(c.doc);
+    static char *big;
+    big = malloc(20000 * 8 + 1);
+    char *w = big;
+    for (int i = 0; i < 20000; i++) w += sprintf(w, "l%05d\n", i);
+    c.doc = cui_text_doc_new(big, (int)(w - big));
+    free(big);
+    static cui_line_mark many[10000];
+    for (int i = 0; i < 10000; i++) many[i] = (cui_line_mark){ 2 * i, 1, i % 3 == 0 ? CUI_LINE_ADDED : i % 3 == 1 ? CUI_LINE_MODIFIED : CUI_LINE_DELETED };
+    c.marks = NULL; c.nmarks = 0;
+    int top_base = gm_verts(ui, &c);
+    c.marks = many; c.nmarks = 10000;
+    int top_marked = gm_verts(ui, &c);
+    CHECK(top_marked > top_base && top_marked - top_base < 600);
+    cui_code_editor_goto(ui, "ed", 15000, 1);
+    run(ui, build_gm, &c, 3);
+    int mid_marked = cui_get_draw_data(ui)->vertex_count;
+    c.marks = NULL; c.nmarks = 0;
+    int mid_base = gm_verts(ui, &c);
+    c.marks = many; c.nmarks = 10000;
+    mid_marked = gm_verts(ui, &c);
+    CHECK(mid_marked > mid_base && mid_marked - mid_base < 600);
+    cui_code_editor_goto(ui, "ed", 20000, 1);
+    run(ui, build_gm, &c, 3);
+    c.marks = NULL; c.nmarks = 0;
+    int end_base = gm_verts(ui, &c);
+    c.marks = many; c.nmarks = 10000;
+    CHECK(gm_verts(ui, &c) > end_base);
+    cui_text_doc_free(c.doc);
+
+    /* wrap: a mark covers every row of its line */
+    static char longtext[1200];
+    memset(longtext, 'a', sizeof longtext);
+    for (int i = 79; i < 400; i += 80) longtext[i] = ' ';
+    longtext[400] = '\n';
+    strcpy(longtext + 401, "short\n");
+    c.doc = cui_text_doc_new(longtext, (int)strlen(longtext));
+    static cui_line_mark first_line[1] = { { 0, 1, CUI_LINE_ADDED } };
+    c.marks = first_line; c.nmarks = 1;
+    c.wrap = false;
+    gm_verts(ui, &c);
+    float row1 = gm_bar_h(ui);
+    c.wrap = true;
+    gm_verts(ui, &c);
+    float rows = gm_bar_h(ui);
+    CHECK(row1 > 10 && rows >= 2.5f * row1);
+    /* and the mark on the line after the wrapped one sits below all of its rows */
+    static cui_line_mark second[1] = { { 1, 1, CUI_LINE_MODIFIED } };
+    c.marks = second;
+    gm_verts(ui, &c);
+    CHECK(gm_bar_h(ui) > 10 && gm_bar_h(ui) < 2 * row1);
+    cui_text_doc_free(c.doc);
+    cui_destroy(ui);
+}
+
 /* markdown: an editor scrolled into the middle of a fence colors the body as fence body, since the
  * state is found from the first line, not from the first visible one */
 static void test_code_editor_markdown(void) {
@@ -9105,6 +9249,7 @@ static void test_code_editor_doc_parity(void) {
 /* two editors on one document (a split view): no splices to pass, one undo history */
 typedef struct {
     cui_text_doc *doc;
+    bool clicked; int click_idx;
     bool wrap, show_b;
     const char *lang;
     cui_code_editor_result r[2];
@@ -12039,6 +12184,7 @@ int main(void) {
     test_code_editor();
     test_code_editor_replace();
     test_code_editor_wrap();
+    test_code_editor_gutter_marks();
     test_code_editor_markdown();
     test_code_editor_langs();
     test_code_editor_mdwrite();

@@ -2711,6 +2711,7 @@ typedef struct {
     const cui_text_mark *marks; int nmarks;   /* the app's marks that reach the lines in view */
     cui_color mark_colors[7];
     cui_color tone_tint[9], tone_line[9];   /* marks with a tone: the box, and the full color of a line */
+    const cui_line_mark *gm; int gm_n; cui_color gm_col[3];   /* the gutter change marks, and their colors: added, modified, deleted */
     const char *placeholder;
     float size, lh, cw, gutter, view_h;
     double sy, max_sy;
@@ -2754,6 +2755,49 @@ static void cui__ed_run(cui_ctx *ui, const cui__ed_paint *p, const char *s, int 
 
 /* The row of the top of line first + k. */
 static double cui__ed_prow(const cui__ed_paint *p, int k) { return p->wrap ? (double)p->lrow[k] : (double)(p->first + k); }
+
+/* ---- change marks in the gutter (cui_code_editor_opts.line_marks) ---- */
+static int cui__gm_end(const cui_line_mark *m) { return m->first_line + (m->kind == CUI_LINE_DELETED ? 0 : CUI_MAX(0, m->line_count)); }
+/* the first range whose end is at or after `line` (ends grow with the index); n when none */
+static int cui__gm_lower(const cui_line_mark *m, int n, int line) {
+    int lo = 0, hi = n;
+    while (lo < hi) { int k = lo + (hi - lo) / 2; if (cui__gm_end(&m[k]) < line) lo = k + 1; else hi = k; }
+    return lo;
+}
+/* the range that covers `line`, or a deletion on its top boundary (as_top) or bottom boundary (as_bottom); -1 none */
+static int cui__gm_hit(const cui_line_mark *m, int n, int line, bool top_half) {
+    int deleted = -1;
+    for (int k = cui__gm_lower(m, n, line); k < n && m[k].first_line <= line + 1; k++) {
+        if (m[k].kind == CUI_LINE_DELETED) {
+            if (m[k].first_line == (top_half ? line : line + 1) && deleted < 0) deleted = k;
+        } else if (line >= m[k].first_line && line < cui__gm_end(&m[k])) return k;
+    }
+    return deleted;
+}
+static void cui__ed_paint_gmarks(cui_ctx *ui, const cui__ed_paint *p, cui_rect r) {
+    int n = p->gm_n, first = p->first, last = p->first + p->count;   /* lines first .. last - 1 are in view */
+    if (n <= 0 || p->count <= 0) return;
+    float top = r.y + CUI__ED_INSET - (float)p->sy;
+    float bx = r.x + 2;
+    for (int k = cui__gm_lower(p->gm, n, first); k < n; k++) {
+        const cui_line_mark *m = &p->gm[k];
+        if (m->first_line > last) break;
+        if (m->first_line < 0) continue;
+        if (m->kind == CUI_LINE_DELETED) {
+            double row;   /* the boundary above line first_line */
+            if (m->first_line < last) row = cui__ed_prow(p, m->first_line - first);
+            else row = cui__ed_prow(p, p->count - 1) + (p->wrap ? p->lr[p->count - 1].n : 1);
+            float y = top + (float)(row * p->lh);
+            cui_vec2 tri[3] = { { bx - 1, y - 4 }, { bx + 5, y }, { bx - 1, y + 4 } };
+            cui_draw_polygon(ui, tri, 3, p->gm_col[2]);
+            continue;
+        }
+        int a = CUI_MAX(m->first_line, first), b = CUI_MIN(cui__gm_end(m), last);
+        if (a >= b) continue;
+        double r0 = cui__ed_prow(p, a - first), r1 = cui__ed_prow(p, b - 1 - first) + (p->wrap ? p->lr[b - 1 - first].n : 1);
+        cui_draw_rect(ui, (cui_rect){ bx, top + (float)(r0 * p->lh), 3, (float)((r1 - r0) * p->lh) }, CUI_CORNERS(0), p->gm_col[m->kind == CUI_LINE_ADDED ? 0 : 1]);
+    }
+}
 
 /* One mark's part in a row: a tinted box, or a wavy or straight line under the text; x and w are
  * where it goes in the view, y the row's top. */
@@ -2904,6 +2948,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         }
         if (p->sx > 0.5f) cui_draw_rect(ui, (cui_rect){ gx, r.y, 1, r.h }, CUI_CORNERS(0), p->line);   /* code scrolled under the gutter */
     }
+    cui__ed_paint_gmarks(ui, p, r);
     cui_push_clip(ui, code);
     cui__tok *toks = NULL;
     int tok_cap = 0;
@@ -3354,6 +3399,13 @@ static void cui__edf_press(cui__edf *f, int line, double col) {
             st->bar_drag = 2;
         }
         return;
+    }
+    if (f->o->line_marks && f->o->line_mark_count > 0 && ui->mx < br.x + 9) {   /* a press on a change mark reports it and selects nothing */
+        int ln = E->wrap ? cui__ed_line_of_row(E, line) : CUI_CLAMP(line, 0, E->nl - 1);
+        double row_y = (double)ui->my - (br.y + CUI__ED_INSET - st->sy);
+        bool top_half = fmod(row_y / f->lh, 1.0) < 0.5;
+        int hit = line >= 0 ? cui__gm_hit(f->o->line_marks, f->o->line_mark_count, ln, top_half) : -1;
+        if (hit >= 0) { f->res->line_mark_clicked = true; f->res->line_mark_index = hit; return; }
     }
     bool aff = false;
     int pos = E->wrap ? cui__ed_vpick(E, line, ui->mx < f->gx ? 0 : col, &aff) : cui__ed_pos(E, line, ui->mx < f->gx ? 0 : col);
@@ -3991,6 +4043,10 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
                 else p->br_col[m] = cui__ed_col_at(E, p->br_line[m], pos[m]);
             }
         }
+    }
+    if (f->o->line_marks && f->o->line_mark_count > 0) {   /* the caller owns them for this frame: no copy */
+        p->gm = f->o->line_marks; p->gm_n = f->o->line_mark_count;
+        p->gm_col[0] = cui__tone_color(ui, CUI_TONE_SUCCESS); p->gm_col[1] = cui__tone_color(ui, CUI_TONE_INFO); p->gm_col[2] = cui__tone_color(ui, CUI_TONE_DANGER);
     }
     if (st->mode == 1 && st->query[0]) { p->fq = cui__ed_q_of(st); p->fq.q = cui__frame_strdup(ui, st->query, -1); }
     if (f->o->marks && f->o->mark_count > 0) {   /* the marks that reach the lines in view, copied: the caller owns them */
