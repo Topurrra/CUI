@@ -2225,6 +2225,41 @@ typedef struct cui_diff_range { int start, length; } cui_diff_range;
 CUI_API bool cui_diff_words(const char *old_line, int old_len, const char *new_line, int new_len,
                             cui_diff_range *old_ranges, int *old_count, cui_diff_range *new_ranges, int *new_count, int cap);
 
+/* ---- Inflate (DEFLATE and zlib decompression) ---- */
+/* Unpacks a raw DEFLATE stream (RFC 1951), or with CUI_INFLATE_ZLIB a zlib
+ * stream (RFC 1950: the 2 byte header, DEFLATE, then the Adler-32 of the
+ * output, checked unless CUI_INFLATE_NO_CHECK). One call decodes the whole
+ * stream; it needs no cui_ctx and keeps no state, so call it on any thread.
+ * Corrupt or truncated input fails cleanly (CUI_INFLATE_ERROR) and never
+ * reads or writes out of bounds. Bytes after the end of the stream are not
+ * used: r.in_used says where it ended (header and check value included), e.g.
+ * to find the next object in a git pack.
+ *
+ * Output bigger than dst_cap is an error, unless CUI_INFLATE_STOP_WHEN_FULL:
+ * then it stops with dst full and r.status CUI_INFLATE_FULL (r.in_used is
+ * then how far the input was read, not a stream boundary). That reads a
+ * header from the first bytes cheaply, such as a git object's "blob 1234".
+ * cui_inflate_alloc decodes into a malloc'd buffer that starts at size_hint
+ * bytes (0: four times the input) and grows as needed up to max_out bytes
+ * (0: no limit); past max_out it fails, or stops with CUI_INFLATE_FULL with
+ * CUI_INFLATE_STOP_WHEN_FULL. It returns NULL on an error (out of memory
+ * included); free the buffer with free(). */
+typedef enum cui_inflate_status { CUI_INFLATE_OK = 0, CUI_INFLATE_FULL = 1, CUI_INFLATE_ERROR = -1 } cui_inflate_status;
+enum {                                /* cui_inflate flags */
+    CUI_INFLATE_RAW = 0,              /* raw DEFLATE (the default) */
+    CUI_INFLATE_ZLIB = 1,             /* a zlib stream: header, DEFLATE, Adler-32 */
+    CUI_INFLATE_STOP_WHEN_FULL = 2,   /* a full output stops the decoding instead of failing it */
+    CUI_INFLATE_NO_CHECK = 4          /* zlib: skip the Adler-32 check (the 4 bytes must still be there) */
+};
+typedef struct cui_inflate_result {
+    cui_inflate_status status;
+    size_t out_len;                   /* bytes written to the output */
+    size_t in_used;                   /* bytes of the input consumed */
+} cui_inflate_result;
+CUI_API cui_inflate_result cui_inflate(const void *src, size_t src_len, void *dst, size_t dst_cap, unsigned flags);
+CUI_API void *cui_inflate_alloc(const void *src, size_t src_len, unsigned flags, size_t size_hint, size_t max_out,
+                                cui_inflate_result *result);
+
 /* ------------------------------------------------------------------------ */
 /* Conversation                                                             */
 /* ------------------------------------------------------------------------ */

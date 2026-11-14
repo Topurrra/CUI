@@ -86,11 +86,12 @@ set(CUI_CORE_SOURCES
     src/cui_terminal.c
     src/cui_vt.c
     src/cui_emoji.c
+    src/cui_inflate.c
     src/render/cui_render_sw.c
     src/render/cui_render_gl.c)
 
 if(CUI_DEFAULT_FONTS)
-    list(APPEND CUI_CORE_SOURCES src/cui_font_data.c src/cui_inflate.c)
+    list(APPEND CUI_CORE_SOURCES src/cui_font_data.c)
 endif()
 
 # Pick the window backend

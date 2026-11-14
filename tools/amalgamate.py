@@ -38,7 +38,7 @@ def library_sources():
     """The library's source files, in a stable order, with the optional ones fenced by the
     macro that turns them off (the same files CMakeLists.txt picks)."""
     src = os.path.join(ROOT, "src")
-    optional = {"cui_font_data.c": "!CUI_NO_DEFAULT_FONTS", "cui_inflate.c": "!CUI_NO_DEFAULT_FONTS",
+    optional = {"cui_font_data.c": "!CUI_NO_DEFAULT_FONTS",
                 "cui_bidi.c": "CUI_TEXT_SHAPING", "cui_shape.c": "CUI_TEXT_SHAPING"}
     files = []
     for name in sorted(os.listdir(src)):

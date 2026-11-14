@@ -36,12 +36,101 @@ static void check_vec(const char *name, const unsigned char *v, size_t n, size_t
     free(out);
 }
 
+static int same(const unsigned char *out, size_t n, unsigned char (*expect)(int)) {
+    for (size_t i = 0; i < n; i++)
+        if (out[i] != expect((int)i)) return 0;
+    return 1;
+}
+
+/* The public API: raw with trailing bytes, zlib (header, Adler-32), stopping when full, a growing buffer. */
+static void check_public(const char *name, const unsigned char *v, size_t n, size_t want, unsigned char (*expect)(int)) {
+    unsigned char *out = malloc(want + 16);
+    int before = g_fail;
+    /* raw, followed by bytes that are not part of the stream: in_used stops at its end */
+    unsigned char *raw = malloc(n + 7);
+    memcpy(raw, v, n);
+    memset(raw + n, 0xA5, 7);
+    cui_inflate_result r = cui_inflate(raw, n + 7, out, want + 16, CUI_INFLATE_RAW);
+    CHECK(r.status == CUI_INFLATE_OK && r.out_len == want && r.in_used == n && same(out, want, expect));
+    r = cui_inflate(raw, n + 7, out, want - 1, CUI_INFLATE_RAW);
+    CHECK(r.status == CUI_INFLATE_ERROR);
+    /* zlib: 78 9C, the stream, the Adler-32 of the output, then trailing bytes */
+    unsigned char *z = malloc(n + 6 + 5);
+    z[0] = 0x78; z[1] = 0x9C;
+    memcpy(z + 2, v, n);
+    uint32_t ad = cui__adler32(out, want);
+    z[n + 2] = (unsigned char)(ad >> 24); z[n + 3] = (unsigned char)(ad >> 16);
+    z[n + 4] = (unsigned char)(ad >> 8); z[n + 5] = (unsigned char)ad;
+    memset(z + n + 6, 0x5A, 5);
+    memset(out, 0, want + 16);
+    r = cui_inflate(z, n + 11, out, want + 16, CUI_INFLATE_ZLIB);
+    CHECK(r.status == CUI_INFLATE_OK && r.out_len == want && r.in_used == n + 6 && same(out, want, expect));
+    CHECK(cui_inflate(z, n + 5, out, want + 16, CUI_INFLATE_ZLIB).status == CUI_INFLATE_ERROR);   /* check value cut */
+    z[n + 5] ^= 1;
+    CHECK(cui_inflate(z, n + 11, out, want + 16, CUI_INFLATE_ZLIB).status == CUI_INFLATE_ERROR);  /* wrong Adler-32 */
+    CHECK(cui_inflate(z, n + 11, out, want + 16, CUI_INFLATE_ZLIB | CUI_INFLATE_NO_CHECK).status == CUI_INFLATE_OK);
+    z[n + 5] ^= 1;
+    z[1] ^= 1;   /* header no longer a multiple of 31 */
+    CHECK(cui_inflate(z, n + 11, out, want + 16, CUI_INFLATE_ZLIB).status == CUI_INFLATE_ERROR);
+    z[1] ^= 1;
+    z[1] = 0xBC;  /* FDICT set (78 BC is a multiple of 31): preset dictionaries are not supported */
+    CHECK(((0x78 << 8) | 0xBC) % 31 != 0 || cui_inflate(z, n + 11, out, want + 16, CUI_INFLATE_ZLIB).status == CUI_INFLATE_ERROR);
+    z[1] = 0x9C;
+    /* stop when full: the first bytes, exactly, for every small size */
+    for (size_t cap = 0; cap < 300 && cap < want; cap += 7) {
+        memset(out, 0, want + 16);
+        r = cui_inflate(z, n + 11, out, cap, CUI_INFLATE_ZLIB | CUI_INFLATE_STOP_WHEN_FULL);
+        CHECK(r.status == CUI_INFLATE_FULL && r.out_len == cap && same(out, cap, expect) && r.in_used <= n + 11);
+    }
+    r = cui_inflate(z, n + 11, out, want, CUI_INFLATE_ZLIB | CUI_INFLATE_STOP_WHEN_FULL);   /* exactly the size: done */
+    CHECK(r.status == CUI_INFLATE_OK && r.out_len == want && r.in_used == n + 6);
+    /* a growing buffer, from a tiny start, then with limits */
+    unsigned char *g = cui_inflate_alloc(z, n + 11, CUI_INFLATE_ZLIB, 1, 0, &r);
+    CHECK(g && r.status == CUI_INFLATE_OK && r.out_len == want && r.in_used == n + 6 && same(g, want, expect));
+    free(g);
+    g = cui_inflate_alloc(raw, n + 7, CUI_INFLATE_RAW, 0, 0, &r);
+    CHECK(g && r.status == CUI_INFLATE_OK && r.out_len == want && r.in_used == n && same(g, want, expect));
+    free(g);
+    g = cui_inflate_alloc(raw, n, CUI_INFLATE_RAW, 0, want, &r);
+    CHECK(g && r.status == CUI_INFLATE_OK && r.out_len == want);
+    free(g);
+    g = cui_inflate_alloc(raw, n, CUI_INFLATE_RAW, 0, want - 1, &r);
+    CHECK(!g && r.status == CUI_INFLATE_ERROR);
+    g = cui_inflate_alloc(raw, n, CUI_INFLATE_RAW | CUI_INFLATE_STOP_WHEN_FULL, 16, 100, &r);
+    CHECK(g && r.status == CUI_INFLATE_FULL && r.out_len == 100 && same(g, 100, expect));
+    free(g);
+    for (size_t cut = 0; cut < n; cut += 1 + n / 32) {   /* truncated input fails, and frees */
+        g = cui_inflate_alloc(raw, cut, CUI_INFLATE_RAW, 0, 0, &r);
+        CHECK(!g || r.out_len != want);
+        free(g);
+    }
+    unsigned char *bad = malloc(n + 11);
+    srand(2);
+    for (int t = 0; t < 1000; t++) {                     /* flipped bits must not crash or leak a wrong success */
+        memcpy(bad, z, n + 11);
+        for (int k = 0; k < 3; k++) bad[2 + rand() % n] ^= (unsigned char)(1 << (rand() % 8));
+        g = cui_inflate_alloc(bad, n + 11, CUI_INFLATE_ZLIB, 0, 1 << 20, &r);
+        if (g) CHECK(r.status == CUI_INFLATE_OK && cui__adler32(g, r.out_len) == ad);
+        free(g);
+        (void)cui_inflate(bad, n + 11, out, 64, CUI_INFLATE_ZLIB | CUI_INFLATE_STOP_WHEN_FULL);
+    }
+    free(bad);
+    printf("public  %-8s %s\n", name, g_fail == before ? "ok" : "FAILED");
+    free(z);
+    free(raw);
+    free(out);
+}
+
 int main(void) {
     size_t text_len = 45 * 40 + 256;
     check_vec("stored", v_stored, sizeof v_stored, text_len, expect_text);
     check_vec("fixed", v_fixed, sizeof v_fixed, text_len, expect_text);
     check_vec("dynamic", v_dynamic, sizeof v_dynamic, text_len, expect_text);
     check_vec("rle", v_rle, sizeof v_rle, 8000, expect_rle);
+    check_public("stored", v_stored, sizeof v_stored, text_len, expect_text);
+    check_public("fixed", v_fixed, sizeof v_fixed, text_len, expect_text);
+    check_public("dynamic", v_dynamic, sizeof v_dynamic, text_len, expect_text);
+    check_public("rle", v_rle, sizeof v_rle, 8000, expect_rle);
     printf("%s\n", g_fail ? "inflate: FAILED" : "inflate: all ok");
     return g_fail != 0;
 }
