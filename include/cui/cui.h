@@ -320,6 +320,11 @@ typedef struct cui_platform_iface {
 } cui_platform_iface;
 CUI_API void cui_set_platform(cui_ctx *ui, const cui_platform_iface *platform);
 CUI_API cui_cursor cui_get_cursor(cui_ctx *ui);
+/* Sets the mouse cursor for this frame, for your own hover areas (a custom splitter, a canvas
+ * tool). Components set theirs as they are built, so the last call of the frame wins: call it
+ * after them to override one. The cursor goes back to the arrow at the start of every frame, so
+ * set it every frame the pointer is over your area. A value outside cui_cursor is ignored. */
+CUI_API void cui_set_cursor(cui_ctx *ui, cui_cursor cursor);
 /* The system clipboard, for a menu or status bar item that copies or pastes ("Copy path").
  * They go through the platform's clipboard hooks, as the copy button and text fields do:
  * without a hook, setting does nothing and getting returns "". The returned text stays
@@ -485,6 +490,11 @@ CUI_API void cui_box_end(cui_ctx *ui);
 CUI_API cui_id cui_row_begin(cui_ctx *ui, const cui_box *opts);
 CUI_API cui_id cui_column_begin(cui_ctx *ui, const cui_box *opts);
 CUI_API void cui_spacer(cui_ctx *ui);                         /* flexible space */
+/* An invisible component of w by h points (0 and 0 for a point) that draws nothing and takes
+ * no input: a rectangle for cui_get_rect(ui, cui_make_id(ui, id)) next frame, or for a popover or
+ * tooltip to attach to as "the previous component", where no visible component marks the spot.
+ * It is a child like any other, so a row's or column's gap still applies around it. */
+CUI_API void cui_anchor(cui_ctx *ui, const char *id, float w, float h);
 CUI_API void cui_gap(cui_ctx *ui, float size);                /* fixed space */
 CUI_API void cui_separator(cui_ctx *ui);                      /* hairline, follows the parent direction */
 
@@ -590,6 +600,10 @@ typedef struct cui_text_opts {
     cui_size width;
     float line_height;         /* multiplier, default 1.45 */
     cui_direction direction;   /* inherited; AUTO examines this text */
+    /* Room around the text, as in cui_box (the specific side wins over pad_x and pad_y, which win
+     * over pad); 0 adds none. With any of them the text sits in a box of its own, which takes
+     * `width` and the stretching, so wrapping and alignment work inside the padded width. */
+    float pad, pad_x, pad_y, pad_top, pad_right, pad_bottom, pad_left;
 } cui_text_opts;
 
 CUI_API void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *opts);
@@ -757,6 +771,13 @@ typedef struct cui_nav_opts {
     const char *badge;         /* small text at the right edge of the item, e.g. a count */
     bool selected;             /* the current page: medium weight text, and the group's highlight glides to it */
     const char *group;         /* items with the same group name share one highlight; `NULL` puts them in one common group */
+    /* A small icon button at the right edge of the row, shown while the row is hovered or focused
+     * (a "more" or "remove" action). The space is kept when it is hidden, so the label does not
+     * move. A click on it does not select the row: cui_nav_item_ex returns false and
+     * *action_clicked is set. `NULL` (the default) leaves the button out. */
+    const char *action_icon;   /* e.g. CUI_ICON_X */
+    const char *action_tooltip;   /* tooltip of the button; `NULL` for none */
+    bool *action_clicked;      /* set to true on the frame the button is clicked, otherwise left as it is */
 } cui_nav_opts;
 CUI_API bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *opts);
 CUI_API void cui_nav_section(cui_ctx *ui, const char *title);

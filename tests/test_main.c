@@ -522,6 +522,113 @@ static void test_nav_highlight(void) {
     cui_destroy(ui);
 }
 
+/* Small additions for the jncode app: cursor setter, anchor, text padding, nav action,
+ * the new icons. */
+typedef struct { int mode; bool action; bool clicked, row_clicked; cui_id item, anchor_prev; cui_cursor want; } js_ctx;
+static void build_js(cui_ctx *ui, void *u) {
+    js_ctx *c = u;
+    cui_column(ui, .pad = 20, .gap = 4, .width = CUI_PX(240)) {
+        if (c->mode == 1) {
+            cui_anchor(ui, "spot", 0, 0);
+            c->item = cui_last_id(ui);
+            cui_anchor(ui, "box", 30, 12);
+        } else if (c->mode == 2) {
+            cui_text_ex(ui, "plain", &(cui_text_opts){ 0 });
+            c->item = cui_last_id(ui);
+        } else if (c->mode == 3) {
+            if (cui_nav_item(ui, "Notes", .action_icon = c->action ? CUI_ICON_X : NULL, .action_tooltip = "Close",
+                             .action_clicked = &c->clicked)) c->row_clicked = true;
+            c->item = cui_last_id(ui);
+        }
+    }
+    if (c->mode == 4) cui_set_cursor(ui, c->want);
+}
+static float js_text_h(cui_ctx *ui, const cui_text_opts *o, float *w_out) {
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_row(ui, .pad = 10, .width = CUI_PX(300)) {
+        cui_column(ui, .id = "tcol", .width = CUI_PX(200), .align = CUI_ALIGN_START) {
+            cui_text_ex(ui, "hello", o);
+        }
+    }
+    cui_end_frame(ui);
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_row(ui, .pad = 10, .width = CUI_PX(300)) {
+        cui_column(ui, .id = "tcol", .width = CUI_PX(200), .align = CUI_ALIGN_START) {
+            cui_text_ex(ui, "hello", o);
+        }
+    }
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "tcol"));
+    cui_end_frame(ui);
+    if (w_out) *w_out = r.w;
+    return r.h;
+}
+static void test_jn_small(void) {
+    printf("small additions: cursor, anchor, text padding, nav action, icons\n");
+    cui_ctx *ui = new_ctx();
+    js_ctx c = { 0 };
+    /* cursor: starts as the arrow each frame, the setter wins, out of range is ignored */
+    c.mode = 4; c.want = CUI_CURSOR_RESIZE_EW;
+    run(ui, build_js, &c, 2);
+    CHECK(cui_get_cursor(ui) == CUI_CURSOR_RESIZE_EW);
+    c.want = CUI_CURSOR_COUNT;
+    run(ui, build_js, &c, 1);
+    CHECK(cui_get_cursor(ui) == CUI_CURSOR_ARROW);
+    c.mode = 0;
+    run(ui, build_js, &c, 2);
+    CHECK(cui_get_cursor(ui) == CUI_CURSOR_ARROW);
+    /* anchor: a rect of the given size, none for 0 x 0, usable as the last component */
+    c.mode = 1;
+    run(ui, build_js, &c, 3);
+    cui_rect a0 = rect_of(ui, cui_make_id(ui, "spot")), a1 = rect_of(ui, cui_make_id(ui, "box"));
+    CHECK(a0.w == 0 && a0.h == 0);
+    CHECK(a1.w == 30 && a1.h == 12);
+    CHECK(a1.x == 20 && a1.y > a0.y);
+    CHECK(c.item == cui_make_id(ui, "spot"));
+    cui_destroy(ui);
+    /* text padding: zero changes nothing, padding grows the box */
+    ui = new_ctx();
+    float w0, w1;
+    float h0 = js_text_h(ui, &(cui_text_opts){ 0 }, &w0);
+    float h1 = js_text_h(ui, &(cui_text_opts){ .pad = 0 }, &w1);
+    CHECK(h0 == h1 && w0 == w1);
+    float h2 = js_text_h(ui, &(cui_text_opts){ .pad_y = 6 }, NULL);
+    CHECK(fabsf(h2 - (h0 + 12)) < 0.01f);
+    float h3 = js_text_h(ui, &(cui_text_opts){ .pad = 3, .pad_top = 10 }, NULL);
+    CHECK(fabsf(h3 - (h0 + 13)) < 0.01f);
+    float h4 = js_text_h(ui, &(cui_text_opts){ .pad_x = 8 }, &w1);
+    CHECK(fabsf(h4 - h0) < 0.01f && w1 == w0);
+    cui_destroy(ui);
+    /* nav action: hovering shows it; a click on it is reported and is not a row click */
+    ui = new_ctx();
+    c = (js_ctx){ .mode = 3, .action = true };
+    cui_input_mouse_move(ui, 790, 590);
+    run(ui, build_js, &c, 3);
+    cui_rect row = rect_of(ui, c.item);
+    float ax = row.x + row.w - 10 - 11, ay = row.y + row.h / 2;   /* the 22 point button at the row's right padding */
+    click_at(ui, build_js, &c, ax, ay);
+    CHECK(c.clicked && !c.row_clicked);
+    c.clicked = false;
+    click_at(ui, build_js, &c, row.x + 20, ay);   /* the label: a row click, no action */
+    CHECK(!c.clicked && c.row_clicked);
+    /* without an action icon the layout and clicks are as before */
+    c = (js_ctx){ .mode = 3, .action = false };
+    run(ui, build_js, &c, 3);
+    row = rect_of(ui, c.item);
+    click_at(ui, build_js, &c, row.x + row.w - 21, row.y + row.h / 2);
+    CHECK(!c.clicked && c.row_clicked);
+    cui_destroy(ui);
+    /* icons: each draws a glyph of the icon font */
+    ui = new_ctx();
+    const char *icons[] = { CUI_ICON_PLUG, CUI_ICON_PUZZLE, CUI_ICON_ARCHIVE };
+    for (int k = 0; k < 3; k++) {
+        cui_text_metrics m = cui_measure_text(ui, CUI_FONT_ICONS, 16, icons[k], -1);
+        CHECK(m.width > 8 && fabsf(m.width - 16) < 2);
+        CHECK(strlen(icons[k]) == 3);
+    }
+    CHECK(strcmp(CUI_ICON_PLUG, CUI_ICON_PUZZLE) != 0 && strcmp(CUI_ICON_PLUG, CUI_ICON_ARCHIVE) != 0);
+    cui_destroy(ui);
+}
+
 /* A click focuses without a ring; the next key shows the ring and acts on
  * that control, unless an open popup above it owns the keyboard. */
 typedef struct { int clicks, sel; cui_id button, select; } ck_ctx;
@@ -11752,6 +11859,7 @@ int main(void) {
     test_keyboard_nav();
     test_copy_button_focus();
     test_nav_highlight();
+    test_jn_small();
     test_clipboard_api();
     test_clock_step_bound();
     test_toggles_and_slider();

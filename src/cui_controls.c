@@ -778,9 +778,13 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
     cui_id gid = cui_make_id(ui, o->group ? o->group : "#nav");
     cui__nav_group *g = cui_state(ui, gid, sizeof *g);
     cui_id id = cui_make_id(ui, label) ^ 0x4A570005u;
+    cui_id aid = id ^ 0x4A57A001u;   /* the action button, a child on top of the row */
+    cui_interact ar;
+    memset(&ar, 0, sizeof ar);
+    if (o->action_icon) ar = cui__interact(ui, aid, 0);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     cui__nav_state *st = cui_state(ui, id, sizeof *st);
-    cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
+    cui__tween(ui, &st->hover, r.hovered || ar.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
     cui__spring(ui, &st->press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
@@ -848,6 +852,24 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
         ui->nodes[b].flags |= CUI_NF_TABULAR;
         ui->nodes[b].line_height = 1.2f;
     }
+    if (o->action_icon) {
+        int a = cui__node_new(ui, aid);
+        cui_node *an = &ui->nodes[a];
+        an->dir = CUI_ROW; an->align = CUI_ALIGN_CENTER; an->justify = CUI_JUSTIFY_CENTER;
+        an->w = CUI_PX(22); an->h = CUI_PX(22);
+        an->self_align = CUI_ALIGN_CENTER;
+        an->radius = CUI_CORNERS(5);
+        if (ar.hovered) an->bg = ar.pressed ? CUI_C(ui, ACTIVE) : cui_mix(CUI_C(ui, HOVER), CUI_C(ui, ACTIVE), 0.6f);
+        cui__mark_interactive(ui, a, 0);
+        cui__open(ui, a);
+        float show = CUI_MAX(st->hover, st->focus);
+        if (ar.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
+        cui__icon_node(ui, o->action_icon, 14, cui_alpha(ar.hovered ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY), show));
+        cui__close(ui);
+        if (ar.clicked && o->action_clicked) *o->action_clicked = true;
+        ui->last_id = aid;
+        if (o->action_tooltip) cui_tooltip(ui, o->action_tooltip);
+    }
     cui__close(ui);
     if (st->focus > 0.01f) {
         float *fa = cui__frame_alloc(ui, sizeof(float));
@@ -857,7 +879,7 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
         ui->nodes[i].flags |= CUI_NF_PAINT_AFTER;
     }
     ui->last_id = id;
-    return r.clicked;
+    return r.clicked && !ar.hovered;
 }
 
 void cui__paint_nav_highlight(cui_ctx *ui, cui_node *n, void *data) {

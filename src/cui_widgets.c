@@ -66,13 +66,27 @@ void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *o) {
     if (!o) o = &d;
     float size = o->size > 0 ? o->size : ui->theme.text_body;
     cui_color c = cui__color_set(o->color) ? cui_color_of(ui, o->color) : CUI_C(ui, FOREGROUND);
+    float px = o->pad_x > 0 ? o->pad_x : o->pad, py = o->pad_y > 0 ? o->pad_y : o->pad;
+    float pads[4] = { o->pad_top > 0 ? o->pad_top : py, o->pad_right > 0 ? o->pad_right : px,
+                      o->pad_bottom > 0 ? o->pad_bottom : py, o->pad_left > 0 ? o->pad_left : px };
+    bool padded = pads[0] > 0 || pads[1] > 0 || pads[2] > 0 || pads[3] > 0;
+    int wrapper = -1;
+    if (padded) {
+        /* a box around the text carries the room, the width and the stretch */
+        wrapper = cui__node_new(ui, 0);
+        cui_node *wn = &ui->nodes[wrapper];
+        for (int k = 0; k < 4; k++) wn->pad[k] = pads[k];
+        if (o->width.kind != CUI_SIZE_FIT) wn->w = o->width;
+        else if (o->align != CUI_TEXT_LEFT && o->align != CUI_TEXT_START) wn->self_align = CUI_ALIGN_STRETCH;
+        cui__open(ui, wrapper);
+    }
     int i = cui__text_node(ui, text, o->length > 0 ? o->length : -1, o->font, cui__fs(ui, size), c, !o->nowrap);
     cui_node *n = &ui->nodes[i];
     n->text_align = (uint8_t)o->align;
     n->direction = (uint8_t)o->direction;
     if (o->tabular) n->flags |= CUI_NF_TABULAR;
     if (o->line_height > 0) n->line_height = o->line_height;
-    if (o->width.kind != CUI_SIZE_FIT) n->w = o->width;
+    if (o->width.kind != CUI_SIZE_FIT) n->w = padded ? CUI_FILL : o->width;
     if (o->align != CUI_TEXT_LEFT && o->align != CUI_TEXT_START && o->width.kind == CUI_SIZE_FIT) n->self_align = CUI_ALIGN_STRETCH;
     if (o->nowrap && text && text[0] && n->text_len > 0) {
         text = n->text;   /* the frame copy: NUL terminated whatever o->length said */
@@ -86,6 +100,7 @@ void cui_text_ex(cui_ctx *ui, const char *text, const cui_text_opts *o) {
             if (tw > pr.w + 0.5f) cui__tooltip_passive(ui, tid, text);
         }
     }
+    if (wrapper >= 0) cui__close(ui);
 }
 
 void cui_textf(cui_ctx *ui, const char *fmt, ...) {

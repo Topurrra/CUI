@@ -222,6 +222,13 @@ void cui_spacer(cui_ctx *ui) {
     cui__leaf(ui, 0, row ? CUI_FILL : CUI_FIT, row ? CUI_FIT : CUI_FILL);
 }
 
+void cui_anchor(cui_ctx *ui, const char *id, float w, float h) {
+    cui_id aid = cui_make_id(ui, id);
+    int i = cui__leaf(ui, aid, CUI_PX(w > 0 ? w : 0), CUI_PX(h > 0 ? h : 0));
+    ui->nodes[i].self_align = CUI_ALIGN_START;
+    ui->last_id = aid;
+}
+
 void cui_gap(cui_ctx *ui, float size) {
     int cur = cui__current(ui);
     bool row = cur >= 0 && ui->nodes[cur].dir == CUI_ROW;

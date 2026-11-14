@@ -592,6 +592,9 @@ bool cui_wants_keyboard(cui_ctx *ui) { return ui->edit != NULL; }
 bool cui_wants_mouse(cui_ctx *ui) { return ui->hot != 0 || ui->active != 0; }
 
 void cui__set_cursor(cui_ctx *ui, cui_cursor c) { ui->cursor = c; }
+void cui_set_cursor(cui_ctx *ui, cui_cursor cursor) {
+    if ((int)cursor >= 0 && (int)cursor < CUI_CURSOR_COUNT) ui->cursor = cursor;
+}
 
 /* ------------------------------------------------------------------------ */
 /* Interaction                                                              */
