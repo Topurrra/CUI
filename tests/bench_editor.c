@@ -13,6 +13,10 @@
  *     cui_bench_editor --doc [MB ...]    the same as the default, on a cui_text_doc (`.doc`)
  *     cui_bench_editor --shared-doc [MB ...]   two editors on one cui_text_doc
  *     cui_bench_editor --replace-doc [A B]     --replace on a cui_text_doc
+ *     cui_bench_editor --async [c|markdown|replace]   work handed to other threads, frames at 60 a second:
+ *                                        Ctrl+End in a fresh 640 000 line file and a format of it (colors
+ *                                        settling), typing meanwhile, Replace all of 860 000 matches in 100 MB
+ *                                        (BENCH_TRACE=1 prints every frame over 4 ms)
  *     cui_bench_editor --compare [MB ...]      buffer (with .revision) and document side by side:
  *                                        open, typing near the top, middle and end, Enter,
  *                                        scrolling, replace all and its undo, memory (default 1 10 100)
@@ -420,8 +424,147 @@ static void shared(size_t mb, bool wrap, bool doc) {
     free(b.buf);
 }
 
+/* Work the editor hands to another thread: the line states after an edit of the whole text and
+ * after a jump to the end, and Replace all. Frames run at 60 a second (the rest of each 16.7 ms
+ * is slept, as an app's loop would), and each is timed; a job is done when the result's
+ * `working` clears. Prints the worst frame while the work went on, the frames over 16 ms, and
+ * the time until it was done (colors settled, the replacement applied). */
+#if defined(_WIN32)
+static void nap(double s) { if (s > 0) Sleep((DWORD)(s * 1000 + 0.5)); }
+#else
+static void nap(double s) { if (s > 0) { struct timespec t = { 0, (long)(s * 1e9) }; nanosleep(&t, NULL); } }
+#endif
+static bool working(const bench_ed *b) {
+#if defined(BENCH_SYNC)   /* the library before the work moved: nothing is ever pending */
+    (void)b;
+    return false;
+#else
+    return b->r.working;
+#endif
+}
+/* frames at 60 a second until the editor has nothing pending (or `limit` seconds): the worst
+ * frame, the frames over 16 ms, and the time it took (from t0) */
+static double settle(cui_ctx *ui, bench_ed *b, double t0, double limit, double *worst, int *over) {
+    *worst = 0; *over = 0;
+    for (int i = 0;; i++) {
+        double f0 = now();
+        double t = frames(ui, b, 1, 0);
+        if (t > *worst) *worst = t;
+        if (t > 16.0) (*over)++;
+        if (getenv("BENCH_TRACE") && t > 4.0) printf("  frame %d: %.1f ms%s\n", i, t, working(b) ? " (working)" : "");
+        if ((!working(b) && i >= 1) || now() - t0 > limit) break;
+        nap(1.0 / 60.0 - (now() - f0));
+    }
+    return (now() - t0) * 1000;
+}
+static void async_one(const char *lang) {
+    size_t size = 50u * 1024 * 1024;   /* about 640 000 lines */
+    char *t = malloc(size + 8192), *nt = malloc(size + 8192);
+    size_t len = gen(t, size, false, lang);
+    gen(nt, size, false, lang);
+    nt[0] = '/';   /* a formatter's output: another text of the same size */
+    bench_ed b;
+    memset(&b, 0, sizeof b);
+    b.lang = lang;
+    b.doc = cui_text_doc_adopt(t, (int)len, NULL, NULL);
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1200, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    double m0 = mem_mb();
+    double worst, open = frames(ui, &b, 1, 0);
+    int over, nl = b.r.line_count;
+    frames(ui, &b, 2, 0);
+    /* a fresh file, Ctrl+End: the states from the top to the end */
+    cui_code_editor_goto(ui, "ed", nl, 1);
+    double t0 = now(), end = settle(ui, &b, t0, 30, &worst, &over);
+    printf("async %-8s %7d lines | open %5.1f | Ctrl+End: worst frame %7.1f, over 16 ms %3d, colors settle %7.1f ms (at line %d)\n", lang, nl, open, worst, over, end, b.r.line);
+    /* the middle, then the whole text replaced (a format) */
+    cui_code_editor_goto(ui, "ed", nl / 2, 1);
+    frames(ui, &b, 3, 0);
+    int mid = b.r.cursor;   /* the caret stays where it was, as an app keeps it over a format */
+    t0 = now();
+    cui_code_editor_edit(ui, "ed", 0, (int)len, nt, mid, mid);
+    double call = (now() - t0) * 1000, first = frames(ui, &b, 1, 0);
+    double fmt = settle(ui, &b, t0, 30, &worst, &over);
+    printf("async %-8s %7d lines | format: edit call %5.1f, its frame %6.1f, then worst frame %7.1f, over 16 ms %3d, colors settle %7.1f ms (at line %d)\n",
+           lang, b.r.line_count, call, first, worst, over, fmt, b.r.line);
+    /* typing in view while the colors settle after another format: each key a frame */
+    cui_code_editor_edit(ui, "ed", 0, b.r.length, nt, mid + 2, mid + 2);
+    double tw = 0, tsum = 0;
+    t0 = now();
+    for (int i = 0; i < 30; i++) {
+        double f0 = now();
+        cui_input_key(ui, CUI_KEY_NONE, false, 0); cui_input_text(ui, "x");
+        double ft = frames(ui, &b, 1, 0);
+        tsum += ft; if (ft > tw) tw = ft;
+        nap(1.0 / 60.0 - (now() - f0));
+    }
+    double after = settle(ui, &b, t0, 30, &worst, &over);
+    printf("async %-8s %7d lines | format, then typing in view: %5.2f ms a key (worst %5.2f), colors settle %7.1f ms after the format (worst frame after %5.1f, at line %d)\n",
+           lang, b.r.line_count, tsum / 30, tw, after, worst, b.r.line);
+    printf("async %-8s memory %5.0f MB beyond the text\n", lang, mem_mb() - m0);
+    fflush(stdout);
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    cui_text_doc_free(b.doc);
+    free(nt);
+}
+/* Replace all of 400 000 matches in 100 MB: the frames from the key on until it is applied */
+static void async_replace(size_t mb) {
+    size_t size = mb * 1024 * 1024;
+    char *t = malloc(size + 8192);
+    size_t len = gen(t, size, false, "text");
+    bench_ed b;
+    memset(&b, 0, sizeof b);
+    b.lang = "text";
+    b.doc = cui_text_doc_adopt(t, (int)len, NULL, NULL);
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1200, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    frames(ui, &b, 3, 0);
+    double m0 = mem_mb();
+    cui_code_editor_replace(ui, "ed", "worker", "WORKER!");
+    for (int i = 0; i < 200; i++) frames(ui, &b, 1, 0);   /* the count done */
+    int matches = b.r.find_matches;
+    double m1 = mem_mb();
+    double t0 = now();
+    cui_input_key(ui, CUI_KEY_ENTER, true, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    cui_input_key(ui, CUI_KEY_ENTER, false, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    double worst; int over;
+    double total = settle(ui, &b, t0, 60, &worst, &over);
+    int after = b.r.length;
+    double m2 = mem_mb();
+    cui_input_key(ui, CUI_KEY_ESCAPE, true, 0); cui_input_key(ui, CUI_KEY_ESCAPE, false, 0);
+    frames(ui, &b, 2, 0);
+    cui_input_key(ui, CUI_KEY_Z, true, CUI_MOD_PRIMARY); cui_input_key(ui, CUI_KEY_Z, false, CUI_MOD_PRIMARY);
+    double undo = frames(ui, &b, 1, 0);
+    bool undone = b.r.length == (int)len;
+    cui_input_key(ui, CUI_KEY_Z, true, CUI_MOD_PRIMARY | CUI_MOD_SHIFT); cui_input_key(ui, CUI_KEY_Z, false, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    double redo = frames(ui, &b, 1, 0);
+    bool redone = b.r.length == after;
+    double sw_ = 0;   /* scrolling the replaced text */
+    cui_input_mouse_move(ui, 600, 400);
+    for (int i = 0; i < 20; i++) { cui_input_scroll(ui, 0, -3); double ft = frames(ui, &b, 1, 0); if (ft > sw_) sw_ = ft; }
+    printf("replace all %zu MB, %d matches | worst frame %6.1f, over 16 ms %d, applied after %7.1f ms | undo %6.1f redo %6.1f ms%s%s | scroll after (worst) %5.2f"
+           " | memory: count %4.0f, after %4.0f MB beyond the text (text %4.0f)\n",
+           mb, matches, worst, over, total, undo, redo, undone ? "" : " (NOT UNDONE)", redone ? "" : " (NOT REDONE)", sw_, m1 - m0, m2 - m0, (double)len / 1048576.0);
+    fflush(stdout);
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    cui_text_doc_free(b.doc);
+}
+
 int main(int argc, char **argv) {
-    bool sh = argc > 1 && (!strcmp(argv[1], "--shared") || !strcmp(argv[1], "--shared-doc"));
+    if (argc > 1 && !strcmp(argv[1], "--async")) {   /* --async [c|markdown|replace] */
+        bool all = argc < 3;
+        if (all || !strcmp(argv[2], "c")) async_one("c");
+        if (all || !strcmp(argv[2], "markdown")) async_one("markdown");
+        if (all || !strcmp(argv[2], "replace")) async_replace(100);
+        return 0;
+    }
+    bool sh =argc > 1 && (!strcmp(argv[1], "--shared") || !strcmp(argv[1], "--shared-doc"));
     if (sh) {   /* --shared[-doc] [MB ...] */
         bool doc = !strcmp(argv[1], "--shared-doc");
         size_t mbs[8] = { 10, 100 };

@@ -15,6 +15,15 @@
 #endif
 #define CUI__ED_SSE2 1
 #endif
+#if defined(_MSC_VER)
+#include <intrin.h>   /* _InterlockedExchangeAdd */
+#endif
+#if defined(_WIN32)
+#include <process.h>  /* _beginthread: jobs on another thread (see "work on another thread") */
+#elif !defined(__wasm__) || defined(__EMSCRIPTEN_PTHREADS__)
+#include <pthread.h>
+#define CUI__ED_PTHREADS 1
+#endif
 
 /* the scans are shared with the documents (cui_textdoc.c) */
 #define cui__ed_find_byte cui__find_byte
@@ -82,7 +91,13 @@ typedef struct {
     int n, valid, kept0, kept1;
     const char *lc; int mode; bool bt;   /* the language the states are for */
     bool ok;
+    unsigned epoch;             /* counts the times the states started over: a job's result is for one */
+    int dirty;                  /* the first line an edit touched since the job for the states began (INT_MAX: none) */
 } cui__ed_mc;
+
+/* Work on another thread (see "work on another thread" below): the line states after an edit far
+ * above the view, and Replace all on a document. */
+typedef struct cui__ed_job cui__ed_job;
 
 /* Undo: each edit keeps the bytes it removed and the bytes it put in (not a copy of the
  * text); edits of the same group undo together. */
@@ -131,6 +146,7 @@ typedef struct {
     bool pend_edit;             /* cui_code_editor_edit: replace [pend_es, pend_ee) with pend_text, then select */
     int pend_es, pend_ee, pend_sa, pend_sc;
     char *pend_text; int pend_n, pend_nl; bool pend_cr;   /* its length, line breaks, and whether it has carriage returns */
+    int *pend_lb;               /* on a document, a big text's line breaks (offsets), found as it was copied: the document reads it no more */
     float focus_t;
     cui__ed_wc *wc;             /* wrap cache, only while `.wrap` is on */
     cui__ed_mc *mc;             /* line states, for the languages with a state (markdown, yaml, xml...) and those with block comments */
@@ -148,6 +164,8 @@ typedef struct {
     cui_text_doc *doc;          /* with `.doc`: the document the caches are for, its revision they are at, and the */
     unsigned doc_seen, doc_mine; /* revision after this editor's own last edit (typing on joins its undo step only then) */
     unsigned doc_serial;        /* the document's serial: another document at the same address is another */
+    cui__ed_job *sjob;          /* the line states being found on another thread, or NULL */
+    cui__ed_job *rjob;          /* Replace all being worked out on another thread, or NULL */
 } cui__ed_state;
 
 /* The piece of a document read last: q[i] is byte i for i in [cs, ce) (q is biased: it points
@@ -170,6 +188,7 @@ typedef struct {
     bool wrap;                  /* soft wrapping on; wcols is the row width in columns */
     int wcols;
     int hint_cr, hint_nl;       /* for the next replace of cui_code_editor_edit's text, read while it was copied: 1 no carriage returns, 2 some; line breaks + 1 (0: not known) */
+    int *hint_lb;               /* and on a document, where they are (taken by the replace) */
     bool rep_on;                /* this frame's edits as one splice: [rep_a, rep_b0) of the text before them is [rep_a, rep_b1) now */
     int rep_a, rep_b0, rep_b1;
 } cui__ed;
@@ -186,6 +205,9 @@ static void cui__ed_span_add(bool *on, int *a, int *b0, int *b1, int s, int r, i
 }
 static void cui__ed_wrap_splice(cui__ed *E, int la, int lb, int k);
 static void cui__ed_wrap_sync(cui__ed *E);
+static void cui__ed_job_drop(cui__ed_job **J);
+typedef struct cui__ed_q cui__ed_q;
+static void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with);
 static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k);
 static void cui__ed_fc_splice(cui__ed_fc *fc, int a, int b0, int b1);
 
@@ -258,9 +280,31 @@ static void cui__sq_set(cui_ctx *ui, cui__sq *q, int i, int v) {
     int off, bi = cui__sq_at(ui, q, i, &off);
     cui__sqb *b = &q->b[bi];
     if (off >= b->n) return;
-    b->sum += cui__sq_val(q, v) - cui__sq_val(q, b->v[off]);
+    int d = cui__sq_val(q, v) - cui__sq_val(q, b->v[off]);
     b->v[off] = v;
+    if (d == 0) return;   /* the counts are as they were, and so are the sums: nothing to fix */
+    b->sum += d;
     if (q->fixed > bi) q->fixed = bi;
+}
+
+/* numbers [i, i + n) to out, block by block */
+static void cui__sq_read(cui_ctx *ui, cui__sq *q, int i, int n, int *out) {
+    int off, bi = cui__sq_at(ui, q, i, &off);
+    for (int k = 0; k < n && bi < q->nb; bi++, off = 0) {
+        int take = CUI_MIN(n - k, q->b[bi].n - off);
+        memcpy(out + k, q->b[bi].v + off, sizeof(int) * (size_t)take);
+        k += take;
+    }
+}
+
+/* numbers [i, i + n) become v[0, n), block by block (a queue without sums: nothing to fix) */
+static void cui__sq_write(cui_ctx *ui, cui__sq *q, int i, int n, const int *v) {
+    int off, bi = cui__sq_at(ui, q, i, &off);
+    for (int k = 0; k < n && bi < q->nb; bi++, off = 0) {
+        int take = CUI_MIN(n - k, q->b[bi].n - off);
+        memcpy(q->b[bi].v + off, v + k, sizeof(int) * (size_t)take);
+        k += take;
+    }
 }
 
 /* the sum of numbers [0, i) */
@@ -550,6 +594,30 @@ static size_t cui__ed_copy_scan(char *d, const char *s, size_t n, bool *has_cr) 
     return total;
 }
 
+/* d[0, n) = s[0, n), and in the same pass the offsets of its line breaks (*lb, malloc'd: a document
+ * takes them with the text) and whether it holds a carriage return; the number of line breaks. In
+ * blocks, each indexed while it is still in the cache. */
+static int cui__ed_copy_lb(char *d, const char *s, int n, bool *has_cr, int **lb) {
+    int k = 0, cap = 0, *o = NULL;
+    *has_cr = false;
+    for (int a = 0; a < n; a += 65536) {
+        int e = CUI_MIN(n, a + 65536);
+        if (k + (e - a) > cap) {   /* at most a line break a byte */
+            int nc = CUI_MAX(cap * 2, k + (e - a));
+            int *no = realloc(o, sizeof(int) * (size_t)nc);
+            if (!no) { free(o); *lb = NULL; return (int)cui__ed_copy_scan(d + a, s + a, (size_t)(n - a), has_cr) + k; }   /* (without the offsets) */
+            o = no; cap = nc;
+        }
+        int got = cui__ed_copy_fill(d, a, s + a, e - a, o + k);
+        for (int i = k; i < k + got; i++) o[i]--;   /* the line break, not the byte after it */
+        k += got;
+        if (!*has_cr && cui__ed_find_byte(d + a, (size_t)(e - a), '\r')) *has_cr = true;
+    }
+    if (cap > k + k / 4 + 1024) { int *no = realloc(o, sizeof(int) * (size_t)CUI_MAX(k, 1)); if (no) o = no; }
+    *lb = o;
+    return k;
+}
+
 /* A hash of the whole text (four lanes, so it runs at memory speed): without the app's
  * revision, the editor finds out this way whether the text changed since the last frame. */
 static uint64_t cui__ed_hash_text(const char *p, size_t n) {
@@ -769,6 +837,7 @@ static void cui__ed_wc_free(cui_ctx *ui, cui__ed_state *st) {
     st->wc = NULL;
 }
 static void cui__ed_mc_free(cui_ctx *ui, cui__ed_state *st) {
+    cui__ed_job_drop(&st->sjob);
     if (!st->mc) return;
     cui__sq_free(ui, &st->mc->st); cui__free(ui, st->mc);
     st->mc = NULL;
@@ -776,10 +845,12 @@ static void cui__ed_mc_free(cui_ctx *ui, cui__ed_state *st) {
 static void cui__ed_dtor(cui_ctx *ui, void *data) {
     cui__ed_state *st = data;
     cui__ed_wc_free(ui, st); cui__ed_mc_free(ui, st);
+    cui__ed_job_drop(&st->rjob);   /* a job still running only hears that it may stop: it frees itself */
     for (int i = 0; i < st->hist.n; i++) cui__ed_rec_free(ui, &st->hist.r[i]);
     cui__free(ui, st->hist.r);
     cui__free(ui, st->ix.ls);
     free(st->pend_text);
+    free(st->pend_lb);
     cui__free(ui, st->fc.b);
     for (int i = 0; i < st->ed.undo_count; i++) cui__free(ui, st->ed.undo[i]);   /* the text fields' history, unused here */
 }
@@ -1099,13 +1170,17 @@ static bool cui__ed_undo(cui__ed *E, bool redo) {
  * the caller gave its own allocation: it may be changed in place and, for a big edit, becomes
  * the undo record's (then *own is NULL: the caller has nothing to free). */
 static bool cui__ed_replace_x(cui__ed *E, int a, int b, const char *t, int n, int kind, char **own) {
-    if (E->ro) { E->hint_nl = E->hint_cr = 0; return false; }
+    int *lb = E->hint_lb;   /* the line breaks of t, when known: the document takes them with t */
+    E->hint_lb = NULL;
+    if (E->ro) { E->hint_nl = E->hint_cr = 0; free(lb); return false; }
     const char *cr = E->hint_cr == 1 ? NULL : cui__ed_find_byte(t, (size_t)n, '\r');
     E->hint_cr = 0;
     int m = cr ? n - (int)cui__ed_count_byte(cr, (size_t)(n - (int)(cr - t)), '\r') : n;
     if (E->doc) {   /* no capacity; the document keeps the undo step */
+        int nlc = E->hint_nl - 1;
         E->hint_nl = 0;
-        if (m == 0 && b == a) return false;
+        if (cr) { free(lb); lb = NULL; }   /* squeezed: the offsets are not those of t any more */
+        if (m == 0 && b == a) { free(lb); return false; }
         cui_ctx *ui = E->ui;
         cui__ed_state *st = E->st;
         cui_edit_state *e = &st->ed;
@@ -1124,7 +1199,8 @@ static bool cui__ed_replace_x(cui__ed *E, int a, int b, const char *t, int n, in
         e->last_kind = kind;
         char *give = own && *own && t == *own && m >= CUI__ED_KEEP_BYTES ? *own : NULL;   /* a big text of the caller's own: the document takes it */
         if (give) *own = NULL;
-        if (!cui__doc_edit(E->doc, a, b, t, m, give, NULL, NULL, e->cursor, merge)) { E->refused = true; return false; }
+        if (!give) { free(lb); lb = NULL; }
+        if (!cui__doc_edit(E->doc, a, b, t, m, give, NULL, NULL, e->cursor, merge, lb, nlc)) { E->refused = true; return false; }
         cui__ed_doc_sync(E, true);
         st->doc_mine = cui_text_doc_revision(E->doc);
         e->cursor = e->anchor = e->last_cursor = a + m;
@@ -1133,6 +1209,7 @@ static bool cui__ed_replace_x(cui__ed *E, int a, int b, const char *t, int n, in
         st->aff_pos = -1;
         return true;
     }
+    free(lb);   /* a buffer finds them as it copies the text in */
     if ((size_t)(E->len - (b - a) + m) + 1 > E->cap) { E->refused = true; E->hint_nl = 0; return false; }
     if (m == 0 && b == a) { E->hint_nl = 0; return false; }
     if (cr && own && *own) {   /* squeezed in place */
@@ -1267,7 +1344,7 @@ static void cui__ed_brackets(const cui__ed *E, int caret, int *a, int *b) {
 /* ---- find ---- */
 
 /* what to look for: the text or the pattern, and the three toggles */
-typedef struct { const char *q; int qn; bool cs, word, rx; } cui__ed_q;
+struct cui__ed_q { const char *q; int qn; bool cs, word, rx; };
 
 static cui__ed_q cui__ed_q_of(const cui__ed_state *st) {
     cui__ed_q Q = { st->query, (int)strlen(st->query), st->f_case, st->f_word, st->f_rx };
@@ -1386,7 +1463,7 @@ static int cui__ed_find(const cui__ed *E, const cui__ed_q *Q, int from, int dir,
 /* ---- the match count (cui__ed_fc) ---- */
 
 #define CUI__ED_FC_BLOCK (256 * 1024)   /* bytes of text in a count block, about */
-#define CUI__ED_FC_FRAME (16 << 20)     /* bytes counted in a frame, at most (a pattern: a quarter) */
+#define CUI__ED_FC_FRAME (1 << 20)      /* bytes counted in a frame, at most (a pattern: a quarter): about 3 ms on a laptop CPU */
 
 static bool cui__ed_fc_same(const cui__ed_fc *fc, const cui__ed_q *Q) {
     return fc->on && fc->cs == Q->cs && fc->word == Q->word && fc->rx == Q->rx && (int)strlen(fc->q) == Q->qn && !memcmp(fc->q, Q->q, (size_t)Q->qn);
@@ -1592,6 +1669,10 @@ static void cui__ed_replace_all(cui__ed *E, const char *with) {
     int first = 0, last = 0, cnt = 0;
     char *t = NULL;
     if (E->ro || Q.qn <= 0) return;
+    if (E->doc && E->len >= cui__ed_rall_bytes) {   /* worked out on another thread, applied when done */
+        if (!E->st->rjob && !cui__ed_q_bad(&Q)) cui__ed_rjob_start(E, &Q, with);
+        return;
+    }
     int n = cui__ed_rall(E, &Q, with, &t, &first, &last, &cnt);
     if (n >= 0 && cnt > 0) cui__ed_replace_x(E, first, last, t, n, 3, &t);
     free(t);
@@ -1788,8 +1869,317 @@ static bool cui__ed_scan_line(const cui__lang *L, const char *s, int i, int e, b
     return in;
 }
 
+/* The state after one line s[a, e), from the state before it. */
+static int cui__ed_state_step(const cui__lang *L, const char *s, int a, int e, int state) {
+    if (L->multi) { cui__tokenize_st(L, s + a, e - a, &state, NULL, 0); return state; }
+    return cui__ed_scan_line(L, s, a, e, state != 0);
+}
+
+/* ---- work on another thread ----
+ * Two things can take long on a big text: the line states down to the view after an edit far above
+ * it (or a jump to the end of a fresh file), and Replace all. Each runs as a job on a thread of its
+ * own, over text that cannot change under it: a snapshot of the document (of just the stretch it
+ * reads), or a copy of that stretch of the buffer. A job touches nothing of the editor and nothing
+ * of the context: it reads its own copy of what it needs and writes its own results. The editor
+ * looks at it in each frame, takes its result if the text is still the one it was for (or the part
+ * of it that still is) and drops it otherwise; meanwhile the frame asks to be drawn again shortly.
+ * Both hold a reference: an editor freed while its job runs only tells it to stop, and the last one
+ * to let go frees it. Where no thread can be started (WebAssembly without threads), the job runs at
+ * once, as the work did before. */
+
+/* line states found on the UI thread in a frame, in bytes of text, before the rest goes to a job */
+int cui__ed_sync_bytes = 256 * 1024;
+/* a document at least this long works out Replace all on another thread */
+int cui__ed_rall_bytes = 1 << 20;
+/* bytes of a buffer a job for line states copies, at most (more: another job after it) */
+int cui__ed_copy_bytes = 8 << 20;
+#define CUI__ED_PART_MIN 4096         /* text between matches shorter than this is copied, not pointed at */
+
+struct cui__ed_job {
+    volatile long refs, cancel, done, progress;
+    int kind;                         /* 1 line states, 2 replace all */
+    cui_text_snap *snap;              /* the text it reads: a snapshot of the document's [ta, tb), */
+    char *copy;                       /* or a copy of the buffer's (copy[0] is byte ta) */
+    int ta, tb;
+    /* line states */
+    cui__lang L;
+    int v, n, state0;                 /* lines [v, v + n), the state before line v */
+    int *out, got;                    /* out[i]: the state before line v + 1 + i, for i < got */
+    int klo, khi, *kept;              /* the states kept from before an edit (see cui__ed_mc), before lines [klo, khi) */
+    bool conv;                        /* it stopped where its states met the kept ones (after line v + got - 1) */
+    unsigned epoch;
+    /* replace all */
+    char q[128], with[128];
+    int qn; bool cs, word, rx;
+    unsigned rev, serial;             /* the document's revision and serial it is for */
+    cui__tpart *parts; int np, pcap;  /* [first, last) becomes these */
+    char *r; int rn, rcap;            /* the bytes the parts take from */
+    int *rnl, rnn;                    /* r's line breaks */
+    int first, last, count, newlen;
+    int err;                          /* 1 a pattern that failed, 2 stopped, 3 no memory */
+};
+
+static long cui__ed_atomic(volatile long *p, long add) {   /* the value after adding (0: a read) */
+#if defined(_MSC_VER)
+    return _InterlockedExchangeAdd(p, add) + add;
+#else
+    return __atomic_add_fetch(p, add, __ATOMIC_ACQ_REL);
+#endif
+}
+
+static void cui__ed_job_release(cui__ed_job *J) {
+    if (!J || cui__ed_atomic(&J->refs, -1) != 0) return;
+    cui_text_snap_free(J->snap);
+    free(J->copy); free(J->out); free(J->kept); free(J->parts); free(J->r); free(J->rnl);
+    free(J);
+}
+
+/* the editor lets go of a job: it stops soon if it still runs */
+static void cui__ed_job_drop(cui__ed_job **J) {
+    if (!*J) return;
+    cui__ed_atomic(&(*J)->cancel, 1);
+    cui__ed_job_release(*J);
+    *J = NULL;
+}
+
+static bool cui__ed_job_done(cui__ed_job *J) { return cui__ed_atomic(&J->done, 0) != 0; }
+static bool cui__ed_job_stopped(cui__ed_job *J) { return cui__ed_atomic(&J->cancel, 0) != 0; }
+
+/* piece i of the job's text: its bytes, the text's [*a, *b) */
+static const char *cui__ed_job_piece(const cui__ed_job *J, int i, int *a, int *b) {
+    if (J->snap) return cui__snap_piece(J->snap, i, a, b);
+    *a = J->ta; *b = J->tb;
+    return i == 0 ? J->copy : NULL;
+}
+static int cui__ed_job_pieces(const cui__ed_job *J) { return J->snap ? cui__snap_pieces(J->snap) : 1; }
+
+/* bytes [a, b) of the job's text to out */
+static void cui__ed_job_read(const cui__ed_job *J, int a, int b, char *out) {
+    int lo = 0, hi = cui__ed_job_pieces(J) - 1, pa, pb;
+    while (lo < hi) { int m = (lo + hi + 1) / 2; cui__ed_job_piece(J, m, &pa, &pb); if (pa <= a) lo = m; else hi = m - 1; }
+    for (int i = lo; a < b; i++) {
+        const char *p = cui__ed_job_piece(J, i, &pa, &pb);
+        if (!p) break;
+        int e = CUI_MIN(b, pb);
+        if (e > a) { memcpy(out, p + (a - pa), (size_t)(e - a)); out += e - a; a = e; }
+    }
+}
+
+/* Walks the lines of the job's text from ta on, as cui__ed_lw does the editor's: a line in one
+ * piece is read where it lies, one across pieces is copied to scratch. */
+typedef struct { const cui__ed_job *J; int pi, pa, pb, pos; const char *pp; char *scr; int scap; } cui__ed_jw;
+
+static void cui__ed_jw_init(cui__ed_jw *w, const cui__ed_job *J) {
+    memset(w, 0, sizeof *w);
+    w->J = J; w->pos = J->ta;
+    w->pp = cui__ed_job_piece(J, 0, &w->pa, &w->pb);
+}
+
+/* the next line: q[*ls, *le) (le: its line break or the end of the stretch); NULL past the end */
+static const char *cui__ed_jw_next(cui__ed_jw *w, int *ls, int *le) {
+    const cui__ed_job *J = w->J;
+    static const char none[1];
+    int a = w->pos, np = cui__ed_job_pieces(J), n = 0;
+    if (a > J->tb) return NULL;
+    *ls = a;
+    for (bool first = true;; first = false) {
+        while (a >= w->pb && w->pi + 1 < np) w->pp = cui__ed_job_piece(J, ++w->pi, &w->pa, &w->pb);
+        if (a >= J->tb || !w->pp || a >= w->pb) break;
+        const char *q = w->pp - w->pa, *p = cui__find_byte(q + a, (size_t)(w->pb - a), '\n');
+        int e = p ? (int)(p - q) : w->pb;
+        if (first && (p || w->pb >= J->tb)) { *le = e; w->pos = e + 1; return q; }   /* in one piece */
+        if (n + (e - a) > w->scap) {
+            w->scap = (n + (e - a)) * 2 + 1024;
+            char *ns = realloc(w->scr, (size_t)w->scap);
+            if (!ns) return NULL;
+            w->scr = ns;
+        }
+        memcpy(w->scr + n, q + a, (size_t)(e - a));
+        n += e - a; a = e;
+        if (p) break;
+    }
+    *le = *ls + n; w->pos = *le + 1;
+    return n ? w->scr - *ls : none - *ls;
+}
+
+/* the line states, from line v on; stops where they meet the kept ones */
+static void cui__ed_job_states(cui__ed_job *J) {
+    cui__ed_jw w;
+    cui__ed_jw_init(&w, J);
+    int state = J->state0, ls, le;
+    for (int i = 0; i < J->n; i++) {
+        if ((i & 1023) == 0 && cui__ed_job_stopped(J)) break;
+        const char *s = cui__ed_jw_next(&w, &ls, &le);
+        if (!s) break;
+        state = cui__ed_state_step(&J->L, s, ls, le, state);
+        J->out[i] = state;
+        J->got = i + 1;
+        int j = J->v + i + 1;
+        if (j >= J->klo && j < J->khi && J->kept[j - J->klo] == state) { J->conv = true; break; }
+    }
+    free(w.scr);
+}
+
+/* room for more bytes in r */
+static bool cui__ed_rj_room(cui__ed_job *J, int more) {
+    if (J->rn + more <= J->rcap) return true;
+    int c = CUI_MAX(J->rcap + J->rcap / 2, J->rn + more + 65536);
+    char *p = realloc(J->r, (size_t)c);
+    if (!p) return false;
+    J->r = p; J->rcap = c;
+    return true;
+}
+/* one more part: bytes [at, at + len) of the text, or (at < 0) the last len bytes put in r */
+static bool cui__ed_rj_part(cui__ed_job *J, int at, int len) {
+    J->newlen += len;
+    if (at < 0) at = -(J->rn - len) - 1;
+    cui__tpart *l = J->np ? &J->parts[J->np - 1] : NULL;
+    if (l && at < 0 && l->at < 0 && -l->at - 1 + l->len == -at - 1) { l->len += len; return true; }   /* r runs on */
+    if (J->np == J->pcap) {
+        int c = J->pcap ? J->pcap * 2 : 1024;
+        cui__tpart *p = realloc(J->parts, sizeof *p * (size_t)c);
+        if (!p) return false;
+        J->parts = p; J->pcap = c;
+    }
+    J->parts[J->np++] = (cui__tpart){ at, len };
+    return true;
+}
+
+/* Replace all, as cui__ed_rall does it, as parts: the text between matches stays where it is when
+ * it is long (a part that points at it); the replacements and short stretches between them go to r. */
+static void cui__ed_job_rall(cui__ed_job *J) {
+    cui__ed_q Q = { J->q, J->qn, J->cs, J->word, J->rx };
+    cui__ed_jw w;
+    cui__ed_jw_init(&w, J);
+    int cur = -1, ls, le, lines = 0;
+    bool ok = true;
+    for (const char *s; ok && (s = cui__ed_jw_next(&w, &ls, &le)) != NULL;) {
+        if ((++lines & 255) == 0) {
+            if (cui__ed_job_stopped(J)) { J->err = 2; ok = false; break; }
+            cui__ed_atomic(&J->progress, ls - J->progress);   /* only this thread writes it */
+        }
+        for (int p = ls, a, b; ok; p = b) {
+            cui_regex_match m;
+            int r = cui__ed_q_line(&Q, s, ls, le, p, &a, &b, &m);
+            if (r < 0) { J->err = 1; ok = false; break; }
+            if (r == 0) break;
+            if (cur < 0) J->first = cur = a;
+            int gap = a - cur, x = cui__ed_expand(&Q, J->with, s, &m, NULL);
+            if (gap >= CUI__ED_PART_MIN) ok = cui__ed_rj_part(J, cur, gap) && cui__ed_rj_room(J, x);
+            else {
+                ok = cui__ed_rj_room(J, gap + x);
+                if (ok && gap > 0) {
+                    if (cur >= ls) memcpy(J->r + J->rn, s + cur, (size_t)gap);
+                    else cui__ed_job_read(J, cur, a, J->r + J->rn);
+                    J->rn += gap;
+                    ok = cui__ed_rj_part(J, -1, gap);
+                }
+            }
+            if (!ok) break;
+            J->rn += cui__ed_expand(&Q, J->with, s, &m, J->r + J->rn);
+            ok = cui__ed_rj_part(J, -1, x);
+            cur = b; J->last = b; J->count++;
+        }
+    }
+    free(w.scr);
+    if (!ok) { if (!J->err) J->err = 3; return; }
+    if (J->rn > 0) {   /* r's line breaks, found here rather than on the UI thread */
+        if (J->rcap > J->rn) { char *p = realloc(J->r, (size_t)J->rn); if (p) { J->r = p; J->rcap = J->rn; } }
+        J->rnn = (int)cui__count_byte(J->r, (size_t)J->rn, '\n');
+        J->rnl = malloc(sizeof(int) * (size_t)CUI_MAX(1, J->rnn));
+        if (!J->rnl) { J->err = 3; return; }
+        int k = cui__fill_nl(J->r, 0, J->rn, J->rnl);
+        for (int i = 0; i < k; i++) J->rnl[i]--;   /* the line break itself, not the byte after it */
+    }
+}
+
+static void cui__ed_job_work(cui__ed_job *J) {
+    if (J->kind == 1) cui__ed_job_states(J);
+    else cui__ed_job_rall(J);
+    cui__ed_atomic(&J->done, 1);
+    cui__ed_job_release(J);
+}
+
+#if defined(_WIN32)
+static void __cdecl cui__ed_thread_main(void *arg) { cui__ed_job_work(arg); }
+static bool cui__ed_thread(cui__ed_job *J) { return _beginthread(cui__ed_thread_main, 0, J) != (uintptr_t)-1; }
+#elif defined(CUI__ED_PTHREADS)
+static void *cui__ed_thread_main(void *arg) { cui__ed_job_work(arg); return NULL; }
+static bool cui__ed_thread(cui__ed_job *J) {
+    pthread_attr_t at;
+    pthread_t t;
+    if (pthread_attr_init(&at) != 0) return false;
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    bool ok = pthread_create(&t, &at, cui__ed_thread_main, J) == 0;
+    pthread_attr_destroy(&at);
+    return ok;
+}
+#else
+static bool cui__ed_thread(cui__ed_job *J) { (void)J; return false; }
+#endif
+
+/* starts the job on a thread, or runs it here when none can be had */
+static void cui__ed_job_go(cui__ed_job *J) {
+    J->refs = 2;   /* the editor's and the work's */
+    if (!cui__ed_thread(J)) cui__ed_job_work(J);
+}
+
+/* ---- the line states ---- */
+
+/* The states of lines [v, upto) go to a job, which reads a snapshot of them (a document) or a copy
+ * (a buffer: at most cui__ed_copy_bytes bytes, and the next job goes on from there). False when it
+ * could not be made (no memory): the states are then found here. */
+static bool cui__ed_sjob_start(cui__ed *E, const cui__lang *L, int v, int upto) {
+    cui_ctx *ui = E->ui;
+    cui__ed_state *st = E->st;
+    cui__ed_mc *mc = st->mc;
+    int ta = cui__ed_ls(E, v), n = upto - v;
+    if (!E->doc) n = CUI_MAX(1, CUI_MIN(n, cui__ed_line_of(E, ta + cui__ed_copy_bytes) - v));
+    int tb = cui__ed_ls(E, v + n) - 1;
+    cui__ed_job *J = calloc(1, sizeof *J);
+    if (!J) return false;
+    J->kind = 1; J->L = *L; J->v = v; J->n = n; J->epoch = mc->epoch;
+    J->state0 = cui__sq_get(ui, &mc->st, v);
+    J->ta = ta; J->tb = tb;
+    J->out = malloc(sizeof(int) * (size_t)n);
+    int klo = CUI_MAX(mc->kept0, v + 1), khi = CUI_MIN(mc->kept1, v + n + 1);
+    if (khi > klo && (J->kept = malloc(sizeof(int) * (size_t)(khi - klo))) != NULL) {
+        cui__sq_read(ui, &mc->st, klo, khi - klo, J->kept);
+        J->klo = klo; J->khi = khi;
+    }
+    if (E->doc) J->snap = cui__doc_snapshot_range(E->doc, ta, tb);
+    else if ((J->copy = malloc((size_t)(tb - ta) + 1)) != NULL) memcpy(J->copy, E->buf + ta, (size_t)(tb - ta));
+    if (!J->out || !(J->snap || J->copy)) { J->refs = 1; cui__ed_job_release(J); return false; }
+    mc->dirty = INT_MAX;
+    st->sjob = J;
+    cui__ed_job_go(J);
+    return true;
+}
+
+/* A finished job's states go in, as far as the text is still the one they were found for: down to
+ * the first line an edit touched since it began. A job that edits left nothing to give is dropped
+ * at once. */
+static void cui__ed_sjob_take(cui__ed *E) {
+    cui__ed_state *st = E->st;
+    cui__ed_mc *mc = st->mc;
+    cui__ed_job *J = st->sjob;
+    if (J->epoch != mc->epoch || mc->dirty <= J->v) { cui__ed_job_drop(&st->sjob); return; }
+    if (!cui__ed_job_done(J)) return;
+    int lim = J->v + J->got;
+    bool conv = J->conv && mc->dirty == INT_MAX;
+    lim = CUI_MIN(lim, mc->dirty);
+    if (J->v <= mc->valid && lim > mc->valid) {
+        cui__sq_write(E->ui, &mc->st, mc->valid + 1, lim - mc->valid, J->out + (mc->valid - J->v));
+        mc->valid = lim;
+        if (conv && lim == J->v + J->got) { mc->valid = mc->kept1 - 1; mc->kept0 = mc->kept1 = 0; }   /* as before the edit from here on */
+    }
+    cui__ed_job_drop(&st->sjob);
+}
+
 /* The line states (see cui__ed_mc) for language L, right from line 0 to line `upto`; false
- * when L has none. */
+ * when L has none. A few hundred kilobytes of lines are found here in a frame; the rest goes to a
+ * job (above), and until it is done the lines below the last state known draw as well as they can
+ * (see cui__edf_build_lines). */
 static bool cui__ed_states(cui__ed *E, const cui__lang *L, int upto) {
     cui_ctx *ui = E->ui;
     cui__ed_state *st = E->st;
@@ -1800,19 +2190,22 @@ static bool cui__ed_states(cui__ed *E, const cui__lang *L, int upto) {
     if (!mc->ok || mc->n != nl || mc->mode != L->mode || mc->lc != L->line_comment || mc->bt != L->backtick) {
         mc->ok = true; mc->n = nl; mc->mode = L->mode; mc->lc = L->line_comment; mc->bt = L->backtick;
         mc->valid = mc->kept0 = mc->kept1 = 0;
+        mc->epoch++; mc->dirty = INT_MAX;
+        cui__ed_job_drop(&st->sjob);
         cui__sq_fill(ui, &mc->st, nl + 1, 0);
     }
     cui__sq_set(ui, &mc->st, 0, L->markdown ? CUI__MD_START : 0);
     upto = CUI_CLAMP(upto, 0, nl);
+    if (st->sjob) cui__ed_sjob_take(E);
     if (mc->valid >= upto) return true;
+    if (st->sjob) { cui__wakeup_after(ui, 1.0f / 60.0f); return true; }   /* still at work: look again next frame */
     cui__ed_lw w = cui__ed_lw_at(E, cui__ed_ls(E, mc->valid));
-    int state = cui__sq_get(ui, &mc->st, mc->valid);
+    int state = cui__sq_get(ui, &mc->st, mc->valid), bytes = 0;
     for (int i = mc->valid; i < upto; i++) {
         int a, e;
         const char *s = cui__ed_lw_next(&w, &a, &e);
         if (!s) break;
-        if (L->multi) cui__tokenize_st(L, s + a, e - a, &state, NULL, 0);
-        else state = cui__ed_scan_line(L, s, a, e, state != 0);
+        state = cui__ed_state_step(L, s, a, e, state);
         if (i + 1 >= mc->kept0 && i + 1 < mc->kept1 && cui__sq_get(ui, &mc->st, i + 1) == state) {   /* as before the edit: right down to kept1 */
             mc->valid = mc->kept1 - 1;
             mc->kept0 = mc->kept1 = 0;
@@ -1822,9 +2215,70 @@ static bool cui__ed_states(cui__ed *E, const cui__lang *L, int upto) {
         }
         cui__sq_set(ui, &mc->st, i + 1, state);
         mc->valid = i + 1;
+        bytes += e - a + 1;
+        if (bytes > cui__ed_sync_bytes && mc->valid < upto && cui__ed_sjob_start(E, L, mc->valid, upto)) {
+            if (cui__ed_job_done(st->sjob)) cui__ed_sjob_take(E);   /* it ran here: no thread */
+            if (st->sjob) cui__wakeup_after(ui, 1.0f / 60.0f);
+            break;
+        }
     }
     cui__ed_lw_done(&w);
     return true;
+}
+
+/* ---- Replace all on another thread ----
+ * On a document of at least cui__ed_rall_bytes, Replace all finds the matches on a job over a
+ * snapshot and works out the new text as parts (cui__doc_edit_parts), which the editor applies as one
+ * edit when the job is done, if the document has not changed since: any edit to it, or closing the
+ * find bar, drops the job. Meanwhile the find bar says "Replacing". */
+
+/* the job's result goes in: as cui__ed_replace_x would put the same text */
+static void cui__ed_rjob_apply(cui__ed *E, cui__ed_job *J) {
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    e->last_edit = E->ui->time;
+    e->last_kind = 3;
+    bool ok = cui__doc_edit_parts(E->doc, J->first, J->last, J->parts, J->np, J->r, J->rn, J->rnl, J->rnn, e->cursor);
+    J->r = NULL; J->rnl = NULL;   /* the document's now (or freed) */
+    if (!ok) { E->refused = true; return; }
+    cui__ed_doc_sync(E, true);
+    st->doc_mine = cui_text_doc_revision(E->doc);
+    e->cursor = e->anchor = e->last_cursor = J->first + J->newlen;
+    E->changed = E->reveal = true;
+    st->pref_col = -1;
+    st->aff_pos = -1;
+}
+
+/* At the start of a frame: the job is dropped if the text changed or the bar closed, applied if done. */
+static void cui__ed_rjob_take(cui__ed *E, bool ro) {
+    cui__ed_state *st = E->st;
+    cui__ed_job *J = st->rjob;
+    if (!E->doc || ro || st->mode != 1 || cui_text_doc_revision(E->doc) != J->rev || cui__doc_serial(E->doc) != J->serial) {
+        cui__ed_job_drop(&st->rjob);
+        return;
+    }
+    if (!cui__ed_job_done(J)) { cui__wakeup_after(E->ui, 1.0f / 60.0f); return; }
+    if (!J->err && J->count > 0) cui__ed_rjob_apply(E, J);
+    cui__ed_job_drop(&st->rjob);
+}
+
+static void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with) {
+    cui__ed_state *st = E->st;
+    cui__ed_job *J = calloc(1, sizeof *J);
+    if (!J) return;
+    J->kind = 2;
+    J->qn = CUI_MIN(Q->qn, (int)sizeof J->q - 1);
+    memcpy(J->q, Q->q, (size_t)J->qn);
+    J->cs = Q->cs; J->word = Q->word; J->rx = Q->rx;
+    snprintf(J->with, sizeof J->with, "%s", with);
+    J->rev = cui_text_doc_revision(E->doc); J->serial = cui__doc_serial(E->doc);
+    J->ta = 0; J->tb = E->len;
+    J->snap = cui__doc_snapshot_range(E->doc, 0, E->len);
+    if (!J->snap) { free(J); return; }
+    st->rjob = J;
+    cui__ed_job_go(J);
+    if (cui__ed_job_done(J)) cui__ed_rjob_take(E, E->ro);   /* it ran here: no thread */
+    else cui__wakeup_after(E->ui, 1.0f / 60.0f);
 }
 
 /* An edit replaced lines [la, lb] with lines [la, la + k]: the states below them are kept,
@@ -1840,6 +2294,7 @@ static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k
     mc->kept0 = k1 > k0 ? k0 + d : 0;
     mc->kept1 = k1 > k0 ? k1 + d : 0;
     mc->valid = CUI_MIN(mc->valid, la);
+    mc->dirty = CUI_MIN(mc->dirty, la);   /* a job's states down to line la still hold */
     mc->n += d;
 }
 
@@ -1851,7 +2306,7 @@ typedef struct {
     int base, first, count, nl;
     const int *ls;              /* starts of the lines in view and the one after */
     bool in_block, json, empty, focused, show_line, ro;
-    const int *mst;             /* markdown: the state before each line in view */
+    const int *mst;             /* languages with states: the state before each line in view (-1: not known yet, drawn plain) */
     cui__lang lang;
     int tab, cursor, anchor, caret_line, caret_col;
     int br_line[2], br_col[2];
@@ -1935,6 +2390,9 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
     cui__tok *toks = NULL;
     int tok_cap = 0;
     bool block = p->in_block;
+    cui__lang plain;   /* a line whose state is not known yet */
+    memset(&plain, 0, sizeof plain);
+    plain.plain = true;
     const char *s = p->text;
     for (int k = 0; k < p->count; k++) {
         const cui__ed_lr *R = &p->lr[k];
@@ -1942,8 +2400,12 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
         int nn = le - ls;
         if (nn + 1 > tok_cap) { tok_cap = nn + 1; toks = cui__frame_alloc(ui, sizeof *toks * (size_t)tok_cap); }
         int nt;
-        if (p->lang.multi) { int ms = p->mst[k]; nt = cui__tokenize_st(&p->lang, s + ls, nn, &ms, toks, tok_cap); }
-        else nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
+        if (p->mst && p->mst[k] < 0) nt = cui__tokenize(&plain, false, s + ls, nn, &block, toks, tok_cap);   /* its state is not known yet */
+        else if (p->lang.multi) { int ms = p->mst[k]; nt = cui__tokenize_st(&p->lang, s + ls, nn, &ms, toks, tok_cap); }
+        else {
+            if (p->mst) block = p->mst[k] != 0;
+            nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
+        }
         int t0 = 0;
         for (int j = 0; j < R->n; j++) {
             bool last = j == R->n - 1;
@@ -2048,6 +2510,9 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
     cui__tok *toks = NULL;
     int tok_cap = 0;
     bool block = p->in_block;
+    cui__lang plain;   /* a line whose state is not known yet */
+    memset(&plain, 0, sizeof plain);
+    plain.plain = true;
     if (p->wrap) cui__ed_paint_wrap(ui, p, r, x0, ty, s0, s1);
     for (int k = 0; k < (p->wrap ? 0 : p->count); k++) {
         int line = p->first + k;
@@ -2089,9 +2554,11 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         if (stop < le) stop = cui__utf8_next(s, le, stop);
         int nn = stop - ls;
         if (nn + 1 > tok_cap) { tok_cap = nn + 1; toks = cui__frame_alloc(ui, sizeof *toks * (size_t)tok_cap); }
+        if (p->mst && !p->lang.multi && p->mst[k] >= 0) block = p->mst[k] != 0;
         bool was_block = block;
         int nt;
-        if (p->lang.multi) { int ms = p->mst[k]; nt = cui__tokenize_st(&p->lang, s + ls, nn, &ms, toks, tok_cap); }
+        if (p->mst && p->mst[k] < 0) nt = cui__tokenize(&plain, false, s + ls, nn, &block, toks, tok_cap);   /* its state is not known yet */
+        else if (p->lang.multi) { int ms = p->mst[k]; nt = cui__tokenize_st(&p->lang, s + ls, nn, &ms, toks, tok_cap); }
         else nt = cui__tokenize(&p->lang, p->json, s + ls, nn, &block, toks, tok_cap);
         int pos = ls, col = 0;
         for (int t = 0; t < nt; t++) {
@@ -2269,9 +2736,12 @@ void cui_code_editor_edit(cui_ctx *ui, const char *id, int start, int end, const
     cui__ed_state *s = cui__ed_get(ui, id);
     size_t n = text ? cui__ed_strlen(text) : 0;
     free(s->pend_text);   /* malloc'd: a big one becomes an undo record's or a document's own */
+    free(s->pend_lb);
+    s->pend_lb = NULL;
     s->pend_text = malloc(n + 1);
     if (!s->pend_text) return;
-    s->pend_nl = (int)cui__ed_copy_scan(s->pend_text, text ? text : "", n, &s->pend_cr);
+    if (s->doc && n >= CUI__ED_KEEP_BYTES) s->pend_nl = cui__ed_copy_lb(s->pend_text, text, (int)n, &s->pend_cr, &s->pend_lb);
+    else s->pend_nl = (int)cui__ed_copy_scan(s->pend_text, text ? text : "", n, &s->pend_cr);
     s->pend_text[n] = 0;
     s->pend_n = (int)n;
     s->pend_edit = true;
@@ -2374,6 +2844,8 @@ static void cui__edf_requests(cui__edf *f) {
     if (st->pend_edit) {
         int a = CUI_CLAMP(st->pend_es, 0, E->len), b = CUI_CLAMP(st->pend_ee, a, E->len);
         E->hint_cr = st->pend_cr ? 2 : 1; E->hint_nl = st->pend_nl + 1;
+        E->hint_lb = st->pend_lb;   /* taken by the replace */
+        st->pend_lb = NULL;
         if (cui__ed_replace_x(E, a, b, st->pend_text, st->pend_n, 3, &st->pend_text)) {
             int m = e->cursor - a;   /* the new text's length: the caret is after it */
             e->last_edit = 0;
@@ -2818,7 +3290,9 @@ static int cui__edf_build_find(cui__edf *f, cui_input_opts *io, cui_button_opts 
     f->res->find_case = st->f_case; f->res->find_word = st->f_word; f->res->find_regex = st->f_rx;
     f->res->find_index = on_match ? index : 0;
     const char *more = partial ? "+" : "";   /* a big text still being counted */
-    const char *label = qn == 0 ? "" : narrow ? (on_match ? cui__frame_printf(ui, "%d/%d%s", index, total, more) : cui__frame_printf(ui, "%d%s", total, more))
+    const char *label = st->rjob ? cui__frame_printf(ui, narrow ? "%d%%" : "Replacingâ¦ %d%%",   /* Replace all at work on another thread */
+                                                     (int)((double)cui__ed_atomic(&st->rjob->progress, 0) * 100.0 / CUI_MAX(1, E->len)))
+                      : qn == 0 ? "" : narrow ? (on_match ? cui__frame_printf(ui, "%d/%d%s", index, total, more) : cui__frame_printf(ui, "%d%s", total, more))
                       : total == 0 && !partial ? "No results" : on_match ? cui__frame_printf(ui, "%d of %d%s", index, total, more)
                       : cui__frame_printf(ui, "%d%s match%s", total, more, total == 1 && !partial ? "" : "es");
     if (*label) {
@@ -2850,7 +3324,7 @@ static void cui__edf_build_replace(cui__edf *f, cui_input_opts *io, cui_button_o
         if (f->prim && (f->mods & (CUI_MOD_ALT | CUI_MOD_SHIFT))) cui__ed_replace_all(E, st->repl);
         else cui__ed_replace_one(E, st->repl);
     }
-    bo->disabled = total == 0;
+    bo->disabled = total == 0 || st->rjob;   /* not while Replace all is at work */
     bo->variant = CUI_BUTTON_SECONDARY;
     bo->tooltip = "Replace this match and go to the next"; bo->shortcut = "Enter";
     if (cui_button_ex(ui, "Replace", bo)) cui__ed_replace_one(E, st->repl);
@@ -3028,12 +3502,22 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
         p->caret_row = f->caret_row;
     }
     p->lang = *L; p->json = json;
-    bool states = cui__ed_states(E, L, L->multi ? last : first);   /* only down to the lines in view */
-    p->in_block = states && !L->multi && cui__sq_get(ui, &st->mc->st, first);
-    if (states && L->multi) {
+    if (cui__ed_states(E, L, L->multi ? last : first)) {   /* only down to the lines in view */
+        /* The state before each line in view. While a job still finds them (cui__ed_states), a line
+         * below the last one known takes it from the line above when that one has a state, else the
+         * state it had before the edit when its text is the same (kept0 to kept1), else none: it draws
+         * plain until the job is done. */
+        const cui__ed_mc *mc = st->mc;
         int *mst = cui__frame_alloc(ui, sizeof(int) * (size_t)CUI_MAX(1, p->count));
-        for (int k = 0; k < p->count; k++) mst[k] = cui__sq_get(ui, &st->mc->st, first + k);
+        for (int k = 0; k < p->count; k++) {
+            int j = first + k;
+            if (j <= mc->valid) mst[k] = cui__sq_get(ui, &st->mc->st, j);
+            else if (k > 0 && mst[k - 1] >= 0) mst[k] = cui__ed_state_step(L, text - a, ls[k - 1], ls[k] - 1, mst[k - 1]);
+            else if (j >= mc->kept0 && j < mc->kept1) mst[k] = cui__sq_get(ui, &st->mc->st, j);
+            else mst[k] = -1;
+        }
         p->mst = mst;
+        p->in_block = !L->multi && p->count > 0 && mst[0] > 0;
     }
     p->tab = E->tab;
     p->cursor = e->cursor; p->anchor = e->anchor;
@@ -3154,9 +3638,10 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
         if (st->hist.n) { for (int i = 0; i < st->hist.n; i++) cui__ed_rec_free(ui, &st->hist.r[i]); st->hist.n = st->hist.pos = 0; st->hist.bytes = 0; }
         if (st->wc && st->wc->ok) { E.wrap = true; E.wcols = st->wc->key / 32; E.tab = st->wc->key % 32; }   /* as last frame, to count the lines an edit touched */
         cui__ed_doc_sync(&E, false);
+        if (st->rjob) cui__ed_rjob_take(&E, o->read_only);   /* Replace all, done on another thread: applied now, before the frame lays out the text */
         E.wrap = false; E.wcols = 0;
     } else {
-        if (st->doc) { st->doc = NULL; st->ix.ok = false; }   /* was on a document: everything is made again */
+        if (st->doc) { st->doc = NULL; st->ix.ok = false; cui__ed_job_drop(&st->rjob); }   /* was on a document: everything is made again */
         E.buf = buf; E.cap = cap;
         cui__ed_take_splice(ui, st, buf, cap, o->revision);
         E.len = cui__ed_text_sync(ui, st, buf, cap, o->revision);
@@ -3245,6 +3730,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     res.splice_removed = E.rep_on ? E.rep_b0 - E.rep_a : 0;
     res.splice_inserted = E.rep_on ? E.rep_b1 - E.rep_a : 0;
     res.refused = E.refused;
+    res.working = st->sjob || st->rjob;
     res.bar_open = st->mode != 0;
     res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.rid || ui->focus == f.gid;
     res.cursor = e->cursor; res.anchor = e->anchor;

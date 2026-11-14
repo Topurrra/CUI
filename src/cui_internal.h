@@ -835,14 +835,28 @@ int cui__doc_line_of(const cui_text_doc *d, int pos);
 const char *cui__doc_chunk(const cui_text_doc *d, int pos, int *cs, int *ce);
 /* Replace [a, b) with t[0, n): own (when not NULL) is t, given away (release(own, user), NULL: free);
  * caret is kept for undo; merge joins the step to the last one when it continues it (typing on,
- * deleting on) or else makes it part of the same undo group. */
+ * deleting on) or else makes it part of the same undo group. nl (malloc'd, taken, or NULL) holds the
+ * offsets of t's nn line breaks when they are known already: an own text is then not read again. */
 bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *own, void (*release)(char *, void *), void *user,
-                   int caret, bool merge);
+                   int caret, bool merge, int *nl, int nn);
 bool cui__doc_undo(cui_text_doc *d, bool redo, int *caret);
 const cui__tsplice *cui__doc_splice_at(const cui_text_doc *d, unsigned rev);   /* valid for the last CUI__DOC_LOG revisions after base_rev */
 unsigned cui__doc_base_rev(const cui_text_doc *d);
 unsigned cui__doc_serial(const cui_text_doc *d);   /* unique per document in the process */
 int cui__doc_maxlen(const cui_text_doc *d);
+/* Many stretches replaced as one edit (Replace all, found on another thread): [a, b) becomes the parts
+ * in order, bytes [at, at + len) of the text (at >= 0) or of r (at < 0: from -at - 1). r and rnl (its
+ * rnn line break offsets, or NULL) are taken. O(parts + pieces in [a, b)), one undo step. */
+typedef struct { int at, len; } cui__tpart;
+bool cui__doc_edit_parts(cui_text_doc *d, int a, int b, const cui__tpart *parts, int np, char *r, int rn, int *rnl, int rnn, int caret);
+/* a snapshot of bytes [a, b) only (O(log n + its pieces)); its pieces with their offsets in the document */
+cui_text_snap *cui__doc_snapshot_range(const cui_text_doc *d, int a, int b);
+const char *cui__snap_piece(const cui_text_snap *s, int i, int *a, int *b);
+int cui__snap_pieces(const cui_text_snap *s);
+/* the code editor's limits for work on another thread (tests lower them): line states found on the UI
+ * thread in a frame (bytes of text), the document length from which Replace all runs on a thread, and the
+ * most bytes of a buffer one job for line states copies */
+extern int cui__ed_sync_bytes, cui__ed_rall_bytes, cui__ed_copy_bytes;
 
 /* ---- syntax highlighting (cui_code.c): the code block, the code editor and the diff viewer ---- */
 typedef struct {

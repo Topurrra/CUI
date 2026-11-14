@@ -9091,9 +9091,10 @@ static void test_code_editor_doc_big(void) {
     /* replace all, then one undo puts it all back */
     cui_code_editor_replace(ui, "ed", "tile", "TILE!");
     run(ui, build_pd, &c, 3);
-    for (int i = 0; i < 20 && c.r.find_matches < lines - 1; i++) run(ui, build_pd, &c, 1);
+    for (int i = 0; i < 200 && c.r.find_matches < lines - 1; i++) run(ui, build_pd, &c, 1);   /* counted about 1 MB a frame */
     CHECK(c.r.find_matches == lines - 1);
-    key(ui, build_pd, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);
+    key(ui, build_pd, &c, CUI_KEY_ENTER, CUI_MOD_PRIMARY | CUI_MOD_ALT);   /* worked out on another thread, applied when done */
+    for (clock_t w0 = clock(); c.r.working && clock() - w0 < 20 * CLOCKS_PER_SEC;) run(ui, build_pd, &c, 1);
     CHECK(c.r.length == (int)n + 80 + lines - 1);
     key(ui, build_pd, &c, CUI_KEY_ESCAPE, 0);
     key(ui, build_pd, &c, CUI_KEY_Z, CUI_MOD_PRIMARY);

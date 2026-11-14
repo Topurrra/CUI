@@ -1967,6 +1967,9 @@ typedef struct cui_code_editor_result {
                                 * splice_inserted bytes there (several edits in a frame: the smallest range that covers
                                 * them all, so a replace all is one splice from its first match to its last);
                                 * splice_start is -1 when the editor changed nothing. For cui_code_editor_splice. */
+    bool working;              /* work for a big text runs on another thread: colors below an edit far above the view are
+                                * still being found, or Replace all is still finding its matches (the find bar says so).
+                                * The editor asks for frames until it is done; nothing waits for it. */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),

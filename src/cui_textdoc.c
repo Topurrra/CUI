@@ -203,8 +203,10 @@ static int cui__td_lower(const int *a, int lo, int hi, int x) {
     return lo;
 }
 
-/* a new buffer of the given bytes (adopted) or capacity (to append to); returns its index */
-static int cui__td_buf_new(cui_text_doc *d, char *p, int len, int cap, void (*release)(char *, void *), void *user) {
+/* A new buffer of the given bytes (adopted) or capacity (to append to); returns its index. nl
+ * (malloc'd, taken) holds the offsets of its nn line breaks when the caller found them already
+ * (on another thread), or is NULL to find them here. */
+static int cui__td_buf_take(cui_text_doc *d, char *p, int len, int cap, void (*release)(char *, void *), void *user, int *nl, int nn) {
     CUI__TD_GROW(d->b, d->nb, d->bcap, 1);
     cui__tbuf *b = &d->b[d->nb];
     memset(b, 0, sizeof *b);
@@ -214,7 +216,8 @@ static int cui__td_buf_new(cui_text_doc *d, char *p, int len, int cap, void (*re
     if (!b->k->p) abort();
     b->k->release = release; b->k->user = user; b->k->refs = 1;
     b->len = len; b->cap = p ? len : cap;
-    if (len > 0) {   /* its line breaks, in blocks so the index grows by what is read */
+    if (nl) { b->nl = nl; b->nn = b->ncap = nn; }
+    else if (len > 0) {   /* its line breaks, in blocks so the index grows by what is read */
         for (int a = 0; a < len; a += 1 << 16) {
             int e = CUI_MIN(len, a + (1 << 16));
             CUI__TD_GROW(b->nl, b->nn, b->ncap, e - a);
@@ -226,12 +229,16 @@ static int cui__td_buf_new(cui_text_doc *d, char *p, int len, int cap, void (*re
     }
     return d->nb++;
 }
+static int cui__td_buf_new(cui_text_doc *d, char *p, int len, int cap, void (*release)(char *, void *), void *user) {
+    return cui__td_buf_take(d, p, len, cap, release, user, NULL, 0);
+}
 
 /* Puts t[0, n) where a piece can point at it: at the end of the add buffer, in a new one, or
  * (own, a big text the caller gave away) in a buffer of its own. Returns the buffer, and in
  * *start where the bytes begin. */
-static int cui__td_place(cui_text_doc *d, const char *t, int n, char *own, void (*release)(char *, void *), void *user, int *start) {
-    if (own && n >= CUI__TD_OWN) { *start = 0; return cui__td_buf_new(d, own, n, n, release, user); }
+static int cui__td_place(cui_text_doc *d, const char *t, int n, char *own, void (*release)(char *, void *), void *user, int *start, int *nl, int nn) {
+    if (own && n >= CUI__TD_OWN) { *start = 0; return cui__td_buf_take(d, own, n, n, release, user, nl, nn); }
+    free(nl);   /* the line breaks are found as the bytes are copied */
     int bi;
     if (n >= CUI__TD_OWN) {   /* a big text: a buffer that fits it exactly */
         char *p = malloc((size_t)n);
@@ -275,8 +282,18 @@ static void cui__td_reserve(cui_text_doc *d, int more) {
     if (have < more) CUI__TD_GROW(d->n, d->nn, d->ncap, more - have);
 }
 
-/* a node for bytes [start, start + len) of buffer bi; the caller reserved room */
-static int cui__td_node(cui_text_doc *d, int bi, int start, int len) {
+/* first index i in [0, n) with a[i] >= x, looked for from h on when the answer is there (pieces
+ * made in order of their bytes find their line breaks in O(1) each, not O(log n)) */
+static int cui__td_lower_from(const int *a, int n, int h, int x) {
+    if (h < 0 || h > n || (h > 0 && a[h - 1] >= x)) return cui__td_lower(a, 0, n, x);
+    int lo = h, hi = h, step = 1;
+    while (hi < n && a[hi] < x) { lo = hi + 1; hi = CUI_MIN(n, h + step); step *= 2; }
+    return cui__td_lower(a, lo, hi, x);
+}
+
+/* A node for bytes [start, start + len) of buffer bi; the caller reserved room. *hint (or NULL):
+ * where the last piece of that buffer made in order ended in its line breaks. */
+static int cui__td_node_h(cui_text_doc *d, int bi, int start, int len, int *hint) {
     int t;
     if (d->freel) { t = d->freel; d->freel = TN(t).l; }
     else t = d->nn++;
@@ -286,11 +303,13 @@ static int cui__td_node(cui_text_doc *d, int bi, int start, int len) {
     x->l = x->r = 0;
     x->pri = d->seed;
     x->buf = bi; x->start = start; x->len = len;
-    x->nl0 = cui__td_lower(b->nl, 0, b->nn, start);
-    x->nl = cui__td_lower(b->nl, x->nl0, b->nn, start + len) - x->nl0;
+    x->nl0 = cui__td_lower_from(b->nl, b->nn, hint ? *hint : -1, start);
+    x->nl = cui__td_lower_from(b->nl, b->nn, x->nl0, start + len) - x->nl0;
+    if (hint) *hint = x->nl0 + x->nl;
     x->sl = len; x->snl = x->nl;
     return t;
 }
+static int cui__td_node(cui_text_doc *d, int bi, int start, int len) { return cui__td_node_h(d, bi, start, len, NULL); }
 
 static int cui__td_merge(cui_text_doc *d, int a, int b) {
     if (!a) return b;
@@ -300,6 +319,29 @@ static int cui__td_merge(cui_text_doc *d, int a, int b) {
     TN(b).l = l;
     cui__td_upd(d, b);
     return b;
+}
+
+/* A tree of the pieces pc[0, n) in order, made in O(n): each new node goes down the right edge
+ * past the nodes of lower priority, which become its left subtree (a node's subtree is complete
+ * once it leaves the edge, so its sums are found then). The caller reserved n nodes. */
+static int cui__td_build(cui_text_doc *d, const cui__tpc *pc, int n) {
+    int *edge = malloc(sizeof(int) * (size_t)CUI_MAX(n, 1)), top = 0;
+    int *hint = malloc(sizeof(int) * (size_t)CUI_MAX(d->nb, 1));
+    if (!edge || !hint) abort();
+    for (int i = 0; i < d->nb; i++) hint[i] = -1;
+    for (int i = 0; i < n; i++) {
+        if (pc[i].len <= 0) continue;
+        int x = cui__td_node_h(d, pc[i].buf, pc[i].start, pc[i].len, &hint[pc[i].buf]), last = 0;
+        while (top > 0 && TN(edge[top - 1]).pri < TN(x).pri) { last = edge[--top]; cui__td_upd(d, last); }
+        TN(x).l = last;
+        if (top > 0) TN(edge[top - 1]).r = x;
+        edge[top++] = x;
+    }
+    while (top > 1) cui__td_upd(d, edge[--top]);
+    int root = top ? edge[0] : 0;
+    if (root) cui__td_upd(d, root);
+    free(edge); free(hint);
+    return root;
 }
 
 /* *a gets the first k bytes of tree t, *b the rest; a piece across k is cut in two (one new node) */
@@ -476,9 +518,7 @@ static void cui__td_put(cui_text_doc *d, int a, int b, const cui__tpc *pc, int n
     cui__td_split(d, d->root, a, &A, &R);
     cui__td_split(d, R, b - a, &M, &B);
     cui__td_take(d, M);
-    int mid = 0;
-    for (int i = 0; i < npc; i++)
-        if (pc[i].len > 0) mid = cui__td_merge(d, mid, cui__td_node(d, pc[i].buf, pc[i].start, pc[i].len));
+    int mid = cui__td_build(d, pc, npc);
     d->root = cui__td_merge(d, cui__td_merge(d, A, mid), B);
     cui__td_log(d, a, b, a + n, la, lb, k);
     cui__td_max_in(d, la, k);
@@ -509,15 +549,16 @@ static void cui__td_trim(cui_text_doc *d) {
 }
 
 bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *own, void (*release)(char *, void *), void *user,
-                   int caret, bool merge) {
+                   int caret, bool merge, int *nl, int nn) {
     int len = TN(d->root).sl;
     a = CUI_CLAMP(a, 0, len); b = CUI_CLAMP(b, a, len);
     if (n < 0) n = 0;
-    if ((long long)len - (b - a) + n > INT_MAX - 2) { if (own) { if (release) release(own, user); else free(own); } return false; }
-    if (a == b && n == 0) { if (own) { if (release) release(own, user); else free(own); } return false; }
-    int nlc = n > 0 ? (int)cui__count_byte(t, (size_t)n, '\n') : 0;
+    if (!own && nl) { free(nl); nl = NULL; }
+    if ((long long)len - (b - a) + n > INT_MAX - 2 || (a == b && n == 0)) { if (own) { if (release) release(own, user); else free(own); } free(nl); return false; }
+    int nlc = nl ? nn : n > 0 ? (int)cui__count_byte(t, (size_t)n, '\n') : 0;
     int start = 0, bi = -1;
-    if (n > 0) bi = cui__td_place(d, t, n, own, release, user, &start);
+    if (n > 0) bi = cui__td_place(d, t, n, own, release, user, &start, nl, nn);
+    else free(nl);
     /* the history: redo steps go, then the edit joins the last record or starts one */
     for (int i = d->hpos; i < d->hn; i++) cui__td_rec_free(&d->h[i]);
     d->hn = d->hpos;
@@ -556,6 +597,73 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
         q->del_n += b - a;
     }
     if (n > 0) { cui__td_pcs_add(&q->ins, &q->nins, &q->cins, (cui__tpc){ bi, start, n }, false); q->ins_n += n; }
+    q->after = d->state = ++d->states;
+    cui__td_trim(d);
+    return true;
+}
+
+/* Many stretches replaced at once, as one edit and one undo step (Replace all, its matches found on
+ * another thread): bytes [a, b) become the parts in order, each either bytes of the text as it is
+ * (at >= 0: [at, at + len), inside [a, b) and in order) or of r (at < 0: r[-at - 1, -at - 1 + len)).
+ * r and its line breaks rnl are taken (malloc'd; rnl NULL: found here). It costs O(parts + pieces
+ * in [a, b)) and reads none of the bytes. False (r and rnl freed, nothing changed) for parts that
+ * do not fit [a, b). */
+bool cui__doc_edit_parts(cui_text_doc *d, int a, int b, const cui__tpart *parts, int np, char *r, int rn, int *rnl, int rnn, int caret) {
+    int len = TN(d->root).sl;
+    long long n = 0;
+    bool ok = a >= 0 && b <= len && a <= b && rn >= 0;
+    for (int i = 0, at = a; ok && i < np; i++) {
+        const cui__tpart *p = &parts[i];
+        if (p->len < 0) ok = false;
+        else if (p->at >= 0) { ok = p->at >= at && p->at + p->len <= b; at = p->at + p->len; }
+        else ok = -p->at - 1 + p->len <= rn;
+        n += p->len;
+    }
+    if (!ok || len - (b - a) + n > INT_MAX - 2 || (a == b && n == 0)) { free(r); free(rnl); return false; }
+    int bi = -1;
+    if (rn > 0) bi = cui__td_buf_take(d, r, rn, rn, NULL, NULL, rnl, rnn);
+    else { free(r); free(rnl); }
+    for (int i = d->hpos; i < d->hn; i++) cui__td_rec_free(&d->h[i]);
+    d->hn = d->hpos;
+    int group = d->hn > 0 ? d->h[d->hn - 1].group + 1 : 1;
+    CUI__TD_GROW(d->h, d->hn, d->hcap, 1);
+    cui__trec *q = &d->h[d->hn++];
+    memset(q, 0, sizeof *q);
+    q->at = a; q->caret = caret; q->group = group;
+    d->hpos = d->hn;
+    int la = cui__doc_line_of(d, a), lb = cui__doc_line_of(d, b);
+    cui__td_max_out(d, la, lb);
+    d->tmpn = 0;
+    cui__td_reserve(d, 2);
+    int A, R, M, B;
+    cui__td_split(d, d->root, a, &A, &R);
+    cui__td_split(d, R, b - a, &M, &B);
+    cui__td_take(d, M);   /* the pieces of [a, b), in order, to d->tmp */
+    /* the new pieces: the text's parts out of the pieces taken, r's from its buffer */
+    cui__tpc *pc = NULL;
+    int npc = 0, cpc = 0, ti = 0, tpos = a;
+    for (int i = 0; i < np; i++) {
+        const cui__tpart *p = &parts[i];
+        if (p->len <= 0) continue;
+        if (p->at < 0) { cui__td_pcs_add(&pc, &npc, &cpc, (cui__tpc){ bi, -p->at - 1, p->len }, false); continue; }
+        int at = p->at, left = p->len;
+        while (left > 0 && ti < d->tmpn) {
+            if (tpos + d->tmp[ti].len <= at) { tpos += d->tmp[ti++].len; continue; }
+            int off = at - tpos, take = CUI_MIN(left, d->tmp[ti].len - off);
+            cui__td_pcs_add(&pc, &npc, &cpc, (cui__tpc){ d->tmp[ti].buf, d->tmp[ti].start + off, take }, false);
+            at += take; left -= take;
+        }
+    }
+    cui__td_reserve(d, npc);
+    int mid = cui__td_build(d, pc, npc);
+    int k = TN(mid).snl;
+    d->root = cui__td_merge(d, cui__td_merge(d, A, mid), B);
+    cui__td_log(d, a, b, a + (int)n, la, lb, k);
+    cui__td_max_in(d, la, k);
+    for (int i = 0; i < d->tmpn; i++) cui__td_pcs_add(&q->del, &q->ndel, &q->cdel, d->tmp[i], false);
+    q->del_n = b - a;
+    q->ins = pc; q->nins = npc; q->cins = cpc;
+    q->ins_n = (int)n;
     q->after = d->state = ++d->states;
     cui__td_trim(d);
     return true;
@@ -740,7 +848,7 @@ bool cui_text_doc_iter_next(cui_text_doc_iter *it) {
 
 bool cui_text_doc_replace(cui_text_doc *d, int start, int end, const char *text, int len) {
     if (!d) return false;
-    return cui__doc_edit(d, start, end, text ? text : "", text ? cui__td_len_of(text, len) : 0, NULL, NULL, NULL, CUI_MAX(start, 0), false);
+    return cui__doc_edit(d, start, end, text ? text : "", text ? cui__td_len_of(text, len) : 0, NULL, NULL, NULL, CUI_MAX(start, 0), false, NULL, 0);
 }
 
 bool cui_text_doc_undo(cui_text_doc *d, int *caret) { return d && cui__doc_undo(d, false, caret); }
@@ -784,6 +892,7 @@ struct cui_text_snap {
     const char **p;             /* chunk i: p[i][0, off[i + 1] - off[i]) */
     int *off;
     cui__tblk **k; int nk;      /* the buffers it keeps alive */
+    int base;                   /* where in the document it starts (a stretch of it: cui__doc_snapshot_range) */
 };
 
 static void cui__td_snap_walk(const cui_text_doc *d, int t, cui_text_snap *s) {
@@ -810,6 +919,53 @@ cui_text_snap *cui_text_doc_snapshot(const cui_text_doc *d) {
     }
     return s;
 }
+
+/* the pieces of tree t (whose first byte is at acc) that reach into [a, b), cut to it: counted
+ * (s NULL) or added to s */
+static int cui__td_snap_range_walk(const cui_text_doc *d, int t, int acc, int a, int b, cui_text_snap *s) {
+    if (!t) return 0;
+    const cui__tnode *x = &TN(t);
+    int ps = acc + TN(x->l).sl, pe = ps + x->len, c = 0;
+    if (a < ps) c += cui__td_snap_range_walk(d, x->l, acc, a, b, s);
+    int ca = CUI_MAX(a, ps), cb = CUI_MIN(b, pe);
+    if (cb > ca) {
+        if (s) {
+            s->p[s->n] = d->b[x->buf].k->p + x->start + (ca - ps);
+            s->off[s->n + 1] = s->off[s->n] + (cb - ca);
+            s->n++;
+        }
+        c++;
+    }
+    if (b > pe) c += cui__td_snap_range_walk(d, x->r, pe, a, b, s);
+    return c;
+}
+
+/* A snapshot of bytes [a, b) only: O(log n + the pieces there), for a worker that reads a
+ * stretch of a big document. Its offsets count from a (cui__snap_piece gives them as the
+ * document's). */
+cui_text_snap *cui__doc_snapshot_range(const cui_text_doc *d, int a, int b) {
+    int len = TN(d->root).sl;
+    a = CUI_CLAMP(a, 0, len); b = CUI_CLAMP(b, a, len);
+    int pieces = cui__td_snap_range_walk(d, d->root, 0, a, b, NULL);
+    cui_text_snap *s = calloc(1, sizeof *s);
+    if (!s) return NULL;
+    s->p = malloc(sizeof *s->p * (size_t)CUI_MAX(1, pieces));
+    s->off = calloc((size_t)pieces + 1, sizeof *s->off);
+    s->k = malloc(sizeof *s->k * (size_t)CUI_MAX(1, d->nb));
+    if (!s->p || !s->off || !s->k) { free(s->p); free(s->off); free(s->k); free(s); return NULL; }
+    cui__td_snap_range_walk(d, d->root, 0, a, b, s);
+    s->len = b - a; s->base = a;
+    for (int i = 0; i < d->nb; i++) { cui__td_atomic_add(&d->b[i].k->refs, 1); s->k[s->nk++] = d->b[i].k; }
+    return s;
+}
+
+/* piece i of a snapshot: its bytes, which are the document's [*a, *b) */
+const char *cui__snap_piece(const cui_text_snap *s, int i, int *a, int *b) {
+    if (!s || i < 0 || i >= s->n) { *a = *b = s ? s->base + s->len : 0; return NULL; }
+    *a = s->base + s->off[i]; *b = s->base + s->off[i + 1];
+    return s->p[i];
+}
+int cui__snap_pieces(const cui_text_snap *s) { return s ? s->n : 0; }
 
 void cui_text_snap_free(cui_text_snap *s) {
     if (!s) return;
