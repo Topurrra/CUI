@@ -947,20 +947,26 @@ static void cui__ed_doc_sync(cui__ed *E, bool own) {
         top_row = wc ? cui__sq_prefix(ui, &wc->rows, top) : top;
     }
     bool on = false, lon = false;
-    int a = 0, b0 = 0, b1 = 0, la = 0, lb0 = 0, lb1 = 0;
+    int a = 0, b0 = 0, b1 = 0, la = 0, lb0 = 0, lb1 = 0, tlen = E->len;
+    for (unsigned r = seen + 1; r != rev + 1; r++) tlen -= cui__doc_splice_at(d, r)->b1 - cui__doc_splice_at(d, r)->b0;   /* the length before them */
     for (unsigned r = seen + 1; r != rev + 1; r++) {
         const cui__tsplice *s = cui__doc_splice_at(d, r);
+        bool whole = s->a == 0 && s->b0 == tlen;   /* the whole text replaced (a format, a reload): positions stay where they were */
+        tlen += s->b1 - s->b0;
         cui__ed_span_add(&on, &a, &b0, &b1, s->a, s->b0 - s->a, s->b1 - s->a);
         cui__ed_span_add(&lon, &la, &lb0, &lb1, s->la, s->lb - s->la + 1, s->k + 1);   /* lines [la, lb] became [la, la + k] */
         if (own) cui__ed_span_add(&E->rep_on, &E->rep_a, &E->rep_b0, &E->rep_b1, s->a, s->b0 - s->a, s->b1 - s->a);
-        else {
+        else if (whole) {
+            e->cursor = CUI_MIN(e->cursor, s->b1); e->anchor = CUI_MIN(e->anchor, s->b1); e->last_cursor = CUI_MIN(e->last_cursor, s->b1);
+            st->drag_a = CUI_MIN(st->drag_a, s->b1); st->drag_b = CUI_MIN(st->drag_b, s->b1);
+        } else {
             e->cursor = cui__ed_map(e->cursor, s->a, s->b0, s->b1);
             e->anchor = cui__ed_map(e->anchor, s->a, s->b0, s->b1);
             e->last_cursor = cui__ed_map(e->last_cursor, s->a, s->b0, s->b1);
             st->drag_a = cui__ed_map(st->drag_a, s->a, s->b0, s->b1);
             st->drag_b = cui__ed_map(st->drag_b, s->a, s->b0, s->b1);
         }
-        if (top >= 0) top = top < s->la ? top : top > s->lb ? top + s->k - (s->lb - s->la) : s->la;
+        if (top >= 0 && !whole) top = top < s->la ? top : top > s->lb ? top + s->k - (s->lb - s->la) : s->la;
         cui__ed_fc_splice(&st->fc, s->a, s->b0, s->b1);
     }
     /* old lines [la, lb0) are new lines [la, lb1) */
@@ -1962,9 +1968,9 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 cui__ed_draw_mark(ui, p, mk, x0 + xa, xb - xa, y);
             }
             if (p->fq.qn > 0) {   /* a match may run on into the next row: each row shows its part */
-                for (int i = ls, x, y; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &x, &y, NULL) > 0 && x < re; i = y) {
-                    if (y <= rs) continue;
-                    int a = CUI_MAX(x, rs), b = CUI_MIN(y, re);
+                for (int i = ls, mx, my; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &mx, &my, NULL) > 0 && mx < re; i = my) {   /* (not x and y: y is the row's) */
+                    if (my <= rs) continue;
+                    int a = CUI_MAX(mx, rs), b = CUI_MIN(my, re);
                     float xa = (float)cui__ed_adv(s, rs, a, p->tab, rc0) * p->cw, xb = (float)cui__ed_adv(s, rs, b, p->tab, rc0) * p->cw;
                     cui_draw_rect_border(ui, (cui_rect){ x0 + xa - 1, y + 1, xb - xa + 2, p->lh - 2 }, CUI_CORNERS(3), p->match, p->match_edge, 1);
                 }
@@ -2068,8 +2074,8 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         }
         /* find matches */
         if (p->fq.qn > 0) {
-            for (int i = ls, x, y; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &x, &y, NULL) > 0; i = y) {
-                float xa = (float)cui__ed_col(s, ls, x, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, y, p->tab) * p->cw;
+            for (int i = ls, mx, my; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &mx, &my, NULL) > 0; i = my) {   /* (not x and y: y is the line's) */
+                float xa = (float)cui__ed_col(s, ls, mx, p->tab) * p->cw, xb = (float)cui__ed_col(s, ls, my, p->tab) * p->cw;
                 cui_draw_rect_border(ui, (cui_rect){ x0 + xa - 1, y + 1, xb - xa + 2, p->lh - 2 }, CUI_CORNERS(3), p->match, p->match_edge, 1);
             }
         }

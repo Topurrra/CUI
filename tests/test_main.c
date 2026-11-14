@@ -8931,6 +8931,14 @@ static void test_code_editor_doc_shared(void) {
     CHECK(cui_text_doc_undo(c.doc, NULL));
     run(ui, build_dd, &c, 1);
     CHECK(c.r[1].cursor == 15 && dd_text_is(&c, "p01XY56789\nabcdefghij\n"));
+    /* the app replaces the whole text (a format): the carets stay where they were, not at its end */
+    dd_sel(ui, &c, "b", 5, 5);
+    cui_text_doc_replace(c.doc, 0, cui_text_doc_length(c.doc), "p01XY 5678 formatted\nabcdefghij\n", -1);
+    run(ui, build_dd, &c, 1);
+    CHECK(c.r[1].cursor == 5 && c.r[1].length == 32);
+    cui_text_doc_undo(c.doc, NULL);
+    run(ui, build_dd, &c, 1);
+    CHECK(c.r[1].cursor == 5 && dd_text_is(&c, "p01XY56789\nabcdefghij\n"));
     /* a new text for the document: the editors start over */
     cui_text_doc_set(c.doc, "fresh\n", -1);
     run(ui, build_dd, &c, 1);
@@ -9017,6 +9025,42 @@ static void test_code_editor_doc_shared(void) {
     }
     free(big);
     cui_text_doc_free(c.doc);
+}
+
+/* The find bar's match boxes sit on their lines (they used to be drawn at a height equal to the
+ * match's byte offset), on a buffer and on a document, wrapped or not. */
+static void test_code_editor_find_boxes(void) {
+    printf("code editor: find matches are boxed on their own line\n");
+    for (int mode = 0; mode < 4; mode++) {
+        static pd_ctx c;
+        memset(&c, 0, sizeof c);
+        static char buf[256];
+        snprintf(buf, sizeof buf, "first line\nsecond one\nthird has tile here\nlast\n");
+        if (mode & 1) c.doc = cui_text_doc_new(buf, -1);
+        else { c.buf = buf; c.cap = sizeof buf; }
+        c.lang = "text";
+        c.wrap = (mode & 2) != 0;
+        cui_ctx *ui = new_ctx();
+        run(ui, build_pd, &c, 3);
+        cui_code_editor_find(ui, "ed", "tile");
+        run(ui, build_pd, &c, 3);
+        cui_rect er = rect_of(ui, cui_make_id(ui, "ed"));
+        float cw = cui_measure_text(ui, CUI_FONT_MONO, 13, "0000000000000000", 16).width / 16, lh = roundf(13 * 1.6f);
+        const cui_draw_data *dd = cui_get_draw_data(ui);
+        int found = 0;
+        float cy = 0;
+        for (int i = 0; i < dd->vertex_count; i++) {
+            const cui_vertex *v = &dd->vertices[i];
+            if (fabsf(2 * v->hw - (4 * cw + 2)) < 0.6f && fabsf(2 * v->hh - (lh - 2)) < 0.6f) { found++; cy = v->y - v->ly; }
+        }
+        /* the box's middle is on the third line of code: under the find bar, two lines down */
+        CHECK(c.r.find_matches == 1 && found > 0);
+        CHECK(cy > er.y + 2 * lh && cy < er.y + er.h);
+        float rows_above = (cy - er.y) / lh;
+        CHECK(rows_above > 2 && rows_above < 6);
+        cui_destroy(ui);
+        cui_text_doc_free(c.doc);
+    }
 }
 
 /* a big document: typing near the top costs about what it costs near the end */
@@ -11462,6 +11506,7 @@ int main(void) {
     test_code_editor_doc_parity();
     test_code_editor_doc_shared();
     test_code_editor_doc_big();
+    test_code_editor_find_boxes();
     test_diff();
     test_diff_prepared();
     test_dials();
