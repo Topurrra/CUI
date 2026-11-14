@@ -1202,7 +1202,8 @@ int cui__scroll_begin_ex(cui_ctx *ui, cui_id id, const cui_box *box, bool horizo
         }
     }
     if (!ui->mdown[0]) st->drag_y = false;
-    st->ty = cui__clampf(st->ty, 0, max_y);
+    if (!st->pend) st->ty = cui__clampf(st->ty, 0, max_y);   /* a pending target is clamped by the layout */
+    if (st->stick) st->unstuck = st->ty < max_y - 1.0f;
     st->tx = cui__clampf(st->tx, 0, max_x);
     cui__tween(ui, &st->y, st->ty, 0.14f);
     cui__tween(ui, &st->x, st->tx, 0.14f);
@@ -1319,6 +1320,7 @@ void cui_scroll_begin(cui_ctx *ui, const cui_scroll_opts *o) {
     b.pad = o->pad;
     b.gap = o->gap;
     cui_scroll_state *st = cui_state(ui, id, sizeof *st);
+    st->stick = o->stick_to_bottom;
     st->fade = o->fade_edges ? (cui__color_set(o->fade_color) ? cui_color_of(ui, o->fade_color) : cui__backdrop(ui)) : cui__rgba(0, 0, 0, 0);
     cui__scroll_begin_ex(ui, id, &b, o->horizontal);
 }
@@ -1351,12 +1353,17 @@ cui_scroll_info cui_scroll_get(cui_ctx *ui, const char *scroll_id) {
 }
 
 void cui_scroll_set(cui_ctx *ui, const char *scroll_id, float y, bool instant) {
-    cui_scroll_state *st = cui_state(ui, cui_make_id(ui, scroll_id), sizeof *st);
+    cui_scroll_state *st = cui_state(ui, cui_make_id(ui, scroll_id), sizeof *st);   /* made if the area was never built */
     if (!(y > 0)) y = 0;   /* also NaN */
-    if (st->view_h > 0 && y > st->content_h - st->view_h) y = CUI_MAX(0.0f, st->content_h - st->view_h);
-    st->ty = y;
-    if (instant) st->y = y;
+    st->pend = true; st->pend_y = y; st->pend_instant = instant;
+    if (st->view_h > 0) {   /* the layout will settle it; meanwhile an eased move starts and an instant one is already there */
+        float m = CUI_MAX(0.0f, st->content_h - st->view_h);
+        st->ty = CUI_MIN(y, m);
+        if (instant) st->y = st->ty;
+    }
 }
+
+void cui_scroll_set_bottom(cui_ctx *ui, const char *scroll_id, bool instant) { cui_scroll_set(ui, scroll_id, CUI_SCROLL_BOTTOM, instant); }
 
 /* ------------------------------------------------------------------------ */
 /* Split view                                                               */

@@ -367,6 +367,9 @@ typedef struct cui_scroll_state {
     float drag_grab;
     bool hover_bar;
     cui_color fade;             /* edge fade color, alpha 0 for none */
+    float pend_y;               /* cui_scroll_set waiting for the layout: resolved against this frame's max */
+    bool pend, pend_instant;
+    bool stick, unstuck;        /* .stick_to_bottom, and whether the user has left the bottom */
 } cui_scroll_state;
 
 int cui__node_new(cui_ctx *ui, cui_id id);

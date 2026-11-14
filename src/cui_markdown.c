@@ -67,7 +67,7 @@ static bool md_has(md_line L, char c) { return L.len > 0 && memchr(L.s, c, (size
 enum { MS_STRONG = 1, MS_EM = 2, MS_STRIKE = 4, MS_CODE = 8, MS_BREAK = 16 };
 typedef struct { const char *p; int len; uint8_t style; int link; int at; } md_run;   /* at: offset in the block's text */
 typedef struct { const char *url; int len; bool www, pending, autolink, wiki; } md_link;
-typedef struct { md_run *runs; int nruns; md_link *links; int nlinks; } md_inline;
+typedef struct { md_run *runs; int nruns; md_link *links; int nlinks; bool ws; } md_inline;   /* ws: spaces and tabs keep their width (plain text) */
 
 enum { TK_TXT, TK_DELIM, TK_CODE, TK_BR, TK_LOPEN, TK_LCLOSE, TK_AUTO };
 typedef struct {
@@ -496,12 +496,30 @@ static float md_piece_w(cui_ctx *ui, const md_font *f, const md_run *R, int b, i
     return w;
 }
 
+/* Tabs go to the next stop of MD_TAB_COLS space widths, counted from the line's left edge. */
+#define MD_TAB_COLS 4
+static float md_tab_to(float x, float space_w) {
+    float stop = space_w * MD_TAB_COLS;
+    return stop > 0 ? (floorf(x / stop + 0.001f) + 1.0f) * stop : x;
+}
+
 /* One line width per hard break, nothing wrapped: the natural width. */
 static float md_runs_width(cui_ctx *ui, const md_inline *in, const md_font *f) {
     float w = 0, best = 0;
     for (int k = 0; k < in->nruns; k++) {
         const md_run *R = &in->runs[k];
         if (R->style & MS_BREAK) { best = CUI_MAX(best, w); w = 0; continue; }
+        if (in->ws) {   /* a tab is not a glyph's width */
+            float spw = cui__text_width(ui, md_font_of(f, R->style), md_size_of(f, R->style), " ", 1, false);
+            for (int a = 0; a < R->len;) {
+                int e = a;
+                while (e < R->len && R->p[e] != '	') e++;
+                if (e > a) w += md_piece_w(ui, f, R, a, e);
+                if (e < R->len) w = md_tab_to(w, spw);
+                a = e + 1;
+            }
+            continue;
+        }
         w += md_piece_w(ui, f, R, 0, R->len);
     }
     return CUI_MAX(best, w);
@@ -558,13 +576,27 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
             if (e > bj) ww += md_piece_w(ui, f, Q, bj, e);
             if (e < Q->len) break;
         }
-        float sw = 0;
-        if (sp_run >= 0 && x > 0) {
+        float sw = 0, spw = 0;
+        const char *sp_end = in->runs[ri].p + bi;   /* the blank run is sp_p up to here (one run: plain text has no styles) */
+        if (sp_run >= 0 && (x > 0 || in->ws)) {
             const md_run *S = &in->runs[sp_run];
-            sw = cui__text_width(ui, md_font_of(f, S->style), md_size_of(f, S->style), " ", 1, false);
+            spw = cui__text_width(ui, md_font_of(f, S->style), md_size_of(f, S->style), " ", 1, false);
+            sw = spw;
+            if (in->ws) {   /* the blanks as written: a space each, a tab to its stop */
+                float ex = x;
+                for (const char *q = sp_p; q < sp_end; q++) ex = *q == '	' ? md_tab_to(ex, spw) : *q == ' ' ? ex + spw : ex;
+                sw = ex - x;
+            }
         }
         if (x > 0 && x + sw + ww > W) { md_finish_line(L, &first, x, W, align); x = 0; sw = 0; }
-        if (sw > 0) { md_seg_add(ui, L, in, sp_run, (int)(sp_p - in->runs[sp_run].p), *sp_p == ' ' ? sp_p : " ", 1, x, sw); x += sw; }
+        if (in->ws && sw > 0 && sp_run == ri) {
+            const md_run *S = &in->runs[sp_run];
+            for (const char *q = sp_p; q < sp_end; q++) {
+                int off = (int)(q - S->p);
+                if (*q == ' ') { md_seg_add(ui, L, in, sp_run, off, q, 1, x, spw); x += spw; }
+                else if (*q == '	') { float nx = md_tab_to(x, spw); md_seg_add(ui, L, in, sp_run, off, " ", 1, x, nx - x); x = nx; }
+            }
+        } else if (sw > 0) { md_seg_add(ui, L, in, sp_run, (int)(sp_p - in->runs[sp_run].p), *sp_p == ' ' ? sp_p : " ", 1, x, sw); x += sw; }
         sp_run = -1;
         bool split = ww > W - x;
         while (ri < in->nruns) {
@@ -872,7 +904,7 @@ typedef struct {
     cui_id id;
     const char *src;
     int len, content_end;
-    bool streaming, compact, fit, custom_color;
+    bool streaming, compact, fit, custom_color, keep_ws;
     float body;                  /* unscaled body size */
     float u;                     /* spacing unit: body / 13 */
     cui_color fg, fg2, link_c, code_bg, marker_c, rule_c, rail_c;
@@ -2140,7 +2172,7 @@ static float md_plain_text(md_ctx *c, const md_line *L, int n, float W) {
         }
         int at = 0;
         for (int k = 0; k < nr; k++) { runs[k].at = at; at += (runs[k].style & MS_BREAK) ? 1 : runs[k].len; }
-        md_inline in = { runs, nr, NULL, 0 };
+        md_inline in = { runs, nr, NULL, 0, c->keep_ws };
         float bw = md_inline_emit(c, &in, &f, c->fg, CUI_TEXT_LEFT, W);   /* not inside CUI_MAX: it evaluates twice */
         best = CUI_MAX(best, bw);
         any = true;
@@ -2462,7 +2494,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     md_ctx c;
     memset(&c, 0, sizeof c);
     c.ui = ui; c.id = id; c.src = text; c.len = len; c.res = &res;
-    c.streaming = o->streaming; c.compact = o->compact; c.fit = o->fit_content;
+    c.streaming = o->streaming; c.compact = o->compact; c.fit = o->fit_content; c.keep_ws = o->plain && o->preserve_whitespace;
     c.base_dir = o->base_dir; c.resolve_image = o->resolve_image; c.resolve_user = o->resolve_user;
     c.body = o->size > 0 ? o->size : ui->theme.text_body;
     c.u = c.body / 13.0f;

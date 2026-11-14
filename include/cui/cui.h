@@ -517,6 +517,9 @@ typedef struct cui_scroll_opts {
     float pad, gap;
     bool fade_edges;            /* content fades out at an edge with more to scroll */
     cui_color fade_color;       /* what it fades into (default: the nearest opaque box around it) */
+    bool stick_to_bottom;       /* follow the end while content grows (chat, logs): it stays at the bottom while it
+                                   is at the bottom and lets go when the user scrolls up; scrolling back down to the
+                                   bottom, or cui_scroll_set_bottom, takes hold again. Follows within the same frame. */
 } cui_scroll_opts;
 CUI_API void cui_scroll_begin(cui_ctx *ui, const cui_scroll_opts *opts);
 CUI_API void cui_scroll_end(cui_ctx *ui);
@@ -531,10 +534,17 @@ typedef struct cui_scroll_info {
     float max_y;               /* the largest offset: max(0, content_h - view_h) */
 } cui_scroll_info;
 CUI_API cui_scroll_info cui_scroll_get(cui_ctx *ui, const char *scroll_id);
-/* Scrolls to y (clamped to 0 and, once the layout is known, to max_y; pass a huge value for the bottom).
- * instant: jump there this frame with no animation, for anchoring the view when content above it changes
- * height or following the end of a streaming reply. Otherwise it eases there, like cui_scroll_to. */
+/* Scrolls to y. The target waits for the layout and is clamped to 0..max_y of that frame's layout, so a set
+ * made before the area's first layout, or on a frame where the content also changes, lands correctly.
+ * CUI_SCROLL_BOTTOM (or any huge value) is the bottom of this frame's content.
+ * instant: jump there in this frame's layout with no animation, for anchoring the view when content above it
+ * changes height or following the end of a streaming reply. Otherwise it eases there, like cui_scroll_to.
+ * An id that was never built is created by the call and the target kept, so it applies when the area is first
+ * built (also after its state was freed because it was not shown); a target left unbuilt for about five
+ * seconds of frames is dropped with the state. cui_scroll_get shows the result after the frame's layout. */
+#define CUI_SCROLL_BOTTOM 1e9f
 CUI_API void cui_scroll_set(cui_ctx *ui, const char *scroll_id, float y, bool instant);
+CUI_API void cui_scroll_set_bottom(cui_ctx *ui, const char *scroll_id, bool instant);   /* cui_scroll_set(.., CUI_SCROLL_BOTTOM, ..) */
 
 /* Resizable split view: two panes with a draggable divider. `ratio` is the
  * size of the first pane in 0..1. Call cui_split_next between the panes. */
@@ -1763,6 +1773,10 @@ typedef struct cui_markdown_opts {
     bool plain;                /* the text is not markdown: lines show and copy as written (a line break stays a line break, blank lines stay),
                                 * nothing is parsed (no markers, links, images or front matter), spaces collapse. Selects like the rest:
                                 * drag, double click a word, triple click a paragraph, Ctrl+A, Ctrl+C */
+    bool preserve_whitespace;  /* with `plain`: spaces and tabs keep their width instead of collapsing to one space, so pasted code keeps its
+                                * indentation. A tab goes to the next stop of 4 space widths from the line's left edge (in the body font,
+                                * not a fixed grid). Lines still wrap at blanks; a blank run that wraps is dropped, a line's own indentation
+                                * stays, and a wrapped continuation starts at the left edge. Copy is unchanged (it always returned the source) */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */

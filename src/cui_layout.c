@@ -712,6 +712,30 @@ static void cui__resolve_direction(cui_ctx *ui, int i, bool inherited) {
     for (int c = n->abs_first; c >= 0; c = ui->nodes[c].next) cui__resolve_direction(ui, c, n->rtl);
 }
 
+/* A cui_scroll_set target or stick-to-bottom, resolved against this frame's content and
+ * view heights (the state still holds the last frame's until now). Called once the children
+ * are positioned: an instant move shifts them by the change in offset. */
+static void cui__scroll_resolve(cui_ctx *ui, cui_node *n) {
+    cui_scroll_state *ss = cui_state(ui, n->id, sizeof(cui_scroll_state));
+    float max_y = CUI_MAX(0.0f, ss->content_h - ss->view_h), want;
+    bool instant = true;
+    if (ss->pend) {
+        want = CUI_MIN(ss->pend_y, max_y);
+        instant = ss->pend_instant;
+        ss->pend = false;
+    } else if (ss->stick && !ss->unstuck && ss->y != max_y) {
+        want = max_y;
+    } else return;
+    ss->ty = want;
+    if (!instant) { ui->animating = true; return; }
+    ss->y = want;
+    float s = ui->scale, ny = roundf(want * s) / s, delta = ny - n->scroll_y;
+    if (delta != 0.0f) {
+        for (int c = n->first; c >= 0; c = ui->nodes[c].next) ui->nodes[c].rect.y -= delta;
+        n->scroll_y = ny;
+    }
+}
+
 /* Pass 5: positions, top down. */
 static void cui__place(cui_ctx *ui, int i) {
     cui_node *n = &ui->nodes[i];
@@ -827,6 +851,7 @@ static void cui__place(cui_ctx *ui, int i) {
         ss->view_w = n->rect.w;
         ss->view_h = n->rect.h;
     }
+    if (n->flags & (CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) cui__scroll_resolve(ui, n);
     for (int c = n->first; c >= 0; c = ui->nodes[c].next) cui__place(ui, c);
     for (int c = n->abs_first; c >= 0; c = ui->nodes[c].next) {
         cui_node *ab = &ui->nodes[c];

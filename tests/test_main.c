@@ -5995,7 +5995,7 @@ typedef struct {
     char text[4096];
     int length;             /* 0: strlen */
     float width;            /* 0: fill a 600 point column */
-    bool streaming, no_front_matter, no_select, plain;
+    bool streaming, no_front_matter, no_select, plain, keep_ws, fit;
     const char *base_dir;
     const char *(*resolve)(const char *src, void *user);
     cui_markdown_result res;
@@ -6007,7 +6007,7 @@ static void build_md(cui_ctx *ui, void *u) {
     cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
         m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter,
                                 .base_dir = m->base_dir, .resolve_image = m->resolve, .resolve_user = m,
-                                .no_select = m->no_select, .plain = m->plain);
+                                .no_select = m->no_select, .plain = m->plain, .preserve_whitespace = m->keep_ws, .fit_content = m->fit);
     }
     if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
     if (m->res.task_offset >= 0) m->toggles++;
@@ -10683,6 +10683,103 @@ static void test_scroll_get_set(void) {
     cui_destroy(ui);
 }
 
+/* a scroll target made before the layout, a bottom that follows growing content, stick_to_bottom */
+typedef struct { int items; bool show, stick, follow; int built; } sq_ctx;
+static void build_sq(cui_ctx *ui, void *u) {
+    sq_ctx *s = u;
+    if (!s->show) return;
+    s->built++;
+    cui_column(ui, .pad = 10, .width = CUI_PX(300)) {
+        cui_scroll(ui, .id = "q", .height = CUI_PX(100), .stick_to_bottom = s->stick) {
+            for (int i = 0; i < s->items; i++) cui_box(ui, .id = i == s->items - 1 ? "qlast" : NULL, .height = CUI_PX(40), .width = CUI_FILL) {}
+        }
+    }
+    if (s->follow) cui_scroll_set_bottom(ui, "q", true);
+}
+static float sq_gap(cui_ctx *ui) {   /* the last item's bottom against the view's bottom: 0 when at the bottom */
+    cui_rect a = cui_get_rect(ui, cui_make_id(ui, "q")), l = cui_get_rect(ui, cui_make_id(ui, "qlast"));
+    return (a.y + a.h) - (l.y + l.h);
+}
+
+static void test_scroll_pending_and_stick(void) {
+    printf("scroll: set before the first layout, after the state was freed, bottom in the same frame, stick_to_bottom\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_reduced_motion(ui, false);
+    sq_ctx s = { .items = 20, .show = true };
+    /* instant, on the first frame: lands on the real bottom (800 - 100) */
+    cui_scroll_set(ui, "q", CUI_SCROLL_BOTTOM, true);   /* never built: the call creates it */
+    run(ui, build_sq, &s, 1);
+    cui_scroll_info a = cui_scroll_get(ui, "q");
+    CHECK(a.found && fabsf(a.y - 700) < 0.01f && fabsf(a.target_y - 700) < 0.01f);
+    CHECK(fabsf(sq_gap(ui)) < 0.6f);   /* and the content is drawn there, not one frame later */
+    cui_destroy(ui);
+    /* eased, on the first frame: heads for the real bottom, not 0 */
+    ui = new_ctx();
+    cui_set_reduced_motion(ui, false);
+    cui_scroll_set(ui, "q", 1e9f, false);
+    run(ui, build_sq, &s, 1);
+    a = cui_scroll_get(ui, "q");
+    CHECK(fabsf(a.target_y - 700) < 0.01f);
+    run(ui, build_sq, &s, 200);
+    CHECK(fabsf(cui_scroll_get(ui, "q").y - 700) < 0.01f);
+    /* a middle value on the first frame of a re-shown view whose state was freed */
+    s.show = false;
+    run(ui, build_sq, &s, 400);   /* not built for longer than state is kept: freed */
+    CHECK(!cui_scroll_get(ui, "q").found);
+    cui_scroll_set(ui, "q", 250, true);
+    s.show = true;
+    run(ui, build_sq, &s, 1);
+    a = cui_scroll_get(ui, "q");
+    CHECK(a.found && fabsf(a.y - 250) < 0.01f);
+    cui_scroll_set(ui, "q", 99999, true);   /* beyond the end: the real max */
+    run(ui, build_sq, &s, 1);
+    CHECK(fabsf(cui_scroll_get(ui, "q").y - 700) < 0.01f);
+    cui_destroy(ui);
+    /* the bottom while the content grows in the same frame: no frame of lag */
+    ui = new_ctx();
+    s = (sq_ctx){ .items = 5, .show = true, .follow = true };
+    run(ui, build_sq, &s, 3);
+    for (int k = 0; k < 6; k++) {
+        s.items++;
+        run(ui, build_sq, &s, 1);
+        a = cui_scroll_get(ui, "q");
+        CHECK(fabsf(a.y - a.max_y) < 0.01f && fabsf(a.max_y - ((float)s.items * 40 - 100)) < 0.01f);
+        CHECK(fabsf(sq_gap(ui)) < 0.6f);
+    }
+    cui_destroy(ui);
+    /* stick_to_bottom: follows growth, lets go when the user scrolls up, takes hold again at the bottom */
+    ui = new_ctx();
+    s = (sq_ctx){ .items = 5, .show = true, .stick = true };
+    run(ui, build_sq, &s, 3);
+    a = cui_scroll_get(ui, "q");
+    CHECK(fabsf(a.y - a.max_y) < 0.01f && a.max_y > 0);   /* at the bottom from the first frame */
+    for (int k = 0; k < 4; k++) {
+        s.items++;
+        run(ui, build_sq, &s, 1);
+        a = cui_scroll_get(ui, "q");
+        CHECK(fabsf(a.y - a.max_y) < 0.01f && fabsf(sq_gap(ui)) < 0.6f);
+    }
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "q"));
+    cui_input_mouse_move(ui, r.x + 20, r.y + 20);
+    run(ui, build_sq, &s, 1);
+    cui_input_scroll(ui, 0, 2);   /* wheel up */
+    run(ui, build_sq, &s, 2);
+    a = cui_scroll_get(ui, "q");
+    CHECK(a.y < a.max_y - 40);
+    const float held = a.y;
+    s.items += 3;   /* content grows while the user reads above: stays put */
+    run(ui, build_sq, &s, 3);
+    a = cui_scroll_get(ui, "q");
+    CHECK(fabsf(a.y - held) < 0.01f);
+    cui_input_scroll(ui, 0, -50);   /* back to the bottom: sticks again */
+    run(ui, build_sq, &s, 2);
+    s.items += 2;
+    run(ui, build_sq, &s, 1);
+    a = cui_scroll_get(ui, "q");
+    CHECK(fabsf(a.y - a.max_y) < 0.01f && fabsf(sq_gap(ui)) < 0.6f);
+    cui_destroy(ui);
+}
+
 typedef struct {
     bool tool_open, think_open, use_ptr, skip;
     cui_id wrap_tool, wrap_think;
@@ -10844,6 +10941,86 @@ static void test_markdown_plain(void) {
     cui_destroy(ui);
 }
 
+static void test_markdown_preserve_whitespace(void) {
+    printf("markdown: .plain with .preserve_whitespace keeps spaces and tabs\n");
+    cui_ctx *ui = new_ctx();
+    static md_test m;
+    memset(&m, 0, sizeof m);
+    m.plain = true; m.fit = true;
+    float w[6];
+    const char *src[6] = { "x", "    x", "\tx", "a  b", "a b", "\t\tx" };
+    for (int pass = 1; pass < 2; pass++) {   /* the natural width (fit_content) of the blanks as written */
+        m.keep_ws = pass == 1;
+        for (int k = 0; k < 6; k++) {
+            snprintf(m.text, sizeof m.text, "%s", src[k]);
+            md_frames(ui, &m, 3);
+            w[k] = md_rect(ui).w;
+        }
+        if (pass == 0) {   /* collapsing: indentation costs nothing, a double space is one */
+            CHECK(fabsf(w[1] - w[0]) < 0.6f && fabsf(w[3] - w[4]) < 0.6f);
+        } else {
+            const float sp = w[3] - w[4];   /* one extra space */
+            CHECK(sp > 1.0f);
+            CHECK(fabsf((w[1] - w[0]) - 4 * sp) < 0.6f);   /* four spaces as drawn */
+            CHECK(fabsf(w[2] - w[1]) < 0.6f);              /* a tab at the start is a stop of four spaces */
+            CHECK(fabsf(w[5] - w[0] - 8 * sp) < 0.6f);     /* two tabs: eight */
+        }
+    }
+    const float sp = w[3] - w[4];
+    /* a tab after text goes to the next stop, measured from the line's left edge */
+    m.keep_ws = true;
+    snprintf(m.text, sizeof m.text, "ab\tc");
+    md_frames(ui, &m, 3);
+    const float tabbed = md_rect(ui).w;
+    snprintf(m.text, sizeof m.text, "ab");
+    md_frames(ui, &m, 3);
+    const float ab = md_rect(ui).w;
+    CHECK(tabbed > ab + 1 && tabbed < 4 * sp + 40);   /* ends at the stop (4 spaces), then "c" */
+    /* drawn where written: a double click finds "ab" after the indentation, and over the indentation it does not */
+    m.fit = false;
+    m.width = 400;
+    for (int k = 0; k < 2; k++) {
+        snprintf(m.text, sizeof m.text, k == 0 ? "                    ab" : "			ab");
+        const float lead = k == 0 ? 20 * sp : 12 * sp;
+        m.keep_ws = true;
+        md_frames(ui, &m, 30);
+        cui_rect q = md_rect(ui);
+        click_at(ui, build_md, &m, q.x + 2, q.y + 8);
+        click_at(ui, build_md, &m, q.x + 2, q.y + 8);
+        CHECK(strcmp(md_copy(ui, &m), "ab") != 0);
+        md_frames(ui, &m, 30);
+        click_at(ui, build_md, &m, q.x + lead + 3, q.y + 8);
+        click_at(ui, build_md, &m, q.x + lead + 3, q.y + 8);
+        CHECK(strcmp(md_copy(ui, &m), "ab") == 0);
+        m.keep_ws = false;   /* collapsed: the text starts at the left edge */
+        md_frames(ui, &m, 30);
+        q = md_rect(ui);
+        click_at(ui, build_md, &m, q.x + 2, q.y + 8);
+        click_at(ui, build_md, &m, q.x + 2, q.y + 8);
+        CHECK(strcmp(md_copy(ui, &m), "ab") == 0);
+        md_frames(ui, &m, 30);
+    }
+    m.keep_ws = true;
+    /* wrapping at blanks still works, and copy returns the source */
+    m.fit = false;
+    m.width = 120;
+    snprintf(m.text, sizeof m.text, "    alpha beta gamma delta epsilon zeta eta theta");
+    md_frames(ui, &m, 3);
+    const float wrapped = md_rect(ui).h;
+    CHECK(md_rect(ui).w <= 121.0f);
+    m.width = 600;
+    md_frames(ui, &m, 3);
+    CHECK(wrapped > md_rect(ui).h + 10);
+    const char *code = "if (x) {\n\treturn  1;\n    y;\n}";
+    snprintf(m.text, sizeof m.text, "%s", code);
+    md_frames(ui, &m, 30);
+    cui_rect r = md_rect(ui);
+    click_at(ui, build_md, &m, r.x + 20, r.y + 8);
+    key(ui, build_md, &m, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(strcmp(md_copy(ui, &m), code) == 0);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_color();
@@ -10900,6 +11077,8 @@ int main(void) {
     test_markdown_select_labels();
     test_markdown_plain();
     test_scroll_get_set();
+    test_scroll_pending_and_stick();
+    test_markdown_preserve_whitespace();
     test_open_pointer();
     test_explicit_lengths();
     test_code_editor();
