@@ -1042,6 +1042,12 @@ static void cui__paint_dirty_dot(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_circle(ui, ctr, 4.0f, cui_alpha(p->c, p->alpha));
 }
 
+/* the tab's leading dot (cui_doc_tab.dot): a filled circle 6 pt across */
+static void cui__paint_tab_dot(cui_ctx *ui, cui_node *n, void *data) {
+    const cui_color *c = data;
+    cui_draw_circle(ui, (cui_vec2){ n->rect.x + n->rect.w * 0.5f, n->rect.y + n->rect.h * 0.5f }, 3.0f, *c);
+}
+
 /* the strip's baseline, left out under the selected tab when asked */
 typedef struct { cui_color c; int skip_node; } cui__dtabs_edge_paint;
 static void cui__paint_dtabs_edge(cui_ctx *ui, cui_node *n, void *data) {
@@ -1326,6 +1332,13 @@ static void cui__dtf_build_tab(cui__dtf *f, int k, int vis_sel, float rad, float
     if (tr.hovered || dragged) cui__set_cursor(ui, dragged ? CUI_CURSOR_MOVE : CUI_CURSOR_HAND);
     cui__open(ui, i);
     cui_color fg = active ? CUI_C(ui, FOREGROUND) : cui_mix(CUI_C(ui, TEXT_SECONDARY), CUI_C(ui, FOREGROUND), ts->hover * 0.7f);
+    if (cui__color_set(tb->dot)) {
+        int dn = cui__leaf(ui, 0, CUI_PX(6), CUI_PX(6));
+        cui_color *dc = CUI_PAINT_DATA(ui, cui_color);
+        *dc = cui_color_of(ui, tb->dot);
+        ui->nodes[dn].paint = cui__paint_tab_dot;
+        ui->nodes[dn].paint_data = dc;
+    }
     if (tb->icon) cui__icon_node(ui, tb->icon, 14, active ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
     const char *title = tb->title ? tb->title : "";
     int t = cui__text_node(ui, title, cui__display_len(title), CUI_FONT_BODY, fs, fg, false);

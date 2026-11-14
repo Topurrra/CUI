@@ -3692,6 +3692,7 @@ typedef struct cui_doc_tab {
     const char *icon;
     const char *tooltip;
     bool dirty;                /* unsaved changes: a dot in place of the x, which returns under the pointer */
+    cui_color dot;             /* a filled dot before the title, e.g. an account colour (zero = none; a CUI_COLOR_* token works); the tab grows to fit */
 } cui_doc_tab;
 /* The strip's height in points: 4 above the tabs, then the tabs. Put it in a fixed-height box
  * when the strip sits beside other things. */
@@ -3760,6 +3761,7 @@ typedef struct cui_dock_panel_opts {
     int _;
     const char *icon;
     bool dirty;                /* unsaved changes: the panel's tab shows a dot in place of its x */
+    cui_color dot;             /* a filled dot before the title, e.g. an account colour (zero = none; a CUI_COLOR_* token works); the tab grows to fit */
 } cui_dock_panel_opts;
 CUI_API bool cui_dock_panel_begin_ex(cui_ctx *ui, const char *title, bool *open, const cui_dock_panel_opts *opts);
 CUI_API void cui_dock_panel_end(cui_ctx *ui);

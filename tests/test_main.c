@@ -12373,6 +12373,40 @@ static cui_color dto_pixel(const cui_doc_tabs_opts *o, bool under_selected, floa
 }
 static bool dto_same(cui_color a, cui_color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
 
+static void test_doc_tab_dot(void) {
+    printf("doc tabs: account dot\n");
+    cui_color red = { 220, 40, 40, 255 };
+    cui_color tok = CUI_COLOR_ACCENT;
+    int vc[4]; float w[4], tx[4];
+    for (int v = 0; v < 4; v++) {   /* none, dot, dot with token, dot + dirty */
+        dto_ctx d = { 0, { 0 }, { { "alpha.c", NULL, NULL, false }, { "beta.c", NULL, NULL, false } } };
+        if (v == 1) d.tabs[0].dot = red;
+        if (v == 2) d.tabs[0].dot = tok;
+        if (v == 3) { d.tabs[0].dot = red; d.tabs[0].dirty = true; }
+        cui_ctx *ui = new_ctx();
+        run(ui, build_dto, &d, 4);
+        vc[v] = cui_get_draw_data(ui)->vertex_count;
+        w[v] = rect_of(ui, scoped_id(ui, "dt", "alpha.c")).w;
+        tx[v] = rect_of(ui, scoped_id(ui, "dt", "alpha.c")).x;
+        cui_destroy(ui);
+    }
+    {   /* unchanged by the new field: a plain tab pair, twice */
+        dto_ctx d = { 0, { 0 }, { { "alpha.c", NULL, NULL, false }, { "beta.c", NULL, NULL, false } } };
+        cui_ctx *ui = new_ctx();
+        run(ui, build_dto, &d, 4);
+        CHECK(cui_get_draw_data(ui)->vertex_count == vc[0]);
+        CHECK(rect_of(ui, scoped_id(ui, "dt", "alpha.c")).w == w[0]);
+        cui_destroy(ui);
+    }
+    CHECK(vc[1] > vc[0]);
+    CHECK(w[1] > w[0] + 5.5f);
+    CHECK(vc[2] > vc[0] && w[2] == w[1]);
+    CHECK(tx[1] == tx[0]);
+    /* the title moves right: compare the title text's x via the tab's width growth (leading dot + gap) */
+    CHECK(vc[3] > vc[1] && w[3] == w[1]);
+    (void)tx;
+}
+
 static void test_doc_tabs_new_opts(void) {
     printf("doc tabs: no_active_underline, no_baseline, active_fill, height\n");
     cui_doc_tabs_opts zero = { 0 };
@@ -12747,6 +12781,7 @@ int main(void) {
     test_markdown_preserve_whitespace();
     test_open_pointer();
     test_doc_tabs_new_opts();
+    test_doc_tab_dot();
     test_instant_fold();
     test_explicit_lengths();
     test_code_editor();

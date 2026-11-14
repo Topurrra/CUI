@@ -6,6 +6,8 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ## Added
 
+- **Document tabs: an optional dot before the title.** `cui_doc_tab` gains `.dot` (a `cui_color`, zero = none, a `CUI_COLOR_*` token works): a filled circle 6 pt across, vertically centred, before the title; the title moves right and the tab grows by 14 pt. It sits beside the dirty dot, which stays on the right. Zero draws exactly as before.
+
 - **Inflate, public.** `cui_inflate(src, len, dst, cap, flags)` unpacks a raw DEFLATE stream or, with `CUI_INFLATE_ZLIB`, a zlib stream (header and Adler-32, checked unless `CUI_INFLATE_NO_CHECK`), and returns a `cui_inflate_result` with the status, the bytes written and the bytes of input consumed (so the next object in a git pack can be found). `CUI_INFLATE_STOP_WHEN_FULL` stops with a full buffer instead of failing (`CUI_INFLATE_FULL`), to read a header from the first bytes; `cui_inflate_alloc(src, len, flags, size_hint, max_out, &r)` decodes into a malloc'd buffer that grows up to a limit, for output of unknown size. Pure, no `cui_ctx`, any thread. The decoder is the one that unpacks the fonts and emoji, unchanged for them, and is now compiled in also without the default fonts.
 - **Status bar progress can be a button.** `cui_status_progress_opts` gains `.clickable` (the label and bar become one item with hover fill, hand cursor, focus ring, Enter/Space, and set `last_id` for `cui_tooltip` and popover anchoring) and `.tooltip`; `cui_status_bar_progress_ex` now returns `bool`, true on the frame it is clicked. Zero options draw exactly as before.
 
