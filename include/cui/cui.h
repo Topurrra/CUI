@@ -1611,6 +1611,61 @@ CUI_API bool cui_data_grid_cell_edit(cui_ctx *ui, char *buf, size_t cap);
 CUI_API bool cui_data_grid_edit(cui_ctx *ui, char *buf, size_t cap);
 CUI_API void cui_data_grid_end(cui_ctx *ui);
 
+/* ------------------------------------------------------------------------ */
+/* Cell grid                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/* A spreadsheet-like view of a big table: rows AND columns virtualized (millions of rows, thousands of
+ * columns), cells drawn straight from a callback as clipped text (no component per cell), a sticky header
+ * row, an optional frozen row-number column, resizable columns, sortable headers, and a rectangular cell
+ * selection driven by mouse and keyboard. Only the cells in view are asked for, so a frame costs the same for
+ * 100 rows or 10 million.
+ *
+ *     float widths[NCOLS];             // caller-owned, in and out (the user resizes); fill once
+ *     cui_cellgrid_sel sel = {0};
+ *     int ev = cui_cellgrid(ui, "t", nrows, NCOLS, .cell = my_cell, .ctx = me, .col_widths = widths, .sel = &sel);
+ *     if (ev & CUI_CELLGRID_COPY) copy_range(&sel);
+ */
+typedef struct cui_cellgrid_sel {
+    int row, col;               /* the cursor cell (0-based; -1 = none) */
+    int anchor_row, anchor_col; /* the other corner of the selected rectangle (equal to the cursor = one cell) */
+} cui_cellgrid_sel;
+
+/* Writes cell (row, col)'s text into buf (cap bytes) and returns it, or returns a string the callback owns that
+ * stays valid until the next call. row -1 asks for column col's header; col -1 asks for row row's label in the
+ * row-number column. Called only for cells in view, on the UI thread, during cui_cell grid. */
+typedef const char *(*cui_cellgrid_cell_fn)(void *ctx, int row, int col, char *buf, size_t cap);
+
+typedef struct cui_cellgrid_opts {
+    int _;
+    cui_size width, height;          /* default fill */
+    cui_cellgrid_cell_fn cell;          /* required */
+    void *ctx;
+    float *col_widths;               /* required: cols entries, in points, in and out; <= 0 means 120 */
+    float row_height;                /* default: the font's line height plus padding */
+    float font_size;                 /* default: the theme's body size */
+    bool header;                     /* show the header row (cell(ctx, -1, col)) */
+    bool row_numbers;                /* show the frozen row-number column (cell(ctx, row, -1)) */
+    const unsigned char *right_align;/* optional, cols entries: nonzero right-aligns that column (numbers) */
+    cui_table_sort *sort;            /* optional: a header click sorts by that column (toggles descending); sort the rows yourself */
+    cui_cellgrid_sel *sel;              /* optional, in and out: setting it from outside scrolls the cursor into view */
+    bool striped;
+    bool grid_lines;
+} cui_cellgrid_opts;
+
+enum {
+    CUI_CELLGRID_SELECTED = 1 << 0,     /* the selection changed */
+    CUI_CELLGRID_SORTED   = 1 << 1,     /* *sort changed */
+    CUI_CELLGRID_COPY     = 1 << 2,     /* Ctrl+C with the cell grid focused: copy the selection yourself */
+    CUI_CELLGRID_ACTIVATE = 1 << 3,     /* double click or Enter on the cursor cell (editing comes later) */
+    CUI_CELLGRID_RESIZED  = 1 << 4      /* a column width changed (save col_widths if you keep them) */
+};
+/* Returns a mask of CUI_CELLGRID_* events from this frame. Keys while focused: arrows, Page Up/Down, Home/End
+ * (row start/end), Ctrl+Home/End (first/last cell), Shift with any of them extends the selection, Ctrl+A
+ * selects all. Mouse: click a cell, drag or Shift+click for a range, click a row number for the row,
+ * double click a header edge to fit the column to the visible cells. Wheel scrolls, Shift+wheel sideways. */
+CUI_API int cui_cellgrid_ex(cui_ctx *ui, const char *id, int rows, int cols, const cui_cellgrid_opts *opts);
+
 /* Tree cell: indentation, a disclosure chevron and a label, for tree tables
  * (use it in a table or grid cell). Returns true when *open toggled. */
 CUI_API bool cui_tree_cell(cui_ctx *ui, const char *label, int depth, bool has_children, bool *open, const char *icon);
@@ -5975,6 +6030,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_counter(ui, id, value, ...)     cui_counter_ex((ui), (id), (value), CUI__OPTS(cui_counter_opts, __VA_ARGS__))
 #define cui_ticker(ui, id, items, count, ...) cui_ticker_ex((ui), (id), (items), (count), CUI__OPTS(cui_ticker_opts, __VA_ARGS__))
 #define cui_data_grid_begin(ui, id, cols, ncols, rows, first, last, ...) cui_data_grid_begin_ex((ui), (id), (cols), (ncols), (rows), (first), (last), CUI__OPTS(cui_grid_opts, __VA_ARGS__))
+#define cui_cellgrid(ui, id, rows, cols, ...) cui_cellgrid_ex((ui), (id), (rows), (cols), CUI__OPTS(cui_cellgrid_opts, __VA_ARGS__))
 #define cui_code_block(ui, id, code, ...)   cui_code_block_ex((ui), (id), (code), CUI__OPTS(cui_code_opts, __VA_ARGS__))
 #define cui_json_view(ui, id, json, ...)    cui_json_view_ex((ui), (id), (json), CUI__OPTS(cui_json_opts, __VA_ARGS__))
 #define cui_hover_card(ui, id, ...)         CUI__SCOPE_IF(cui_hover_card_begin((ui), (id), CUI__OPTS(cui_hover_card_opts, __VA_ARGS__)), cui_hover_card_end(ui))

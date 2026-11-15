@@ -45,6 +45,7 @@ set(CUI_CORE_SOURCES
     src/cui_disclosure.c
     src/cui_loading.c
     src/cui_grid.c
+    src/cui_cellgrid.c
     src/cui_treetable.c
     src/cui_treesel.c
     src/cui_code.c
