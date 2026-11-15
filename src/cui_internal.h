@@ -221,6 +221,8 @@ void cui__push_xform(cui_ctx *ui, float scale, float ox, float oy, float alpha, 
 void cui__pop_xform(cui_ctx *ui);
 void cui__draw_glyph_quad(cui_ctx *ui, float x0, float y0, float x1, float y1,
                           float u0, float v0, float u1, float v1, cui_color c);
+/* Rectangles on whole device pixels as one batch, without anti-aliasing (r: x0, y0, x1, y1 each, in device pixels): see cui_draw.c */
+void cui__draw_rects_px(cui_ctx *ui, const float *r, int n, cui_color col);
 void cui__draw_check(cui_ctx *ui, cui_rect r, float t, float thickness, cui_color c);
 void cui__draw_top_light(cui_ctx *ui, cui_rect r, cui_corners rad, float alpha);
 void cui__draw_sheen(cui_ctx *ui, cui_rect r, cui_corners rad, float k);
@@ -411,6 +413,11 @@ void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r);
 cui_color cui__tm_palette(cui_ctx *ui, int k);
 cui_color cui__tm_256(cui_ctx *ui, int n);
 void cui__tm_block(cui_ctx *ui, int k, cui_rect c, cui_color col);
+/* The VT screen's hand-drawn characters (cui_vt_glyphs.c): box drawing, block elements, braille, sextants and wedges, status line
+ * shapes. Draws the character cp in the cell (logical pixels) on whole device pixels and returns true, or false when cp is not one of them. */
+bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col);
+uint8_t cui__vt_box_arms(uint32_t cp);          /* U+2500..U+257F: left, right, up, down arms, 2 bits each: 0 none, 1 light, 2 heavy, 3 double */
+int cui__vt_sextant_bits(uint32_t cp);          /* U+1FB00..U+1FB3B: the six cells as bits (upper left first), 0 outside */
 
 /* ---- per id state ---- */
 typedef struct cui_state_entry {

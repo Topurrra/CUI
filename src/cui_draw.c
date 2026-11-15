@@ -237,6 +237,29 @@ static void cui__solid_vertex(cui_vertex *v, float x, float y, cui_color c) {
     v->x = x; v->y = y; v->mode = CUI_SHADE_SOLID; v->color = c;
 }
 
+/* n axis aligned rectangles of one color as one batch of plain triangles: no anti-aliasing, the edges are exactly where given.
+ * r holds x0, y0, x1, y1 for each, in device pixels (logical pixels times ui->scale), so a painter that lays a shape out on whole
+ * pixels gets crisp edges, and a screenful of small rectangles costs a few vertex writes each instead of a shape each. */
+void cui__draw_rects_px(cui_ctx *ui, const float *r, int n, cui_color col) {
+    col = cui_color_of(ui, col);
+    if (n <= 0 || col.a == 0) return;
+    cui_xform x = cui__xf(ui);
+    col = cui__xa(col, x.alpha);
+    cui__set_texture(ui, 0);
+    uint32_t base;
+    cui_vertex *v = cui__reserve(ui, n * 4, n * 6, &base);
+    uint32_t *ix = cui__idx(ui, n * 6);
+    for (int i = 0; i < n; i++) {
+        float x0 = r[4 * i] * x.scale + x.ox, y0 = r[4 * i + 1] * x.scale + x.oy, x1 = r[4 * i + 2] * x.scale + x.ox, y1 = r[4 * i + 3] * x.scale + x.oy;
+        cui__solid_vertex(&v[i * 4 + 0], x0, y0, col);
+        cui__solid_vertex(&v[i * 4 + 1], x1, y0, col);
+        cui__solid_vertex(&v[i * 4 + 2], x1, y1, col);
+        cui__solid_vertex(&v[i * 4 + 3], x0, y1, col);
+        uint32_t b = base + (uint32_t)i * 4, *q = ix + i * 6;
+        q[0] = b; q[1] = b + 1; q[2] = b + 2; q[3] = b; q[4] = b + 2; q[5] = b + 3;
+    }
+}
+
 static void cui__polyline_px(cui_ctx *ui, const cui_vec2 *pts, int n, float thick, cui_color col, bool closed) {
     if (n < 2) return;
     cui__set_texture(ui, 0);
