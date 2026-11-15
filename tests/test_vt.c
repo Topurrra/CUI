@@ -564,6 +564,28 @@ static void test_sgr(void) {
     cui_vt_destroy(v);
 }
 
+/* ---- cursor shape ---- */
+
+static void test_cursor_shape(void) {
+    cui_vt *v = cui_vt_create(20, 4, 0);
+    CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[3 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_UNDERLINE);
+    W(v, "\x1b[2 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[4 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_UNDERLINE);
+    W(v, "\x1b[5 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BAR);
+    W(v, "\x1b[1 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[6 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BAR);
+    W(v, "\x1b[ q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);        /* no parameter: the default, a block */
+    W(v, "\x1b[6 q\x1b[9 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BAR); /* unknown: ignored */
+    W(v, "\x1b" "c"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[5 q\x1b[!p"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[5 qab");                                                           /* it prints nothing and moves nothing */
+    int x, y; cui_vt_cursor(v, &x, &y);
+    CHECK_EQ(x, 2); CHECK_EQ(y, 0);
+    CHECK_STR(row(v, 0), "ab");
+    cui_vt_destroy(v);
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -605,6 +627,7 @@ int main(void) {
     test_mouse();
     test_focus();
     test_sgr();
+    test_cursor_shape();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

@@ -53,6 +53,7 @@ struct cui_vt {
     uint8_t mouse_modes;              /* what the program asked for: CUI__VT_M1000, _M1002, _M1003 */
     bool mouse_sgr;                   /* encoding 1006 */
     bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
+    uint8_t cursor_shape;             /* CUI_VT_CURSOR_* from CSI Ps SP q */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -379,7 +380,12 @@ static void cui__vt_csi(cui_vt *v, char f) {
     if (v->inter == '!' && f == 'p') {      /* soft reset */
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = false; v->pend = false;
-        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0;
+        return;
+    }
+    if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking is not drawn) */
+        int m = v->np ? v->p[0] : 0;
+        if (m <= 2) v->cursor_shape = CUI_VT_CURSOR_BLOCK; else if (m <= 4) v->cursor_shape = CUI_VT_CURSOR_UNDERLINE; else if (m <= 6) v->cursor_shape = CUI_VT_CURSOR_BAR;
         return;
     }
     if (v->inter) return;
@@ -471,7 +477,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
     case 'c': {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
-        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0;
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -635,6 +641,7 @@ bool cui_vt_alt_screen(const cui_vt *v) { return v->cur == 1; }
 bool cui_vt_app_cursor(const cui_vt *v) { return v->app_cursor; }
 bool cui_vt_bracketed_paste(const cui_vt *v) { return v->bracketed; }
 bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; }
+int cui_vt_cursor_shape(const cui_vt *v) { return v ? v->cursor_shape : CUI_VT_CURSOR_BLOCK; }
 int cui_vt_scrollback_count(const cui_vt *v) { return v->sb_count; }
 
 /* the cells of row `row` counted from the top of the live screen: negative rows are scrollback, -1 the newest */
@@ -1042,6 +1049,7 @@ typedef struct {
     float cw, lh, size, padx, pady;
     int off;
     bool focused, show_cursor, has_sel;
+    int shape;                        /* CUI_VT_CURSOR_* */
     cui__vt_pos s0, s1;
     cui_color fg, bg, sel, cursor, bar;
     float bar_t;
@@ -1185,7 +1193,17 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     /* the cursor */
     if (p->show_cursor && v->cursor_vis && p->off == 0) {
         float cx = x0 + v->cx * p->cw, cy = y0 + v->cy * p->lh;
-        if (p->focused) {
+        if (p->shape != CUI_VT_CURSOR_BLOCK) {              /* an underline or a bar, on whole device pixels; the character under it stays as it is */
+            float s = ui->scale > 0 ? ui->scale : 1;
+            cui_color col = p->focused ? p->cursor : cui_alpha(p->cursor, 0.55f);
+            if (p->shape == CUI_VT_CURSOR_UNDERLINE) {
+                float t = fmaxf(1.0f, floorf(p->lh * 0.1f * s + 0.5f)) / s;
+                cui__vt_snap_rect(ui, cx, cy + p->lh - t, cx + p->cw, cy + p->lh, col);
+            } else {
+                float t = fmaxf(1.0f, floorf(p->cw * 0.2f * s + 0.5f)) / s;
+                cui__vt_snap_rect(ui, cx, cy, cx + t, cy + p->lh, col);
+            }
+        } else if (p->focused) {
             cui__vt_snap_rect(ui, cx, cy, cx + p->cw, cy + p->lh, p->cursor);
             int cn; bool w;
             const cui__vt_cell *cells = cui__vt_cells_at(v, v->cy, &cn, &w);
@@ -1336,7 +1354,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     cui__vt_paint *p = (cui__vt_paint *)cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
     p->v = v; p->cw = cw; p->lh = lh; p->size = size; p->padx = padx; p->pady = pady; p->off = st->off;
-    p->focused = focused; p->show_cursor = true;
+    p->focused = focused; p->show_cursor = true; p->shape = v->cursor_shape;
     p->has_sel = st->has_sel;
     cui__vt_sel_order(st, &p->s0, &p->s1);
     p->fg = CUI_C(ui, FOREGROUND);
