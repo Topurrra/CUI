@@ -381,12 +381,157 @@ static void cui__vg_braille(cui__vg *g, uint32_t cp) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Sextants, wedges and the other symbols for legacy computing               */
+/* ------------------------------------------------------------------------ */
+
+/* a polygon of the cell, points in device pixels relative to its corner (anti-aliased) */
+static void cui__vg_poly(cui__vg *g, const float *xy, int n, cui_color col) {
+    cui_vec2 p[20];
+    float k = 1.0f / g->s;
+    if (n > 20) n = 20;
+    for (int i = 0; i < n; i++) p[i] = (cui_vec2){ ((float)g->x + xy[2 * i]) * k, ((float)g->y + xy[2 * i + 1]) * k };
+    cui_draw_polygon(g->ui, p, n, col);
+}
+
+/* U+1FB00..U+1FB3B: the 60 patterns of six cells (bit 0 upper left, 1 upper right, 2 middle left, 3 middle right, 4 lower left,
+ * 5 lower right), in order of their value, without the empty one, the left half (21), the right half (42) and the full one. 0: not one. */
+int cui__vt_sextant_bits(uint32_t cp) {
+    if (cp < 0x1FB00 || cp > 0x1FB3B) return 0;
+    int b = (int)(cp - 0x1FB00) + 1;
+    if (b >= 21) b++;
+    if (b >= 42) b++;
+    return b;
+}
+
+static void cui__vg_sextant(cui__vg *g, int bits) {
+    int xm = cui__vg_eighth(g->w, 4), ye[4] = { 0, (2 * g->h + 3) / 6, (4 * g->h + 3) / 6, g->h };
+    for (int r = 0; r < 3; r++) {
+        int l = (bits >> (2 * r)) & 1, rt = (bits >> (2 * r + 1)) & 1;
+        if (l && rt) cui__vg_fill(g, 0, ye[r], g->w, ye[r + 1]);
+        else if (l) cui__vg_fill(g, 0, ye[r], xm, ye[r + 1]);
+        else if (rt) cui__vg_fill(g, xm, ye[r], g->w, ye[r + 1]);
+    }
+}
+
+/* U+1FB3C..U+1FB67 "X block diagonal P to Q": the side of the line P-Q that holds corner X. Points on the cell's edge:
+ * 0 upper left, 1 upper middle left (1/3 down), 2 lower middle left (2/3), 3 lower left, 4 upper centre, 5 lower centre,
+ * 6 upper right, 7 upper middle right, 8 lower middle right, 9 lower right. Corners: 0 lower left, 1 lower right, 2 upper left, 3 upper right. */
+static const uint8_t cui__vg_wedges[44][3] = {
+    {0,2,5},{0,2,9},{0,1,5},{0,1,9},{0,0,5},{1,1,4},{1,1,6},{1,2,4},
+    {1,2,6},{1,3,4},{1,2,7},{1,5,8},{1,3,8},{1,5,7},{1,3,7},{1,5,6},
+    {0,4,7},{0,0,7},{0,4,8},{0,0,8},{0,4,9},{0,1,8},{3,2,5},{3,2,9},
+    {3,1,5},{3,1,9},{3,0,5},{2,1,4},{2,1,6},{2,2,4},{2,2,6},{2,3,4},
+    {2,2,7},{2,5,8},{2,3,8},{2,5,7},{2,3,7},{2,5,6},{3,4,7},{3,0,7},
+    {3,4,8},{3,0,8},{3,4,9},{3,1,8},
+};
+
+static void cui__vg_wedge(cui__vg *g, int idx) {
+    float w = (float)g->w, h = (float)g->h, xm = (float)cui__vg_eighth(g->w, 4);
+    float y1 = (float)((2 * g->h + 3) / 6), y2 = (float)((4 * g->h + 3) / 6);
+    const float pt[10][2] = { { 0, 0 }, { 0, y1 }, { 0, y2 }, { 0, h }, { xm, 0 }, { xm, h }, { w, 0 }, { w, y1 }, { w, y2 }, { w, h } };
+    const float cn[4][2] = { { 0, h }, { w, h }, { 0, 0 }, { w, 0 } };
+    const uint8_t *e = cui__vg_wedges[idx];
+    float ax = pt[e[1]][0], ay = pt[e[1]][1], dx = pt[e[2]][0] - ax, dy = pt[e[2]][1] - ay;
+    float sc = dx * (cn[e[0]][1] - ay) - dy * (cn[e[0]][0] - ax);          /* which side of the line holds the corner */
+    const float ring[4][2] = { { 0, 0 }, { w, 0 }, { w, h }, { 0, h } };
+    float out[2 * 8];
+    int n = 0;
+    /* clip the cell's rectangle to that side of the line (Sutherland-Hodgman, one edge) */
+    for (int i = 0; i < 4; i++) {
+        const float *a = ring[i], *b = ring[(i + 1) & 3];
+        float sa = (dx * (a[1] - ay) - dy * (a[0] - ax)) * sc, sb = (dx * (b[1] - ay) - dy * (b[0] - ax)) * sc;
+        if (sa >= 0) { out[2 * n] = a[0]; out[2 * n + 1] = a[1]; n++; }
+        if ((sa > 0 && sb < 0) || (sa < 0 && sb > 0)) {
+            float t = sa / (sa - sb);
+            out[2 * n] = a[0] + (b[0] - a[0]) * t; out[2 * n + 1] = a[1] + (b[1] - a[1]) * t; n++;
+        }
+    }
+    if (n >= 3) cui__vg_poly(g, out, n, g->col);
+}
+
+/* U+1FB68..U+1FB6F: the three quarters left when one quarter triangle is missing, and the quarter triangles (left, upper, right, lower) */
+static void cui__vg_triangles(cui__vg *g, uint32_t cp) {
+    float w = (float)g->w, h = (float)g->h, xm = (float)cui__vg_eighth(g->w, 4), ym = (float)(g->h / 2);
+    int xi = cui__vg_eighth(g->w, 4), yi = g->h / 2;
+    if (cp >= 0x1FB6C) {
+        int side = (int)(cp - 0x1FB6C);
+        float t[4][6] = { { 0, 0, 0, h, xm, ym }, { 0, 0, w, 0, xm, ym }, { w, 0, w, h, xm, ym }, { 0, h, w, h, xm, ym } };
+        cui__vg_poly(g, t[side], 3, g->col);
+        return;
+    }
+    /* the missing quarter: 0x1FB68 left, 0x1FB69 upper, 0x1FB6A right, 0x1FB6B lower; a rectangle of the far half and two triangles */
+    if (cp == 0x1FB68) {        /* upper, right, lower: the left quarter is missing */
+        cui__vg_fill(g, xi, 0, g->w, g->h);
+        float a[6] = { 0, 0, xm, 0, xm, ym }, b[6] = { 0, h, xm, h, xm, ym };
+        cui__vg_poly(g, a, 3, g->col); cui__vg_poly(g, b, 3, g->col);
+    } else if (cp == 0x1FB69) { /* left, lower, right: the upper quarter is missing */
+        cui__vg_fill(g, 0, yi, g->w, g->h);
+        float a[6] = { 0, 0, 0, ym, xm, ym }, b[6] = { w, 0, w, ym, xm, ym };
+        cui__vg_poly(g, a, 3, g->col); cui__vg_poly(g, b, 3, g->col);
+    } else if (cp == 0x1FB6A) { /* upper, left, lower: the right quarter is missing */
+        cui__vg_fill(g, 0, 0, xi, g->h);
+        float a[6] = { w, 0, xm, 0, xm, ym }, b[6] = { w, h, xm, h, xm, ym };
+        cui__vg_poly(g, a, 3, g->col); cui__vg_poly(g, b, 3, g->col);
+    } else {                    /* left, upper, right: the lower quarter is missing */
+        cui__vg_fill(g, 0, 0, g->w, yi);
+        float a[6] = { 0, h, 0, ym, xm, ym }, b[6] = { w, h, w, ym, xm, ym };
+        cui__vg_poly(g, a, 3, g->col); cui__vg_poly(g, b, 3, g->col);
+    }
+}
+
+/* U+1FB70..U+1FB94: eighth columns and rows, quarter-steps, medium shades of halves */
+static bool cui__vg_legacy(cui__vg *g, uint32_t cp) {
+    int w = g->w, h = g->h, xm = cui__vg_eighth(w, 4), ym = h / 2;
+    cui_color med = cui_alpha(g->col, 0.5f);
+    if (cp <= 0x1FB75) { int n = (int)(cp - 0x1FB70) + 1; cui__vg_fill(g, cui__vg_eighth(w, n), 0, cui__vg_eighth(w, n + 1), h); }
+    else if (cp <= 0x1FB7B) { int n = (int)(cp - 0x1FB76) + 1; cui__vg_fill(g, 0, cui__vg_eighth(h, n), w, cui__vg_eighth(h, n + 1)); }
+    else if (cp <= 0x1FB7F) {
+        int e = cui__vg_eighth(w, 1), f = cui__vg_eighth(h, 1);
+        if (e < 1) e = 1;
+        if (f < 1) f = 1;
+        bool left = cp == 0x1FB7C || cp == 0x1FB7D, lower = cp == 0x1FB7C || cp == 0x1FB7F;
+        if (left) cui__vg_fill(g, 0, 0, e, h); else cui__vg_fill(g, w - e, 0, w, h);
+        if (lower) cui__vg_fill(g, 0, h - f, w, h); else cui__vg_fill(g, 0, 0, w, f);
+    }
+    else if (cp == 0x1FB80) { int f = cui__vg_eighth(h, 1); if (f < 1) f = 1; cui__vg_fill(g, 0, 0, w, f); cui__vg_fill(g, 0, h - f, w, h); }
+    else if (cp == 0x1FB81) { static const uint8_t rows[4] = { 0, 2, 4, 7 }; for (int i = 0; i < 4; i++) cui__vg_fill(g, 0, cui__vg_eighth(h, rows[i]), w, cui__vg_eighth(h, rows[i] + 1)); }
+    else if (cp <= 0x1FB86) { static const uint8_t n[5] = { 2, 3, 5, 6, 7 }; cui__vg_fill(g, 0, 0, w, cui__vg_eighth(h, n[cp - 0x1FB82])); }
+    else if (cp <= 0x1FB8B) { static const uint8_t n[5] = { 2, 3, 5, 6, 7 }; cui__vg_fill(g, w - cui__vg_eighth(w, n[cp - 0x1FB87]), 0, w, h); }
+    else if (cp == 0x1FB8C) cui__vg_fillc(g, 0, 0, xm, h, med);
+    else if (cp == 0x1FB8D) cui__vg_fillc(g, xm, 0, w, h, med);
+    else if (cp == 0x1FB8E) cui__vg_fillc(g, 0, 0, w, ym, med);
+    else if (cp == 0x1FB8F) cui__vg_fillc(g, 0, ym, w, h, med);
+    else if (cp == 0x1FB90) cui__vg_fillc(g, 0, 0, w, h, med);
+    else if (cp == 0x1FB91) { cui__vg_fill(g, 0, 0, w, ym); cui__vg_fillc(g, 0, ym, w, h, med); }
+    else if (cp == 0x1FB92) { cui__vg_fillc(g, 0, 0, w, ym, med); cui__vg_fill(g, 0, ym, w, h); }
+    else if (cp == 0x1FB94) { cui__vg_fillc(g, 0, 0, xm, h, med); cui__vg_fill(g, xm, 0, w, h); }
+    else return false;
+    return true;
+}
+
+/* U+1FB9A..U+1FB9F: the bow ties and the triangles in medium shade */
+static bool cui__vg_halves(cui__vg *g, uint32_t cp) {
+    float w = (float)g->w, h = (float)g->h, xm = (float)cui__vg_eighth(g->w, 4), ym = (float)(g->h / 2);
+    if (cp == 0x1FB9A) {
+        float a[6] = { 0, 0, w, 0, xm, ym }, b[6] = { 0, h, w, h, xm, ym };
+        cui__vg_poly(g, a, 3, g->col); cui__vg_poly(g, b, 3, g->col);
+    } else if (cp == 0x1FB9B) {
+        float a[6] = { 0, 0, 0, h, xm, ym }, b[6] = { w, 0, w, h, xm, ym };
+        cui__vg_poly(g, a, 3, g->col); cui__vg_poly(g, b, 3, g->col);
+    } else {
+        float t[4][6] = { { 0, 0, w, 0, 0, h }, { 0, 0, w, 0, w, h }, { w, 0, w, h, 0, h }, { 0, 0, w, h, 0, h } };
+        cui__vg_poly(g, t[cp - 0x1FB9C], 3, cui_alpha(g->col, 0.5f));
+    }
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
 bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (cp < 0x2500) return false;
-    bool ours = (cp <= 0x259F) || (cp >= 0x2800 && cp <= 0x28FF);
+    bool ours = (cp <= 0x259F) || (cp >= 0x2800 && cp <= 0x28FF) || (cp >= 0x1FB00 && cp <= 0x1FB9F);
     if (!ours) return false;
     cui__vg g;
     g.ui = ui;
@@ -403,7 +548,13 @@ bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     bool drawn = true;
     if (cp <= 0x257F) drawn = cui__vg_box(&g, cp);
     else if (cp <= 0x259F) drawn = cui__vg_block(&g, cp);
-    else cui__vg_braille(&g, cp);
+    else if (cp >= 0x2800 && cp <= 0x28FF) cui__vg_braille(&g, cp);
+    else if (cp <= 0x1FB3B) cui__vg_sextant(&g, cui__vt_sextant_bits(cp));
+    else if (cp <= 0x1FB67) cui__vg_wedge(&g, (int)(cp - 0x1FB3C));
+    else if (cp <= 0x1FB6F) cui__vg_triangles(&g, cp);
+    else if (cp <= 0x1FB94) drawn = cui__vg_legacy(&g, cp);
+    else if (cp >= 0x1FB9A) drawn = cui__vg_halves(&g, cp);
+    else drawn = false;
     cui__vg_flush(&g);
     return drawn;
 }
