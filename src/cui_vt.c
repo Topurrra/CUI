@@ -44,7 +44,11 @@ struct cui_vt {
     uint64_t sb_total;                /* lines ever pushed to the scrollback */
     uint32_t rgb[CUI__VT_RGB_MAX]; int rgb_n;
     uint8_t *tabs;
+    uint8_t mouse_modes;              /* what the program asked for: CUI__VT_M1000, _M1002, _M1003 */
+    bool mouse_sgr;                   /* encoding 1006 */
 };
+
+enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
 
 /* ------------------------------------------------------------------------ */
 /* Screens                                                                  */
@@ -318,6 +322,12 @@ static void cui__vt_mode(cui_vt *v, bool set) {
         case 25: v->cursor_vis = set; break;
         case 47: case 1047: cui__vt_switch_screen(v, set, false); break;
         case 1049: cui__vt_switch_screen(v, set, true); break;
+        case 1000: case 1002: case 1003: {
+            uint8_t bit = m == 1000 ? CUI__VT_M1000 : m == 1002 ? CUI__VT_M1002 : CUI__VT_M1003;
+            if (set) v->mouse_modes |= bit; else v->mouse_modes &= (uint8_t)~bit;
+            break;
+        }
+        case 1006: v->mouse_sgr = set; break;
         case 2004: v->bracketed = set; break;
         default: break;
         }
@@ -331,6 +341,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
     if (v->inter == '!' && f == 'p') {      /* soft reset */
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = false; v->pend = false;
+        v->mouse_modes = 0; v->mouse_sgr = false;
         return;
     }
     if (v->inter) return;
@@ -422,6 +433,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
     case 'c': {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
+        v->mouse_modes = 0; v->mouse_sgr = false;
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -583,6 +595,7 @@ void cui_vt_cursor(const cui_vt *v, int *x, int *y) { if (x) *x = v->cx; if (y) 
 bool cui_vt_alt_screen(const cui_vt *v) { return v->cur == 1; }
 bool cui_vt_app_cursor(const cui_vt *v) { return v->app_cursor; }
 bool cui_vt_bracketed_paste(const cui_vt *v) { return v->bracketed; }
+bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; }
 int cui_vt_scrollback_count(const cui_vt *v) { return v->sb_count; }
 
 /* the cells of row `row` counted from the top of the live screen: negative rows are scrollback, -1 the newest */
@@ -657,6 +670,8 @@ typedef struct {
     float press_x, press_y;
     uint64_t seen_total;
     char out[768]; int out_n;
+    uint8_t btn_down;                 /* buttons whose press went to the program */
+    int mcol, mrow; bool mvalid;      /* the last cell the mouse was reported in */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -665,6 +680,64 @@ static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
     st->out_n += n;
 }
 static void cui__vt_outs(cui__vt_state *st, const char *s) { cui__vt_out(st, s, (int)strlen(s)); }
+
+/* ------------------------------------------------------------------------ */
+/* View: mouse reports                                                      */
+/* ------------------------------------------------------------------------ */
+
+typedef struct { cui_rect pr; float padx, pady, cw, lh; } cui__vt_geom;
+
+/* the cell under a point, 0-based and clamped to the grid: the geometry selection uses */
+static void cui__vt_grid_at(const cui_vt *v, const cui__vt_geom *g, float mx, float my, int *col, int *row) {
+    *row = CUI_CLAMP((int)floorf((my - g->pr.y - g->pady) / g->lh), 0, v->rows - 1);
+    *col = CUI_CLAMP((int)floorf((mx - g->pr.x - g->padx) / g->cw), 0, v->cols - 1);
+}
+
+/* one report: SGR (ESC [ < b ; x ; y M or m) or the classic ESC [ M with bytes, coordinates capped at 223 */
+static void cui__vt_mouse_out(cui__vt_state *st, const cui_vt *v, int code, int col, int row, bool release) {
+    char b[32];
+    int x = col + 1, y = row + 1, n;
+    if (v->mouse_sgr) n = snprintf(b, sizeof b, "\x1b[<%d;%d;%d%c", code, x, y, release ? 'm' : 'M');
+    else {
+        if (release) code = (code & ~3) | 3;
+        b[0] = 0x1b; b[1] = '['; b[2] = 'M';
+        b[3] = (char)(32 + code); b[4] = (char)(32 + CUI_MIN(x, 223)); b[5] = (char)(32 + CUI_MIN(y, 223));
+        n = 6;
+    }
+    cui__vt_out(st, b, n);
+}
+
+static int cui__vt_mouse_mods(int mods) {
+    return ((mods & CUI_MOD_SHIFT) ? 4 : 0) | ((mods & CUI_MOD_ALT) ? 8 : 0) | ((mods & CUI_MOD_CTRL) ? 16 : 0);
+}
+
+/* the buttons, motion and wheel of this frame as reports. `can_press`: a new press goes to the program (no Shift).
+ * A release is always reported while a press is open, wherever the pointer is, so the program never sees a stuck button. */
+static void cui__vt_mouse_frame(cui_ctx *ui, cui__vt_state *st, const cui_vt *v, const cui__vt_geom *g, bool hovered, bool can_press) {
+    int col = st->mcol, row = st->mrow;
+    if (ui->mouse_inside) cui__vt_grid_at(v, g, ui->mx, ui->my, &col, &row);
+    int mods = cui__vt_mouse_mods(ui->mods);
+    bool moved = !st->mvalid || col != st->mcol || row != st->mrow;
+    for (int b = 0; b < 3; b++) {
+        uint8_t bit = (uint8_t)(1u << b);
+        int code = b == CUI_MOUSE_RIGHT ? 2 : b == CUI_MOUSE_MIDDLE ? 1 : 0;
+        if ((st->btn_down & bit) && ui->mreleased[b]) { cui__vt_mouse_out(st, v, code + mods, col, row, true); st->btn_down &= (uint8_t)~bit; }
+        if (can_press && hovered && ui->mpressed[b]) {
+            cui__vt_mouse_out(st, v, code + mods, col, row, false);
+            st->btn_down |= bit; moved = false;
+            st->has_sel = false; st->selecting = false;
+        }
+        if ((st->btn_down & bit) && !ui->mdown[b]) { cui__vt_mouse_out(st, v, code + mods, col, row, true); st->btn_down &= (uint8_t)~bit; }
+    }
+    if (moved && (st->btn_down || hovered)) {
+        if (st->btn_down) {
+            int first = st->btn_down & 1 ? 0 : st->btn_down & 4 ? 1 : 2;       /* the lowest button held, as a protocol code */
+            if (v->mouse_modes & (CUI__VT_M1002 | CUI__VT_M1003)) cui__vt_mouse_out(st, v, first + 32 + mods, col, row, false);
+        } else if (can_press && (v->mouse_modes & CUI__VT_M1003)) cui__vt_mouse_out(st, v, 3 + 32 + mods, col, row, false);
+    }
+    if (st->btn_down || hovered) { st->mcol = col; st->mrow = row; st->mvalid = true; }
+    else st->mvalid = false;
+}
 
 /* ESC [ code ; mods final, or without mods ESC [ final (or ESC O final in application mode) */
 static void cui__vt_out_key(cui__vt_state *st, bool app, int mods, const char *code, char final) {
@@ -1072,8 +1145,22 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     st->seen_total = v->sb_total; st->init = true;
     if (st->off > v->sb_count) st->off = v->sb_count;
     if (v->cur == 1) st->off = 0;
+    /* the program has the mouse (opt in): its clicks, drags and wheel are reports, Shift or scrolled-back history keeps them local */
+    bool mshift = (ui->mods & CUI_MOD_SHIFT) != 0;
+    bool can_grab = o->mouse && !o->no_input && v->mouse_modes != 0 && st->off == 0;
+    bool grab = can_grab && (!mshift || st->btn_down != 0);
+    cui__vt_geom geom = { pr, padx, pady, cw, lh };
     /* wheel */
-    if (ui->scroll_target == wid && ui->scroll_dy != 0) {
+    if (ui->scroll_target == wid && ui->scroll_dy != 0 && grab) {
+        float d = ui->scroll_dy;
+        int k = CUI_CLAMP((int)lroundf(fabsf(d)), 1, 8), col, row;      /* one report per notch */
+        cui__vt_grid_at(v, &geom, ui->mx, ui->my, &col, &row);
+        for (int i = 0; i < k; i++) cui__vt_mouse_out(st, v, (d > 0 ? 64 : 65) + cui__vt_mouse_mods(ui->mods), col, row, false);
+        ui->scroll_dy = 0;
+    } else if (can_grab && mshift && in.hovered && v->cur == 0 && ui->scroll_dy != 0) {      /* Shift+wheel looks back in the history */
+        st->off = CUI_CLAMP(st->off + (int)lroundf(ui->scroll_dy * 3), 0, v->sb_count);
+        ui->scroll_dy = 0;
+    } else if (ui->scroll_target == wid && ui->scroll_dy != 0) {
         float d = ui->scroll_dy;
         if (v->cur == 0) st->off = CUI_CLAMP(st->off + (int)lroundf(d * 3), 0, v->sb_count);
         else {   /* a full screen program has no scrollback: the wheel moves its cursor */
@@ -1083,8 +1170,9 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         ui->scroll_dy = 0;
     }
     /* mouse: select */
-    if (in.hovered) cui__set_cursor(ui, CUI_CURSOR_TEXT);
-    if (pr.w > 0) {
+    if (grab || st->btn_down) cui__vt_mouse_frame(ui, st, v, &geom, in.hovered, can_grab && !mshift);
+    if (in.hovered && !grab) cui__set_cursor(ui, CUI_CURSOR_TEXT);
+    if (pr.w > 0 && !grab) {
         cui__vt_pos at = cui__vt_pos_at(v, st, pr, padx, pady, cw, lh, ui->mx, ui->my);
         if (in.active && ui->mpressed[CUI_MOUSE_LEFT]) {
             if (ui->click_count >= 3) { st->a = (cui__vt_pos){ at.row, 0 }; st->b = (cui__vt_pos){ at.row, v->cols - 1 }; st->has_sel = true; st->selecting = false; }
@@ -1129,7 +1217,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         for (int k = 1; k < CUI_KEY_COUNT; k++) ui->kpressed[k] = 0;   /* nothing else sees what the program got */
     }
     /* right click: copy the selection, or paste */
-    if (in.right_clicked && !o->no_input) {
+    if (in.right_clicked && !o->no_input && !grab) {
         if (st->has_sel) {
             char *t = cui__vt_selection_text(ui, v, st);
             if (t) { cui_set_clipboard_text(ui, t); cui__free(ui, t); res.copied = true; }

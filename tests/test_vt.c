@@ -252,11 +252,11 @@ static void test_speed(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse; } scene;
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse); }
     cui_end_frame(ui);
     s->focus = false;
 }
@@ -350,6 +350,149 @@ static void test_view(void) {
     cui_destroy(ui);
 }
 
+/* ---- mouse reports ---- */
+
+static void at_cell(cui_ctx *ui, scene *s, int col, int row) {     /* the middle of a cell (7.8 x 19 pixels, 10 and 6 of padding) */
+    cui_input_mouse_move(ui, 10 + ((float)col + 0.5f) * 7.8f, 6 + ((float)row + 0.5f) * 19.0f);
+    build(ui, s);
+}
+static void button(cui_ctx *ui, scene *s, cui_mouse_button b, bool down) { cui_input_mouse_button(ui, b, down); build(ui, s); }
+static void mods(cui_ctx *ui, scene *s, int m) { cui_input_key(ui, CUI_KEY_NONE, true, m); build(ui, s); }
+
+static cui_ctx *mouse_ctx(scene *s, float w) {
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+    cui_set_viewport(ui, w, 400, 1);
+    cui_set_reduced_motion(ui, true);
+    memset(s, 0, sizeof *s);
+    s->vt = cui_vt_create(80, 24, 1000); s->focus = true; s->mouse = true;
+    for (int i = 0; i < 3; i++) build(ui, s);
+    return ui;
+}
+
+static void test_mouse(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    CHECK(!cui_vt_mouse_reporting(s.vt));
+    /* the program asks: SGR, press and release only */
+    W(s.vt, "\x1b[?1000h\x1b[?1006h");
+    CHECK(cui_vt_mouse_reporting(s.vt));
+    at_cell(ui, &s, 5, 3);
+    CHECK_EQ(s.r.input_len, 0);                                    /* 1000: no motion */
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[<0;6;4M"));
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[<0;6;4m"));
+    button(ui, &s, CUI_MOUSE_MIDDLE, true);  CHECK(got(&s, "\x1b[<1;6;4M"));
+    button(ui, &s, CUI_MOUSE_MIDDLE, false); CHECK(got(&s, "\x1b[<1;6;4m"));
+    button(ui, &s, CUI_MOUSE_RIGHT, true);  CHECK(got(&s, "\x1b[<2;6;4M"));      /* a right click is not a paste */
+    CHECK(!s.r.paste);
+    button(ui, &s, CUI_MOUSE_RIGHT, false); CHECK(got(&s, "\x1b[<2;6;4m"));
+    /* the wheel: one report per notch, and the screen does not scroll */
+    cui_input_scroll(ui, 0, 1); build(ui, &s); CHECK(got(&s, "\x1b[<64;6;4M"));
+    cui_input_scroll(ui, 0, -1); build(ui, &s); CHECK(got(&s, "\x1b[<65;6;4M"));
+    cui_input_scroll(ui, 0, -2); build(ui, &s); CHECK(got(&s, "\x1b[<65;6;4M\x1b[<65;6;4M"));
+    /* modifiers */
+    mods(ui, &s, CUI_MOD_CTRL);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[<16;6;4M"));
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[<16;6;4m"));
+    mods(ui, &s, CUI_MOD_ALT);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[<8;6;4M"));
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[<8;6;4m"));
+    /* Shift keeps it local: a drag selects, nothing is reported, the pointer is the I-beam */
+    mods(ui, &s, CUI_MOD_SHIFT);
+    W(s.vt, "\x1b[2J\x1b[Hhello world");
+    build(ui, &s);
+    at_cell(ui, &s, 1, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK_EQ(s.r.input_len, 0);
+    CHECK_EQ(cui_get_cursor(ui), CUI_CURSOR_TEXT);
+    at_cell(ui, &s, 8, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK_EQ(s.r.input_len, 0);
+    mods(ui, &s, 0);
+    CHECK_EQ(cui_get_cursor(ui), CUI_CURSOR_ARROW);                   /* the program has the mouse: an arrow */
+    /* a click and release in one frame is both reports, in order */
+    at_cell(ui, &s, 2, 2);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); build(ui, &s);
+    CHECK(got(&s, "\x1b[<0;3;3M\x1b[<0;3;3m"));
+
+    /* 1002: motion with a button down, only when the cell changes; a release outside is reported, clamped */
+    W(s.vt, "\x1b[?1002h");
+    at_cell(ui, &s, 4, 1);
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK(got(&s, "\x1b[<0;5;2M"));
+    at_cell(ui, &s, 4, 1); CHECK_EQ(s.r.input_len, 0);
+    cui_input_mouse_move(ui, 10 + 4.9f * 7.8f, 6 + 1.5f * 19); build(ui, &s); CHECK_EQ(s.r.input_len, 0);   /* same cell */
+    at_cell(ui, &s, 7, 1); CHECK(got(&s, "\x1b[<32;8;2M"));
+    at_cell(ui, &s, 7, 4); CHECK(got(&s, "\x1b[<32;8;5M"));
+    char want[32];
+    snprintf(want, sizeof want, "\x1b[<32;1;%dM", s.r.rows);
+    cui_input_mouse_move(ui, -500, 5000); build(ui, &s);
+    CHECK(got(&s, want));                                                                 /* clamped to the grid */
+    snprintf(want, sizeof want, "\x1b[<0;1;%dm", s.r.rows);
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, want));
+    /* 1002 does not report motion with no button */
+    at_cell(ui, &s, 2, 2); CHECK_EQ(s.r.input_len, 0);
+    /* 1003: all motion, code 35 with no button */
+    W(s.vt, "\x1b[?1003h");
+    at_cell(ui, &s, 3, 2); CHECK(got(&s, "\x1b[<35;4;3M"));
+    at_cell(ui, &s, 3, 2); CHECK_EQ(s.r.input_len, 0);
+    W(s.vt, "\x1b[?1003l\x1b[?1002l");
+
+    /* the classic encoding: ESC [ M and three bytes */
+    W(s.vt, "\x1b[?1006l");
+    at_cell(ui, &s, 5, 3);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[M \x26\x24"));      /* 32+0, 32+6, 32+4 */
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[M#\x26\x24"));      /* a release is button 3 */
+    cui_input_scroll(ui, 0, 1); build(ui, &s); CHECK(got(&s, "\x1b[M`\x26\x24"));  /* 32+64 */
+
+    /* a button still down when the window loses the focus is released */
+    W(s.vt, "\x1b[?1006h");
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK_EQ(s.r.input_len, 8);
+    cui_input_focus(ui, false); build(ui, &s);
+    CHECK(got(&s, "\x1b[<0;6;4m"));
+    cui_input_focus(ui, true); build(ui, &s);
+
+    /* looking back in the history keeps the wheel and the clicks local */
+    for (int i = 0; i < 100; i++) { char b[32]; snprintf(b, sizeof b, "row %d\r\n", i); W(s.vt, b); }
+    build(ui, &s);
+    mods(ui, &s, CUI_MOD_SHIFT);
+    cui_input_scroll(ui, 0, 2); build(ui, &s);                                      /* Shift+wheel: history */
+    CHECK_EQ(s.r.input_len, 0);
+    mods(ui, &s, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK_EQ(s.r.input_len, 0);               /* scrolled back: local */
+    button(ui, &s, CUI_MOUSE_LEFT, false);
+    cui_input_scroll(ui, 0, -2); build(ui, &s); CHECK_EQ(s.r.input_len, 0);        /* the wheel scrolls back down */
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK(s.r.input_len > 0);                 /* live again: reported */
+    button(ui, &s, CUI_MOUSE_LEFT, false);
+
+    /* ESC c and soft reset forget the mouse */
+    W(s.vt, "\x1b" "c"); CHECK(!cui_vt_mouse_reporting(s.vt));
+    W(s.vt, "\x1b[?1000h"); CHECK(cui_vt_mouse_reporting(s.vt));
+    W(s.vt, "\x1b[!p"); CHECK(!cui_vt_mouse_reporting(s.vt));
+    W(s.vt, "\x1b[?1000h\x1b[?1000l"); CHECK(!cui_vt_mouse_reporting(s.vt));
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+
+    /* .mouse = false: nothing is reported, the wheel and the clicks do what they did before */
+    ui = mouse_ctx(&s, 640);
+    s.mouse = false;
+    W(s.vt, "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1049h");
+    CHECK(cui_vt_mouse_reporting(s.vt));                                               /* remembered */
+    at_cell(ui, &s, 5, 3); CHECK_EQ(s.r.input_len, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK_EQ(s.r.input_len, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK_EQ(s.r.input_len, 0);
+    CHECK_EQ(cui_get_cursor(ui), CUI_CURSOR_TEXT);
+    cui_input_scroll(ui, 0, -1); build(ui, &s); CHECK(got(&s, "\x1b[B\x1b[B\x1b[B"));   /* the alternate screen's wheel: arrow keys */
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+
+    /* classic coordinates stop at 223 */
+    ui = mouse_ctx(&s, 2200);
+    W(s.vt, "\x1b[?1000h");
+    at_cell(ui, &s, 250, 3);
+    CHECK(s.r.cols > 240);
+    button(ui, &s, CUI_MOUSE_LEFT, true);
+    CHECK(s.r.input_len == 6 && (unsigned char)s.r.input[4] == 255);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_text();
@@ -363,6 +506,7 @@ int main(void) {
     test_resize_and_limits();
     test_speed();
     test_view();
+    test_mouse();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
