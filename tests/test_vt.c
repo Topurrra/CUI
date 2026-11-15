@@ -493,6 +493,77 @@ static void test_mouse(void) {
     cui_destroy(ui);
 }
 
+/* ---- SGR: underline styles, overline, colon forms ---- */
+
+static cui_vt_cell sgr_cell(cui_vt *v, const char *seq) {       /* the cell an "X" written after `seq` gets */
+    cui_vt_cell c;
+    W(v, "\x1b[0m\x1b[2J\x1b[H");
+    W(v, seq);
+    W(v, "X");
+    CHECK(cui_vt_cell_at(v, 0, 0, &c));
+    return c;
+}
+
+static void test_sgr(void) {
+    cui_vt *v = cui_vt_create(40, 6, 0);
+    const int U = CUI_VT_UNDERLINE;
+    CHECK_EQ(sgr_cell(v, "\x1b[4m").attrs, U);                                       /* plain: as before, no style bit */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:0m").attrs, 0);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:1m").attrs, U);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:2m").attrs, U | CUI_VT_UNDERLINE_DOUBLE);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3m").attrs, U | CUI_VT_UNDERLINE_CURLY);            /* not italic */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:4m").attrs, U | CUI_VT_UNDERLINE_DOTTED);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:5m").attrs, U | CUI_VT_UNDERLINE_DASHED);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:9m").attrs, U);                                     /* unknown style: a plain line */
+    CHECK_EQ(sgr_cell(v, "\x1b[21m").attrs, U | CUI_VT_UNDERLINE_DOUBLE);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3;24m").attrs, 0);                                  /* 24 ends any style */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3m\x1b[4:0m").attrs, 0);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3m\x1b[4m").attrs, U);                              /* a new style replaces the old */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3;1m").attrs, U | CUI_VT_UNDERLINE_CURLY | CUI_VT_BOLD);     /* the next parameter after a colon group */
+    CHECK_EQ(sgr_cell(v, "\x1b[4;3m").attrs, U | CUI_VT_ITALIC);                     /* with semicolons it is two attributes */
+    CHECK_EQ(sgr_cell(v, "\x1b[1;4:2;3m").attrs, CUI_VT_BOLD | U | CUI_VT_UNDERLINE_DOUBLE | CUI_VT_ITALIC);
+    CHECK_EQ(sgr_cell(v, "\x1b[53m").attrs, CUI_VT_OVERLINE);
+    CHECK_EQ(sgr_cell(v, "\x1b[53;55m").attrs, 0);
+    CHECK_EQ(sgr_cell(v, "\x1b[53;4:3;9m").attrs, CUI_VT_OVERLINE | U | CUI_VT_UNDERLINE_CURLY | CUI_VT_STRIKE);
+    CHECK_EQ(sgr_cell(v, "\x1b[53;4:3;1m\x1b[0m").attrs, 0);                         /* reset clears them */
+    CHECK_EQ(sgr_cell(v, "\x1b[53;4:3m\x1b[m").attrs, 0);
+    /* the style survives save and restore of the cursor, and an erase does not keep it */
+    W(v, "\x1b[2J\x1b[H\x1b[4:4m\x1b" "7\x1b[0m\x1b" "8Y");
+    { cui_vt_cell c; CHECK(cui_vt_cell_at(v, 0, 0, &c)); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_DOTTED); }
+    W(v, "\x1b[2J\x1b[H\x1b[4:4m\x1b[K");
+    { cui_vt_cell c; CHECK(cui_vt_cell_at(v, 0, 0, &c)); CHECK_EQ(c.attrs, 0); }
+    /* a wide character and the style */
+    W(v, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3m\xe4\xb8\xad");
+    { cui_vt_cell c; CHECK(cui_vt_cell_at(v, 0, 0, &c)); CHECK_EQ(c.ch, 0x4E2D); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); }
+
+    /* colors in the colon forms and the old semicolon forms */
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2::255:0:0m").fg, 0x1FF0000);
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2:1:2:3m").fg, 0x1010203);
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2:0:9:8:7m").fg, 0x1090807);                        /* with a color space id */
+    CHECK_EQ(sgr_cell(v, "\x1b[38:5:196m").fg, 196);
+    CHECK_EQ(sgr_cell(v, "\x1b[48:2::10:20:30m").bg, 0x10A141E);
+    CHECK_EQ(sgr_cell(v, "\x1b[48:5:7m").bg, 7);
+    CHECK_EQ(sgr_cell(v, "\x1b[38;2;4;5;6m").fg, 0x1040506);
+    CHECK_EQ(sgr_cell(v, "\x1b[38;5;21m").fg, 21);
+    CHECK_EQ(sgr_cell(v, "\x1b[48;2;4;5;6m").bg, 0x1040506);
+    { cui_vt_cell c = sgr_cell(v, "\x1b[4:3;38:2::10:20:30;48;5;7;1m"); CHECK_EQ(c.fg, 0x10A141E); CHECK_EQ(c.bg, 7); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY | CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[1;38;5;9m"); CHECK_EQ(c.fg, 9); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2:1m").fg, -1);                                    /* too short: ignored */
+    CHECK_EQ(sgr_cell(v, "\x1b[38;5m").fg, -1);
+    CHECK_EQ(sgr_cell(v, "\x1b[38:9:1:2:3m").fg, -1);
+    /* the underline color is read and dropped, and never swallows what follows it */
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58:2::255:0:0;1m"); CHECK_EQ(c.fg, -1); CHECK_EQ(c.bg, -1); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58;2;255;0;0;1m"); CHECK_EQ(c.fg, -1); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58:5:9;1m"); CHECK_EQ(c.fg, -1); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58;5;9;4:3m"); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[4:3m\x1b[59m"); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[4:3;58:2::1:2:3;38:5:2m"); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); CHECK_EQ(c.fg, 2); }
+    /* colons outside SGR do not change other sequences */
+    W(v, "\x1b[2J\x1b[2;3Hz");
+    { char b[64]; cui_vt_line_text(v, 1, b, sizeof b); CHECK_STR(b, "  z"); }
+    cui_vt_destroy(v);
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -533,6 +604,7 @@ int main(void) {
     test_view();
     test_mouse();
     test_focus();
+    test_sgr();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

@@ -14,10 +14,15 @@
 #define CUI__VT_PALETTE 257         /* color ids: 0 default, 1..256 palette index + 1, 257.. an entry of the rgb table */
 
 enum { CUI__VT_SPACER = 1u << 30 };  /* the second cell of a wide character */
+#define CUI__VT_OVER 0x80000000u       /* overline */
+#define CUI__VT_ULS_SHIFT 21           /* underline style 0..5 (none, single, double, curly, dotted, dashed) in the 3 free bits below the attributes */
+#define CUI__VT_ULS_MASK 0x00E00000u
+#define CUI__VT_ULS(ca) (((ca) & CUI__VT_ULS_MASK) >> CUI__VT_ULS_SHIFT)
 #define CUI__VT_CP(ca) ((ca) & 0x1FFFFFu)
-#define CUI__VT_ATTRS(ca) ((ca) & 0x7F000000u)
+#define CUI__VT_ATTRS(ca) ((ca) & 0xFFE00000u)
 
 typedef struct { uint32_t ca; uint16_t fg, bg; } cui__vt_cell;
+typedef char cui__vt_cell_is_8_bytes[sizeof(cui__vt_cell) == 8 ? 1 : -1];
 typedef struct { cui__vt_cell *cells; uint16_t *map; uint8_t *wrap; } cui__vt_screen;
 typedef struct { uint32_t off; uint16_t len; uint8_t wrapped; } cui__vt_line;
 
@@ -35,6 +40,7 @@ struct cui_vt {
     bool autowrap, app_cursor, bracketed, cursor_vis;
     int state;
     int p[16], np; bool pany; char priv, inter;
+    uint16_t pcolon;                  /* bit i: the separator before p[i] was a colon (a sub-parameter) */
     uint32_t cp; int need;            /* a UTF-8 sequence cut by the end of a write */
     char osc[160]; int osc_n;
     char title[128];
@@ -255,35 +261,65 @@ static uint16_t cui__vt_rgb_id(cui_vt *v, int r, int g, int b) {
     return (uint16_t)(CUI__VT_PALETTE + best);
 }
 
+static void cui__vt_underline(cui_vt *v, int style) {
+    v->attr &= ~(uint32_t)(CUI_VT_UNDERLINE | CUI__VT_ULS_MASK);
+    if (style < 0 || style > 5) style = 1;                 /* an unknown style is a plain line */
+    if (style > 0) v->attr |= CUI_VT_UNDERLINE | ((uint32_t)style << CUI__VT_ULS_SHIFT);
+}
+
+/* The color after a 38, 48 or 58 at p[k]; `end` is where its colon group stops (k + 1 when it has no sub-parameters).
+ * Forms: 38;5;n  38;2;r;g;b  38:5:n  38:2:r:g:b  38:2::r:g:b (an empty color space id). Returns the index of the last
+ * parameter used, or -1 when the form is not understood. */
+static int cui__vt_sgr_color(cui_vt *v, int k, int end, uint16_t *col) {
+    if (end > k + 1) {                                      /* colons */
+        int n = end - k - 1;
+        const int *s = &v->p[k + 1];
+        if (s[0] == 5 && n >= 2) { *col = (uint16_t)(1 + (s[1] & 255)); return end - 1; }
+        if (s[0] == 2 && n >= 5) { *col = cui__vt_rgb_id(v, s[2], s[3], s[4]); return end - 1; }
+        if (s[0] == 2 && n == 4) { *col = cui__vt_rgb_id(v, s[1], s[2], s[3]); return end - 1; }
+        return -1;
+    }
+    if (k + 2 < v->np && v->p[k + 1] == 5) { *col = (uint16_t)(1 + (v->p[k + 2] & 255)); return k + 2; }
+    if (k + 4 < v->np && v->p[k + 1] == 2) { *col = cui__vt_rgb_id(v, v->p[k + 2], v->p[k + 3], v->p[k + 4]); return k + 4; }
+    return -1;
+}
+
 static void cui__vt_sgr(cui_vt *v) {
     if (v->np == 0) { v->attr = 0; v->fg = v->bg = 0; return; }
     for (int k = 0; k < v->np; k++) {
         int c = v->p[k];
-        if (c == 0) { v->attr = 0; v->fg = v->bg = 0; }
+        int end = k + 1;
+        while (end < v->np && ((v->pcolon >> end) & 1u)) end++;      /* a colon group is k .. end - 1 */
+        if (c == 4) cui__vt_underline(v, end > k + 1 ? v->p[k + 1] : 1);
+        else if (c == 38 || c == 48 || c == 58) {
+            uint16_t col = 0;
+            int last = cui__vt_sgr_color(v, k, end, &col);
+            if (last >= 0) {
+                if (c == 38) v->fg = col; else if (c == 48) v->bg = col;      /* 58, the underline color, has no room in a cell: the line takes the text color */
+                end = last + 1;
+            }
+        }
+        else if (c == 0) { v->attr = 0; v->fg = v->bg = 0; }
         else if (c == 1) v->attr |= CUI_VT_BOLD;
         else if (c == 2) v->attr |= CUI_VT_DIM;
         else if (c == 3) v->attr |= CUI_VT_ITALIC;
-        else if (c == 4 || c == 21) v->attr |= CUI_VT_UNDERLINE;
+        else if (c == 21) cui__vt_underline(v, 2);
         else if (c == 7) v->attr |= CUI_VT_INVERSE;
         else if (c == 9) v->attr |= CUI_VT_STRIKE;
         else if (c == 22) v->attr &= ~(uint32_t)(CUI_VT_BOLD | CUI_VT_DIM);
         else if (c == 23) v->attr &= ~(uint32_t)CUI_VT_ITALIC;
-        else if (c == 24) v->attr &= ~(uint32_t)CUI_VT_UNDERLINE;
+        else if (c == 24) cui__vt_underline(v, 0);
         else if (c == 27) v->attr &= ~(uint32_t)CUI_VT_INVERSE;
         else if (c == 29) v->attr &= ~(uint32_t)CUI_VT_STRIKE;
+        else if (c == 53) v->attr |= CUI__VT_OVER;
+        else if (c == 55) v->attr &= ~CUI__VT_OVER;
         else if (c >= 30 && c <= 37) v->fg = (uint16_t)(1 + c - 30);
         else if (c >= 90 && c <= 97) v->fg = (uint16_t)(1 + c - 90 + 8);
         else if (c >= 40 && c <= 47) v->bg = (uint16_t)(1 + c - 40);
         else if (c >= 100 && c <= 107) v->bg = (uint16_t)(1 + c - 100 + 8);
         else if (c == 39) v->fg = 0;
         else if (c == 49) v->bg = 0;
-        else if ((c == 38 || c == 48) && k + 1 < v->np) {
-            uint16_t col;
-            if (v->p[k + 1] == 5 && k + 2 < v->np) { col = (uint16_t)(1 + (v->p[k + 2] & 255)); k += 2; }
-            else if (v->p[k + 1] == 2 && k + 4 < v->np) { col = cui__vt_rgb_id(v, v->p[k + 2], v->p[k + 3], v->p[k + 4]); k += 4; }
-            else continue;
-            if (c == 38) v->fg = col; else v->bg = col;
-        }
+        k = end - 1;                                        /* the sub-parameters of a colon group, or the parameters of a color, are used */
     }
 }
 
@@ -482,7 +518,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             }
             if (c < 0x20) {
                 v->need = 0;
-                if (c == 0x1B) { v->state = CUI__VT_ESC; v->np = 0; v->pany = false; v->priv = v->inter = 0; }
+                if (c == 0x1B) { v->state = CUI__VT_ESC; v->np = 0; v->pcolon = 0; v->pany = false; v->priv = v->inter = 0; }
                 else cui__vt_control(v, c);
             } else if (c >= 0xC2 && c <= 0xF4) {
                 v->need = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : 1;
@@ -493,7 +529,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             } else { v->need = 0; cui__vt_put(v, 0xFFFD); }
             break;
         case CUI__VT_ESC:
-            if (c == '[') { v->state = CUI__VT_CSI; v->np = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
+            if (c == '[') { v->state = CUI__VT_CSI; v->np = 0; v->pcolon = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
             else if (c == ']') { v->state = CUI__VT_OSC; v->osc_n = 0; }
             else if (c == 'P' || c == 'X' || c == '^' || c == '_') v->state = CUI__VT_STR;
             else if (c >= 0x20 && c <= 0x2F) v->state = CUI__VT_ESC_INT;       /* ( ) # % and the like: one more byte */
@@ -511,6 +547,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             } else if (c == ';' || c == ':') {
                 if (v->np == 0) v->np = 1;
                 if (v->np < 16) v->np++;
+                if (c == ':') v->pcolon |= (uint16_t)(1u << (v->np - 1));
                 v->pany = true;
             } else if (c >= '<' && c <= '?') v->priv = (char)c;
             else if (c >= 0x20 && c <= 0x2F) v->inter = (char)c;
@@ -650,7 +687,13 @@ bool cui_vt_cell_at(const cui_vt *v, int x, int y, cui_vt_cell *out) {
     if (x < 0 || y < 0 || x >= v->cols || y >= v->rows) return false;
     const cui__vt_cell *c = &cui__vt_row(v, &v->scr[v->cur], y)[x];
     out->ch = CUI__VT_CP(c->ca);
-    out->attrs = (int)CUI__VT_ATTRS(c->ca) & ~(int)CUI__VT_SPACER;
+    {
+        uint32_t a = c->ca, style = CUI__VT_ULS(a);
+        int at = (int)(a & 0x3F000000u);                                          /* bold .. strike: the same bits as CUI_VT_* */
+        if (style >= 2) at |= CUI_VT_UNDERLINE_DOUBLE << (style - 2);
+        if (a & CUI__VT_OVER) at |= CUI_VT_OVERLINE;
+        out->attrs = at;
+    }
     for (int k = 0; k < 2; k++) {
         uint16_t id = k ? c->bg : c->fg;
         int32_t r = id == 0 ? -1 : id < CUI__VT_PALETTE ? id - 1 : (int32_t)(0x1000000u | v->rgb[id - CUI__VT_PALETTE]);
@@ -1025,6 +1068,54 @@ static bool cui__vt_run_same(const cui__vt_cell *a, const cui__vt_cell *b) {
     return a->fg == b->fg && a->bg == b->bg && CUI__VT_ATTRS(a->ca) == CUI__VT_ATTRS(b->ca);
 }
 
+/* The underline (a style, or the plain line as it always was) and the overline of `n` cells from cell `x` of a row at `ry`, in
+ * the text color. Every edge is put on a whole device pixel, so the lines are the same at any scale. */
+static void cui__vt_decor(cui_ctx *ui, const cui__vt_paint *p, uint32_t at, float x0, int x, int n, float ry, cui_color col) {
+    float s = ui->scale > 0 ? ui->scale : 1;
+    float left = x0 + (float)x * p->cw, right = x0 + (float)(x + n) * p->cw;
+    float t = fmaxf(1.0f, floorf(p->lh / 16.0f * s + 0.5f)) / s;       /* line thickness: the box light line's */
+    float yb = ry + p->lh - 1.0f;                                       /* bottom edge of an underline */
+    uint32_t style = (at & CUI_VT_UNDERLINE) ? CUI__VT_ULS(at) : 0;
+    if (at & CUI__VT_OVER) cui__vt_snap_rect(ui, left, ry, right, ry + t, col);
+    if (!(at & CUI_VT_UNDERLINE)) return;
+    switch (style) {
+    case 2:                                                             /* double: two lines with a gap of one */
+        cui__vt_snap_rect(ui, left, yb - t, right, yb, col);
+        cui__vt_snap_rect(ui, left, yb - 3 * t, right, yb - 2 * t, col);
+        break;
+    case 3: {                                                           /* curly: a wave one cell long, column by column on device pixels */
+        float amp = fmaxf(2.0f, floorf(0.12f * p->lh * s + 0.5f));      /* device pixels */
+        float per = fmaxf(4.0f, floorf(p->cw * s + 0.5f));
+        float top = yb - t - amp / s;
+        int a = (int)floorf(left * s + 0.5f), b = (int)floorf(right * s + 0.5f);
+        int run0 = a, lev = -1;
+        for (int d = a; d <= b; d++) {
+            int l = -1;
+            if (d < b) l = (int)floorf(amp * 0.5f * (1.0f - cosf(6.2831853f * fmodf((float)d, per) / per)) + 0.5f);
+            if (l != lev) {
+                if (lev >= 0) cui__vt_snap_rect(ui, (float)run0 / s, top + (float)lev / s, (float)d / s, top + (float)lev / s + t, col);
+                run0 = d; lev = l;
+            }
+        }
+        break;
+    }
+    case 4: {                                                           /* dotted: dots of the line's width, one dot of gap */
+        float dot = t, step = 2 * t;
+        for (float dx = ceilf(left / step) * step; dx < right; dx += step) cui__vt_snap_rect(ui, dx, yb - t, fminf(dx + dot, right), yb, col);
+        break;
+    }
+    case 5:                                                             /* dashed: a dash of 0.6 cell in every cell */
+        for (int k = 0; k < n; k++) {
+            float cx = left + (float)k * p->cw;
+            cui__vt_snap_rect(ui, cx, yb - t, cx + p->cw * 0.6f, yb, col);
+        }
+        break;
+    default:                                                            /* single: as it was drawn before the styles */
+        cui_draw_rect(ui, (cui_rect){ left, ry + p->lh - 2, right - left, 1 }, CUI_CORNERS(0), col);
+        break;
+    }
+}
+
 static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     cui__vt_paint *p = (cui__vt_paint *)data;
     const cui_vt *v = p->v;
@@ -1070,7 +1161,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, u, (int)k, true);
                 if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, u, (int)k, true);
-                if (at & CUI_VT_UNDERLINE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh - 2, p->cw, 1 }, CUI_CORNERS(0), fg);
+                if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, x + 1 < cn && (cells[x + 1].ca & CUI__VT_SPACER) ? 2 : 1, ry, fg);
                 x++;
                 continue;
             }
@@ -1086,7 +1177,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             len = last - x + 1;
             cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, buf, len, true);
             if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, buf, len, true);
-            if (at & CUI_VT_UNDERLINE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh - 2, len * p->cw, 1 }, CUI_CORNERS(0), fg);
+            if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, len, ry, fg);
             if (at & CUI_VT_STRIKE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh * 0.5f, len * p->cw, 1 }, CUI_CORNERS(0), fg);
             x = e;
         }

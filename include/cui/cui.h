@@ -4062,7 +4062,7 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  *     char reply[64]; size_t n = cui_vt_reply(vt, reply, sizeof reply);   // answers to the program's queries: send them too
  *
  * Understood: cursor movement, erase, insert and delete (characters and lines), scrolling regions, 16, 256
- * and true colors, bold, dim, italic, underline, inverse, strike, wide characters, the alternate screen
+ * and true colors, bold, dim, italic, underline (single, double, curly, dotted, dashed: `4:0` to `4:5`, `21`; `58` and `59` are read but the line takes the text color: a cell has no room for a second color), overline (`53`, `55`), inverse, strike, colors in the colon forms (`38:2::r:g:b`, `38:2:r:g:b`, `38:5:n`), wide characters, the alternate screen
  * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2),
  * cursor position and device attribute reports, mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
  * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, images, character sets.
@@ -4092,7 +4092,10 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * sends arrow keys. Drag, double click and triple click select. */
 enum {
     CUI_VT_BOLD = 1 << 24, CUI_VT_DIM = 1 << 25, CUI_VT_ITALIC = 1 << 26, CUI_VT_UNDERLINE = 1 << 27,
-    CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29
+    CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29,
+    /* CUI_VT_UNDERLINE is set for every underline style; one of these says which (none of them: a single line) */
+    CUI_VT_UNDERLINE_DOUBLE = 1 << 20, CUI_VT_UNDERLINE_CURLY = 1 << 21, CUI_VT_UNDERLINE_DOTTED = 1 << 22, CUI_VT_UNDERLINE_DASHED = 1 << 23,
+    CUI_VT_OVERLINE = 1 << 30
 };
 typedef struct cui_vt cui_vt;
 typedef struct cui_vt_cell {
