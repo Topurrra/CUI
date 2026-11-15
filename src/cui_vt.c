@@ -295,20 +295,13 @@ static void cui__vt_sgr(cui_vt *v) {
     for (int k = 0; k < v->np; k++) {
         int c = v->p[k];
         int end = k + 1;
-        while (end < v->np && ((v->pcolon >> end) & 1u)) end++;      /* a colon group is k .. end - 1 */
-        if (c == 4) cui__vt_underline(v, end > k + 1 ? v->p[k + 1] : 1);
-        else if (c == 38 || c == 48 || c == 58) {
-            uint16_t col = 0;
-            int last = cui__vt_sgr_color(v, k, end, &col);
-            if (last >= 0) {
-                if (c == 38) v->fg = col; else if (c == 48) v->bg = col;      /* 58, the underline color, has no room in a cell: the line takes the text color */
-                end = last + 1;
-            }
-        }
-        else if (c == 0) { v->attr = 0; v->fg = v->bg = 0; }
+        if (v->pcolon) while (end < v->np && ((v->pcolon >> end) & 1u)) end++;      /* a colon group is k .. end - 1 */
+        if (c == 0) { v->attr = 0; v->fg = v->bg = 0; }
         else if (c == 1) v->attr |= CUI_VT_BOLD;
+        else if (c >= 30 && c <= 37) v->fg = (uint16_t)(1 + c - 30);
         else if (c == 2) v->attr |= CUI_VT_DIM;
         else if (c == 3) v->attr |= CUI_VT_ITALIC;
+        else if (c == 4) cui__vt_underline(v, end > k + 1 ? v->p[k + 1] : 1);
         else if (c == 21) cui__vt_underline(v, 2);
         else if (c == 7) v->attr |= CUI_VT_INVERSE;
         else if (c == 9) v->attr |= CUI_VT_STRIKE;
@@ -319,12 +312,19 @@ static void cui__vt_sgr(cui_vt *v) {
         else if (c == 29) v->attr &= ~(uint32_t)CUI_VT_STRIKE;
         else if (c == 53) v->attr |= CUI__VT_OVER;
         else if (c == 55) v->attr &= ~CUI__VT_OVER;
-        else if (c >= 30 && c <= 37) v->fg = (uint16_t)(1 + c - 30);
         else if (c >= 90 && c <= 97) v->fg = (uint16_t)(1 + c - 90 + 8);
         else if (c >= 40 && c <= 47) v->bg = (uint16_t)(1 + c - 40);
         else if (c >= 100 && c <= 107) v->bg = (uint16_t)(1 + c - 100 + 8);
         else if (c == 39) v->fg = 0;
         else if (c == 49) v->bg = 0;
+        else if (c == 38 || c == 48 || c == 58) {
+            uint16_t col = 0;
+            int last = cui__vt_sgr_color(v, k, end, &col);
+            if (last >= 0) {
+                if (c == 38) v->fg = col; else if (c == 48) v->bg = col;      /* 58, the underline color, has no room in a cell: the line takes the text color */
+                end = last + 1;
+            }
+        }
         k = end - 1;                                        /* the sub-parameters of a colon group, or the parameters of a color, are used */
     }
 }
@@ -398,18 +398,17 @@ static void cui__vt_csi(cui_vt *v, char f) {
     int n = cui__vt_arg(v, 0, 1);
     cui__vt_screen *s = CUI__VT_S(v);
     if (v->priv && f != 'h' && f != 'l' && f != 'c' && f != 'q') return;
-    if (v->inter == '!' && f == 'p') {      /* soft reset */
-        v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
-        v->app_cursor = false; v->pend = false;
-        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
+    if (v->inter) {                         /* the few sequences with an intermediate byte; the common ones pay one test */
+        if (v->inter == '!' && f == 'p') {      /* soft reset */
+            v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
+            v->app_cursor = false; v->pend = false;
+            v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
+        } else if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking is not drawn) */
+            int m = v->np ? v->p[0] : 0;
+            if (m <= 2) v->cursor_shape = CUI_VT_CURSOR_BLOCK; else if (m <= 4) v->cursor_shape = CUI_VT_CURSOR_UNDERLINE; else if (m <= 6) v->cursor_shape = CUI_VT_CURSOR_BAR;
+        }
         return;
     }
-    if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking is not drawn) */
-        int m = v->np ? v->p[0] : 0;
-        if (m <= 2) v->cursor_shape = CUI_VT_CURSOR_BLOCK; else if (m <= 4) v->cursor_shape = CUI_VT_CURSOR_UNDERLINE; else if (m <= 6) v->cursor_shape = CUI_VT_CURSOR_BAR;
-        return;
-    }
-    if (v->inter) return;
     switch (f) {
     case '@': {         /* insert blank characters */
         cui__vt_cell *row = cui__vt_row(v, s, v->cy);
