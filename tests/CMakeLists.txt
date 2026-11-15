@@ -44,6 +44,10 @@ target_link_libraries(cui_screenshots PRIVATE cui::cui)
 add_test(NAME cui_screenshots COMMAND cui_screenshots ${CMAKE_CURRENT_BINARY_DIR})
 
 if(CUI_WITH_APP)
+    add_executable(cui_test_multiwin test_multiwin.c)   # several windows on one thread (hidden windows)
+    target_link_libraries(cui_test_multiwin PRIVATE cui::cui)
+    add_test(NAME cui_test_multiwin COMMAND cui_test_multiwin)
+
     add_executable(cui_app_smoke app_smoke.c ../examples/gallery_ui.c ../examples/gallery_more.c)
     target_link_libraries(cui_app_smoke PRIVATE cui::cui)
     if(APPLE)

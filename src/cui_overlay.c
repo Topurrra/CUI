@@ -1800,3 +1800,27 @@ void cui__widgets_end_frame(cui_ctx *ui) {
     ui->pmx = ui->mx;
     ui->pmy = ui->my;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Rect clipped overlay                                                      */
+/* ------------------------------------------------------------------------ */
+
+/* The z of a floating layer between the window's content and popovers (1100). */
+#define CUI__CLIPPED_OVERLAY_Z 1000
+
+void cui_overlay_begin(cui_ctx *ui, const char *id_str, cui_rect rect) {
+    cui_id id = cui_make_id(ui, id_str ? id_str : "overlay");
+    int root = cui__float_begin(ui, id, CUI__CLIPPED_OVERLAY_Z, 0, CUI__PLACE_EXACT, 0);
+    cui_node *n = &ui->nodes[root];
+    n->fx = rect.x; n->fy = rect.y;
+    n->w = CUI_PX(CUI_MAX(0, rect.w));
+    n->h = CUI_PX(CUI_MAX(0, rect.h));
+    n->dir = CUI_COLUMN;
+    n->flags |= CUI_NF_CLIP | CUI_NF_HIT_OPAQUE;   /* cut at the rect; its empty space takes the pointer */
+    cui_push_id(ui, id_str ? id_str : "overlay");
+}
+
+void cui_overlay_end(cui_ctx *ui) {
+    cui_pop_id(ui);
+    cui__float_end(ui);
+}

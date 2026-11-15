@@ -571,6 +571,13 @@ CUI_API cui_id cui_make_id(cui_ctx *ui, const char *str);
 CUI_API void cui_push_id(cui_ctx *ui, const char *str);
 CUI_API void cui_push_id_int(cui_ctx *ui, int value);
 CUI_API void cui_pop_id(cui_ctx *ui);
+/* An id scope with a seed of your own (a pane's serial, say): the ids of everything built inside, and so
+ * the state that hangs on them (focus, text editing, scroll, open/closed), come from the seed, so the same
+ * widgets drawn twice, or in two panes, keep separate state. Like cui_push_id_int, with a 32 bit seed that
+ * cannot collide with it. Ids that a component takes globally (a dockspace's, for cui_dock_save) ignore
+ * scopes, as they ignore cui_push_id. */
+CUI_API void cui_push_id_scope(cui_ctx *ui, uint32_t seed);
+CUI_API void cui_pop_id_scope(cui_ctx *ui);
 /* The id and rectangle of the most recent component (for tooltips, popovers). */
 CUI_API cui_id cui_last_id(cui_ctx *ui);
 CUI_API cui_rect cui_last_rect(cui_ctx *ui);
@@ -936,6 +943,16 @@ CUI_API void cui_dialog_footer_begin(cui_ctx *ui);
 CUI_API void cui_dialog_footer_end(cui_ctx *ui);
 
 typedef enum cui_side { CUI_SIDE_RIGHT = 0, CUI_SIDE_LEFT, CUI_SIDE_BOTTOM, CUI_SIDE_TOP } cui_side;
+/* A layer clipped to a rectangle instead of the window: a sheet, a drawer or a dialog inside one pane of
+ * a split layout. rect is in the window's points (take it from cui_get_rect of the pane). Everything
+ * built between begin and end is placed at rect, drawn above the window's content and the panes (below
+ * popovers, menus, tooltips and modal dialogs), cut off at rect's edges, and receives the pointer there:
+ * a press on its empty space does not reach what is under it. Nothing is drawn by the layer itself:
+ * give it a background with cui_box(.bg = ...) or paint your own. The content gets rect's width and
+ * height; ids inside are scoped by `id`. Call it every frame the layer is shown, from anywhere (it does
+ * not need to be inside the pane); a layer that is not called is gone. */
+CUI_API void cui_overlay_begin(cui_ctx *ui, const char *id, cui_rect rect);
+CUI_API void cui_overlay_end(cui_ctx *ui);
 typedef struct cui_sheet_opts { int _; cui_side side; float size; const char *description; } cui_sheet_opts;
 CUI_API bool cui_sheet_begin(cui_ctx *ui, const char *title, bool *open, const cui_sheet_opts *opts);
 CUI_API void cui_sheet_end(cui_ctx *ui);
@@ -3844,6 +3861,8 @@ typedef struct cui_dockspace_opts {
     float min_panel_width;     /* default 120; splits stop here (and share what there is when too narrow) */
     float min_panel_height;    /* default 96 */
     bool shortcuts;            /* Ctrl+Tab, Ctrl+Shift+Tab and Ctrl+W act on the focused leaf */
+    bool leaf_header;          /* a leaf with exactly one panel draws no tab strip but a header for the app to fill (see below) */
+    float leaf_header_height;  /* with leaf_header: the header's height in points (default 32) */
 } cui_dockspace_opts;
 CUI_API void cui_dockspace_begin_ex(cui_ctx *ui, const char *id, const cui_dockspace_opts *opts);
 CUI_API void cui_dockspace_end(cui_ctx *ui);
@@ -3857,6 +3876,29 @@ typedef struct cui_dock_panel_opts {
 } cui_dock_panel_opts;
 CUI_API bool cui_dock_panel_begin_ex(cui_ctx *ui, const char *title, bool *open, const cui_dock_panel_opts *opts);
 CUI_API void cui_dock_panel_end(cui_ctx *ui);
+/* Leaf headers (cui_dockspace_opts.leaf_header). A leaf that shows one panel has no tab strip: in its
+ * place is a header bar, leaf_header_height tall, that the app fills with its own title, menu and
+ * buttons. Pressing on the bar's empty space and dragging (a few points) starts the usual dock drag, with
+ * the four sides and the centre tinted as for a tab; a press on a widget you put in the bar (a button,
+ * a menu) stays that widget's. Dropping onto another leaf's header stacks the panel there as a tab,
+ * and a leaf that then has several panels shows its tab strip as before (no header). Panels are named
+ * as in cui_dock_panel_begin (the title, or the part after ###).
+ *
+ * Fill the header inside the panel:
+ *     if (cui_dock_panel_begin(ui, "Chat###pane-3", &open)) {
+ *         if (cui_dock_panel_header_begin(ui)) {       // false: no header (a tab strip, or the narrow one-stack view)
+ *             cui_text(ui, "Chat"); cui_spacer(ui); if (cui_button(ui, "x")) open = false;
+ *             cui_dock_panel_header_end(ui);
+ *         } else { ...the app's own header inside the content... }
+ *         ...content...
+ *         cui_dock_panel_end(ui);
+ *     }
+ * or take the header's rect (the last frame's, in points) with cui_dock_panel_header_rect, between
+ * cui_dockspace_begin and end, and draw over it: false when the panel has no header now. The header is
+ * a row with its items centred and the leaf's background. Without leaf_header nothing changes. */
+CUI_API bool cui_dock_panel_header_rect(cui_ctx *ui, const char *panel_title, cui_rect *out);
+CUI_API bool cui_dock_panel_header_begin(cui_ctx *ui);
+CUI_API void cui_dock_panel_header_end(cui_ctx *ui);
 /* Saved layout: one line, e.g.
  *     dock1 h0.22([*Scene tree,Assets],v0.7([*Viewport],[*Log,-Console]))
  * h splits side by side and v stacks, the number is the first child's share,
@@ -3873,6 +3915,7 @@ CUI_API bool cui_dock_load(cui_ctx *ui, const char *id, const char *text);
 #define cui_dockspace(ui, id, ...)          CUI__SCOPE(cui_dockspace_begin_ex((ui), (id), CUI__OPTS(cui_dockspace_opts, __VA_ARGS__)), cui_dockspace_end(ui))
 #define cui_dock_panel_begin(ui, title, open, ...) cui_dock_panel_begin_ex((ui), (title), (open), CUI__OPTS(cui_dock_panel_opts, __VA_ARGS__))
 #define cui_dock_panel(ui, title, open, ...) CUI__SCOPE_IF(cui_dock_panel_begin_ex((ui), (title), (open), CUI__OPTS(cui_dock_panel_opts, __VA_ARGS__)), cui_dock_panel_end(ui))
+#define cui_dock_panel_header(ui) CUI__SCOPE_IF(cui_dock_panel_header_begin(ui), cui_dock_panel_header_end(ui))
 #endif
 /* Tool panels: property inspector, log console                             */
 /* ------------------------------------------------------------------------ */
@@ -5820,6 +5863,8 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_scroll(ui, ...)     CUI__SCOPE(cui_scroll_begin((ui), CUI__OPTS(cui_scroll_opts, __VA_ARGS__)), cui_scroll_end(ui))
 #define cui_split(ui, id, ratio, ...) CUI__SCOPE(cui_split_begin((ui), (id), (ratio), CUI__OPTS(cui_split_opts, __VA_ARGS__)), cui_split_end(ui))
 #define cui_id_scope(ui, str)   CUI__SCOPE(cui_push_id((ui), (str)), cui_pop_id(ui))
+#define cui_id_seed(ui, seed)   CUI__SCOPE(cui_push_id_scope((ui), (seed)), cui_pop_id_scope(ui))
+#define cui_overlay(ui, id, rect) CUI__SCOPE(cui_overlay_begin((ui), (id), (rect)), cui_overlay_end(ui))
 #define cui_disabled_scope(ui, d) CUI__SCOPE(cui_push_disabled((ui), (d)), cui_pop_disabled(ui))
 
 #define cui_text(ui, text, ...)             cui_text_ex((ui), (text), CUI__OPTS(cui_text_opts, __VA_ARGS__))

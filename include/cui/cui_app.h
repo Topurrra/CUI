@@ -90,6 +90,12 @@ typedef struct cui_app_desc {
      * reports them while they are over the window (cui_file_drag_active, cui_input_file_hover) so a tree or
      * dropzone can highlight its target. Falls back to WM_DROPFILES when OLE cannot start. Ignored elsewhere. */
     bool file_hover;
+    /* Windows: where the window's top left corner (its outer frame) is created, in screen coordinates
+     * (the system's virtual screen, as cui_app_position reports: device pixels on Windows), so a window
+     * opens in place without a flash at the default spot. Used only when has_pos is set. The other backends
+     * ignore it for now. */
+    int x, y;
+    bool has_pos;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */
@@ -109,6 +115,45 @@ CUI_API void cui_app_destroy(cui_app *app);
  * called. */
 CUI_API bool cui_app_frame(cui_app *app);
 CUI_API cui_ctx *cui_app_ui(cui_app *app);
+
+/* Several windows on one thread. cui_app_frame blocks, so one thread cannot serve two apps with it;
+ * these steps do not. A loop:
+ *
+ *     cui_app *apps[2] = { a, b };
+ *     while (a_open || b_open) {
+ *         for (int i = 0; i < 2; i++)
+ *             if (apps[i] && cui_app_pending(apps[i])) {
+ *                 if (!cui_app_frame_poll(apps[i])) { cui_app_destroy(apps[i]); apps[i] = NULL; continue; }
+ *                 ... draw into cui_app_ui(apps[i]) ...
+ *             }
+ *         cui_app_wait(apps, 2);
+ *     }
+ *
+ * cui_app_frame_poll presents the app's previous frame, takes in the operating system's messages for the
+ * thread (every window of it) without waiting, and begins a frame: draw it, as after cui_app_frame, and
+ * poll again later. It returns false once the window was closed or cui_app_quit was called (then no frame
+ * was begun). NULL-app calls (cui_app_quit(NULL), file dialogs) name the app that was last polled, so
+ * they keep working inside the draw code of each window.
+ * cui_app_pending says whether an app needs a frame now: input arrived, an animation or redraw is
+ * running, a cui_request_wakeup is due, a worker woke the window (Windows: a WM_APP message), the first
+ * frame is not out yet, or it was closed. An app that is not pending would draw the same picture again,
+ * so skip it; polling it anyway is allowed (you then draw it each time) but costs a frame.
+ * cui_app_wait presents the frames that were drawn since the last wait, then sleeps until some app of the
+ * list is pending: input, a timer or a wakeup on any window of the thread. It does not poll: an idle
+ * set of windows uses no CPU. While an app animates it paces the loop to the display as cui_app_frame does.
+ * Secondary windows: the first window of a thread may use OpenGL; a window made on the same thread while
+ * another one holds a GL context uses the software renderer (a second GL context per thread is not
+ * supported), whatever cui_app_desc.renderer says. Ask for it explicitly with CUI_RENDERER_SOFTWARE to
+ * avoid the message an explicit CUI_RENDERER_OPENGL prints. Threads of their own, each with its own
+ * apps, work as before.
+ * The windows' positions: cui_app_set_position moves one, cui_app_position reads it (the outer frame's top
+ * left, in screen coordinates, device pixels on Windows). Both work on Windows; the other backends do
+ * nothing yet and cui_app_position returns false there. */
+CUI_API bool cui_app_frame_poll(cui_app *app);
+CUI_API bool cui_app_pending(cui_app *app);
+CUI_API void cui_app_wait(cui_app *const *apps, int n);
+CUI_API void cui_app_set_position(cui_app *app, int x, int y);
+CUI_API bool cui_app_position(cui_app *app, int *x, int *y);
 
 /* Creates the app, calls frame() until the window closes, destroys it. */
 CUI_API int cui_app_run(const cui_app_desc *desc, void (*frame)(cui_ctx *ui, void *user), void *user);

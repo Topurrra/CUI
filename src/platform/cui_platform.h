@@ -17,6 +17,12 @@ struct cui_app {
     uint8_t *sw_pixels;
     int sw_w, sw_h;
     bool software;
+    bool gl_counted;           /* counted in this thread's OpenGL apps (one GL context per thread: cui__gl_apps) */
+    bool wake_tracked;         /* the backend sets `woken` when something other than input wakes the window */
+    bool woken;                /* a worker's message arrived since the frame began (cui_app_pending) */
+    double idle_since;         /* when the last frame was presented */
+    double wake_at;            /* absolute time of the next timer the app asked for (cui_request_wakeup), < 0 none */
+    float wake_seen;           /* the cui_next_wakeup value wake_at was made from */
     bool running;
     bool in_frame;
     bool presented_once;
@@ -61,6 +67,8 @@ void cui__plat_wait(cui_app *app, double timeout);   /* < 0 waits for the next e
 void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w, int *fb_h);
 void cui__plat_set_title(cui_app *app, const char *title);
 void cui__plat_set_size(cui_app *app, int w, int h);
+void cui__plat_set_position(cui_app *app, int x, int y);   /* the outer frame's top left, screen coordinates */
+bool cui__plat_position(cui_app *app, int *x, int *y);     /* false where the backend cannot tell */
 void cui__plat_show(cui_app *app);
 void *cui__plat_native(cui_app *app);
 /* window controls: 0 minimize, 1 toggle maximize, 2 start a drag, 3 is maximized, 4 has a custom title bar */

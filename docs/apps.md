@@ -73,6 +73,24 @@ Call it every frame for as long as you need it. Use it for a clock, a countdown,
 
 Do not do slow work in the frame function. Reading a large file or waiting on the network there freezes the window, because nothing is drawn until the function returns.
 
+## Several windows on one thread
+
+`cui_app_frame` blocks, so one thread cannot serve two windows with it. These calls do not:
+
+```c
+cui_app *apps[2] = { main_window, palette };
+while (apps[0] && apps[1]) {
+    for (int i = 0; i < 2; i++) {
+        if (!cui_app_pending(apps[i])) continue;          // input, an animation, a timer or a wake up for this window
+        if (!cui_app_frame_poll(apps[i])) { cui_app_destroy(apps[i]); apps[i] = NULL; break; }
+        draw(i, cui_app_ui(apps[i]));
+    }
+    if (apps[0] && apps[1]) cui_app_wait(apps, 2);        // presents what was drawn, then sleeps for any of them
+}
+```
+
+`cui_app_frame_poll` presents the window's last frame, takes in the thread's pending messages and begins a frame, without waiting; it returns false once the window is closed. `cui_app_pending` says whether a window needs a frame, so an idle one is not drawn when another wakes the loop. `cui_app_wait` blocks (`MsgWaitForMultipleObjects` on Windows, no polling) until input, a wake up or a timer on any window of the list, and paces animation to the display, so idle windows use no CPU. A NULL app in calls such as `cui_app_quit(NULL)` or a file dialog means the window polled last. Windows after the first on a thread use the software renderer, which redraws only what changed (one GL context per thread). Place windows with `cui_app_desc.x`, `.y` and `.has_pos` (created in place) and `cui_app_set_position` / `cui_app_position` (Windows, GLFW and SDL2; X11 and macOS do nothing yet). See [`examples/two_windows.c`](../examples/two_windows.c).
+
 ## Other threads
 
 A `cui_ctx` is used from one thread. Run long work on another thread, share plain data with it (an atomic, or a struct behind a mutex), and read that data in the frame function. The worker never calls CUI. While it runs, call `cui_request_wakeup` each frame so the interface keeps up. [Recipes](recipes.md#a-long-task-on-another-thread) has the whole program.

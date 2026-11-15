@@ -688,6 +688,8 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     default:
         break;
     }
+    /* a worker's message (the app's own, WM_APP and up, such as a wake up) needs a frame: cui_app_pending */
+    if (msg >= WM_APP && msg < 0xC000 && msg != WM_APP + 0x51) app->woken = true;
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
@@ -715,7 +717,9 @@ bool cui__plat_init(cui_app *app) {
     WCHAR title[256];
     MultiByteToWideChar(CP_UTF8, 0, app->title, -1, title, 256);
     app->plat = w;
-    w->hwnd = CreateWindowExW(0, wc.lpszClassName, title, style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
+    app->wake_tracked = true;   /* WM_APP messages from workers mark the window woken (cui_app_pending) */
+    w->hwnd = CreateWindowExW(0, wc.lpszClassName, title, style, app->desc.has_pos ? app->desc.x : CW_USEDEFAULT,
+                              app->desc.has_pos ? app->desc.y : CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                               NULL, NULL, inst, app);
     if (!w->hwnd) { free(w); app->plat = NULL; return false; }
     if (app->desc.custom_titlebar)   /* recompute the client area: no title bar or frame */
@@ -1026,6 +1030,28 @@ void cui__plat_set_size(cui_app *app, int width, int height) {
     RECT r = { 0, 0, (LONG)(width * w->scale), (LONG)(height * w->scale) };
     if (!app->desc.custom_titlebar) AdjustWindowRectEx(&r, (DWORD)GetWindowLongW(w->hwnd, GWL_STYLE), FALSE, 0);
     SetWindowPos(w->hwnd, NULL, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER);
+}
+
+void cui__plat_set_position(cui_app *app, int x, int y) {
+    cui__win32 *w = cui__w(app);
+    SetWindowPos(w->hwnd, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+bool cui__plat_position(cui_app *app, int *x, int *y) {
+    cui__win32 *w = cui__w(app);
+    RECT r;
+    if (IsIconic(w->hwnd)) {   /* a minimized window sits far off screen: report where it comes back to */
+        WINDOWPLACEMENT wp;
+        memset(&wp, 0, sizeof wp);
+        wp.length = sizeof wp;
+        if (!GetWindowPlacement(w->hwnd, &wp)) return false;
+        r = wp.rcNormalPosition;
+    } else if (!GetWindowRect(w->hwnd, &r)) {
+        return false;
+    }
+    *x = (int)r.left;
+    *y = (int)r.top;
+    return true;
 }
 
 void *cui__plat_native(cui_app *app) { return cui__w(app)->hwnd; }

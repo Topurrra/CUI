@@ -24,6 +24,8 @@
 #define CUI__DK_DEPTH  40          /* nesting accepted by cui_dock_load */
 #define CUI__DK_TILE   32.0f       /* drop target */
 #define CUI__DK_STRIP  ((float)CUI_DOC_TABS_HEIGHT)       /* fallback strip height before the first layout */
+#define CUI__DK_HEADER 32.0f       /* leaf_header: default header height */
+#define CUI__DK_HDRDRAG 5.0f       /* leaf_header: how far a press on the header moves before it is a dock drag */
 
 enum { DK_FREE = 0, DK_LEAF, DK_SPLIT };
 enum { DK_NONE = 0, DK_CENTER, DK_LEFT, DK_RIGHT, DK_TOP, DK_BOTTOM };
@@ -65,6 +67,8 @@ typedef struct {
     /* tab drag */
     int drag, drag_panel, drag_leaf;
     float grab_x, grab_y;      /* where the tab was taken, from its corner */
+    bool drag_hdr;             /* the press was on a leaf header (it has no strip to leave: it starts after a few points) */
+    float press_x, press_y;    /* where that press was */
     int t_kind;                /* 0 none, 1 a leaf, 2 an outer edge */
     int t_leaf, t_zone, t_index;
     float pv[4], pv_alpha, tiles_alpha;
@@ -91,6 +95,12 @@ typedef struct cui__dk_build {
     int container;
     float min_w, min_h;
     bool shortcuts, in_panel;
+    bool leaf_header;          /* opts.leaf_header */
+    float hdr_h;
+    bool in_hdr;               /* inside cui_dock_panel_header_begin */
+    int cur_panel;             /* the panel between cui_dock_panel_begin and end, -1 */
+    bool hdr[CUI__DK_NODES];   /* last frame's state: the leaf shows a header, not a strip */
+    int hdr_node[CUI__DK_NODES];  /* this frame's header node of a leaf, -1 */
     bool compact;              /* too narrow to split: every panel is a tab of one stack */
     int takeover;              /* leaf whose strip is told the press ended, this frame */
     bool vis[CUI__DK_NODES];
@@ -532,6 +542,7 @@ static int cui__dk_visible_tabs(const cui__dk_state *st, int leaf, int *out, int
     return c;
 }
 static cui_id cui__dk_leaf_id(const cui__dk_build *b, uint32_t uid) { return cui__hash(&uid, sizeof uid, b->seed ^ 0x1EAFu); }
+static cui_id cui__dk_hdr_id(const cui__dk_build *b, uint32_t uid) { return cui__dk_leaf_id(b, uid) ^ 0x5717u; }
 static cui_id cui__dk_tab_id(cui_ctx *ui, uint32_t uid, const char *label) {
     cui_push_id(ui, cui__frame_printf(ui, "t%u", (unsigned)uid));
     cui_id id = cui_make_id(ui, label);
@@ -578,6 +589,30 @@ static void cui__dk_build_leaf(cui_ctx *ui, cui__dk_build *b, int i) {
     L->bg = CUI_C(ui, SURFACE_MUTED);
     L->flags |= CUI_NF_CLIP;
     cui__open(ui, ln);
+    if (b->leaf_header && !b->compact && vn == 1) {
+        /* one panel: a header bar for the app instead of a strip. It records a hit of its own, so a
+         * press on its empty space is told from one on a widget the app puts in it */
+        int hn = cui__node_new(ui, lid ^ 0x5717u);
+        cui_node *H = &ui->nodes[hn];
+        H->dir = CUI_ROW; H->align = CUI_ALIGN_CENTER;
+        H->w = CUI_FILL; H->h = CUI_PX(b->hdr_h);
+        H->self_align = CUI_ALIGN_STRETCH;
+        H->flags |= CUI_NF_CLIP | CUI_NF_INTERACTIVE;
+        b->hdr_node[i] = hn;
+        b->tab_vis[vis[0]] = true;
+        b->tab_id[vis[0]] = lid ^ 0x5717u;
+        n->sel = vis[0];
+        b->shown[i] = vis[0];
+        int hbody = cui__node_new(ui, lid ^ 0xB0D1u);
+        cui_node *HB = &ui->nodes[hbody];
+        HB->dir = CUI_COLUMN;
+        HB->w = CUI_FILL; HB->h = CUI_FILL;
+        HB->self_align = CUI_ALIGN_STRETCH;
+        HB->bg = CUI_C(ui, SURFACE);
+        b->body[i] = hbody;
+        cui__close(ui);
+        return;
+    }
     int sw = cui__node_new(ui, lid ^ 0x5717u);
     ui->nodes[sw].dir = CUI_COLUMN;
     ui->nodes[sw].w = CUI_FILL;
@@ -737,6 +772,13 @@ static void cui__dk_target(cui_ctx *ui, cui__dk_build *b, cui_rect R, cui__dk_pa
         pt->tiles[pt->ntiles] = lt[k]; pt->zone[pt->ntiles] = lz[k]; pt->outer[pt->ntiles] = false; pt->ntiles++;
     }
     st->t_kind = 1; st->t_leaf = leaf;
+    if (b->hdr[leaf] && cui__rect_contains(S, mx, my)) {
+        /* over a header: stacks as a second tab (the leaf then shows its strip) */
+        st->t_zone = DK_CENTER;
+        st->t_index = -1;
+        *pv = Lr;
+        return;
+    }
     if (cui__rect_contains(S, mx, my)) {
         /* over the strip: a tab at the slot under the pointer */
         int vis[CUI__DK_PANELS];
@@ -877,9 +919,12 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
     b->min_w = o->min_panel_width > 0 ? o->min_panel_width : 120;
     b->min_h = o->min_panel_height > 0 ? o->min_panel_height : 96;
     b->shortcuts = o->shortcuts;
+    b->leaf_header = o->leaf_header;
+    b->hdr_h = o->leaf_header_height > 0 ? o->leaf_header_height : CUI__DK_HEADER;
+    b->cur_panel = -1;
     b->takeover = -1;
     b->prev = cui__dk_cur(ui);
-    for (int i = 0; i < CUI__DK_NODES; i++) { b->body[i] = -1; b->shown[i] = -1; }
+    for (int i = 0; i < CUI__DK_NODES; i++) { b->body[i] = -1; b->shown[i] = -1; b->hdr_node[i] = -1; }
     cui_push_id(ui, id_str);
     b->seed = ui->id_stack[ui->id_depth > 0 ? ui->id_depth - 1 : 0];
     cui_rect R = cui__prev_rect(ui, b->id);
@@ -906,6 +951,23 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
         if (fr.w > 0 && cui__rect_contains(lr, fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f) && !ui->mpressed[0]) st->cur_leaf = i;
         int vis[CUI__DK_PANELS];
         int vn = cui__dk_visible_tabs(st, i, vis, -1);
+        b->hdr[i] = b->leaf_header && !b->compact && vn == 1;
+        if (b->hdr[i]) {
+            /* a press on the header's empty space may become a dock drag (a widget in it has the press) */
+            cui_id hid = cui__dk_hdr_id(b, st->nodes[i].uid);
+            b->tab_id[vis[0]] = hid;
+            cui__interact(ui, hid, 0);
+            if (ui->mpressed[0] && st->drag == DK_IDLE && ui->hot == hid && ui->active == hid) {
+                cui_rect hr = cui__prev_rect(ui, hid);
+                st->drag = DK_PENDING;
+                st->drag_hdr = true;
+                st->drag_panel = vis[0];
+                st->drag_leaf = i;
+                st->press_x = ui->mx; st->press_y = ui->my;
+                st->grab_x = cui__clampf(ui->mx - hr.x, 12, 80); st->grab_y = cui__clampf(ui->my - hr.y, 8, b->hdr_h - 8);
+            }
+            continue;
+        }
         for (int k = 0; k < vn; k++) {
             cui__dk_panel *p = &st->panels[vis[k]];
             cui_id tid = cui__dk_tab_id(ui, st->nodes[i].uid, p->label);
@@ -916,6 +978,7 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
                 st->drag = DK_PENDING;
                 st->drag_panel = vis[k];
                 st->drag_leaf = i;
+                st->drag_hdr = false;
                 st->grab_x = ui->mx - tr.x; st->grab_y = ui->my - tr.y;
             }
         }
@@ -930,9 +993,11 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
         if (!ui->mdown[0]) st->drag = DK_IDLE;
         else {
             cui_rect s = cui__rect_inset(b->strip_rect[st->drag_leaf], -8);
-            if (!cui__rect_contains(s, ui->mx, ui->my)) {
+            bool go = st->drag_hdr ? hypotf(ui->mx - st->press_x, ui->my - st->press_y) >= CUI__DK_HDRDRAG
+                                   : !cui__rect_contains(s, ui->mx, ui->my);
+            if (go) {
                 st->drag = DK_DRAG;
-                b->takeover = st->drag_leaf;
+                b->takeover = st->drag_hdr ? -1 : st->drag_leaf;
                 st->t_kind = 0;
                 st->pv_alpha = 0;
                 st->tiles_alpha = 0;
@@ -1068,6 +1133,7 @@ bool cui_dock_panel_begin_ex(cui_ctx *ui, const char *title, bool *open, const c
     cui__open(ui, w);
     cui_push_id(ui, title);
     b->in_panel = true;
+    b->cur_panel = pi;
     ui->last_id = b->tab_id[pi];
     return true;
 }
@@ -1075,10 +1141,41 @@ bool cui_dock_panel_begin_ex(cui_ctx *ui, const char *title, bool *open, const c
 void cui_dock_panel_end(cui_ctx *ui) {
     cui__dk_build *b = cui__dk_cur(ui);
     if (!b || !b->in_panel) return;
+    if (b->in_hdr) cui_dock_panel_header_end(ui);
     cui_pop_id(ui);
     cui__close(ui);   /* the panel */
     cui__close(ui);   /* the leaf body */
     b->in_panel = false;
+    b->cur_panel = -1;
+}
+
+bool cui_dock_panel_header_rect(cui_ctx *ui, const char *panel_title, cui_rect *out) {
+    cui__dk_build *b = cui__dk_cur(ui);
+    if (!b || !panel_title) return false;
+    char name[CUI__DK_NAME];
+    cui__dk_name_of(panel_title, name);
+    int pi = cui__dk_find(b->st, name);
+    int leaf = pi >= 0 ? b->st->panels[pi].leaf : -1;
+    if (leaf < 0 || b->hdr_node[leaf] < 0 || !cui__has_prev_rect(ui, cui__dk_hdr_id(b, b->st->nodes[leaf].uid))) return false;
+    if (out) *out = cui__prev_rect(ui, cui__dk_hdr_id(b, b->st->nodes[leaf].uid));
+    return true;
+}
+
+bool cui_dock_panel_header_begin(cui_ctx *ui) {
+    cui__dk_build *b = cui__dk_cur(ui);
+    if (!b || !b->in_panel || b->in_hdr || b->cur_panel < 0) return false;
+    int leaf = b->st->panels[b->cur_panel].leaf;
+    if (leaf < 0 || b->hdr_node[leaf] < 0) return false;
+    cui__open(ui, b->hdr_node[leaf]);
+    b->in_hdr = true;
+    return true;
+}
+
+void cui_dock_panel_header_end(cui_ctx *ui) {
+    cui__dk_build *b = cui__dk_cur(ui);
+    if (!b || !b->in_hdr) return;
+    cui__close(ui);
+    b->in_hdr = false;
 }
 
 static void cui__dk_glyph(cui_ctx *ui, cui_rect t, int zone, bool outer, bool hot, float a) {

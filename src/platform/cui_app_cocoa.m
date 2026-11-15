@@ -431,6 +431,10 @@ void cui__plat_set_title(cui_app *app, const char *title) {
     cui__p(app).window.title = [NSString stringWithUTF8String:title];
 }
 
+/* window positions are not implemented here yet (cui_app_position returns false) */
+void cui__plat_set_position(cui_app *app, int x, int y) { (void)app; (void)x; (void)y; }
+bool cui__plat_position(cui_app *app, int *x, int *y) { (void)app; (void)x; (void)y; return false; }
+
 void cui__plat_set_size(cui_app *app, int w, int h) {
     [cui__p(app).window setContentSize:NSMakeSize(w, h)];
 }

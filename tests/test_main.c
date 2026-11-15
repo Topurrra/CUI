@@ -4166,6 +4166,297 @@ static void test_dock(void) {
     cui_destroy(ui);
 }
 
+/* leaf headers: a leaf with one panel has a header for the app instead of a tab strip ------------- */
+
+typedef struct {
+    bool open[DK_N];
+    bool header_on;            /* cui_dockspace_opts.leaf_header */
+    bool in_header[DK_N];      /* cui_dock_panel_header_begin answered true */
+    bool rect_ok[DK_N];
+    cui_rect hdr[DK_N];        /* cui_dock_panel_header_rect */
+    cui_rect btn[DK_N];        /* the app's own button in the header */
+    int clicks[DK_N];
+    cui_id body[DK_N];
+    cui_rect tab[DK_N];
+    const char *layout;
+    float w, h, hh;
+} hdock_ctx;
+static void build_hdock(cui_ctx *ui, void *u) {
+    hdock_ctx *d = u;
+    cui_box(ui, .width = CUI_PX(d->w), .height = CUI_PX(d->h)) {
+        cui_dockspace(ui, "hs", .layout = d->layout, .leaf_header = d->header_on, .leaf_header_height = d->hh) {
+            for (int k = 0; k < DK_N; k++) {
+                d->rect_ok[k] = cui_dock_panel_header_rect(ui, dk_names[k], &d->hdr[k]);
+                bool shown = cui_dock_panel_begin(ui, dk_names[k], &d->open[k]);
+                d->tab[k] = cui_last_id(ui) ? cui_last_rect(ui) : (cui_rect){ 0, 0, 0, 0 };
+                if (!shown) continue;
+                d->in_header[k] = cui_dock_panel_header_begin(ui);
+                if (d->in_header[k]) {
+                    cui_text(ui, dk_names[k]);
+                    cui_spacer(ui);
+                    if (cui_button(ui, "Go", .size = CUI_SIZE_SM)) d->clicks[k]++;
+                    d->btn[k] = cui_last_rect(ui);
+                    cui_dock_panel_header_end(ui);
+                }
+                d->body[k] = cui_box_begin(ui, &(cui_box){ .id = "content", .width = CUI_FILL, .height = CUI_FILL });
+                cui_box_end(ui);
+                cui_dock_panel_end(ui);
+            }
+        }
+    }
+}
+static const char *hdock_str(cui_ctx *ui) {
+    static char buf[1024];
+    cui_dock_save(ui, "hs", buf, sizeof buf);
+    return buf;
+}
+static void hdock_drag(cui_ctx *ui, hdock_ctx *d, float ax, float ay, float bx, float by, bool release) {
+    cui_input_mouse_move(ui, ax, ay);
+    run(ui, build_hdock, d, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_hdock, d, 1);
+    for (int s = 1; s <= 12; s++) {
+        float t = s / 12.0f;
+        cui_input_mouse_move(ui, ax + (bx - ax) * t, ay + (by - ay) * t);
+        run(ui, build_hdock, d, 1);
+    }
+    if (!release) return;
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_hdock, d, 3);
+}
+static hdock_ctx hdock_new(const char *layout, bool header) {
+    hdock_ctx d;
+    memset(&d, 0, sizeof d);
+    for (int k = 0; k < DK_N; k++) d.open[k] = true;
+    d.layout = layout; d.w = 800; d.h = 560; d.header_on = header;
+    return d;
+}
+
+static void test_dock_header(void) {
+    printf("docking: leaf headers\n");
+    static const char *const base = "dock1 h0.25([*Files],v0.6([*Editor,Log],[*Props]))";
+    cui_ctx *ui = new_ctx();
+    hdock_ctx d = hdock_new(base, true);
+    d.hh = 0;   /* the default, 32 */
+    run(ui, build_hdock, &d, 4);
+    CHECK(strcmp(hdock_str(ui), base) == 0);   /* layout and save text are as without headers */
+    /* single panel leaves have a header, the leaf with tabs keeps its strip */
+    CHECK(d.rect_ok[0] && d.rect_ok[3] && !d.rect_ok[1] && !d.rect_ok[2]);
+    CHECK(d.in_header[0] && d.in_header[3] && !d.in_header[1]);
+    CHECK_NEAR(d.hdr[0].h, 32, 0.01);
+    cui_rect bf = cui_get_rect(ui, d.body[0]);
+    CHECK_NEAR(d.hdr[0].y + d.hdr[0].h, bf.y, 1.0);   /* the body starts under the header */
+    CHECK(d.hdr[0].w > 150 && d.hdr[0].w < 250 && d.hdr[0].x < bf.x + 1);
+    CHECK(d.tab[1].w > 0 && d.tab[2].w > 0 && d.tab[2].x > d.tab[1].x);   /* Editor and Log: tabs */
+    CHECK(d.btn[0].w > 0 && d.btn[0].x > d.hdr[0].x && d.btn[0].x + d.btn[0].w <= d.hdr[0].x + d.hdr[0].w + 0.5f);
+    CHECK(d.btn[0].y >= d.hdr[0].y && d.btn[0].y + d.btn[0].h <= d.hdr[0].y + d.hdr[0].h + 0.5f);
+    /* a header the app asked 40 points for */
+    cui_destroy(ui);
+    ui = new_ctx();
+    d = hdock_new(base, true);
+    d.hh = 40;
+    run(ui, build_hdock, &d, 4);
+    CHECK_NEAR(d.hdr[0].h, 40, 0.01);
+    cui_destroy(ui);
+
+    /* a press on the app's button is a click, not a drag, even when the pointer travels */
+    ui = new_ctx();
+    d = hdock_new(base, true);
+    run(ui, build_hdock, &d, 4);
+    cui_rect bt = d.btn[3];
+    click_at(ui, build_hdock, &d, bt.x + bt.w / 2, bt.y + bt.h / 2);
+    CHECK(d.clicks[3] == 1);
+    cui_rect be = cui_get_rect(ui, d.body[1]);
+    hdock_drag(ui, &d, bt.x + bt.w / 2, bt.y + bt.h / 2, be.x + 20, be.y + be.h / 2, true);
+    CHECK(strcmp(hdock_str(ui), base) == 0);
+    /* a press on empty space that moves less than a few points is no drag */
+    cui_rect hp = d.hdr[3];
+    hdock_drag(ui, &d, hp.x + 20 + 40, hp.y + hp.h / 2, hp.x + 20 + 42, hp.y + hp.h / 2 + 1, true);
+    CHECK(strcmp(hdock_str(ui), base) == 0);
+
+    /* dragging the header's empty space starts the dock drag: the centre of Editor stacks Props as a tab */
+    hp = d.hdr[3];
+    be = cui_get_rect(ui, d.body[1]);
+    float sx = hp.x + hp.w * 0.5f, sy = hp.y + hp.h / 2;
+    hdock_drag(ui, &d, sx, sy, be.x + be.w / 2, be.y + be.h / 2, false);
+    cui_draw_data const *dd = cui_get_draw_data(ui);
+    CHECK(dd->vertex_count > 0);
+    CHECK(cui_wants_mouse(ui));   /* the dock drag has the pointer */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_hdock, &d, 3);
+    CHECK(strcmp(hdock_str(ui), "dock1 h0.25([*Files],[Editor,Log,*Props])") == 0);
+    CHECK(!d.rect_ok[3] && d.tab[3].w > 0);   /* now a tab of a leaf with three panels: its strip, no header */
+    cui_destroy(ui);
+
+    /* the four sides split the leaf under the pointer; the preview and tiles are drawn while dragging */
+    ui = new_ctx();
+    d = hdock_new(base, true);
+    run(ui, build_hdock, &d, 4);
+    cui_rect bp = cui_get_rect(ui, d.body[3]);
+    hp = d.hdr[0];
+    hdock_drag(ui, &d, hp.x + hp.w * 0.5f, hp.y + hp.h / 2, bp.x + bp.w - 8, bp.y + bp.h / 2, false);
+    CHECK(cui_get_draw_data(ui)->vertex_count > 0);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_hdock, &d, 3);
+    CHECK(strcmp(hdock_str(ui), "dock1 v0.6([*Editor,Log],h0.5([*Props],[*Files]))") == 0);
+    CHECK(d.rect_ok[0] && d.rect_ok[3]);   /* both single panel leaves have headers again */
+    cui_destroy(ui);
+
+    /* onto another leaf's header: a tab there */
+    ui = new_ctx();
+    d = hdock_new(base, true);
+    run(ui, build_hdock, &d, 4);
+    hp = d.hdr[3];
+    cui_rect hf = d.hdr[0];
+    hdock_drag(ui, &d, hp.x + hp.w * 0.5f, hp.y + hp.h / 2, hf.x + hf.w - 20, hf.y + hf.h / 2, true);
+    CHECK(strcmp(hdock_str(ui), "dock1 h0.25([Files,*Props],[*Editor,Log])") == 0);
+    cui_destroy(ui);
+
+    /* Esc cancels */
+    ui = new_ctx();
+    d = hdock_new(base, true);
+    run(ui, build_hdock, &d, 4);
+    hp = d.hdr[3];
+    be = cui_get_rect(ui, d.body[1]);
+    hdock_drag(ui, &d, hp.x + hp.w * 0.5f, hp.y + hp.h / 2, be.x + be.w / 2, be.y + be.h / 2, false);
+    key(ui, build_hdock, &d, CUI_KEY_ESCAPE, 0);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_hdock, &d, 3);
+    CHECK(strcmp(hdock_str(ui), base) == 0);
+    cui_destroy(ui);
+
+    /* save and load are the same text, and headers follow the layout */
+    ui = new_ctx();
+    d = hdock_new(base, true);
+    run(ui, build_hdock, &d, 4);
+    CHECK(cui_dock_load(ui, "hs", "dock1 v0.5([*Files],h0.5([*Editor],[*Log,Props]))"));
+    run(ui, build_hdock, &d, 4);
+    CHECK(strcmp(hdock_str(ui), "dock1 v0.5([*Files],h0.5([*Editor],[*Log,Props]))") == 0);
+    CHECK(d.rect_ok[0] && d.rect_ok[1] && !d.rect_ok[2] && !d.rect_ok[3]);
+    cui_destroy(ui);
+
+    /* without leaf_header nothing changes: no header, the strip is there, the same geometry as the plain dockspace */
+    ui = new_ctx();
+    d = hdock_new(base, false);
+    run(ui, build_hdock, &d, 4);
+    CHECK(!d.rect_ok[0] && !d.in_header[0] && !d.in_header[3]);
+    CHECK(d.tab[0].w > 0 && d.tab[3].w > 0);
+    cui_rect hb = cui_get_rect(ui, d.body[0]);
+    cui_destroy(ui);
+    ui = new_ctx();
+    dock_ctx pd = dock_new(base, 800, 560);
+    run(ui, build_dock, &pd, 4);
+    cui_rect pb = dock_body(ui, &pd, 0);
+    CHECK_NEAR(hb.x, pb.x, 0.01); CHECK_NEAR(hb.y, pb.y, 0.01); CHECK_NEAR(hb.w, pb.w, 0.01); CHECK_NEAR(hb.h, pb.h, 0.01);
+    cui_destroy(ui);
+}
+
+/* id scopes and the clipped overlay --------------------------------------------------------------- */
+
+typedef struct { cui_id a1, a2, b1, after; bool text_a, text_b; char ta[16], tb[16]; cui_rect ov, inner, under; int under_clicks, in_clicks; bool show; cui_rect clip_probe; } scope_ctx;
+static void build_scope(cui_ctx *ui, void *u) {
+    scope_ctx *s = u;
+    cui_row(ui, .gap = 8) {
+        cui_push_id_scope(ui, 1);
+        s->a1 = cui_make_id(ui, "field");
+        cui_input(ui, "field", s->ta, sizeof s->ta, .width = CUI_PX(140));
+        cui_pop_id_scope(ui);
+        cui_push_id_scope(ui, 2);
+        s->b1 = cui_make_id(ui, "field");
+        cui_input(ui, "field", s->tb, sizeof s->tb, .width = CUI_PX(140));
+        cui_pop_id_scope(ui);
+        cui_push_id_scope(ui, 1);
+        s->a2 = cui_make_id(ui, "field");
+        cui_pop_id_scope(ui);
+        s->after = cui_make_id(ui, "field");
+    }
+}
+
+typedef struct { cui_rect pane, ov; int under, inside, far; bool show, edge; cui_rect btn_in, btn_out, btn_far; } overlay_ctx;
+static void build_overlay(cui_ctx *ui, void *u) {
+    overlay_ctx *o = u;
+    cui_row(ui, .width = CUI_FILL, .height = CUI_FILL) {
+        cui_column(ui, .id = "left", .width = CUI_PX(300), .height = CUI_FILL) {
+            if (cui_button(ui, "Under")) o->under++;
+            o->btn_out = cui_last_rect(ui);
+        }
+        cui_column(ui, .id = "pane", .width = CUI_PX(300), .height = CUI_FILL) { cui_text(ui, "pane"); }
+    }
+    o->pane = cui_get_rect(ui, cui_make_id(ui, "pane"));
+    if (o->show) {
+        cui_rect place = o->edge ? (cui_rect){ 0, 0, 200, 100 } : o->pane;
+        cui_overlay(ui, "sheet", place) {
+            cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_SURFACE_RAISED, .pad = 10) {
+                if (cui_button(ui, "Inside")) o->inside++;
+                o->btn_in = cui_last_rect(ui);
+                cui_row(ui, .width = CUI_PX(400), .height = CUI_PX(30)) {
+                    cui_spacer(ui);
+                    if (cui_button(ui, "Far")) o->far++;
+                    o->btn_far = cui_last_rect(ui);
+                }
+            }
+        }
+    }
+    o->ov = cui_get_rect(ui, cui_make_id(ui, "sheet"));
+}
+
+static void test_id_scope_and_overlay(void) {
+    printf("id scopes and the clipped overlay\n");
+    cui_ctx *ui = new_ctx();
+    scope_ctx s;
+    memset(&s, 0, sizeof s);
+    run(ui, build_scope, &s, 3);
+    CHECK(s.a1 != s.b1);              /* the same name in two scopes: two ids */
+    CHECK(s.a1 == s.a2);              /* the same scope again: the same id */
+    CHECK(s.after != s.a1 && s.after != s.b1);   /* after a pop: the outer scope's id */
+    /* the text fields keep their own state */
+    cui_rect ra = cui_get_rect(ui, s.a1), rb = cui_get_rect(ui, s.b1);
+    CHECK(ra.w > 0 && rb.w > 0 && rb.x > ra.x);
+    click_at(ui, build_scope, &s, ra.x + 20, ra.y + ra.h / 2);
+    cui_input_text(ui, "hello");
+    run(ui, build_scope, &s, 2);
+    CHECK(strcmp(s.ta, "hello") == 0 && s.tb[0] == 0);
+    click_at(ui, build_scope, &s, rb.x + 20, rb.y + rb.h / 2);
+    cui_input_text(ui, "x");
+    run(ui, build_scope, &s, 2);
+    CHECK(strcmp(s.ta, "hello") == 0 && strcmp(s.tb, "x") == 0);
+    cui_destroy(ui);
+
+    /* the overlay sits exactly on its rect, takes the pointer there and clips its content */
+    ui = new_ctx();
+    overlay_ctx o;
+    memset(&o, 0, sizeof o);
+    run(ui, build_overlay, &o, 3);
+    CHECK_NEAR(o.pane.x, 300, 0.5); CHECK_NEAR(o.pane.w, 300, 0.5);
+    o.show = true;
+    run(ui, build_overlay, &o, 3);
+    CHECK_NEAR(o.ov.x, o.pane.x, 0.01); CHECK_NEAR(o.ov.y, o.pane.y, 0.01);
+    CHECK_NEAR(o.ov.w, o.pane.w, 0.01); CHECK_NEAR(o.ov.h, o.pane.h, 0.01);
+    /* content wider than the overlay is cut off: its button beyond the edge cannot be pressed */
+    CHECK(o.btn_far.x > o.pane.x + o.pane.w && o.btn_far.x < 790);
+    click_at(ui, build_overlay, &o, o.btn_far.x + 5, o.btn_far.y + 5);
+    CHECK(o.far == 0);
+    click_at(ui, build_overlay, &o, o.btn_in.x + 5, o.btn_in.y + 5);
+    CHECK(o.inside == 1);
+    /* a press on the overlay's empty space does not reach the pane under it; a press elsewhere does */
+    cui_rect pn = o.pane;
+    click_at(ui, build_overlay, &o, pn.x + pn.w - 10, pn.y + pn.h - 10);
+    CHECK(o.under == 0);
+    click_at(ui, build_overlay, &o, o.btn_out.x + 5, o.btn_out.y + 5);
+    CHECK(o.under == 1);
+    /* at the window's corner it is not moved in by the 8 point margin popovers keep */
+    o.edge = true;
+    run(ui, build_overlay, &o, 3);
+    CHECK_NEAR(o.ov.x, 0, 0.01); CHECK_NEAR(o.ov.y, 0, 0.01); CHECK_NEAR(o.ov.w, 200, 0.01); CHECK_NEAR(o.ov.h, 100, 0.01);
+    /* gone when it is no longer called */
+    o.show = false;
+    run(ui, build_overlay, &o, 3);
+    o.inside = 0;
+    click_at(ui, build_overlay, &o, o.btn_out.x + 5, o.btn_out.y + 5);
+    CHECK(o.under == 2);
+    cui_destroy(ui);
+}
+
 typedef struct { float width, ratio; } split_range_case;
 
 /** A horizontal split containing two measurable panes. */
@@ -13559,6 +13850,8 @@ int main(void) {
     test_tooltip_placement();
     test_select_size();
     test_dock();
+    test_dock_header();
+    test_id_scope_and_overlay();
     test_virtual_list();
     test_split_minimums();
     test_theme();

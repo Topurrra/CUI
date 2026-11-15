@@ -463,6 +463,14 @@ void cui_push_id_int(cui_ctx *ui, int v) {
 
 void cui_pop_id(cui_ctx *ui) { if (ui->id_depth > 0) ui->id_depth--; }
 
+/* A scope of its own: every id made inside (widget state, focus, text editing, scroll positions) is
+ * hashed from the seed, so the same code drawn twice gets two sets of state. */
+void cui_push_id_scope(cui_ctx *ui, uint32_t seed) {
+    cui_id id = cui__hash(&seed, sizeof seed, cui__seed(ui) ^ 0x5C09E5EEu);
+    if (ui->id_depth < CUI_ID_STACK) { ui->auto_counter[ui->id_depth] = 0; ui->id_stack[ui->id_depth++] = id; }
+}
+void cui_pop_id_scope(cui_ctx *ui) { cui_pop_id(ui); }
+
 cui_id cui_last_id(cui_ctx *ui) { return ui->last_id; }
 cui_rect cui_last_rect(cui_ctx *ui) { return cui__prev_rect(ui, ui->last_id); }
 cui_rect cui_get_rect(cui_ctx *ui, cui_id id) { return cui__prev_rect(ui, id); }

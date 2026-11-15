@@ -356,7 +356,7 @@ typedef struct cui_node {
 #define CUI__ALIGN_NOSTRETCH 7
 
 /* placement values beyond cui_placement for floating roots */
-enum { CUI__PLACE_FULL = 100, CUI__PLACE_CENTER = 101, CUI__PLACE_POINT = 102 };
+enum { CUI__PLACE_FULL = 100, CUI__PLACE_CENTER = 101, CUI__PLACE_POINT = 102, CUI__PLACE_EXACT = 103 };   /* EXACT: at (fx, fy) in the size asked, not kept inside the window */
 
 typedef struct cui_scroll_state {
     float x, y;                 /* current offset */

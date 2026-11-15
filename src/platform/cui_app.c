@@ -3,6 +3,20 @@
 #include "cui_platform.h"
 
 static cui_app *cui__current_app;
+/* A thread may keep one OpenGL context: the renderer's calls go to whichever context is current, and
+ * nothing here makes the right one current before each. So the windows a thread makes after its first
+ * GL window draw in software (see cui_app_frame_poll in cui_app.h). The thread that holds GL windows is
+ * remembered while it has any; windows of other threads are not counted (a thread local would pull
+ * emulated thread locals into every app on some toolchains: 70 KB). */
+#ifdef _WIN32
+__declspec(dllimport) unsigned long __stdcall GetCurrentThreadId(void);
+#define CUI__THREAD_ID() ((uintptr_t)GetCurrentThreadId())
+#else
+#include <pthread.h>
+#define CUI__THREAD_ID() ((uintptr_t)pthread_self())
+#endif
+static uintptr_t cui__gl_thread;
+static int cui__gl_apps;
 static void cui__app_set_clip(void *user, const char *utf8);
 static const char *cui__app_get_clip(void *user);
 
@@ -78,6 +92,15 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
      * so the window shows without waiting for the driver. Tests and screenshots, and an app or
      * user that asks for a renderer, get it from the first frame. */
     bool want_gl = d->renderer != CUI_RENDERER_SOFTWARE && !cui__env_is("CUI_RENDERER", "software");
+    if (want_gl && cui__gl_apps > 0 && cui__gl_thread == CUI__THREAD_ID()) {   /* this thread already has a GL window */
+        if (d->renderer == CUI_RENDERER_OPENGL) fprintf(stderr, "cui: one OpenGL window per thread, using the software renderer\n");
+        want_gl = false;
+    }
+    if (want_gl && (cui__gl_apps == 0 || cui__gl_thread == CUI__THREAD_ID())) {
+        cui__gl_thread = CUI__THREAD_ID();
+        app->gl_counted = true;
+        cui__gl_apps++;
+    }
     if (want_gl && d->renderer == CUI_RENDERER_AUTO && !getenv("CUI_RENDERER") && !getenv("CUI_SCREENSHOT") && !d->hidden)
         app->gl_starting = cui__plat_gl_begin_async(app);
     cui_ctx_desc cd;
@@ -85,9 +108,10 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     cd.theme = mode;
     cd.accent = d->accent;
     app->ui = cui_create(&cd);
-    if (!app->ui) { cui__app_drop_gl_start(app); free(app); return NULL; }
+    if (!app->ui) { cui__app_drop_gl_start(app); if (app->gl_counted) cui__gl_apps--; free(app); return NULL; }
     if (!cui__plat_init(app)) {
         cui__app_drop_gl_start(app);
+        if (app->gl_counted) cui__gl_apps--;
         fprintf(stderr, "cui: could not create a window (%s backend)\n", cui__plat_name());
         cui_destroy(app->ui);
         free(app);
@@ -149,6 +173,7 @@ void cui_app_destroy(cui_app *app) {
     free(app->sw_pixels);
     cui_destroy(app->ui);
     free(app->clipboard);
+    if (app->gl_counted) cui__gl_apps--;
     free(app);
 }
 
@@ -174,6 +199,15 @@ void cui_app_set_title(cui_app *app, const char *title) {
 }
 
 void cui_app_set_size(cui_app *app, int w, int h) { app = cui__app_or_current(app); if (app) cui__plat_set_size(app, w, h); }
+void cui_app_set_position(cui_app *app, int x, int y) { app = cui__app_or_current(app); if (app) cui__plat_set_position(app, x, y); }
+bool cui_app_position(cui_app *app, int *x, int *y) {
+    int px = 0, py = 0;
+    app = cui__app_or_current(app);
+    bool ok = app && cui__plat_position(app, &px, &py);
+    if (x) *x = ok ? px : 0;
+    if (y) *y = ok ? py : 0;
+    return ok;
+}
 
 void cui_app_follow_system_theme(cui_app *app, bool follow) {
     app = cui__app_or_current(app);
@@ -250,26 +284,35 @@ static void cui__app_begin(cui_app *app) {
     if (dt <= 0) dt = 1.0f / 120.0f;
     cui_begin_frame(app->ui, dt);
     app->in_frame = true;
+    app->woken = false;
 }
 
-bool cui_app_frame(cui_app *app) {
-    if (app->in_frame) {
-        cui__app_render(app);
-        if (app->screenshot_path && ++app->frames >= app->screenshot_frames) {
-            const cui_draw_data *dd = cui_get_draw_data(app->ui);
-            int w = dd->width_px, h = dd->height_px;
-            unsigned char *px = malloc((size_t)w * (size_t)h * 4);
-            if (px && cui_app_screenshot(app, px, w, h)) {
-                bool ok = cui_write_png(app->screenshot_path, px, w, h, w * 4);
-                fprintf(stderr, "cui: %s %s\n", ok ? "saved" : "could not save", app->screenshot_path);
-            }
-            free(px);
-            app->running = false;
+/* Presents the frame that was drawn (and takes the screenshot a test asked for). */
+static void cui__app_finish(cui_app *app) {
+    if (!app->in_frame) return;
+    cui__app_render(app);
+    app->idle_since = cui__plat_now();
+    app->wake_seen = -2;   /* the timers of the frame just drawn count from now */
+    if (app->screenshot_path && ++app->frames >= app->screenshot_frames) {
+        const cui_draw_data *dd = cui_get_draw_data(app->ui);
+        int w = dd->width_px, h = dd->height_px;
+        unsigned char *px = malloc((size_t)w * (size_t)h * 4);
+        if (px && cui_app_screenshot(app, px, w, h)) {
+            bool ok = cui_write_png(app->screenshot_path, px, w, h, w * 4);
+            fprintf(stderr, "cui: %s %s\n", ok ? "saved" : "could not save", app->screenshot_path);
         }
+        free(px);
+        app->running = false;
     }
-    if (!app->running) return false;
+}
+
+/* How long the app may sleep before its next frame, in seconds: 0 when it animates (then *pace_until, when
+ * not 0, is the time before which that frame should not start, for the pacing of software drawing), a
+ * delay for a timer, < 0 for input only. */
+static double cui__app_plan(cui_app *app, double *pace_until) {
     cui_ctx *ui = app->ui;
     double timeout;
+    *pace_until = 0;
     if (app->desc.continuous || cui_needs_redraw(ui) || !app->presented_once) {
         /* Animation frames come at the display's rate. With vsync the swap waits for it; the
          * software renderer, and drivers that ignore the swap interval (software GL, settings
@@ -296,9 +339,7 @@ bool cui_app_frame(cui_app *app) {
         if (app->presented_once && (!app->gl || app->desc.no_vsync || app->vsync_off)) {
             /* one frame per period, counted from when the last one began; events that come
              * in the meantime are taken in but do not start the frame early */
-            double until = app->last_time + 1.0 / (app->desc.no_vsync && app->hz < 120 ? 120 : app->hz);
-            for (double left = until - now; left > 0.0005 && app->running; left = until - cui__plat_now())
-                cui__plat_wait(app, left);
+            *pace_until = app->last_time + 1.0 / (app->desc.no_vsync && app->hz < 120 ? 120 : app->hz);
         }
     } else {
         app->pace_frames = 0;
@@ -307,6 +348,16 @@ bool cui_app_frame(cui_app *app) {
         timeout = wake >= 0 ? wake : -1;
     }
     if (app->gl_starting && (timeout < 0 || timeout > 0.1)) timeout = 0.1;   /* the thread wakes the loop too; this is in case it cannot */
+    return timeout;
+}
+
+bool cui_app_frame(cui_app *app) {
+    cui__app_finish(app);
+    if (!app->running) return false;
+    double until, timeout = cui__app_plan(app, &until);
+    if (until > 0)
+        for (double left = until - cui__plat_now(); left > 0.0005 && app->running; left = until - cui__plat_now())
+            cui__plat_wait(app, left);
     CUI__PROBE(CUI_PROBE_SLEEP);
     cui__plat_wait(app, timeout);
     CUI__PROBE(CUI_PROBE_WAKE);
@@ -314,6 +365,76 @@ bool cui_app_frame(cui_app *app) {
     if (app->gl_starting) cui__app_take_gl(app, false);
     cui__app_begin(app);
     return true;
+}
+
+bool cui_app_frame_poll(cui_app *app) {
+    app = cui__app_or_current(app);
+    if (!app) return false;
+    cui__app_finish(app);
+    if (!app->running) return false;
+    cui__current_app = app;
+    cui__plat_wait(app, 0);   /* this thread's messages, every window's, without sleeping */
+    if (!app->running) return false;
+    if (app->gl_starting) cui__app_take_gl(app, false);
+    cui__app_begin(app);
+    return true;
+}
+
+/* When the app's next timer is due, in plat_now time, or < 0. Wake ups the frame asked for count from the end
+ * of the frame; one asked for between frames (cui_request_wakeup) from when it is first seen here. The time stays
+ * put while the loop wakes for other windows, as the frame's own wait would have kept it. */
+static double cui__app_deadline(cui_app *app) {
+    float w = cui_next_wakeup(app->ui);
+    if (w != app->wake_seen) {
+        app->wake_seen = w;
+        app->wake_at = w >= 0 ? cui__plat_now() + w : -1;
+    }
+    return app->wake_at;
+}
+
+bool cui_app_pending(cui_app *app) {
+    app = cui__app_or_current(app);
+    if (!app) return false;
+    if (!app->running || app->woken || app->desc.continuous || !app->presented_once || cui_needs_redraw(app->ui)) return true;
+    double now = cui__plat_now(), due = cui__app_deadline(app);
+    if (due >= 0 && now >= due) return true;
+    return app->gl_starting && now - app->idle_since >= 0.1;   /* as the plan: the OpenGL thread may not be able to wake us */
+}
+
+void cui_app_wait(cui_app *const *apps, int n) {
+    cui_app *first = NULL;
+    double limit = -1, pace = 0, now;
+    for (int i = 0; i < n; i++) if (apps[i]) { cui__app_finish(apps[i]); if (!first) first = apps[i]; }
+    if (!first) return;
+    now = cui__plat_now();
+    for (int i = 0; i < n; i++) {
+        cui_app *a = apps[i];
+        if (!a) continue;
+        double until = 0, t = 0;
+        if (a->running && !a->woken) {
+            t = cui__app_plan(a, &until);
+            if (t != 0 || until == 0) {   /* not animating: the timer's deadline, not its delay (see cui__app_deadline) */
+                bool animating = a->desc.continuous || cui_needs_redraw(a->ui) || !a->presented_once;
+                if (!animating) {
+                    double due = cui__app_deadline(a);
+                    t = due >= 0 ? (due > now ? due - now : 0) : -1;
+                    if (a->gl_starting && (t < 0 || t > 0.1)) t = 0.1;
+                }
+            }
+        }
+        if (t == 0 && until > now) { if (!pace || until < pace) pace = until; continue; }   /* animating: due at the next period */
+        if (t >= 0 && (limit < 0 || t < limit)) limit = t;
+    }
+    if (pace > 0 && (limit < 0 || pace - now < limit)) {
+        /* the nearest frame period: events on the way are taken in, the frame still waits for it */
+        for (double left = pace - now; left > 0.0005; left = pace - cui__plat_now()) cui__plat_wait(first, left);
+        limit = 0;
+    }
+    CUI__PROBE(CUI_PROBE_SLEEP);
+    cui__plat_wait(first, limit);
+    CUI__PROBE(CUI_PROBE_WAKE);
+    for (int i = 0; i < n; i++)
+        if (apps[i] && !apps[i]->wake_tracked) apps[i]->woken = true;   /* the backend cannot tell which window it was */
 }
 
 void cui__app_live_frame(cui_app *app) {

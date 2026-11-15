@@ -881,6 +881,7 @@ static cui_rect cui__anchor_rect(cui_ctx *ui, cui_id anchor) {
 static void cui__layout_float(cui_ctx *ui, int i) {
     cui_node *n = &ui->nodes[i];
     float vw = ui->vw, vh = ui->vh, margin = 8;
+    bool exact = n->placement == CUI__PLACE_EXACT;
     cui__measure_w(ui, i);
     n = &ui->nodes[i];
     if (n->placement == CUI__PLACE_FULL) n->rect.w = vw;
@@ -888,7 +889,7 @@ static void cui__layout_float(cui_ctx *ui, int i) {
     else if (n->w.kind == CUI_SIZE_PERCENT) n->rect.w = vw * n->w.value / 100.0f;
     else if (n->w.kind == CUI_SIZE_GROW) n->rect.w = vw;
     else n->rect.w = CUI_MIN(n->pref_w, vw - 2 * margin);
-    n->rect.w = cui__clamp_size(n->rect.w, n->min_w, CUI_MIN(n->max_w, n->placement == CUI__PLACE_FULL ? vw : vw - 2 * margin));
+    n->rect.w = cui__clamp_size(n->rect.w, n->min_w, CUI_MIN(n->max_w, n->placement == CUI__PLACE_FULL ? vw : exact ? 1e9f : vw - 2 * margin));
     cui__resolve_w(ui, i);
     cui__measure_h(ui, i);
     n = &ui->nodes[i];
@@ -897,12 +898,12 @@ static void cui__layout_float(cui_ctx *ui, int i) {
     else if (n->h.kind == CUI_SIZE_PERCENT) n->rect.h = vh * n->h.value / 100.0f;
     else if (n->h.kind == CUI_SIZE_GROW) n->rect.h = vh;
     else n->rect.h = n->pref_h;
-    if (n->placement != CUI__PLACE_FULL) n->rect.h = CUI_MIN(n->rect.h, CUI_MIN(n->max_h, vh - 2 * margin));
+    if (n->placement != CUI__PLACE_FULL) n->rect.h = CUI_MIN(n->rect.h, CUI_MIN(n->max_h, exact ? 1e9f : vh - 2 * margin));
     float W = n->rect.w, H = n->rect.h, off = n->offset;
     float x = 0, y = 0;
     if (n->placement == CUI__PLACE_FULL) { x = 0; y = 0; }
     else if (n->placement == CUI__PLACE_CENTER) { x = (vw - W) * 0.5f; y = (vh - H) * 0.5f; }
-    else if (n->placement == CUI__PLACE_POINT) { x = n->fx; y = n->fy; }
+    else if (n->placement == CUI__PLACE_POINT || exact) { x = n->fx; y = n->fy; }
     else {
         cui_rect A = n->fpos && !n->anchor ? (cui_rect){ n->fx, n->fy, 0, 0 } : cui__anchor_rect(ui, n->anchor);
         switch (n->placement) {
@@ -931,7 +932,7 @@ static void cui__layout_float(cui_ctx *ui, int i) {
         case CUI_PLACE_RIGHT: case CUI_PLACE_LEFT: y = A.y + (A.h - H) * 0.5f; break;
         }
     }
-    if (n->placement != CUI__PLACE_FULL) {
+    if (n->placement != CUI__PLACE_FULL && !exact) {
         x = cui__clampf(x, margin, CUI_MAX(margin, vw - margin - W));
         y = cui__clampf(y, margin, CUI_MAX(margin, vh - margin - H));
     }

@@ -180,6 +180,8 @@ void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w
 
 void cui__plat_set_title(cui_app *app, const char *title) { SDL_SetWindowTitle(cui__s(app)->win, title); }
 void cui__plat_set_size(cui_app *app, int w, int h) { SDL_SetWindowSize(cui__s(app)->win, w, h); }
+void cui__plat_set_position(cui_app *app, int x, int y) { SDL_SetWindowPosition(cui__s(app)->win, x, y); }
+bool cui__plat_position(cui_app *app, int *x, int *y) { SDL_GetWindowPosition(cui__s(app)->win, x, y); return true; }
 void *cui__plat_native(cui_app *app) { return cui__s(app)->win; }
 bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
