@@ -252,11 +252,11 @@ static void test_speed(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; } scene;
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports); }
     cui_end_frame(ui);
     s->focus = false;
 }
@@ -493,6 +493,31 @@ static void test_mouse(void) {
     cui_destroy(ui);
 }
 
+/* ---- focus reports ---- */
+
+static void test_focus(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    s.freports = true;
+    build(ui, &s);
+    cui_input_focus(ui, false); build(ui, &s);
+    CHECK_EQ(s.r.input_len, 0);                                    /* the program did not ask */
+    cui_input_focus(ui, true); build(ui, &s);
+    CHECK_EQ(s.r.input_len, 0);
+    W(s.vt, "\x1b[?1004h");
+    cui_input_focus(ui, false); build(ui, &s); CHECK(got(&s, "\x1b[O"));
+    build(ui, &s); CHECK_EQ(s.r.input_len, 0);                     /* once */
+    cui_input_focus(ui, true); build(ui, &s); CHECK(got(&s, "\x1b[I"));
+    s.freports = false;
+    cui_input_focus(ui, false); build(ui, &s); CHECK_EQ(s.r.input_len, 0);   /* not opted in */
+    cui_input_focus(ui, true); build(ui, &s); CHECK_EQ(s.r.input_len, 0);
+    s.freports = true;
+    W(s.vt, "\x1b[?1004l");
+    cui_input_focus(ui, false); build(ui, &s); CHECK_EQ(s.r.input_len, 0);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_text();
@@ -507,6 +532,7 @@ int main(void) {
     test_speed();
     test_view();
     test_mouse();
+    test_focus();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

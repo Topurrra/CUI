@@ -4074,6 +4074,9 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * still reported, with the cell clamped to the grid, so the program never sees a stuck button. Without `.mouse`
  * the requests are remembered and nothing is reported.
  *
+ * Focus (`.focus_reports = true`): a program that asked with mode 1004 gets ESC [ I when the view has the keyboard
+ * and the window the focus, ESC [ O when either is lost. A view that is no longer built (a hidden tab) sends nothing.
+ *
  * Memory is fixed: two grids of 8 bytes per cell, and a scrollback ring of `lines * 48` cells (lines are
  * stored without their blank right end). Scrolling moves no cell data. Writing never allocates and parses
  * several hundred MB/s, so feed output in slices (a few ms of work a frame) and ask for another frame while
@@ -4121,6 +4124,7 @@ typedef struct cui_vt_opts {
     bool focus;                    /* take the keyboard now (once, when you open it) */
     bool no_input;                 /* show only: no keys, no paste */
     bool mouse;                    /* report the mouse to a program that asks for it (see "Mouse" above); false: nothing is reported */
+    bool focus_reports;            /* tell a program that asked (mode 1004) with ESC [ I and ESC [ O when the view gains or loses the keyboard, or the window the focus */
 } cui_vt_opts;
 typedef struct cui_vt_result {
     const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */

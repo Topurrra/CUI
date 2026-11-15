@@ -46,6 +46,7 @@ struct cui_vt {
     uint8_t *tabs;
     uint8_t mouse_modes;              /* what the program asked for: CUI__VT_M1000, _M1002, _M1003 */
     bool mouse_sgr;                   /* encoding 1006 */
+    bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -328,6 +329,7 @@ static void cui__vt_mode(cui_vt *v, bool set) {
             break;
         }
         case 1006: v->mouse_sgr = set; break;
+        case 1004: v->focus_mode = set; break;
         case 2004: v->bracketed = set; break;
         default: break;
         }
@@ -341,7 +343,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
     if (v->inter == '!' && f == 'p') {      /* soft reset */
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = false; v->pend = false;
-        v->mouse_modes = 0; v->mouse_sgr = false;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false;
         return;
     }
     if (v->inter) return;
@@ -433,7 +435,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
     case 'c': {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
-        v->mouse_modes = 0; v->mouse_sgr = false;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false;
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -672,6 +674,7 @@ typedef struct {
     char out[768]; int out_n;
     uint8_t btn_down;                 /* buttons whose press went to the program */
     int mcol, mrow; bool mvalid;      /* the last cell the mouse was reported in */
+    bool finit, fin;                  /* the view had the keyboard and the window had the focus, as of the last frame */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -1133,6 +1136,10 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     cui_interact in = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
     bool focused = ui->focus == id;
     res.focused = focused;
+    /* focus reports (opt in): when the view gains or loses the keyboard, or the window the focus, a program that asked gets ESC [ I or O */
+    bool has_keys = focused && ui->window_focused;
+    if (st->finit && has_keys != st->fin && o->focus_reports && !o->no_input && v->focus_mode) cui__vt_outs(st, has_keys ? "\x1b[I" : "\x1b[O");
+    st->fin = has_keys; st->finit = true;
     /* the grid follows the view's size */
     if (pr.w > 0 && pr.h > 0) {
         int cols = (int)((pr.w - 2 * padx) / cw), rows = (int)((pr.h - 2 * pady) / lh);
