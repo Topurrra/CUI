@@ -65,7 +65,7 @@ void cui_popover_close(cui_ctx *ui, const char *id) { cui__popup_set(ui, cui_mak
 void cui_popover_close_self(cui_ctx *ui) {
     for (int i = ui->pb_depth - 1; i >= 0; i--) {
         cui__popup_build *b = &ui->pb_stack[i];
-        if (!b->menu) { cui__popup_set(ui, b->id, false); return; }
+        cui__popup_set(ui, b->id, false); return;
     }
 }
 void cui_popover_toggle(cui_ctx *ui, const char *id) {
@@ -229,6 +229,12 @@ bool cui_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *o) {
 
 void cui_menu_end(cui_ctx *ui) { cui__popup_end(ui); }
 
+/* closes every menu being built, the chain a leaf click closes; a popover around them is left alone */
+void cui_menu_close(cui_ctx *ui) {
+    for (int i = ui->pb_depth - 1; i >= 0; i--)
+        if (ui->pb_stack[i].menu) cui__popup_set(ui, ui->pb_stack[i].id, false);
+}
+
 bool cui_context_menu_begin(cui_ctx *ui, const char *id) {
     cui_id pid = cui_make_id(ui, id) ^ 0xC7Cu;
     cui_id anchor = ui->last_id;
@@ -295,6 +301,13 @@ bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *
     int t = cui__text_node(ui, label, cui__display_len(label), o->font, cui__fs(ui, ts), fg, false);
     ui->nodes[t].line_height = 1.3f;
     ui->nodes[t].w = CUI_FILL;
+    if (o->badge) {
+        cui_badge_opts bo;
+        memset(&bo, 0, sizeof bo);
+        bo.tone = o->badge_tone;
+        bo.size = CUI_SIZE_SM;
+        cui_badge_ex(ui, o->badge, &bo);
+    }
     if (o->submenu) cui__icon_node(ui, CUI_ICON_CHEVRON_RIGHT, 16, CUI_C(ui, TEXT_SECONDARY));
     if (o->shortcut) {
         int s = cui__text_node(ui, o->shortcut, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_sm), CUI_C(ui, TEXT_MUTED), false);
@@ -302,6 +315,13 @@ bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *
     }
     if (o->checked) cui__icon_node(ui, CUI_ICON_CHECK, 16, CUI_C(ui, FOREGROUND));
     cui__close(ui);
+    if (o->tooltip) {
+        cui_tooltip_opts to;
+        memset(&to, 0, sizeof to);
+        to.placement = CUI_PLACE_RIGHT;
+        ui->last_id = id;
+        cui_tooltip_ex(ui, o->tooltip, &to);
+    }
     bool chosen = !disabled && (r.clicked || (hl && cui_key_pressed(ui, CUI_KEY_ENTER)));
     if (chosen) {
         if (!o->submenu) cui__close_all_popups(ui);   /* a submenu item opens its menu instead */
@@ -443,7 +463,7 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
         cui__open(ui, col);
         cui__field_label(ui, o->label);
     }
-    float h = cui__control_height(ui, CUI_SIZE_MD);
+    float h = cui__control_height(ui, o->size);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 8;
@@ -538,11 +558,14 @@ bool cui_select_ex(cui_ctx *ui, const char *id_str, const char *const *items, in
 /* Tooltip                                                                  */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { char text[256]; cui_id anchor, shown, pressed; cui_spring t, ox, oy; double last_shown; bool visible, passive; } cui__tooltip_state;
+typedef struct { char text[256]; cui_id anchor, shown, pressed; cui_spring t, ox, oy; double last_shown; bool visible, passive; int place; } cui__tooltip_state;
 static cui__tooltip_state *cui__tooltip_get(cui_ctx *ui) { return cui_state(ui, 0x7001717u, sizeof(cui__tooltip_state)); }
 
 /** Hover starts cold until a tooltip has actually appeared. */
-void cui_tooltip(cui_ctx *ui, const char *text) {
+void cui_tooltip(cui_ctx *ui, const char *text) { cui_tooltip_ex(ui, text, NULL); }
+
+void cui_tooltip_ex(cui_ctx *ui, const char *text, const cui_tooltip_opts *o) {
+    int place = o && o->placement != 0 ? (int)o->placement : (int)CUI_PLACE_TOP;
     cui_id anchor = ui->last_id;
     if (!anchor || !text) return;
     cui__tooltip_state *tt = cui__tooltip_get(ui);
@@ -570,6 +593,7 @@ void cui_tooltip(cui_ctx *ui, const char *text) {
             tt->anchor = anchor;
             tt->visible = true;
             tt->passive = false;
+            tt->place = place;
         } else {
             cui__wakeup_after(ui, (float)(delay - (ui->time - ui->hover_start)) + 0.01f);
         }
@@ -595,6 +619,7 @@ void cui__tooltip_passive(cui_ctx *ui, cui_id anchor, const char *text) {
         tt->anchor = anchor;
         tt->visible = true;
         tt->passive = true;
+        tt->place = CUI_PLACE_TOP;
     } else {
         cui__wakeup_after(ui, (float)(delay - (ui->time - ui->hover_start)) + 0.01f);
     }
@@ -620,7 +645,7 @@ static void cui__tooltip_render(cui_ctx *ui) {
     cui__spring(ui, &tt->ox, 0, 0.32f, 0.08f);
     cui__spring(ui, &tt->oy, 0, 0.32f, 0.08f);
     float t = cui__clampf(tt->t.x, 0, 1);
-    int root = cui__float_begin(ui, 0x7001718u, 0x7FFFFFF0, tt->anchor, CUI_PLACE_TOP, 6);
+    int root = cui__float_begin(ui, 0x7001718u, 0x7FFFFFF0, tt->anchor, tt->place ? tt->place : CUI_PLACE_TOP, 6);
     cui_node *n = &ui->nodes[root];
     n->bg = ui->mode == CUI_THEME_DARK ? cui_oklch(0.93f, 0, 0, 1) : cui_oklch(0.20f, 0, 0, 1);
     n->radius = CUI_CORNERS(CUI__R_ITEM(ui));

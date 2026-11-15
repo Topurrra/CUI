@@ -12331,6 +12331,186 @@ static void test_popover_close_self(void) {
     cui_destroy(ui);
 }
 
+
+/* menu item badge and tooltip, cui_menu_close, close_self in a menu, tooltip placement, select size ---- */
+
+typedef struct {
+    int mode;                      /* 0 plain, 1 explicit zero opts, 2 badge + tooltip */
+    int chosen;
+    cui_rect first, second, close_btn;
+    bool pop_btn;
+} mb_ctx;
+
+static void build_mb(cui_ctx *ui, void *u) {
+    mb_ctx *s = u;
+    s->first = s->second = s->close_btn = (cui_rect){ 0 };
+    cui_button(ui, "Anchor");
+    cui_context_menu(ui, "mb") {
+        if (s->mode == 0) {
+            if (cui_menu_item(ui, "First", .shortcut = "Ctrl K")) s->chosen = 1;
+        } else if (s->mode == 1) {
+            if (cui_menu_item(ui, "First", .shortcut = "Ctrl K", .badge = NULL, .badge_tone = CUI_TONE_NEUTRAL, .tooltip = NULL)) s->chosen = 1;
+        } else {
+            if (cui_menu_item(ui, "First", .shortcut = "Ctrl K", .badge = "New", .badge_tone = CUI_TONE_SUCCESS, .tooltip = "About first")) s->chosen = 1;
+        }
+        s->first = cui_get_rect(ui, cui_make_id(ui, "First"));
+        if (cui_menu_item(ui, "Second")) s->chosen = 2;
+        s->second = cui_get_rect(ui, cui_make_id(ui, "Second"));
+        if (s->mode == 3) {
+            if (cui_button(ui, "Done")) cui_menu_close(ui);
+            s->close_btn = cui_last_rect(ui);
+        }
+        if (s->mode == 4) {
+            if (cui_button(ui, "Done")) cui_popover_close_self(ui);
+            s->close_btn = cui_last_rect(ui);
+        }
+    }
+}
+
+static int mb_open(cui_ctx *ui, mb_ctx *s, float x, float y) {
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_context_menu_open_at(ui, "mb", x, y);
+    build_mb(ui, s);
+    cui_end_frame(ui);
+    run(ui, build_mb, s, 3);
+    return cui_get_draw_data(ui)->vertex_count;
+}
+
+static void test_menu_item_badge_tooltip(void) {
+    printf("menu: zero options unchanged; a badge draws; keys still navigate; the tooltip shows to the right\n");
+    int v[3];
+    for (int m = 0; m < 3; m++) {
+        cui_ctx *ui = new_ctx();
+        mb_ctx s;
+        memset(&s, 0, sizeof s);
+        s.mode = m;
+        v[m] = mb_open(ui, &s, 100, 100);
+        CHECK(s.first.w > 0);
+        if (m == 0) { CHECK(s.first.h == 32); }
+        cui_destroy(ui);
+    }
+    CHECK(v[0] == v[1]);
+    CHECK(v[2] > v[0]);
+    /* keyboard: Down, Down, Enter chooses the second item whatever the first carries */
+    cui_ctx *ui = new_ctx();
+    mb_ctx s;
+    memset(&s, 0, sizeof s);
+    s.mode = 2;
+    mb_open(ui, &s, 100, 100);
+    cui_input_mouse_leave(ui);
+    run(ui, build_mb, &s, 2);
+    key(ui, build_mb, &s, CUI_KEY_DOWN, 0);
+    key(ui, build_mb, &s, CUI_KEY_DOWN, 0);
+    key(ui, build_mb, &s, CUI_KEY_ENTER, 0);
+    CHECK(s.chosen == 2);
+    cui_destroy(ui);
+    /* tooltip: hover the first row until the delay passes; it sits to the right of the row */
+    ui = new_ctx();
+    memset(&s, 0, sizeof s);
+    s.mode = 2;
+    mb_open(ui, &s, 100, 100);
+    cui_vec2 c = center(s.first);
+    cui_input_mouse_move(ui, c.x, c.y);
+    run(ui, build_mb, &s, 2);
+    cui_rect none = rect_of(ui, 0x7001718u);
+    CHECK(none.w == 0);                             /* not yet: the delay */
+    run(ui, build_mb, &s, 60);
+    cui_rect tip = rect_of(ui, 0x7001718u);
+    CHECK(tip.w > 0);
+    CHECK(tip.x >= s.first.x + s.first.w - 1);
+    CHECK(tip.y < s.first.y + s.first.h && tip.y + tip.h > s.first.y);   /* level with the row, not above it */
+    cui_destroy(ui);
+}
+
+static void test_menu_close_and_close_self(void) {
+    printf("menu: cui_menu_close and cui_popover_close_self close a menu from its content\n");
+    for (int mode = 3; mode <= 4; mode++) {
+        cui_ctx *ui = new_ctx();
+        mb_ctx s;
+        memset(&s, 0, sizeof s);
+        s.mode = mode;
+        mb_open(ui, &s, 100, 100);
+        CHECK(s.close_btn.w > 0);
+        cui_vec2 c = center(s.close_btn);
+        click_at(ui, build_mb, &s, c.x, c.y);
+        run(ui, build_mb, &s, 3);
+        CHECK(s.first.w == 0 && s.close_btn.w == 0);    /* the menu is gone */
+        cui_destroy(ui);
+    }
+}
+
+typedef struct { int tip; cui_rect btn; } tp_ctx;
+static void build_tp(cui_ctx *ui, void *u) {
+    tp_ctx *s = u;
+    cui_box(ui, .width = CUI_PX(10), .height = CUI_PX(250)) {}
+    cui_button(ui, "Anchor");
+    s->btn = cui_last_rect(ui);
+    if (s->tip == 0) cui_tooltip(ui, "Tooltip");
+    else if (s->tip == 1) cui_tooltip_ex(ui, "Tooltip", NULL);
+    else if (s->tip == 2) cui_tooltip_ex(ui, "Tooltip", &(cui_tooltip_opts){ 0 });
+    else if (s->tip == 3) cui_tooltip_ex(ui, "Tooltip", &(cui_tooltip_opts){ .placement = CUI_PLACE_RIGHT });
+    else if (s->tip == 4) cui_tooltip_ex(ui, "Tooltip", &(cui_tooltip_opts){ .placement = CUI_PLACE_BOTTOM });
+}
+
+static cui_rect tp_shown(int tip, int *verts) {
+    cui_ctx *ui = new_ctx();
+    tp_ctx s = { tip };
+    run(ui, build_tp, &s, 2);
+    cui_vec2 c = center(s.btn);
+    cui_input_mouse_move(ui, c.x, c.y);
+    run(ui, build_tp, &s, 70);
+    cui_rect r = rect_of(ui, 0x7001718u);
+    if (verts) *verts = cui_get_draw_data(ui)->vertex_count;
+    cui_rect b = s.btn;
+    r.x -= b.x; r.y -= b.y;      /* relative to the anchor */
+
+    cui_destroy(ui);
+    return r;
+}
+
+static void test_tooltip_placement(void) {
+    printf("tooltip: zero options are the usual place above; RIGHT and BOTTOM are opt in\n");
+    int v0, v1, v2, v3, v4;
+    cui_rect a = tp_shown(0, &v0), b = tp_shown(1, &v1), c = tp_shown(2, &v2), r = tp_shown(3, &v3), d = tp_shown(4, &v4);
+    CHECK(a.w > 0 && a.y < 0);                          /* above the button */
+    CHECK(v0 == v1 && v0 == v2);
+    CHECK(a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h);
+    CHECK(a.x == c.x && a.y == c.y && a.w == c.w);
+    CHECK(r.w > 0 && r.x > 0);                          /* to the right */
+    CHECK(d.w > 0 && d.y > 0);                          /* below */
+    (void)v3; (void)v4;
+}
+
+typedef struct { int size; cui_rect sel, inp; int idx; } ss_ctx;
+static void build_ss(cui_ctx *ui, void *u) {
+    ss_ctx *s = u;
+    static const char *items[] = { "One", "Two" };
+    char buf[8] = "";
+    cui_row(ui, .gap = 10) {
+        cui_select(ui, "sel", items, 2, &s->idx, .size = (cui_control_size)s->size);
+        s->sel = cui_get_rect(ui, cui_make_id(ui, "sel"));
+        cui_input(ui, "inp", buf, sizeof buf, .size = CUI_SIZE_SM);
+        s->inp = cui_get_rect(ui, cui_make_id(ui, "inp"));
+    }
+}
+
+static void test_select_size(void) {
+    printf("select: size SM is as tall as a small input; zero is the usual height\n");
+    cui_ctx *ui = new_ctx();
+    ss_ctx s = { CUI_SIZE_MD };
+    run(ui, build_ss, &s, 3);
+    float md = s.sel.h;
+    int vmd = cui_get_draw_data(ui)->vertex_count;
+    s.size = 0;
+    run(ui, build_ss, &s, 3);
+    CHECK(s.sel.h == md && cui_get_draw_data(ui)->vertex_count == vmd);
+    CHECK(md > 0 && md > s.inp.h);
+    s.size = CUI_SIZE_SM;
+    run(ui, build_ss, &s, 3);
+    CHECK(s.sel.h < md);
+    CHECK(s.sel.h == s.inp.h);
+    cui_destroy(ui);
+}
 /* app requests: scroll position, caller-owned open state, explicit lengths, plain selectable text ---- */
 
 typedef struct { int items; float item_h; } sp_ctx;
@@ -13011,6 +13191,10 @@ int main(void) {
     test_context_menu_close_and_width();
     test_popover_at();
     test_popover_close_self();
+    test_menu_item_badge_tooltip();
+    test_menu_close_and_close_self();
+    test_tooltip_placement();
+    test_select_size();
     test_dock();
     test_virtual_list();
     test_split_minimums();

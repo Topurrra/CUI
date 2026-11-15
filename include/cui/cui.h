@@ -743,6 +743,7 @@ typedef struct cui_select_opts {
     bool searchable;           /* combobox: filter options by typing */
     bool disabled;
     cui_size width;
+    cui_control_size size;     /* CUI_SIZE_SM: the trigger is as tall as a small input (theme control_sm); zero is the usual size */
 } cui_select_opts;
 /* Enter opens the list or picks the highlighted item. A searchable select
  * returns focus to its trigger when its list closes. */
@@ -846,7 +847,7 @@ CUI_API void cui_popover_open(cui_ctx *ui, const char *id);
  * popover block cui_popover_close(ui, "same-id") builds the id under that pushed scope and misses the popover.
  * From inside a popover use cui_popover_close_self; from outside (a button that opened it) this is fine. */
 CUI_API void cui_popover_close(cui_ctx *ui, const char *id);
-/* Closes the innermost open popover from inside its content (between cui_popover_begin and cui_popover_end). */
+/* Closes the innermost open popover or menu from inside its content (between its begin and end). */
 CUI_API void cui_popover_close_self(cui_ctx *ui);
 CUI_API void cui_popover_toggle(cui_ctx *ui, const char *id);
 CUI_API bool cui_popover_is_open(cui_ctx *ui, const char *id);
@@ -862,6 +863,9 @@ typedef struct cui_menu_opts {
 } cui_menu_opts;
 CUI_API bool cui_menu_begin(cui_ctx *ui, const char *label, const cui_menu_opts *opts);
 CUI_API void cui_menu_end(cui_ctx *ui);
+/* Closes the menu being built and the menus it is a submenu of, as choosing an item does. Call it from custom
+ * content inside cui_menu, cui_context_menu or cui_submenu. Does nothing outside a menu. */
+CUI_API void cui_menu_close(cui_ctx *ui);
 /* Context menu: opens on right click over the previous component. */
 CUI_API bool cui_context_menu_begin(cui_ctx *ui, const char *id);
 CUI_API void cui_context_menu_end(cui_ctx *ui);
@@ -871,6 +875,11 @@ CUI_API void cui_context_menu_end(cui_ctx *ui);
 CUI_API void cui_context_menu_open_at(cui_ctx *ui, const char *id, float x, float y);
 /* Closes the context menu with this id from code (the id it was built and opened with). */
 CUI_API void cui_context_menu_close(cui_ctx *ui, const char *id);
+
+typedef enum cui_tone {
+    CUI_TONE_NEUTRAL = 0, CUI_TONE_INFO, CUI_TONE_SUCCESS, CUI_TONE_WARNING, CUI_TONE_DANGER,
+    CUI_TONE_VIOLET, CUI_TONE_TEAL, CUI_TONE_ROSE, CUI_TONE_ACCENT
+} cui_tone;
 
 typedef struct cui_menu_item_opts {
     int _;
@@ -882,6 +891,9 @@ typedef struct cui_menu_item_opts {
     cui_font font;             /* the label's font, default CUI_FONT_BODY: a style menu shows each style in its own */
     float text_size;           /* the label's size in points, default the body size; the item grows to fit it */
     bool submenu;              /* a chevron at the right edge; clicking does not close the menu (cui_submenu_begin sets it) */
+    const char *badge;         /* a small pill after the label, drawn as cui_badge, before the shortcut */
+    cui_tone badge_tone;       /* the badge's tone, as cui_badge(.tone); zero is neutral */
+    const char *tooltip;       /* shown to the right of the row on hover (to its left at the screen edge) */
 } cui_menu_item_opts;
 CUI_API bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *opts);
 /* Submenu: an item with a chevron that opens a menu to its right (to its left at the screen edge) while the
@@ -898,6 +910,11 @@ CUI_API void cui_menu_label(cui_ctx *ui, const char *text);
 /* Tooltip for the previous component. The first hover waits for the delay,
  * measured in elapsed time even when the app sleeps between frames. */
 CUI_API void cui_tooltip(cui_ctx *ui, const char *text);
+typedef struct cui_tooltip_opts {
+    int _;
+    cui_placement placement;   /* CUI_PLACE_TOP, _BOTTOM, _LEFT or _RIGHT of the component; zero is the usual place, above. Flips at the screen edge. */
+} cui_tooltip_opts;
+CUI_API void cui_tooltip_ex(cui_ctx *ui, const char *text, const cui_tooltip_opts *opts);
 
 /* ------------------------------------------------------------------------ */
 /* Dialogs, sheets, toasts, alerts                                          */
@@ -923,10 +940,6 @@ typedef struct cui_sheet_opts { int _; cui_side side; float size; const char *de
 CUI_API bool cui_sheet_begin(cui_ctx *ui, const char *title, bool *open, const cui_sheet_opts *opts);
 CUI_API void cui_sheet_end(cui_ctx *ui);
 
-typedef enum cui_tone {
-    CUI_TONE_NEUTRAL = 0, CUI_TONE_INFO, CUI_TONE_SUCCESS, CUI_TONE_WARNING, CUI_TONE_DANGER,
-    CUI_TONE_VIOLET, CUI_TONE_TEAL, CUI_TONE_ROSE, CUI_TONE_ACCENT
-} cui_tone;
 
 typedef struct cui_toast_opts {
     int _;
