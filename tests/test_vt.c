@@ -252,11 +252,11 @@ static void test_speed(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; float line_height; } scene;
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports, .line_height = s->line_height); }
     cui_end_frame(ui);
     s->focus = false;
 }
@@ -619,6 +619,28 @@ static void test_queries(void) {
     }
 }
 
+/* ---- line height ---- */
+
+static void test_line_height(void) {
+    static const float lhs[] = { 0, 1.4f, 1.2f, 1.0f, 5.0f, 0.5f };           /* a multiplier of the font size, 0 is 1.4, clamped to 1..3 */
+    static const int want[] = { 19, 19, 16, 13, 39, 13 };                      /* rows of 13 pt text, ceil(13 * m) */
+    for (int i = 0; i < 6; i++) {
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+        cui_set_viewport(ui, 640, 400, 1);
+        cui_set_reduced_motion(ui, true);
+        scene s = { cui_vt_create(80, 24, 0), { 0 }, true, 640, 400, false, false, lhs[i] };
+        for (int k = 0; k < 3; k++) build(ui, &s);
+        char b[64]; int ch = 0, cw = 0;
+        W(s.vt, "\x1b[16t");
+        cui_vt_reply(s.vt, b, sizeof b - 1);
+        CHECK_EQ(sscanf(b, "\x1b[6;%d;%dt", &ch, &cw), 2);
+        CHECK_EQ(ch, want[i]);
+        CHECK_EQ(s.r.rows, (400 - 12) / want[i]);
+        cui_vt_destroy(s.vt);
+        cui_destroy(ui);
+    }
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -662,6 +684,7 @@ int main(void) {
     test_sgr();
     test_cursor_shape();
     test_queries();
+    test_line_height();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

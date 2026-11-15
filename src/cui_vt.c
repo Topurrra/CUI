@@ -1248,7 +1248,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     float size = cui__fs(ui, o->size > 0 ? o->size : 13);
     float cw = cui__text_width(ui, CUI_FONT_MONO, size, "0", 1, true);
     if (cw <= 0) cw = size * 0.6f;
-    float lh = ceilf(size * 1.4f), padx = 10, pady = 6;
+    float lh = ceilf(size * (o->line_height > 0 ? CUI_CLAMP(o->line_height, 1.0f, 3.0f) : 1.4f)), padx = 10, pady = 6;
     cui_rect pr = cui__prev_rect(ui, id);
     if (!v) return res;
     v->cell_w = (int)lroundf(cw * (ui->scale > 0 ? ui->scale : 1.0f)); v->cell_h = (int)lroundf(lh * (ui->scale > 0 ? ui->scale : 1.0f));

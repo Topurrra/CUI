@@ -4130,6 +4130,7 @@ typedef struct cui_vt_opts {
     bool no_input;                 /* show only: no keys, no paste */
     bool mouse;                    /* report the mouse to a program that asks for it (see "Mouse" above); false: nothing is reported */
     bool focus_reports;            /* tell a program that asked (mode 1004) with ESC [ I and ESC [ O when the view gains or loses the keyboard, or the window the focus */
+    float line_height;             /* a row's height in font sizes, from 1 to 3; 0 is 1.4. Pictures made of half blocks want cells near 1:2 (1.2 for most monospace fonts) */
 } cui_vt_opts;
 typedef struct cui_vt_result {
     const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */
