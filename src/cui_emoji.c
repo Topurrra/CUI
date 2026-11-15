@@ -658,16 +658,26 @@ static bool cui__em_outline(cui_ctx *ui, cui__emoji *e, int gid, int px, uint8_t
     if (nl == 0 && !e->mono_font) return false;
     int count = nl ? nl : 1;
     /* the box of all layers, centered */
-    int bx0 = 1 << 30, by0 = 1 << 30, bx1 = -(1 << 30), by1 = -(1 << 30);
+    int bx0, by0, bx1, by1;
     uint32_t lo_ = CUI__T32(c, CL, 8);
-    for (int k = 0; k < count; k++) {
-        int lg = nl ? CUI__T16(c, CL, lo_ + (uint32_t)(first + k) * 4) : gid;
-        int x0, y0, x1, y1;
-        if (!cui__tt_box(e->tt, lg, scale, &x0, &y0, &x1, &y1)) continue;
-        bx0 = CUI_MIN(bx0, x0); by0 = CUI_MIN(by0, y0); bx1 = CUI_MAX(bx1, x1); by1 = CUI_MAX(by1, y1);
+    /* a glyph can reach past the font's em box (a rocket's tip, a wide folder): shrink until the
+     * box of all layers fits the cell, or its edges are cut off */
+    for (int pass = 0; pass < 4; pass++) {
+        bx0 = 1 << 30; by0 = 1 << 30; bx1 = -(1 << 30); by1 = -(1 << 30);
+        for (int k = 0; k < count; k++) {
+            int lg = nl ? CUI__T16(c, CL, lo_ + (uint32_t)(first + k) * 4) : gid;
+            int x0, y0, x1, y1;
+            if (!cui__tt_box(e->tt, lg, scale, &x0, &y0, &x1, &y1)) continue;
+            bx0 = CUI_MIN(bx0, x0); by0 = CUI_MIN(by0, y0); bx1 = CUI_MAX(bx1, x1); by1 = CUI_MAX(by1, y1);
+        }
+        if (bx1 <= bx0) return false;
+        int bw = bx1 - bx0, bh = by1 - by0;
+        int fit = px - 2;   /* a pixel of room on every side, for the smoothing at the edge */
+        if (bw <= fit && bh <= fit) break;
+        scale *= CUI_MIN((float)fit / (float)bw, (float)fit / (float)bh);
     }
-    if (bx1 <= bx0) return false;
     int ox = (px - (bx1 - bx0)) / 2 - bx0, oy = (int)(asc * scale + (px - (asc - desc) * scale) * 0.5f);
+    if (by1 - by0 <= px - 2) oy = CUI_CLAMP(oy, 1 - by0, px - 1 - by1);   /* and inside the cell vertically */
     const uint8_t *p = e->cpal;
     uint32_t PL = e->cpal_len, recs = CUI__T32(p, PL, 8), pal0 = CUI__T16(p, PL, 12);
     for (int k = 0; k < count; k++) {

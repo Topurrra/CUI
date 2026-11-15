@@ -12,6 +12,9 @@
 #include <wchar.h>
 #endif
 
+#ifndef ETF_PLAIN_HASH
+#define ETF_PLAIN_HASH 0xbd4fadd0u
+#endif
 static int g_failed, g_checks;
 #define CHECK(cond) do { g_checks++; if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
 #define CHECK_NEAR(a, b, eps) do { g_checks++; double a_ = (a), b_ = (b); if (fabs(a_ - b_) > (eps)) { g_failed++; \
@@ -11984,6 +11987,105 @@ static void test_emoji_text(void) {
     cui_destroy(ui);
 }
 
+/* emoji must lie inside the clip of the row that holds them, and plain text must not change */
+typedef struct { int quads, outside; } etf_scan;
+static etf_scan etf_check(cui_ctx *ui) {
+    etf_scan r = { 0, 0 };
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    for (int c = 0; c < dd->command_count; c++) {
+        const cui_draw_cmd *cm = &dd->commands[c];
+        if (!cm->texture) continue;   /* only the emoji texture is in use here */
+        for (uint32_t i = cm->index_offset; i + 5 < cm->index_offset + cm->index_count; i += 6) {
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            for (int k = 0; k < 6; k++) {
+                const cui_vertex *v = &dd->vertices[dd->indices[i + k]];
+                x0 = fminf(x0, v->x); x1 = fmaxf(x1, v->x); y0 = fminf(y0, v->y); y1 = fmaxf(y1, v->y);
+            }
+            r.quads++;
+            if (x0 < cm->clip.x - 0.01f || y0 < cm->clip.y - 0.01f || x1 > cm->clip.x + cm->clip.w + 0.01f || y1 > cm->clip.y + cm->clip.h + 0.01f) r.outside++;
+        }
+    }
+    return r;
+}
+static void build_etf(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_column(ui, .pad = 10, .gap = 6) {
+        cui_markdown(ui, "md", "# \xf0\x9f\x9a\x80 Heading\n\n## \xf0\x9f\x93\x81 Two\n\n| A | B |\n|--|--|\n| \xf0\x9f\x9a\x80 cell | x |\n\n- \xe2\x9c\x85 item\n");
+        cui_text(ui, "\xf0\x9f\x9a\x80 tight \xf0\x9f\x93\x81", .size = 12, .line_height = 1.0f);
+        cui_box(ui, .width = CUI_PX(120)) cui_text(ui, "\xf0\x9f\x9a\x80 a long truncated label", .nowrap = true);
+        cui_chat_message(ui, "\xf0\x9f\x9a\x80 hi \xf0\x9f\x93\x81", .author = "Maya");
+        cui_chat_message(ui, "# \xf0\x9f\x9a\x80 Head", .markdown = true, .mine = true);
+    }
+}
+static unsigned etf_hash(cui_ctx *ui) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned h = 2166136261u;
+    for (int i = 0; i < dd->vertex_count; i++) {
+        const cui_vertex *v = &dd->vertices[i];
+        const unsigned char *b = (const unsigned char *)v;
+        for (size_t k = 0; k < sizeof *v; k++) h = (h ^ b[k]) * 16777619u;
+    }
+    return h;
+}
+static void build_etp(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_column(ui, .pad = 10, .gap = 6) {
+        cui_markdown(ui, "md", "# Heading\n\nSome *plain* text with `code` and a [link](x).\n\n| A | B |\n|--|--|\n| a | b |\n\n- item\n");
+        cui_text(ui, "tight text", .size = 12, .line_height = 1.0f);
+        cui_chat_message(ui, "hello there", .author = "Maya");
+    }
+}
+static unsigned etf_real_ring(const char *font) {
+    /* one rocket drawn big on white; the pixels on the outer ring of its square */
+    cui_ctx *ui = new_ctx();
+    if (!cui_emoji_font_load_file(ui, font)) { cui_destroy(ui); return 0xFFFFu; }
+    cui_set_viewport(ui, 200, 200, 1);
+    for (int i = 0; i < 4; i++) {
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        cui_draw_emoji(ui, "\xf0\x9f\x9a\x80", -1, (cui_rect){ 20, 20, 100, 100 });
+        cui_end_frame(ui);
+    }
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    unsigned ring = 0, inside = 0;
+    for (int y = 20; y < 120; y++)
+        for (int x = 20; x < 120; x++) {
+            const unsigned char *p = px + ((size_t)y * dd->width_px + x) * 4;
+            bool drawn = p[0] != px[0] || p[1] != px[1] || p[2] != px[2];
+            if (drawn) inside++;
+            if (drawn && (x == 20 || x == 119 || y == 20 || y == 119)) ring++;
+        }
+    free(px);
+    cui_destroy(ui);
+    return inside < 500 ? 0xFFFEu : ring;   /* nothing drawn: not a result */
+}
+static void test_emoji_fit(void) {
+    printf("emoji: drawn whole, inside the row's clip; text without emoji unchanged\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_platform(ui, &(cui_platform_iface){ .draw_emoji = em_fake_draw });
+    run(ui, build_etf, NULL, 4);
+    etf_scan s = etf_check(ui);
+    CHECK(s.quads >= 9);      /* heading, heading, cell, item, tight, truncated, two chat messages */
+    CHECK(s.outside == 0);
+    cui_destroy(ui);
+    /* text without emoji: the same vertices as before the fix */
+    ui = new_ctx();
+    cui_set_platform(ui, &(cui_platform_iface){ .draw_emoji = em_fake_draw });
+    run(ui, build_etp, NULL, 4);
+    CHECK(etf_hash(ui) == ETF_PLAIN_HASH);
+    cui_destroy(ui);
+    /* the real glyph: its tip and corners are not cut at the edge of its cell */
+    static const char *fonts[] = { "C:/Windows/Fonts/seguiemj.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf" };
+    for (int i = 0; i < 2; i++) {
+        unsigned ring = etf_real_ring(fonts[i]);
+        if (ring == 0xFFFFu) continue;   /* no such font here */
+        CHECK(ring != 0xFFFEu);
+        printf("    %s: %u pixels on the edge\n", fonts[i], ring);
+        CHECK(ring == 0);
+    }
+}
+
 /** Share one software renderer across the test contexts and return a failing
  * exit status to CTest if any check in the suite fails. */
 /* find bar from code, tone marks, doc tab context menu ---------------------- */
@@ -13158,6 +13260,7 @@ int main(void) {
     test_sw_texture_edges();
     test_emoji_release();
     test_emoji_text();
+    test_emoji_fit();
     test_planning();
     test_node_editor();
     test_flame();
