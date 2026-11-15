@@ -276,7 +276,7 @@ static void test_view(void) {
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
     cui_set_viewport(ui, 640, 400, 1);
     cui_set_reduced_motion(ui, true);
-    scene s = { cui_vt_create(80, 24, 1000), { 0 }, true, 640, 400 };
+    scene s = { cui_vt_create(80, 24, 1000), { 0 }, true, 640, 400, false, false, 0 };
     for (int i = 0; i < 3; i++) build(ui, &s);
     CHECK(s.r.cols > 40 && s.r.cols < 100);
     CHECK(s.r.rows > 10 && s.r.rows < 30);
@@ -443,7 +443,7 @@ static void test_mouse(void) {
 
     /* a button still down when the window loses the focus is released */
     W(s.vt, "\x1b[?1006h");
-    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK_EQ(s.r.input_len, 8);
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK_EQ(s.r.input_len, 9);
     cui_input_focus(ui, false); build(ui, &s);
     CHECK(got(&s, "\x1b[<0;6;4m"));
     cui_input_focus(ui, true); build(ui, &s);
@@ -604,7 +604,7 @@ static void test_queries(void) {
         cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
         cui_set_viewport(ui, 640.0f * (float)sc, 400.0f * (float)sc, (float)sc);
         cui_set_reduced_motion(ui, true);
-        scene s = { cui_vt_create(80, 24, 0), { 0 }, true, 640, 400, false, false };
+        scene s = { cui_vt_create(80, 24, 0), { 0 }, true, 640, 400, false, false, 0 };
         for (int i = 0; i < 3; i++) build(ui, &s);
         W(s.vt, "\x1b[14t\x1b[16t\x1b[18t");
         reply_of(s.vt, b, sizeof b);
