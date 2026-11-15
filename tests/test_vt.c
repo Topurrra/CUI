@@ -252,11 +252,11 @@ static void test_speed(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; float line_height; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; float line_height; bool glyphs, italic; } scene;
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports, .line_height = s->line_height); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports, .line_height = s->line_height, .glyphs = s->glyphs, .italic = s->italic); }
     cui_end_frame(ui);
     s->focus = false;
 }
@@ -722,6 +722,50 @@ static void test_look(void) {
     cui_destroy(ui);
 }
 
+/* ---- the opt-in looks: the complete hand-drawn set and the slanted italic; without them the picture is the old one ---- */
+
+static void test_opt_in_looks(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    /* a round corner, a dashed line, a quadrant and braille: square, solid or not drawn at all without .glyphs */
+    W(s.vt, "\x1b[2J\x1b[H\xe2\x95\xad\xe2\x94\x84\xe2\x96\x9a\xe2\xa3\xbf\x1b[5;1H");
+    build(ui, &s);
+    uint32_t old = paint_hash(ui, 10, 6, 60, 26);
+    s.glyphs = true; build(ui, &s);
+    uint32_t drawn = paint_hash(ui, 10, 6, 60, 26);
+    CHECK(drawn != old);
+    s.glyphs = false; build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 10, 6, 60, 26), old);
+    /* a hand-drawn character takes its underline with it, as text does */
+    s.glyphs = true;
+    W(s.vt, "\x1b[2J\x1b[H\x1b[4m\xe2\xa3\xbf\xe2\xa3\xbf\x1b[0m\x1b[5;1H");
+    build(ui, &s);
+    CHECK(paint_hash(ui, 10, 6, 60, 26) != drawn);
+    uint32_t under = paint_hash(ui, 10, 20, 26, 26);
+    W(s.vt, "\x1b[2J\x1b[H\xe2\xa3\xbf\xe2\xa3\xbf\x1b[5;1H");
+    build(ui, &s);
+    CHECK(paint_hash(ui, 10, 20, 26, 26) != under);
+    /* the block cursor shows the hand-drawn character under it in the background color: not a blank block */
+    W(s.vt, "\x1b[2J\x1b[H\xe2\x96\x9a\x1b[1D");
+    build(ui, &s);
+    uint32_t on_glyph = paint_hash(ui, 10, 6, 18, 25);
+    W(s.vt, "\x1b[2J\x1b[H \x1b[1D");
+    build(ui, &s);
+    CHECK(paint_hash(ui, 10, 6, 18, 25) != on_glyph);
+    s.glyphs = false;
+    /* italic: upright without .italic (as before), slanted with it; text that is not italic is the same either way */
+    W(s.vt, "\x1b[2J\x1b[H\x1b[3mHello\x1b[0m\x1b[5;1H");
+    build(ui, &s);
+    uint32_t upright = paint_hash(ui, 10, 6, 80, 26);
+    s.italic = true; build(ui, &s);
+    CHECK(paint_hash(ui, 10, 6, 80, 26) != upright);
+    W(s.vt, "\x1b[2J\x1b[HHello\x1b[5;1H");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 10, 6, 80, 26), upright);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -768,6 +812,7 @@ int main(void) {
     test_line_height();
     test_sync();
     test_look();
+    test_opt_in_looks();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

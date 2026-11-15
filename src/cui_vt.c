@@ -984,6 +984,95 @@ static void cui__vt_snap_rect(cui_ctx *ui, float x0, float y0, float x1, float y
 }
 
 /* ------------------------------------------------------------------------ */
+/* Box drawing as it is without `.glyphs` (the complete set is in cui_vt_glyphs.c) */
+/* ------------------------------------------------------------------------ */
+
+/* U+2500..U+257F as four arms (left, right, up, down), each 0 none, 1 light, 2 heavy, 3 double, so lines meet
+ * exactly across cells whatever the font has. Dashed lines are drawn solid; the diagonals are lines. */
+#define CUI__VT_ARMS0(l, r, u, d) ((uint8_t)((l) | ((r) << 2) | ((u) << 4) | ((d) << 6)))
+static uint8_t cui__vt_box0_arms(uint32_t c) {
+    static const uint8_t t[] = {
+        CUI__VT_ARMS0(1,1,0,0), CUI__VT_ARMS0(2,2,0,0), CUI__VT_ARMS0(0,0,1,1), CUI__VT_ARMS0(0,0,2,2), CUI__VT_ARMS0(1,1,0,0), CUI__VT_ARMS0(2,2,0,0), CUI__VT_ARMS0(0,0,1,1), CUI__VT_ARMS0(0,0,2,2),
+        CUI__VT_ARMS0(1,1,0,0), CUI__VT_ARMS0(2,2,0,0), CUI__VT_ARMS0(0,0,1,1), CUI__VT_ARMS0(0,0,2,2),
+        CUI__VT_ARMS0(0,1,0,1), CUI__VT_ARMS0(0,2,0,1), CUI__VT_ARMS0(0,1,0,2), CUI__VT_ARMS0(0,2,0,2), CUI__VT_ARMS0(1,0,0,1), CUI__VT_ARMS0(2,0,0,1), CUI__VT_ARMS0(1,0,0,2), CUI__VT_ARMS0(2,0,0,2),
+        CUI__VT_ARMS0(0,1,1,0), CUI__VT_ARMS0(0,2,1,0), CUI__VT_ARMS0(0,1,2,0), CUI__VT_ARMS0(0,2,2,0), CUI__VT_ARMS0(1,0,1,0), CUI__VT_ARMS0(2,0,1,0), CUI__VT_ARMS0(1,0,2,0), CUI__VT_ARMS0(2,0,2,0),
+        CUI__VT_ARMS0(0,1,1,1), CUI__VT_ARMS0(0,2,1,1), CUI__VT_ARMS0(0,1,2,1), CUI__VT_ARMS0(0,1,1,2), CUI__VT_ARMS0(0,1,2,2), CUI__VT_ARMS0(0,2,2,1), CUI__VT_ARMS0(0,2,1,2), CUI__VT_ARMS0(0,2,2,2),
+        CUI__VT_ARMS0(1,0,1,1), CUI__VT_ARMS0(2,0,1,1), CUI__VT_ARMS0(1,0,2,1), CUI__VT_ARMS0(1,0,1,2), CUI__VT_ARMS0(1,0,2,2), CUI__VT_ARMS0(2,0,2,1), CUI__VT_ARMS0(2,0,1,2), CUI__VT_ARMS0(2,0,2,2),
+        CUI__VT_ARMS0(1,1,0,1), CUI__VT_ARMS0(2,1,0,1), CUI__VT_ARMS0(1,2,0,1), CUI__VT_ARMS0(2,2,0,1), CUI__VT_ARMS0(1,1,0,2), CUI__VT_ARMS0(2,1,0,2), CUI__VT_ARMS0(1,2,0,2), CUI__VT_ARMS0(2,2,0,2),
+        CUI__VT_ARMS0(1,1,1,0), CUI__VT_ARMS0(2,1,1,0), CUI__VT_ARMS0(1,2,1,0), CUI__VT_ARMS0(2,2,1,0), CUI__VT_ARMS0(1,1,2,0), CUI__VT_ARMS0(2,1,2,0), CUI__VT_ARMS0(1,2,2,0), CUI__VT_ARMS0(2,2,2,0),
+        CUI__VT_ARMS0(1,1,1,1), CUI__VT_ARMS0(2,1,1,1), CUI__VT_ARMS0(1,2,1,1), CUI__VT_ARMS0(2,2,1,1), CUI__VT_ARMS0(1,1,2,1), CUI__VT_ARMS0(1,1,1,2), CUI__VT_ARMS0(1,1,2,2), CUI__VT_ARMS0(2,1,2,1),
+        CUI__VT_ARMS0(1,2,2,1), CUI__VT_ARMS0(2,1,1,2), CUI__VT_ARMS0(1,2,1,2), CUI__VT_ARMS0(2,2,2,1), CUI__VT_ARMS0(2,2,1,2), CUI__VT_ARMS0(2,1,2,2), CUI__VT_ARMS0(1,2,2,2), CUI__VT_ARMS0(2,2,2,2),
+        CUI__VT_ARMS0(1,1,0,0), CUI__VT_ARMS0(2,2,0,0), CUI__VT_ARMS0(0,0,1,1), CUI__VT_ARMS0(0,0,2,2),
+        CUI__VT_ARMS0(3,3,0,0), CUI__VT_ARMS0(0,0,3,3), CUI__VT_ARMS0(0,3,0,1), CUI__VT_ARMS0(0,1,0,3), CUI__VT_ARMS0(0,3,0,3), CUI__VT_ARMS0(3,0,0,1), CUI__VT_ARMS0(1,0,0,3), CUI__VT_ARMS0(3,0,0,3),
+        CUI__VT_ARMS0(0,3,1,0), CUI__VT_ARMS0(0,1,3,0), CUI__VT_ARMS0(0,3,3,0), CUI__VT_ARMS0(3,0,1,0), CUI__VT_ARMS0(1,0,3,0), CUI__VT_ARMS0(3,0,3,0),
+        CUI__VT_ARMS0(0,3,1,1), CUI__VT_ARMS0(0,1,3,3), CUI__VT_ARMS0(0,3,3,3), CUI__VT_ARMS0(3,0,1,1), CUI__VT_ARMS0(1,0,3,3), CUI__VT_ARMS0(3,0,3,3),
+        CUI__VT_ARMS0(3,3,0,1), CUI__VT_ARMS0(1,1,0,3), CUI__VT_ARMS0(3,3,0,3), CUI__VT_ARMS0(3,3,1,0), CUI__VT_ARMS0(1,1,3,0), CUI__VT_ARMS0(3,3,3,0),
+        CUI__VT_ARMS0(3,3,1,1), CUI__VT_ARMS0(1,1,3,3), CUI__VT_ARMS0(3,3,3,3),
+        CUI__VT_ARMS0(0,1,0,1), CUI__VT_ARMS0(1,0,0,1), CUI__VT_ARMS0(1,0,1,0), CUI__VT_ARMS0(0,1,1,0),
+    };
+    if (c >= 0x2574 && c <= 0x257F) {
+        static const uint8_t h[] = { CUI__VT_ARMS0(1,0,0,0), CUI__VT_ARMS0(0,0,1,0), CUI__VT_ARMS0(0,1,0,0), CUI__VT_ARMS0(0,0,0,1), CUI__VT_ARMS0(2,0,0,0), CUI__VT_ARMS0(0,0,2,0),
+                                     CUI__VT_ARMS0(0,2,0,0), CUI__VT_ARMS0(0,0,0,2), CUI__VT_ARMS0(1,2,0,0), CUI__VT_ARMS0(0,0,1,2), CUI__VT_ARMS0(2,1,0,0), CUI__VT_ARMS0(0,0,2,1) };
+        return h[c - 0x2574];
+    }
+    return c >= 0x2500 && c < 0x2500 + sizeof t ? t[c - 0x2500] : 0;
+}
+
+/* One arm of a box character. `i`: 0 left, 1 right, 2 up, 3 down. A double arm is two lines; where the crossing
+ * line is double too, each line reaches the crossing line on its side (a corner closes) or stops at its inner
+ * line (a gap for the arm on the other side to pass through). */
+static void cui__vt_box0_arm(cui_ctx *ui, int i, const int *arm, cui_rect c, float light, float heavy, cui_color col) {
+    float cx = c.x + c.w * 0.5f, cy = c.y + c.h * 0.5f, g = light * 1.5f, half = light * 0.5f;
+    bool is_h = i < 2;
+    int a = is_h ? 2 : 0, b = a + 1;                     /* the crossing arms: up and down for a horizontal arm, left and right otherwise */
+    bool cross_any = arm[a] || arm[b], cross3 = arm[a] == 3 || arm[b] == 3;
+    float t = arm[i] == 2 ? heavy : light;
+    float cross_w = 0;
+    if (cross_any) cross_w = (arm[a] == 2 || arm[b] == 2 ? heavy : light) * 0.5f;
+    int lines = arm[i] == 3 ? 2 : 1;
+    for (int k = 0; k < lines; k++) {
+        float o = lines == 2 ? (k ? g : -g) : 0;           /* offset across the arm */
+        float mid;                                          /* where the line ends at the middle, along the arm */
+        float mc = is_h ? cx : cy;
+        float dir = (i == 0 || i == 2) ? 1.0f : -1.0f;     /* from the edge toward the middle */
+        if (!cross_any) mid = mc;
+        else if (lines == 2 && cross3) {
+            bool side_has = is_h ? (k == 0 ? arm[2] != 0 : arm[3] != 0) : (k == 0 ? arm[0] != 0 : arm[1] != 0);
+            mid = side_has ? mc - dir * (g + half) : mc + dir * (g + half);
+            if (!side_has) {
+                bool opp_has = is_h ? (k == 0 ? arm[3] != 0 : arm[2] != 0) : (k == 0 ? arm[1] != 0 : arm[0] != 0);
+                if (!opp_has) mid = mc;
+            }
+        } else mid = mc + dir * cross_w;
+        if (is_h) {
+            float yc = cy + o;
+            if (i == 0) cui__vt_snap_rect(ui, c.x, yc - t * 0.5f, mid, yc + t * 0.5f, col);
+            else cui__vt_snap_rect(ui, mid, yc - t * 0.5f, c.x + c.w, yc + t * 0.5f, col);
+        } else {
+            float xc = cx + o;
+            if (i == 2) cui__vt_snap_rect(ui, xc - t * 0.5f, c.y, xc + t * 0.5f, mid, col);
+            else cui__vt_snap_rect(ui, xc - t * 0.5f, mid, xc + t * 0.5f, c.y + c.h, col);
+        }
+    }
+}
+
+static bool cui__vt_box0(cui_ctx *ui, uint32_t cp, cui_rect c, cui_color col) {
+    if (cp < 0x2500 || cp > 0x257F) return false;
+    if (cp >= 0x2571 && cp <= 0x2573) {     /* diagonals */
+        if (cp != 0x2572) cui_draw_line(ui, (cui_vec2){ c.x, c.y + c.h }, (cui_vec2){ c.x + c.w, c.y }, 1, col);
+        if (cp != 0x2571) cui_draw_line(ui, (cui_vec2){ c.x, c.y }, (cui_vec2){ c.x + c.w, c.y + c.h }, 1, col);
+        return true;
+    }
+    uint8_t a = cui__vt_box0_arms(cp);
+    if (!a) return false;
+    int arm[4] = { a & 3, (a >> 2) & 3, (a >> 4) & 3, (a >> 6) & 3 };     /* left, right, up, down */
+    float s = ui->scale > 0 ? ui->scale : 1;
+    float light = fmaxf(1.0f, floorf(c.h / 16.0f * s + 0.5f) / s), heavy = light * 2.0f + (c.h > 24 ? 1.0f : 0.0f);
+    for (int i = 0; i < 4; i++) if (arm[i]) cui__vt_box0_arm(ui, i, arm, c, light, heavy, col);
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
 /* View: paint                                                              */
 /* ------------------------------------------------------------------------ */
 
@@ -993,6 +1082,7 @@ typedef struct {
     int off;
     bool focused, show_cursor, has_sel;
     int shape;                        /* CUI_VT_CURSOR_* */
+    bool glyphs, italic;              /* the opt-in looks: hand-drawn characters, slanted italic */
     const cui__vt_cell *snap;         /* paint this copy of the screen (a synchronized update is open) instead of the live one */
     int scx, scy; bool scursor;
     cui__vt_pos s0, s1;
@@ -1069,12 +1159,19 @@ static void cui__vt_decor(cui_ctx *ui, const cui__vt_paint *p, uint32_t at, floa
     }
 }
 
+/* Slants the glyphs drawn since vertex v0 around the baseline `base`: a synthesized italic (the monospace font has none). */
+static void cui__vt_slant(cui_ctx *ui, int v0, float base) {
+    cui_xform x = ui->dl.xform_stack[ui->dl.xform_depth - 1];
+    float by = base * ui->scale * x.scale + x.oy;
+    for (int v = v0; v < ui->dl.vtx_count; v++) ui->dl.vtx[v].x += 0.2f * (by - ui->dl.vtx[v].y);
+}
+
 static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     cui__vt_paint *p = (cui__vt_paint *)data;
     const cui_vt *v = p->v;
     cui_rect r = n->rect;
     cui__paint_wheel_hit(ui, p->wheel, r);
-    float x0 = r.x + p->padx, y0 = r.y + p->pady, fh = cui__font_line_height(ui, CUI_FONT_MONO, p->size);
+    float x0 = r.x + p->padx, y0 = r.y + p->pady, fh = cui__font_line_height(ui, CUI_FONT_MONO, p->size), asc = cui__font_ascent(ui, CUI_FONT_MONO, p->size);
     cui_push_clip(ui, (cui_rect){ r.x, r.y + 1, r.w, r.h - 2 });
     char *buf = (char *)cui__frame_alloc(ui, (size_t)v->cols * 4 + 8);
     for (int y = 0; y < v->rows; y++) {
@@ -1109,11 +1206,23 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             cui__vt_cell_colors(ui, p, &cells[x], &fg, &bg, &hb);
             uint32_t at = cells[x].ca;
             float ty = ry + (p->lh - fh) * 0.5f;
-            if (cui__vt_glyph(ui, ch, (cui_rect){ x0 + x * p->cw, ry, p->cw, p->lh }, fg)) { x++; continue; }
+            bool slant = p->italic && (at & CUI_VT_ITALIC);
+            int v0 = ui->dl.vtx_count;
             if (ch >= 128) {
+                cui_rect cell = { x0 + x * p->cw, ry, p->cw, p->lh };
+                if (p->glyphs) {                            /* the complete hand-drawn set; lines above and below go with it, as with text */
+                    if (cui__vt_glyph(ui, ch, cell, fg)) {
+                        if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, 1, ry, fg);
+                        x++; continue;
+                    }
+                } else {                                    /* as it always was: box lines and the first block elements */
+                    if (cui__vt_box0(ui, ch, cell, fg)) { x++; continue; }
+                    if (ch >= 0x2580 && ch <= 0x2593) { cui__tm_block(ui, (int)(ch - 0x2580), cell, fg); x++; continue; }
+                }
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, u, (int)k, true);
                 if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, u, (int)k, true);
+                if (slant) cui__vt_slant(ui, v0, ty + asc);
                 if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, x + 1 < cn && (cells[x + 1].ca & CUI__VT_SPACER) ? 2 : 1, ry, fg);
                 x++;
                 continue;
@@ -1130,6 +1239,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             len = last - x + 1;
             cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, buf, len, true);
             if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, buf, len, true);
+            if (slant) cui__vt_slant(ui, v0, ty + asc);
             if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, len, ry, fg);
             if (at & CUI_VT_STRIKE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh * 0.5f, len * p->cw, 1 }, CUI_CORNERS(0), fg);
             x = e;
@@ -1156,7 +1266,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             const cui__vt_cell *cells = p->snap ? p->snap + (size_t)ccy * (size_t)v->cols : cui__vt_cells_at(v, ccy, &cn, &w);
             if (p->snap) cn = v->cols;
             uint32_t ch = cells && ccx < cn ? CUI__VT_CP(cells[ccx].ca) : 0;
-            if (ch > ' ' && ch != 0x7F) {
+            if (ch > ' ' && ch != 0x7F && !(p->glyphs && ch >= 128 && cui__vt_glyph(ui, ch, (cui_rect){ cx, cy, p->cw, p->lh }, p->bg))) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, cx, cy + (p->lh - fh) * 0.5f, p->bg, u, (int)k, true);
             }
@@ -1304,6 +1414,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     memset(p, 0, sizeof *p);
     p->v = v; p->cw = cw; p->lh = lh; p->size = size; p->padx = padx; p->pady = pady; p->off = st->off;
     p->focused = focused; p->show_cursor = true; p->shape = v->cursor_shape;
+    p->glyphs = o->glyphs; p->italic = o->italic;
     p->has_sel = st->has_sel;
     cui__vt_sel_order(st, &p->s0, &p->s1);
     p->fg = CUI_C(ui, FOREGROUND);

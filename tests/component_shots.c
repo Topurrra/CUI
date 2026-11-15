@@ -2729,7 +2729,7 @@ SCENE(vt_terminal) {
     static int frames;
     if (!vt) vt = cui_vt_create(90, 20, 0);
     cui_box(ui, UPTO(820)) {
-        cui_vt_view(ui, "vt", vt, .height = CUI_PX(400), .no_input = true);
+        cui_vt_view(ui, "vt", vt, .height = CUI_PX(400), .no_input = true, .glyphs = true);
     }
     if (++frames == 3) vt_demo_fill(vt);      /* once the grid has the size of its view */
 }
