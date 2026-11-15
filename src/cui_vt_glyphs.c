@@ -227,12 +227,46 @@ static bool cui__vg_box(cui__vg *g, uint32_t cp) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Block elements                                                           */
+/* ------------------------------------------------------------------------ */
+
+/* the position of the n-th eighth of a length: rounded, so eighths of cells in a row add up */
+static int cui__vg_eighth(int len, int n) { return (len * n + 4) / 8; }
+
+/* quadrants: bit 0 upper left, 1 upper right, 2 lower left, 3 lower right */
+static void cui__vg_quadrants(cui__vg *g, int mask) {
+    int xm = cui__vg_eighth(g->w, 4), ym = g->h / 2;
+    if ((mask & 3) == 3) cui__vg_fill(g, 0, 0, g->w, ym);
+    else if (mask & 1) cui__vg_fill(g, 0, 0, xm, ym);
+    else if (mask & 2) cui__vg_fill(g, xm, 0, g->w, ym);
+    if ((mask & 12) == 12) cui__vg_fill(g, 0, ym, g->w, g->h);
+    else if (mask & 4) cui__vg_fill(g, 0, ym, xm, g->h);
+    else if (mask & 8) cui__vg_fill(g, xm, ym, g->w, g->h);
+}
+
+static bool cui__vg_block(cui__vg *g, uint32_t cp) {
+    int w = g->w, h = g->h, xm = cui__vg_eighth(w, 4), ym = h / 2;
+    if (cp == 0x2580) cui__vg_fill(g, 0, 0, w, ym);
+    else if (cp <= 0x2588) cui__vg_fill(g, 0, h - cui__vg_eighth(h, (int)(cp - 0x2580)), w, h);        /* lower 1/8 .. full */
+    else if (cp <= 0x258F) cui__vg_fill(g, 0, 0, cui__vg_eighth(w, (int)(0x2590 - cp)), h);         /* left 7/8 .. 1/8 */
+    else if (cp == 0x2590) cui__vg_fill(g, xm, 0, w, h);
+    else if (cp <= 0x2593) cui__vg_fillc(g, 0, 0, w, h, cui_alpha(g->col, 0.25f * (float)(cp - 0x2590)));
+    else if (cp == 0x2594) { int e = cui__vg_eighth(h, 1); cui__vg_fill(g, 0, 0, w, e < 1 ? 1 : e); }
+    else if (cp == 0x2595) { int e = cui__vg_eighth(w, 1); cui__vg_fill(g, w - (e < 1 ? 1 : e), 0, w, h); }
+    else {
+        static const uint8_t q[10] = { 4, 8, 1, 13, 9, 7, 11, 2, 6, 14 };        /* U+2596..U+259F */
+        cui__vg_quadrants(g, q[cp - 0x2596]);
+    }
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
 bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (cp < 0x2500) return false;
-    bool ours = (cp <= 0x257F) || (cp >= 0x2580 && cp <= 0x2593);
+    bool ours = (cp <= 0x259F);
     if (!ours) return false;
     cui__vg g;
     g.ui = ui;
@@ -248,7 +282,7 @@ bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (g.w <= 0 || g.h <= 0) return true;
     bool drawn = true;
     if (cp <= 0x257F) drawn = cui__vg_box(&g, cp);
-    else { cui__vg_flush(&g); cui__tm_block(ui, (int)(cp - 0x2580), cell, col); }      /* the block elements: the shared ones until they have their own */
+    else drawn = cui__vg_block(&g, cp);
     cui__vg_flush(&g);
     return drawn;
 }
