@@ -4064,7 +4064,7 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * Understood: cursor movement, erase, insert and delete (characters and lines), scrolling regions, 16, 256
  * and true colors, bold, dim, italic, underline (single, double, curly, dotted, dashed: `4:0` to `4:5`, `21`; `58` and `59` are read but the line takes the text color: a cell has no room for a second color), overline (`53`, `55`), inverse, strike, colors in the colon forms (`38:2::r:g:b`, `38:2:r:g:b`, `38:5:n`), wide characters, the alternate screen
  * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2),
- * cursor shape (`CSI Ps SP q`: block, underline, bar; never blinking), cursor position, device attribute, XTVERSION (`ESC [ > q`) and size reports (`ESC [ 14 t`, `16 t` and `18 t`, with the cell size the view records each frame), mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
+ * cursor shape (`CSI Ps SP q`: block, underline, bar; never blinking), synchronized output (`?2026`: the view shows the screen as it was until the update ends, for at most about 150 ms), cursor position, device attribute, XTVERSION (`ESC [ > q`) and size reports (`ESC [ 14 t`, `16 t` and `18 t`, with the cell size the view records each frame), mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
  * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, images, character sets.
  *
  * Mouse (`.mouse = true`): while the program asked for the mouse (`cui_vt_mouse_reporting`), clicks, drags,
@@ -4115,6 +4115,7 @@ CUI_API bool cui_vt_alt_screen(const cui_vt *vt);
 CUI_API bool cui_vt_app_cursor(const cui_vt *vt);
 CUI_API bool cui_vt_bracketed_paste(const cui_vt *vt);
 CUI_API bool cui_vt_mouse_reporting(const cui_vt *vt);                        /* the program asked for the mouse (1000, 1002 or 1003) */
+CUI_API bool cui_vt_synchronized(const cui_vt *vt);                              /* a synchronized update (?2026h ... ?2026l) is open: the view shows the screen as it was at h, for about 150 ms of frames */
 enum { CUI_VT_CURSOR_BLOCK = 0, CUI_VT_CURSOR_UNDERLINE = 1, CUI_VT_CURSOR_BAR = 2 };
 CUI_API int cui_vt_cursor_shape(const cui_vt *vt);                            /* CUI_VT_CURSOR_*, set by the program with CSI Ps SP q; block until then (no blinking is drawn) */
 CUI_API int cui_vt_scrollback_count(const cui_vt *vt);

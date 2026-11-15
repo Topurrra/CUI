@@ -641,6 +641,87 @@ static void test_line_height(void) {
     }
 }
 
+/* ---- what is painted: synchronized output, underline styles, cursor shapes ---- */
+
+static uint32_t paint_hash(cui_ctx *ui, int x0, int y0, int x1, int y1) {     /* a hash of a rectangle of the last frame, 640 x 400 */
+    static uint32_t px[640 * 400];
+    cui_sw_render(g_sw, cui_get_draw_data(ui), px, 640, 400, 640 * 4, CUI_SW_RGBA);
+    uint32_t h = 2166136261u;
+    for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) h = (h ^ px[y * 640 + x]) * 16777619u;
+    return h;
+}
+
+static void test_sync(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    size_t mem0 = cui_vt_memory(s.vt);
+    W(s.vt, "\x1b[2J\x1b[Hold text");
+    build(ui, &s);
+    uint32_t old = paint_hash(ui, 0, 0, 200, 60);
+    CHECK(!cui_vt_synchronized(s.vt));
+    W(s.vt, "\x1b[?2026h");
+    CHECK(cui_vt_synchronized(s.vt));
+    CHECK(cui_vt_memory(s.vt) > mem0);                                         /* the one copy of the screen is counted */
+    W(s.vt, "\x1b[2J\x1b[Hnew text");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), old);                              /* the screen as it was */
+    char b[32]; cui_vt_line_text(s.vt, 0, b, sizeof b); CHECK_STR(b, "new text");   /* the program's screen is the new one */
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), old);
+    W(s.vt, "\x1b[?2026l");
+    build(ui, &s);
+    uint32_t cur = paint_hash(ui, 0, 0, 200, 60);
+    CHECK(cur != old);                                                         /* the end of the update shows the new screen at once */
+    /* an update that never ends shows the live screen after about 150 ms of frames */
+    W(s.vt, "\x1b[?2026h\x1b[2J\x1b[Hthird");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), cur);
+    for (int i = 0; i < 12; i++) build(ui, &s);                                /* 12 frames of 16.7 ms */
+    uint32_t third = paint_hash(ui, 0, 0, 200, 60);
+    CHECK(third != cur);
+    W(s.vt, "\x1b[?2026l");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), third);
+    /* the copy is reused for the next update, a reset and a resize close one */
+    size_t mem1 = cui_vt_memory(s.vt);
+    W(s.vt, "\x1b[?2026h"); CHECK(cui_vt_synchronized(s.vt)); CHECK_EQ(cui_vt_memory(s.vt), mem1);
+    W(s.vt, "\x1b" "c"); CHECK(!cui_vt_synchronized(s.vt));
+    W(s.vt, "\x1b[?2026h\x1b[?1049h"); CHECK(!cui_vt_synchronized(s.vt));      /* the other screen: no stale picture */
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
+static void test_look(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    uint32_t seen[8];
+    int n = 0;
+    static const char *const seq[] = { "\x1b[4m", "\x1b[4:2m", "\x1b[4:3m", "\x1b[4:4m", "\x1b[4:5m", "\x1b[53m", "\x1b[m" };
+    for (int i = 0; i < 7; i++) {                                              /* every style draws something of its own */
+        W(s.vt, "\x1b[0m\x1b[2J\x1b[H"); W(s.vt, seq[i]); W(s.vt, "Hello Hello");
+        build(ui, &s);
+        seen[n] = paint_hash(ui, 10, 6, 120, 26);
+        for (int k = 0; k < n; k++) CHECK(seen[k] != seen[n]);
+        n++;
+    }
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3m\x1b[58:2::255:0:0mHello Hello");     /* the underline color is not drawn: the same picture */
+    build(ui, &s);
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3mHello Hello");
+    uint32_t a = (build(ui, &s), paint_hash(ui, 10, 6, 120, 26));
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3m\x1b[58:2::255:0:0mHello Hello");
+    CHECK_EQ(paint_hash(ui, 10, 6, 120, 26), a);                               /* (the frame has not changed: only the screen did) */
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 10, 6, 120, 26), a);
+    /* the cursor: a block, an underline and a bar are three pictures, and the character stays under the line and the bar */
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[Hab\x1b[1D");
+    uint32_t shape[3];
+    static const char *const cs[] = { "\x1b[2 q", "\x1b[4 q", "\x1b[6 q" };
+    for (int i = 0; i < 3; i++) { W(s.vt, cs[i]); build(ui, &s); shape[i] = paint_hash(ui, 10, 6, 40, 26); }
+    CHECK(shape[0] != shape[1] && shape[1] != shape[2] && shape[0] != shape[2]);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -685,6 +766,8 @@ int main(void) {
     test_cursor_shape();
     test_queries();
     test_line_height();
+    test_sync();
+    test_look();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

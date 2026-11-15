@@ -55,6 +55,9 @@ struct cui_vt {
     bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
     uint8_t cursor_shape;             /* CUI_VT_CURSOR_* from CSI Ps SP q */
     int cell_w, cell_h;               /* the view's cell in device pixels, for the size reports (0 before a view has drawn) */
+    cui__vt_cell *snap;               /* synchronized output (?2026): the screen as it was at h, allocated at the first h and kept */
+    int snap_cols, snap_rows, snap_cx, snap_cy; bool snap_cursor;
+    bool sync_on; uint32_t sync_seq;  /* an update is open; counts the h that opened one */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -108,13 +111,14 @@ cui_vt *cui_vt_create(int cols, int rows, int scrollback_lines) {
 void cui_vt_destroy(cui_vt *v) {
     if (!v) return;
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
-    free(v->sb); free(v->sb_lines); free(v->tabs);
+    free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap);
     free(v);
 }
 
 size_t cui_vt_memory(const cui_vt *v) {
     size_t n = sizeof *v + (size_t)CUI__VT_MAX_COLS;
     n += (size_t)v->cols * (size_t)v->rows * sizeof(cui__vt_cell) * (v->scr[1].cells ? 2 : 1);
+    if (v->snap) n += (size_t)v->snap_cols * (size_t)v->snap_rows * sizeof(cui__vt_cell);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -339,6 +343,7 @@ static void cui__vt_cursor_to(cui_vt *v, int x, int y) {
 
 static void cui__vt_switch_screen(cui_vt *v, bool alt, bool save) {
     if (alt == (v->cur == 1)) return;
+    v->sync_on = false;
     if (alt) {
         if (!v->scr[1].cells && !cui__vt_screen_alloc(&v->scr[1], v->cols, v->rows)) return;
         if (save) { v->sx = v->cx; v->sy = v->cy; v->spend = v->pend; v->sattr = v->attr; v->sfg = v->fg; v->sbg = v->bg; }
@@ -349,6 +354,20 @@ static void cui__vt_switch_screen(cui_vt *v, bool alt, bool save) {
         if (save) { cui__vt_cursor_to(v, v->sx, v->sy); v->pend = v->spend; v->attr = v->sattr; v->fg = v->sfg; v->bg = v->sbg; }
     }
     v->stop = 0; v->sbot = v->rows - 1;
+}
+
+/* ?2026h: the view keeps painting the screen as it is now until ?2026l (or about 150 ms of frames). One copy of the visible
+ * cells, allocated at the first use and kept for the next ones; a program that never asks costs nothing. */
+static void cui__vt_sync_begin(cui_vt *v) {
+    if (!v->snap || v->snap_cols != v->cols || v->snap_rows != v->rows) {
+        free(v->snap);
+        v->snap_cols = v->cols; v->snap_rows = v->rows;
+        v->snap = (cui__vt_cell *)malloc((size_t)v->cols * (size_t)v->rows * sizeof(cui__vt_cell));
+        if (!v->snap) return;
+    }
+    for (int y = 0; y < v->rows; y++) memcpy(v->snap + (size_t)y * (size_t)v->cols, cui__vt_row(v, CUI__VT_S(v), y), sizeof(cui__vt_cell) * (size_t)v->cols);
+    v->snap_cx = v->cx; v->snap_cy = v->cy; v->snap_cursor = v->cursor_vis;
+    v->sync_on = true; v->sync_seq++;
 }
 
 static void cui__vt_mode(cui_vt *v, bool set) {
@@ -369,6 +388,7 @@ static void cui__vt_mode(cui_vt *v, bool set) {
         case 1006: v->mouse_sgr = set; break;
         case 1004: v->focus_mode = set; break;
         case 2004: v->bracketed = set; break;
+        case 2026: if (set) { if (!v->sync_on) cui__vt_sync_begin(v); } else v->sync_on = false; break;
         default: break;
         }
     }
@@ -381,7 +401,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
     if (v->inter == '!' && f == 'p') {      /* soft reset */
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = false; v->pend = false;
-        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
         return;
     }
     if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking is not drawn) */
@@ -487,7 +507,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
     case 'c': {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
-        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -605,6 +625,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     cols = CUI_CLAMP(cols, 2, CUI__VT_MAX_COLS);
     rows = CUI_CLAMP(rows, 1, CUI__VT_MAX_ROWS);
     if (cols == v->cols && rows == v->rows) return;
+    v->sync_on = false;
     /* the cursor must stay on screen: rows above it move into the scrollback */
     if (v->cur == 0 && v->cy >= rows) {
         int drop = v->cy - rows + 1;
@@ -651,6 +672,7 @@ bool cui_vt_alt_screen(const cui_vt *v) { return v->cur == 1; }
 bool cui_vt_app_cursor(const cui_vt *v) { return v->app_cursor; }
 bool cui_vt_bracketed_paste(const cui_vt *v) { return v->bracketed; }
 bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; }
+bool cui_vt_synchronized(const cui_vt *v) { return v && v->sync_on; }
 int cui_vt_cursor_shape(const cui_vt *v) { return v ? v->cursor_shape : CUI_VT_CURSOR_BLOCK; }
 int cui_vt_scrollback_count(const cui_vt *v) { return v->sb_count; }
 
@@ -733,6 +755,7 @@ typedef struct {
     uint64_t seen_total;
     char out[768]; int out_n;
     uint8_t btn_down;                 /* buttons whose press went to the program */
+    uint32_t sync_seen; double sync_t0;   /* the update the view last saw open, and when the view first drew it */
     int mcol, mrow; bool mvalid;      /* the last cell the mouse was reported in */
     bool finit, fin;                  /* the view had the keyboard and the window had the focus, as of the last frame */
 } cui__vt_state;
@@ -1060,6 +1083,8 @@ typedef struct {
     int off;
     bool focused, show_cursor, has_sel;
     int shape;                        /* CUI_VT_CURSOR_* */
+    const cui__vt_cell *snap;         /* paint this copy of the screen (a synchronized update is open) instead of the live one */
+    int scx, scy; bool scursor;
     cui__vt_pos s0, s1;
     cui_color fg, bg, sel, cursor, bar;
     float bar_t;
@@ -1148,6 +1173,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
         int cn; bool wrapped;
         int64_t arow = (int64_t)v->sb_total - p->off + y;
         const cui__vt_cell *cells = cui__vt_cells_abs(v, arow, &cn, &wrapped);
+        if (p->snap && arow >= (int64_t)v->sb_total && arow - (int64_t)v->sb_total < v->rows) { cells = p->snap + (size_t)(arow - (int64_t)v->sb_total) * (size_t)v->cols; cn = v->cols; }
         /* selection under the text */
         if (p->has_sel && arow >= p->s0.row && arow <= p->s1.row) {
             int c0 = arow == p->s0.row ? p->s0.col : 0, c1 = arow == p->s1.row ? p->s1.col + 1 : v->cols;
@@ -1200,9 +1226,11 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             x = e;
         }
     }
-    /* the cursor */
-    if (p->show_cursor && v->cursor_vis && p->off == 0) {
-        float cx = x0 + v->cx * p->cw, cy = y0 + v->cy * p->lh;
+    /* the cursor (where it was when a synchronized update opened, while one is shown) */
+    int ccx = p->snap ? p->scx : v->cx, ccy = p->snap ? p->scy : v->cy;
+    bool cvis = p->snap ? p->scursor : v->cursor_vis;
+    if (p->show_cursor && cvis && p->off == 0) {
+        float cx = x0 + (float)ccx * p->cw, cy = y0 + (float)ccy * p->lh;
         if (p->shape != CUI_VT_CURSOR_BLOCK) {              /* an underline or a bar, on whole device pixels; the character under it stays as it is */
             float s = ui->scale > 0 ? ui->scale : 1;
             cui_color col = p->focused ? p->cursor : cui_alpha(p->cursor, 0.55f);
@@ -1216,8 +1244,9 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
         } else if (p->focused) {
             cui__vt_snap_rect(ui, cx, cy, cx + p->cw, cy + p->lh, p->cursor);
             int cn; bool w;
-            const cui__vt_cell *cells = cui__vt_cells_at(v, v->cy, &cn, &w);
-            uint32_t ch = cells && v->cx < cn ? CUI__VT_CP(cells[v->cx].ca) : 0;
+            const cui__vt_cell *cells = p->snap ? p->snap + (size_t)ccy * (size_t)v->cols : cui__vt_cells_at(v, ccy, &cn, &w);
+            if (p->snap) cn = v->cols;
+            uint32_t ch = cells && ccx < cn ? CUI__VT_CP(cells[ccx].ca) : 0;
             if (ch > ' ' && ch != 0x7F) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, cx, cy + (p->lh - fh) * 0.5f, p->bg, u, (int)k, true);
@@ -1375,6 +1404,15 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     p->bar = CUI_C(ui, BORDER_STRONG);
     p->bar_t = in.hovered || st->off > 0 ? 1.0f : 0.0f;
     p->wheel = wid;
+    /* an update bracketed by ?2026h and ?2026l is open: show the screen as it was when it opened, for about 150 ms of frames at most */
+    if (v->sync_on && v->snap && st->off == 0 && v->snap_cols == v->cols && v->snap_rows == v->rows) {
+        if (st->sync_seen != v->sync_seq) { st->sync_seen = v->sync_seq; st->sync_t0 = ui->time; }
+        double left = 0.15 - (ui->time - st->sync_t0);
+        if (left > 0) {
+            p->snap = v->snap; p->scx = v->snap_cx; p->scy = v->snap_cy; p->scursor = v->snap_cursor;
+            cui_request_wakeup(ui, (float)left + 0.002f);           /* the live screen shows again even if nothing else asks for a frame */
+        }
+    }
     ln->paint = cui__paint_vt;
     ln->paint_data = p;
     ui->last_id = id;
