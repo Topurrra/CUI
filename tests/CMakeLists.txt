@@ -182,3 +182,6 @@ if(WIN32 AND CUI_BUILD_RENDER_PROBE)
     add_executable(cui_render_probe render_probe.c)
     target_link_libraries(cui_render_probe PRIVATE cui::cui d3d11 dxgi dwmapi gdi32 user32 psapi)
 endif()
+
+add_executable(cui_bench_log bench_log.c)   # the log view over a big log (1.1 million lines)
+target_link_libraries(cui_bench_log PRIVATE cui::cui)

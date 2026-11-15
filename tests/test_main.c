@@ -8675,6 +8675,166 @@ static void test_log_view_settles(void) {
     cui_destroy(ui);
 }
 
+/* The log view's filter over a big log is found a slice of lines a frame, and not at all when
+ * every level is shown with no filter text. */
+extern uint64_t cui__logv_scan_rows;
+static const char *const lv_tags[5] = { "trace", "debug", "info ", "warn ", "error" };
+static int lv_line(uint64_t seq, char *out, size_t cap) { return snprintf(out, cap, "line %llu of %s", (unsigned long long)seq, seq % 3 ? "ok" : "the slow path"); }
+/* what "copy all" gives for the lines of levels in mask that contain query: its length and start */
+static size_t lv_expect(const cui_log_buffer *b, unsigned mask, const char *query, char *head, size_t head_cap, int *rows) {
+    size_t total = 0;
+    int n = 0;
+    head[0] = 0;
+    for (uint64_t seq = b->total - (uint64_t)b->count; seq < b->total; seq++) {
+        char t[64];
+        int len = lv_line(seq, t, sizeof t);
+        int lv = (int)(seq % 5);
+        if (!(mask & (1u << lv)) || (query[0] && !strstr(t, query))) continue;
+        if (n == 0) snprintf(head, head_cap, "%s %s", lv_tags[lv], t);
+        total += 6 + (size_t)len + 1;
+        n++;
+    }
+    if (n) total--;
+    *rows = n;
+    return total;
+}
+/* frames until nothing asks for another; the most lines one of them looked at */
+static int lv_settle(cui_ctx *ui, logv_ctx *a, uint64_t *max_per_frame, int limit) {
+    int frames = 0;
+    *max_per_frame = 0;
+    do {
+        uint64_t before = cui__logv_scan_rows;
+        run(ui, build_logv, a, 1);
+        if (cui__logv_scan_rows - before > *max_per_frame) *max_per_frame = cui__logv_scan_rows - before;
+        frames++;
+    } while (cui_needs_redraw(ui) && frames < limit);
+    return frames;
+}
+/* click a line, select all and copy: the length and start of the copy */
+static size_t lv_copy_all(cui_ctx *ui, logv_ctx *a, char *head, size_t cap) {
+    click_at(ui, build_logv, a, 200, 150);
+    cui_input_key(ui, CUI_KEY_A, true, CUI_MOD_PRIMARY); cui_input_key(ui, CUI_KEY_A, false, CUI_MOD_PRIMARY);
+    run(ui, build_logv, a, 1);
+    g_clip[0] = 0; g_clip_len = 0;
+    cui_input_key(ui, CUI_KEY_C, true, CUI_MOD_PRIMARY); cui_input_key(ui, CUI_KEY_C, false, CUI_MOD_PRIMARY);
+    run(ui, build_logv, a, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    size_t n = g_clip_len;
+    char *nl = strchr(g_clip, '\n');
+    size_t hl = nl ? (size_t)(nl - g_clip) : strlen(g_clip);
+    snprintf(head, cap, "%.*s", (int)(hl < cap - 1 ? hl : cap - 1), g_clip);
+    return n;
+}
+static void lv_type_filter(cui_ctx *ui, logv_ctx *a, const char *text) {
+    click_at(ui, build_logv, a, 500, 26);   /* the search field */
+    cui_input_key(ui, CUI_KEY_A, true, CUI_MOD_PRIMARY); cui_input_key(ui, CUI_KEY_A, false, CUI_MOD_PRIMARY);
+    run(ui, build_logv, a, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    cui_input_text(ui, text);
+}
+static void test_log_view_scan(void) {
+    printf("log view: no scan unless filtered, a big filter in slices, small logs in one frame\n");
+    enum { N = 1000000 };
+    static cui_log_line lines[N + 16];
+    static char text[N * 28];
+    static cui_log_buffer lb;
+    cui_log_init(&lb, lines, N + 16, text, sizeof text);
+    for (int i = 0; i < N; i++) {
+        char t[64];
+        lv_line((uint64_t)i, t, sizeof t);
+        cui_log_append_text(&lb, (cui_log_level)(i % 5), (double)i, t, -1);
+    }
+    CHECK(lb.count == N);
+    cui_ctx *ui = new_ctx();
+    logv_ctx a = { &lb, false, 0 };
+    char head[96], want_head[96];
+    int rows;
+    uint64_t per;
+
+    /* the first frames of a 1M line log scan nothing, and all of it is there */
+    uint64_t c0 = cui__logv_scan_rows;
+    int fr = lv_settle(ui, &a, &per, 50);
+    CHECK(cui__logv_scan_rows == c0 && per == 0 && fr <= 20);
+    size_t want = lv_expect(&lb, 31u, "", want_head, sizeof want_head, &rows);
+    size_t got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0);
+    CHECK(cui__logv_scan_rows == c0);
+
+    /* a level turned off: several frames, a slice each, the same rows as a full scan */
+    c0 = cui__logv_scan_rows;
+    click_at(ui, build_logv, &a, 35, 24);   /* Trace */
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    fr = lv_settle(ui, &a, &per, 400);
+    CHECK(cui__logv_scan_rows - c0 >= (uint64_t)N - (uint64_t)N / 100 && cui__logv_scan_rows - c0 <= (uint64_t)N + 2000);
+    CHECK(fr >= 4 && per < (uint64_t)N / 4);
+    want = lv_expect(&lb, 30u, "", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0);
+    CHECK(strncmp(head, "debug", 5) == 0);
+
+    /* a filter on top of it */
+    lv_type_filter(ui, &a, "slow");
+    c0 = cui__logv_scan_rows;
+    fr = lv_settle(ui, &a, &per, 800);
+    CHECK(fr >= 4 && per < (uint64_t)N / 4 && cui__logv_scan_rows - c0 >= (uint64_t)N - (uint64_t)N / 100);
+    want = lv_expect(&lb, 30u, "slow", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(rows > 0 && got == want && strcmp(head, want_head) == 0);
+
+    /* the filter cleared and Trace turned on again: all lines again, with no scan */
+    lv_type_filter(ui, &a, "");
+    click_at(ui, build_logv, &a, 35, 24);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    lv_settle(ui, &a, &per, 400);
+    c0 = cui__logv_scan_rows;
+    want = lv_expect(&lb, 31u, "", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0 && cui__logv_scan_rows == c0);
+    cui_destroy(ui);
+
+    /* a small log: no scan with nothing hidden, one frame for a filter */
+    static cui_log_line slines[3000];
+    static char stext[3000 * 28];
+    static cui_log_buffer sb;
+    cui_log_init(&sb, slines, 3000, stext, sizeof stext);
+    for (int i = 0; i < 2000; i++) {
+        char t[64];
+        lv_line((uint64_t)i, t, sizeof t);
+        cui_log_append_text(&sb, (cui_log_level)(i % 5), (double)i, t, -1);
+    }
+    ui = new_ctx();
+    logv_ctx sa = { &sb, false, 0 };
+    c0 = cui__logv_scan_rows;
+    lv_settle(ui, &sa, &per, 50);
+    CHECK(cui__logv_scan_rows == c0);
+    want = lv_expect(&sb, 31u, "", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0);
+    lv_type_filter(ui, &sa, "slow");
+    c0 = cui__logv_scan_rows;
+    run(ui, build_logv, &sa, 1);
+    CHECK(cui__logv_scan_rows - c0 == 2000);
+    fr = lv_settle(ui, &sa, &per, 50);
+    CHECK(per == 0);
+    want = lv_expect(&sb, 31u, "slow", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(rows > 0 && got == want && strcmp(head, want_head) == 0);
+    /* lines that leave the buffer while nothing is hidden: the view follows the ring */
+    lv_type_filter(ui, &sa, "");
+    lv_settle(ui, &sa, &per, 50);
+    for (int i = 2000; i < 3500; i++) {
+        char t[64];
+        lv_line((uint64_t)i, t, sizeof t);
+        cui_log_append_text(&sb, (cui_log_level)(i % 5), (double)i, t, -1);
+    }
+    lv_settle(ui, &sa, &per, 50);
+    want = lv_expect(&sb, 31u, "", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0);
+    cui_destroy(ui);
+}
+
+
 static void test_code_editor_mdwrite(void) {
     printf("code editor: markdown list continuation, Tab in lists, cui_code_editor_edit\n");
     cui_ctx *ui = new_ctx();
@@ -12792,6 +12952,7 @@ int main(void) {
     test_code_editor_langs();
     test_code_editor_mdwrite();
     test_log_view_settles();
+    test_log_view_scan();
     test_code_editor_big();
     test_code_editor_replace_all();
     test_code_editor_shared();

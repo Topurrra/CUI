@@ -552,12 +552,13 @@ static const cui_log_line *cui__log_at(const cui_log_buffer *b, uint64_t seq) {
 static const char *const cui__log_tags[CUI_LOG_LEVEL_COUNT] = { "trace", "debug", "info", "warn", "error" };
 
 typedef struct {
-    bool init, follow, dragging;
+    bool init, follow, dragging, ident;
     bool levels[CUI_LOG_LEVEL_COUNT];
     char search[128];
     /* the lines that pass the filter, as line numbers in ascending order */
     const cui_log_buffer *buf;
     uint64_t scanned;          /* next line number to look at */
+    uint64_t base;             /* ident: the line number of row 0 */
     unsigned mask;
     char applied[128];
     uint64_t *rows; int nrows, cap;
@@ -587,20 +588,41 @@ static int cui__ci_find(const char *h, int hn, const char *q, int qn) {
     return -1;
 }
 
-/* Brings the filtered index up to date: drops lines that left the buffer,
- * scans new ones. Returns how many shown rows were dropped from the top. */
+/* The lines are numbered (oldest .. total - 1). With every level shown and no filter every
+ * line is a row, so `rows` is never built: row i is line base + i. Otherwise `rows` holds
+ * the lines that pass, found a slice of lines per frame (see CUI__LOGV_SCAN_BUDGET). */
+static inline uint64_t cui__logv_at(const cui__logv_state *s, int i) {
+    return s->ident ? s->base + (uint64_t)i : s->rows[i];
+}
+
+/* lines examined by the scan, all views, all frames (tests read it) */
+uint64_t cui__logv_scan_rows;
+
+/* The cost of a slice in units: a line costs CUI__LOGV_LINE_COST and, with a filter text, one
+ * per byte searched. About 1 to 2 ms of work. */
+#define CUI__LOGV_SCAN_BUDGET 800000u
+#define CUI__LOGV_LINE_COST 12u
+
+/* Brings the filtered index up to date: drops lines that left the buffer, scans new ones (at
+ * most a slice per call; s->scanned < b->total says it is not done). Returns how many shown
+ * rows were dropped from the top. */
 static int cui__logv_refresh(cui_ctx *ui, cui__logv_state *s, const cui_log_buffer *b) {
     unsigned mask = 0;
     for (int k = 0; k < CUI_LOG_LEVEL_COUNT; k++) if (s->levels[k]) mask |= 1u << k;
     uint64_t oldest = b->total - (uint64_t)b->count;
     int dropped = 0;
-    if (s->buf != b || s->mask != mask || strcmp(s->applied, s->search) != 0 || s->scanned > b->total) {
+    bool ident = mask == (1u << CUI_LOG_LEVEL_COUNT) - 1 && s->search[0] == 0;
+    if (s->buf != b || s->mask != mask || strcmp(s->applied, s->search) != 0 || s->scanned > b->total || s->ident != ident) {
         s->buf = b;
         s->mask = mask;
         memcpy(s->applied, s->search, sizeof s->applied);
         s->nrows = 0;
         s->scanned = oldest;
         s->max_w = 0;
+        s->ident = ident;
+        s->base = oldest;
+    } else if (ident) {
+        dropped = (int)CUI_MIN((uint64_t)s->nrows, oldest - CUI_MIN(oldest, s->base));
     } else {
         int k = 0;
         while (k < s->nrows && s->rows[k] < oldest) k++;
@@ -611,9 +633,22 @@ static int cui__logv_refresh(cui_ctx *ui, cui__logv_state *s, const cui_log_buff
         }
     }
     if (s->scanned < oldest) s->scanned = oldest;
+    if (ident) {
+        /* no scan: every line is a row */
+        s->base = oldest;
+        s->nrows = b->count;
+        s->scanned = b->total;
+        return dropped;
+    }
     int qn = (int)strlen(s->applied);
-    for (uint64_t seq = s->scanned; seq < b->total; seq++) {
+    uint64_t budget = CUI__LOGV_SCAN_BUDGET;
+    uint64_t seq = s->scanned;
+    for (; seq < b->total && budget > 0; seq++) {
         const cui_log_line *l = cui__log_at(b, seq);
+        uint64_t cost = CUI__LOGV_LINE_COST;
+        if (l && qn && (mask & (1u << l->level))) cost += l->len;
+        budget = cost >= budget ? 0 : budget - cost;
+        cui__logv_scan_rows++;
         if (!l || !(mask & (1u << l->level))) continue;
         if (qn && cui__ci_find(b->text + l->offset, (int)l->len, s->applied, qn) < 0) continue;
         if (s->nrows >= s->cap) {
@@ -626,12 +661,14 @@ static int cui__logv_refresh(cui_ctx *ui, cui__logv_state *s, const cui_log_buff
         }
         s->rows[s->nrows++] = seq;
     }
-    s->scanned = b->total;
+    s->scanned = seq;
+    if (seq < b->total) ui->animating = true;   /* more next frame */
     return dropped;
 }
 
 /* first shown row at or after line number seq */
 static int cui__logv_lower(const cui__logv_state *s, uint64_t seq) {
+    if (s->ident) return seq <= s->base ? 0 : (int)CUI_MIN(seq - s->base, (uint64_t)s->nrows);
     int lo = 0, hi = s->nrows;
     while (lo < hi) { int m = (lo + hi) / 2; if (s->rows[m] < seq) lo = m + 1; else hi = m; }
     return lo;
@@ -651,14 +688,14 @@ static void cui__logv_copy(cui_ctx *ui, const cui__logv_state *s, const cui_log_
     if (s->has_sel) { lo = CUI_MIN(s->anchor, s->cursor); hi = CUI_MAX(s->anchor, s->cursor); }
     int a = cui__logv_lower(s, lo), e = s->nrows;
     size_t total = 1;
-    for (int i = a; i < e && s->rows[i] <= hi; i++) {
-        const cui_log_line *l = cui__log_at(b, s->rows[i]);
+    for (int i = a; i < e && cui__logv_at(s, i) <= hi; i++) {
+        const cui_log_line *l = cui__log_at(b, cui__logv_at(s, i));
         if (l) total += l->len + 20;
     }
     char *out = cui__alloc(ui, total);
     size_t n = 0;
-    for (int i = a; i < e && s->rows[i] <= hi; i++) {
-        const cui_log_line *l = cui__log_at(b, s->rows[i]);
+    for (int i = a; i < e && cui__logv_at(s, i) <= hi; i++) {
+        const cui_log_line *l = cui__log_at(b, cui__logv_at(s, i));
         if (!l) continue;
         char head[24];
         int hn;
@@ -806,7 +843,12 @@ static void cui__lvf_build_toolbar(cui__lvf *f) {
     io.size = CUI_SIZE_SM;
     io.width = CUI_FILL;
     io.placeholder = "Filter lines";
-    if (s->search[0] && s->applied[0] && !strcmp(s->search, s->applied)) io.suffix = cui__frame_printf(ui, "%d found", s->nrows);
+    if (s->search[0] && s->applied[0] && !strcmp(s->search, s->applied)) {
+        if (s->scanned < b->total) {   /* a big log is searched a slice a frame */
+            uint64_t from = b->total - (uint64_t)b->count, done = s->scanned > from ? s->scanned - from : 0;
+            io.suffix = cui__frame_printf(ui, "%d found, %d%%", s->nrows, (int)(done * 100 / (uint64_t)CUI_MAX(1, b->count)));
+        } else io.suffix = cui__frame_printf(ui, "%d found", s->nrows);
+    }
     cui_search_ex(ui, "search", s->search, sizeof s->search, &io);
     ui->nodes[ui->last_node].min_w = 140;
     /* the actions stay together when the toolbar wraps */
@@ -856,7 +898,7 @@ static void cui__lvf_pointer(cui__lvf *f) {
         }
         if (f->lr.hovered && ui->mpressed[0]) {
             if (f->hover_row >= 0) {
-                uint64_t seq = s->rows[f->hover_row];
+                uint64_t seq = cui__logv_at(s, f->hover_row);
                 if ((ui->mods & CUI_MOD_SHIFT) && s->has_cursor) { if (!s->has_sel) s->anchor = s->cursor; }
                 else s->anchor = seq;
                 s->cursor = seq;
@@ -864,8 +906,8 @@ static void cui__lvf_pointer(cui__lvf *f) {
                 s->dragging = true;
             } else s->has_sel = false;
         }
-        if (s->dragging && f->lr.active && ui->mdown[0] && s->nrows > 0 && ri >= 0 && ri < s->nrows && s->rows[ri] != s->cursor) {
-            s->cursor = s->rows[ri];
+        if (s->dragging && f->lr.active && ui->mdown[0] && s->nrows > 0 && ri >= 0 && ri < s->nrows && cui__logv_at(s, ri) != s->cursor) {
+            s->cursor = cui__logv_at(s, ri);
             s->has_sel = true;
         }
     }
@@ -893,8 +935,8 @@ static void cui__lvf_keys(cui__lvf *f) {
     if (cui_key_pressed(ui, CUI_KEY_END)) { to = s->nrows - 1; moved = true; f->key_end = true; }
     if (moved) {
         to = CUI_CLAMP(to, 0, s->nrows - 1);
-        uint64_t prev = s->has_cursor ? s->cursor : s->rows[to];
-        s->cursor = s->rows[to];
+        uint64_t prev = s->has_cursor ? s->cursor : cui__logv_at(s, to);
+        s->cursor = cui__logv_at(s, to);
         if (ui->mods & CUI_MOD_SHIFT) { if (!s->has_sel) s->anchor = prev; }
         else s->anchor = s->cursor;
         s->has_sel = s->has_cursor = true;
@@ -906,8 +948,8 @@ static void cui__lvf_keys(cui__lvf *f) {
         ui->animating = true;
     }
     if ((ui->mods & CUI_MOD_PRIMARY) && cui_key_pressed(ui, CUI_KEY_A)) {
-        s->anchor = s->rows[0];
-        s->cursor = s->rows[s->nrows - 1];
+        s->anchor = cui__logv_at(s, 0);
+        s->cursor = cui__logv_at(s, s->nrows - 1);
         s->has_sel = s->has_cursor = true;
     }
     if ((ui->mods & CUI_MOD_PRIMARY) && cui_key_pressed(ui, CUI_KEY_C)) f->copy_now = true;
@@ -922,7 +964,7 @@ static void cui__lvf_follow(cui__lvf *f, float total_h) {
     float max_y = CUI_MAX(0, ss->content_h - ss->view_h);
     if (s->follow && (f->wheel > 0 || f->key_up || (ss->drag_y && ss->ty < max_y - 1))) s->follow = false;
     else if (!s->follow && (f->wheel < 0 || ss->drag_y || f->key_end) && ss->ty >= max_y - 1) s->follow = true;
-    if (s->follow) {
+    if (s->follow && s->scanned >= f->b->total) {   /* not while a scan is still adding rows */
         float bottom = CUI_MAX(0, total_h - f->view_h);
         /* The scroll view clamps ty to its own measured content height, which can differ
          * from total_h by the list's padding or float rounding; aiming past that clamp
@@ -981,7 +1023,7 @@ static void cui__lvf_build_rows(cui__lvf *f, cui__logv_common *c, int first, int
     uint64_t sel_lo = CUI_MIN(s->anchor, s->cursor), sel_hi = CUI_MAX(s->anchor, s->cursor);
     bool show_cursor = ui->focus == f->lid && ui->focus_visible && s->has_cursor;
     for (int i = first; i < last; i++) {
-        uint64_t seq = s->rows[i];
+        uint64_t seq = cui__logv_at(s, i);
         const cui_log_line *l = cui__log_at(b, seq);
         if (!l) continue;
         cui__logv_row *p = cui__frame_alloc(ui, sizeof *p);
@@ -1047,7 +1089,7 @@ static int cui__lvf_build_list(cui__lvf *f) {
         ui->nodes[e].w = CUI_FILL; ui->nodes[e].h = CUI_FILL;
         ui->nodes[e].align = CUI_ALIGN_CENTER; ui->nodes[e].justify = CUI_JUSTIFY_CENTER;
         cui__open(ui, e);
-        const char *msg = f->b->count == 0 ? "No log lines yet" : "No lines match the filter";
+        const char *msg = f->b->count == 0 ? "No log lines yet" : s->scanned < f->b->total ? "Scanning..." : "No lines match the filter";
         cui__text_node(ui, msg, -1, CUI_FONT_BODY, cui__fs(ui, ui->theme.text_body), CUI_C(ui, TEXT_MUTED), false);
         cui__close(ui);
     } else {
@@ -1095,7 +1137,7 @@ static void cui__log_view_ex_body(cui_ctx *ui, const char *id_str, cui_log_buffe
 
     /* the filter */
     int dropped = cui__logv_refresh(ui, s, f.b);
-    if (s->has_sel && s->nrows > 0 && CUI_MAX(s->anchor, s->cursor) < s->rows[0]) s->has_sel = false;
+    if (s->has_sel && s->nrows > 0 && CUI_MAX(s->anchor, s->cursor) < cui__logv_at(s, 0)) s->has_sel = false;
     if (dropped > 0 && !s->follow) {
         /* lines left the top of the buffer: keep the ones in view still */
         ss->y = CUI_MAX(0, ss->y - dropped * f.row_h);
