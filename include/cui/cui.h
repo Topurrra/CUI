@@ -1091,10 +1091,79 @@ typedef struct cui_tree_opts {
     const char *icon;
     bool leaf;                 /* a node without children: no chevron, a file icon, and `*open` is left alone */
     bool selected;             /* drawn with the active background and medium weight text */
+    uint64_t item;             /* inside cui_tree_multi_begin: this row's number (non-zero); 0 is a plain row */
+    uint64_t parent;           /* the item of the folder it is in, 0 at the top: where a drop on a file row goes */
 } cui_tree_opts;
 CUI_API bool cui_tree_begin(cui_ctx *ui, const char *label, bool *open, const cui_tree_opts *opts);
 CUI_API void cui_tree_end(cui_ctx *ui);
 CUI_API bool cui_tree_clicked(cui_ctx *ui);   /* the node created by the last cui_tree_begin was clicked */
+
+/* ---- Tree with several selected rows, drag and drop (opt in) ----
+ *
+ * Give each row an `item` (any non-zero number you choose: a hash of its path, an index + 1) and wrap the
+ * tree in cui_tree_multi_begin / _end with a cui_tree_sel you keep. Rows without an item, and trees without
+ * the wrapper, behave as before. CUI reports gestures; you do the work (move the files, delete them).
+ *
+ *     static cui_tree_sel sel;                                    // zero is empty; cui_tree_sel_free at exit
+ *     cui_tree_multi_begin(ui, .sel = &sel, .drag = true, .os_drop = true, .root_item = ROOT);
+ *         ... cui_tree_begin(ui, name, &open, &(cui_tree_opts){ .item = id, .parent = parent_id, .leaf = file }) ...
+ *     cui_tree_multi_result r = cui_tree_multi_end(ui);
+ *     if (r.dropped) move(r.drop_items, r.drop_count, r.drop_target, r.drop_copy);
+ *
+ * Selection: a click selects one row, Ctrl+click toggles, Shift+click selects the rows between the anchor and the
+ * clicked one in the order shown, Ctrl+A selects all shown rows, Up and Down move the cursor row (Shift extends,
+ * Home and End jump), and a click with Ctrl or Shift is not reported by cui_tree_clicked. Rows of a folder that is
+ * closed are not shown and not part of a range.
+ * Drag: press a row and move; the selection is dragged ("3 items" follows the pointer, a row's name when it is
+ * one). A folder row under the pointer is the drop target (a file row targets its `parent`, empty space the
+ * `root_item`); a closed folder opens after `expand_delay`. Escape cancels. Ctrl held at the drop sets
+ * `drop_copy`. `can_drop` can refuse targets (a folder into itself): they are not highlighted and the cursor shows
+ * "not allowed". Files dragged from the OS onto the tree are reported the same way (`os_dropped`, the paths with
+ * cui_dropped_file), and highlight their target while they are over the window where the backend reports hover
+ * (Windows: cui_app_desc.file_hover). */
+typedef struct cui_tree_sel {
+    uint64_t *items;           /* the selected items; read only, change them with the functions below */
+    int count, cap;
+    uint64_t cursor;           /* the keyboard row, 0 none */
+    uint64_t anchor;           /* where a Shift range starts, 0 none */
+    struct cui_tree_sel_priv *p;
+} cui_tree_sel;
+CUI_API bool cui_tree_sel_has(const cui_tree_sel *s, uint64_t item);
+CUI_API void cui_tree_sel_set(cui_tree_sel *s, uint64_t item);     /* only this item (0: none) */
+CUI_API void cui_tree_sel_add(cui_tree_sel *s, uint64_t item);
+CUI_API void cui_tree_sel_clear(cui_tree_sel *s);
+CUI_API void cui_tree_sel_free(cui_tree_sel *s);                   /* releases everything it holds */
+typedef struct cui_tree_multi_opts {
+    int _;
+    cui_tree_sel *sel;         /* required */
+    bool drag;                 /* rows can be dragged */
+    bool os_drop;              /* files dropped from the OS onto the tree are reported */
+    float expand_delay;        /* seconds over a closed folder before it opens, default 0.6 */
+    uint64_t root_item;        /* the target for a drop on a top level file row or on empty space; 0: none */
+    const char *scroll_id;     /* the cui_scroll .id around the tree: it follows the cursor and scrolls while dragging */
+    bool (*can_drop)(void *user, const uint64_t *items, int count, uint64_t target);   /* optional */
+    void *user;                /* passed to can_drop */
+} cui_tree_multi_opts;
+typedef struct cui_tree_multi_result {
+    bool selection_changed;
+    bool dragging;             /* a drag is in progress */
+    bool dropped;              /* rows were dropped on `drop_target` this frame */
+    const uint64_t *drop_items;   /* valid until the next drag */
+    int drop_count;
+    uint64_t drop_target;
+    bool drop_copy;            /* Ctrl was held: copy instead of move */
+    bool os_dropped;           /* files from the OS were dropped on `os_target`; os_count paths, cui_dropped_file(ui, i) */
+    uint64_t os_target;
+    int os_count;
+    bool key_delete;           /* Delete with rows selected */
+    bool key_rename;           /* F2 */
+    bool context;              /* right click: the clicked row is selected; open your menu (cui_context_menu_open_at) */
+    uint64_t context_item;
+    float context_x, context_y;
+    uint64_t expanded;         /* a folder opened by hovering a drag over it, else 0 */
+} cui_tree_multi_result;
+CUI_API void cui_tree_multi_begin_ex(cui_ctx *ui, const cui_tree_multi_opts *opts);
+CUI_API cui_tree_multi_result cui_tree_multi_end(cui_ctx *ui);
 
 /* List item: a selectable row with optional icon, subtitle and trailing text. */
 typedef struct cui_list_item_opts {
@@ -5621,6 +5690,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_empty_state(ui, title, ...)     cui_empty_state_ex((ui), (title), CUI__OPTS(cui_empty_opts, __VA_ARGS__))
 #define cui_metric(ui, label, value, ...)   cui_metric_ex((ui), (label), (value), CUI__OPTS(cui_metric_opts, __VA_ARGS__))
 #define cui_accordion(ui, title, open)      CUI__SCOPE_IF(cui_accordion_begin((ui), (title), (open)), cui_accordion_end(ui))
+#define cui_tree_multi_begin(ui, ...)       cui_tree_multi_begin_ex((ui), CUI__OPTS(cui_tree_multi_opts, __VA_ARGS__))
 #define cui_tree(ui, label, open, ...)      CUI__SCOPE_IF(cui_tree_begin((ui), (label), (open), CUI__OPTS(cui_tree_opts, __VA_ARGS__)), cui_tree_end(ui))
 #define cui_list_item(ui, title, ...)       cui_list_item_ex((ui), (title), CUI__OPTS(cui_list_item_opts, __VA_ARGS__))
 #define cui_virtual_list(ui, id, n, rh, h, first, last) CUI__SCOPE(cui_virtual_list_begin((ui), (id), (n), (rh), (h), (first), (last)), cui_virtual_list_end(ui))

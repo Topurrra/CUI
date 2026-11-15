@@ -86,6 +86,10 @@ typedef struct cui_app_desc {
     /* Open the window maximized. A shortcut set to start minimized or maximized still wins on
      * Windows. Unset: today's behavior, a normal window at width x height. */
     bool start_maximized;
+    /* Windows: take files dragged from Explorer through OLE drag and drop instead of WM_DROPFILES, which also
+     * reports them while they are over the window (cui_file_drag_active, cui_input_file_hover) so a tree or
+     * dropzone can highlight its target. Falls back to WM_DROPFILES when OLE cannot start. Ignored elsewhere. */
+    bool file_hover;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */

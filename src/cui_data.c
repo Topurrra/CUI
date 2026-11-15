@@ -126,12 +126,16 @@ bool cui_tree_begin(cui_ctx *ui, const char *label, bool *open, const cui_tree_o
     cui__tree_state *st = cui_state(ui, id, sizeof *st);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     bool is_open = open && *open && !o->leaf;
-    if (r.clicked && open && !o->leaf) { *open = !*open; is_open = *open; }
+    cui__tsel_flags mr = { 0 };   /* inside cui_tree_multi_begin: what the selection and the drag say about this row */
+    bool multi = o->item && ui->building.tree_multi && cui__tsel_row(ui, id, o, label, open && !o->leaf, is_open, &r, &mr);
+    if (multi && mr.expand && open) { *open = true; is_open = true; }
+    if (r.clicked && open && !o->leaf && !(multi && mr.mod_click)) { *open = !*open; is_open = *open; }
     if (r.focus_visible && open && !o->leaf) {
         if (cui_key_pressed(ui, CUI_KEY_RIGHT)) { *open = true; is_open = true; }
         if (cui_key_pressed(ui, CUI_KEY_LEFT)) { *open = false; is_open = false; }
     }
-    ui->tree_clicked = r.clicked;
+    ui->tree_clicked = r.clicked && !(multi && mr.mod_click);
+    bool sel_row = o->selected || (multi && mr.selected);
     if (!st->init) { st->t.x = is_open ? 1.0f : 0.0f; st->init = true; }
     cui__spring(ui, &st->t, is_open ? 1.0f : 0.0f, CUI__SPRING_EXPAND);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
@@ -142,15 +146,19 @@ bool cui_tree_begin(cui_ctx *ui, const char *label, bool *open, const cui_tree_o
     n->pad[3] = 6 + 16.0f * (float)ui->tree_depth; n->pad[1] = 8;
     n->w = CUI_FILL; n->self_align = CUI_ALIGN_STRETCH;
     n->radius = CUI_CORNERS(CUI__R_ITEM(ui));
-    n->bg = o->selected ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), st->hover);
+    n->bg = sel_row ? CUI_C(ui, ACTIVE) : cui_alpha(CUI_C(ui, HOVER), st->hover);
+    if (multi && mr.target) {   /* the folder a drag would drop into */
+        n->bg = cui_alpha(CUI_C(ui, ACCENT), 0.20f);
+        n->border = 1; n->border_color = CUI_C(ui, ACCENT);
+    }
     cui__mark_interactive(ui, row, CUI_IF_FOCUSABLE);
     if (r.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
     cui__open(ui, row);
     if (o->leaf) cui_gap(ui, 14);
     else cui__chevron_node(ui, -CUI_PI * 0.5f + st->t.x * CUI_PI * 0.5f, 14, CUI_C(ui, TEXT_MUTED));
     const char *icon = o->icon ? o->icon : (o->leaf ? CUI_ICON_FILE : (is_open ? CUI_ICON_FOLDER_OPEN : CUI_ICON_FOLDER));
-    cui__icon_node(ui, icon, 16, o->selected ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
-    int t = cui__text_node(ui, label, cui__display_len(label), o->selected ? CUI_FONT_MEDIUM : CUI_FONT_BODY,
+    cui__icon_node(ui, icon, 16, sel_row ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY));
+    int t = cui__text_node(ui, label, cui__display_len(label), sel_row ? CUI_FONT_MEDIUM : CUI_FONT_BODY,
                            cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
     ui->nodes[t].line_height = 1.3f;
     ui->nodes[t].w = CUI_FILL;

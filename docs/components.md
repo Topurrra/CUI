@@ -684,6 +684,25 @@ Tree keyboard: Right opens, Left closes.
 
 `cui_tree_begin` returns true while the node is open, and only then do you add its children and call `cui_tree_end`. A leaf never opens, so it gets no `cui_tree_end`, as `main.c` shows above. The third argument points at your `bool`, which a click on the node flips; pass `NULL` for a leaf. `cui_tree_clicked` is true on the frame the node of the last `cui_tree_begin` was clicked, so ask right after that call. Children are scoped by their parent, so the same name in two folders is fine. For a tree with columns, use the tree table.
 
+### Several selected rows, drag and drop
+
+A tree can opt in to a selection of many rows, dragging them onto folders, and files dropped from the OS. CUI reports the gestures; you do the work (move the files, delete them). Give every row an `.item` (any non-zero number you choose, such as a hash of its path) and its folder as `.parent`, keep a `cui_tree_sel`, and wrap the rows:
+
+```c
+static cui_tree_sel sel;                 // zero is empty; cui_tree_sel_free(&sel) at exit
+cui_tree_multi_begin(ui, .sel = &sel, .drag = true, .os_drop = true, .root_item = ROOT);
+    cui_tree_begin(ui, "src", &src_open, &(cui_tree_opts){ .item = 1 });
+    ...
+cui_tree_multi_result r = cui_tree_multi_end(ui);
+if (r.dropped)    move(r.drop_items, r.drop_count, r.drop_target, r.drop_copy);
+if (r.os_dropped) copy_in(ui, r.os_count, r.os_target);   // the paths: cui_dropped_file(ui, i)
+if (r.key_delete) ask_then_delete(&sel);
+```
+
+A click selects one row, Ctrl+click toggles, Shift+click selects the rows between the anchor and the clicked one in the order shown, Ctrl+A selects the shown rows, and Up, Down, Home and End move the cursor (Shift extends). A click with Ctrl or Shift is not reported by `cui_tree_clicked`. Dragging a selected row drags the whole selection; a label ("3 items", or the row's name) follows the pointer. The folder under the pointer is highlighted as the target, a closed one opens after `.expand_delay` (0.6 s), a file row targets its `.parent`, and empty space targets `.root_item`. Escape cancels, and Ctrl held at the drop sets `drop_copy`. `.can_drop` can refuse a target (a folder into itself): it is not highlighted and the pointer shows "not allowed". Without it the target is reported as it is and your code decides. A right click selects the row if it was not selected and reports `context` with the pointer position (open your menu with `cui_context_menu_open_at`); Delete and F2 are reported as `key_delete` and `key_rename`. Give `.scroll_id` the id of the `cui_scroll` around the tree to have it follow the cursor and scroll while a drag is near its edge.
+
+Files dragged from the OS onto the tree are reported as `os_dropped` and highlight their target while they hover, where the backend reports hovering: X11 and macOS always, Windows with `cui_app_desc.file_hover = true` (OLE drag and drop instead of `WM_DROPFILES`). Trees without `.item` and without the wrapper draw and behave exactly as before.
+
 ## Accordion
 
 Sections that fold open and closed under their headers.

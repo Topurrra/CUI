@@ -678,6 +678,7 @@ struct cui_ctx {
         void *status_bar;          /* its width budget */
         void *card_stack;
         void *kanban;
+        void *tree_multi;          /* the tree with several selected rows being built (cui_treesel.c) */
         void *dock;
         void *spot;                /* spotlight card */
         void *reasoning;
@@ -956,5 +957,13 @@ bool cui__mermaid_block(cui_ctx *ui, const char *id, const char *src, int len, f
 bool cui__mermaid_probe(cui_ctx *ui, const char *src, int len, float body, int *crossings, int *box_hits);
 /* For tests: the scale, expand button and expanded view of the flowchart built under id. */
 bool cui__mermaid_view_info(cui_ctx *ui, const char *id, float *zoom, bool *expand, bool *big_open, float *natural);
+
+/* ---- tree selection and drag and drop (cui_treesel.c) ---- */
+/* What a row built inside cui_tree_multi_begin learns: drawn selected, the drop target, a click with Ctrl or Shift
+ * (it does not toggle the folder), and a closed folder that has been hovered long enough by a drag (open it).
+ * False, with out untouched, for a row without an item or outside the wrapper. */
+typedef struct cui__tsel_flags { bool selected, target, mod_click, expand; } cui__tsel_flags;
+bool cui__tsel_row(cui_ctx *ui, cui_id id, const cui_tree_opts *o, const char *label, bool folder, bool is_open,
+                   const cui_interact *r, cui__tsel_flags *out);
 
 #endif /* CUI_INTERNAL_H */

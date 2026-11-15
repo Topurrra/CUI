@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <ole2.h>
 #include <dwmapi.h>
 #include <imm.h>
 
@@ -54,6 +55,7 @@ typedef struct {
     BITMAPINFO bmi;
     HANDLE timer;          /* timed waits: high resolution where Windows has it (10 1803 and later) */
     bool show_pending;     /* shown with the first picture (cui__plat_show) */
+    bool ole_drop;         /* the window is an OLE drop target (cui_app_desc.file_hover) */
 } cui__win32;
 
 static HMODULE cui__opengl32;
@@ -352,6 +354,119 @@ static void cui__win32_text_input_rect(void *user, cui_rect caret) {
     cui__win32_place_ime(w);
 }
 
+/* Files dropped from the OS: the paths of a drop (WM_DROPFILES or OLE) go to the frame as one drop at (x, y). */
+static void cui__win32_deliver_drop(cui_app *app, HDROP drop, float x, float y) {
+    UINT n = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+    if (n > 64) n = 64;
+    char *paths[64] = { 0 };   /* zeroed: MinGW cannot tell that only the first `got` are read */
+    int got = 0;
+    for (UINT i = 0; i < n; i++) {
+        UINT len = DragQueryFileW(drop, i, NULL, 0);
+        WCHAR *wbuf = (WCHAR *)malloc(sizeof(WCHAR) * (len + 1));
+        if (!wbuf) continue;
+        DragQueryFileW(drop, i, wbuf, len + 1);
+        int u = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, NULL, 0, NULL, NULL);
+        char *ubuf = u > 0 ? (char *)malloc((size_t)u) : NULL;
+        if (ubuf) { WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, ubuf, u, NULL, NULL); paths[got++] = ubuf; }
+        free(wbuf);
+    }
+    cui_input_file_drop(app->ui, (const char *const *)paths, got, x, y);
+    for (int i = 0; i < got; i++) free(paths[i]);
+}
+
+/* OLE drop target (cui_app_desc.file_hover): the same drop, and the hover before it */
+typedef struct cui__win32_dt {
+    IDropTarget iface;
+    LONG refs;
+    cui_app *app;
+} cui__win32_dt;
+
+static const GUID cui__iid_unknown = { 0x00000000, 0x0000, 0x0000, { 0xC0, 0, 0, 0, 0, 0, 0, 0x46 } };
+static const GUID cui__iid_droptarget = { 0x00000122, 0x0000, 0x0000, { 0xC0, 0, 0, 0, 0, 0, 0, 0x46 } };
+
+static bool cui__win32_dt_has_files(IDataObject *obj) {
+    FORMATETC fe = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    return obj && obj->lpVtbl->QueryGetData(obj, &fe) == S_OK;
+}
+
+static void cui__win32_dt_point(cui_app *app, POINTL pt, float *x, float *y) {
+    cui__win32 *w = cui__w(app);
+    POINT p = { pt.x, pt.y };
+    ScreenToClient(w->hwnd, &p);
+    *x = (float)p.x / w->scale;
+    *y = (float)p.y / w->scale;
+}
+
+static HRESULT STDMETHODCALLTYPE cui__dt_qi(IDropTarget *t, REFIID riid, void **out) {
+    if (IsEqualGUID(riid, &cui__iid_unknown) || IsEqualGUID(riid, &cui__iid_droptarget)) {
+        *out = t;
+        t->lpVtbl->AddRef(t);
+        return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE cui__dt_addref(IDropTarget *t) { return (ULONG)InterlockedIncrement(&((cui__win32_dt *)t)->refs); }
+static ULONG STDMETHODCALLTYPE cui__dt_release(IDropTarget *t) {
+    LONG n = InterlockedDecrement(&((cui__win32_dt *)t)->refs);
+    if (n == 0) free(t);
+    return (ULONG)n;
+}
+static HRESULT STDMETHODCALLTYPE cui__dt_enter(IDropTarget *t, IDataObject *obj, DWORD keys, POINTL pt, DWORD *effect) {
+    (void)keys;
+    cui_app *app = ((cui__win32_dt *)t)->app;
+    if (!cui__win32_dt_has_files(obj)) { *effect = DROPEFFECT_NONE; return S_OK; }
+    float x, y;
+    cui__win32_dt_point(app, pt, &x, &y);
+    cui_input_file_hover(app->ui, true, x, y);
+    *effect = DROPEFFECT_COPY;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE cui__dt_over(IDropTarget *t, DWORD keys, POINTL pt, DWORD *effect) {
+    (void)keys;
+    cui_app *app = ((cui__win32_dt *)t)->app;
+    float x, y;
+    cui__win32_dt_point(app, pt, &x, &y);
+    cui_input_file_hover(app->ui, true, x, y);
+    *effect = DROPEFFECT_COPY;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE cui__dt_leave(IDropTarget *t) {
+    cui_input_file_hover(((cui__win32_dt *)t)->app->ui, false, 0, 0);
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE cui__dt_drop(IDropTarget *t, IDataObject *obj, DWORD keys, POINTL pt, DWORD *effect) {
+    (void)keys;
+    cui_app *app = ((cui__win32_dt *)t)->app;
+    *effect = DROPEFFECT_NONE;
+    cui_input_file_hover(app->ui, false, 0, 0);
+    FORMATETC fe = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM sm;
+    memset(&sm, 0, sizeof sm);
+    if (!obj || obj->lpVtbl->GetData(obj, &fe, &sm) != S_OK) return S_OK;
+    float x, y;
+    cui__win32_dt_point(app, pt, &x, &y);
+    cui__win32_deliver_drop(app, (HDROP)sm.hGlobal, x, y);
+    ReleaseStgMedium(&sm);
+    *effect = DROPEFFECT_COPY;
+    SetForegroundWindow(cui__w(app)->hwnd);
+    return S_OK;
+}
+static IDropTargetVtbl cui__dt_vtbl = { cui__dt_qi, cui__dt_addref, cui__dt_release, cui__dt_enter, cui__dt_over, cui__dt_leave, cui__dt_drop };
+
+/* true when the window takes drops through OLE; false leaves it to WM_DROPFILES */
+static bool cui__win32_dt_register(cui_app *app, HWND hwnd) {
+    HRESULT hr = OleInitialize(NULL);
+    if (hr != S_OK && hr != S_FALSE) return false;
+    cui__win32_dt *dt = (cui__win32_dt *)calloc(1, sizeof *dt);
+    if (!dt) return false;
+    dt->iface.lpVtbl = &cui__dt_vtbl;
+    dt->refs = 1;
+    dt->app = app;
+    if (RegisterDragDrop(hwnd, &dt->iface) != S_OK) { free(dt); return false; }
+    return true;   /* the registration holds the other reference; RevokeDragDrop releases it */
+}
+
 static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     cui_app *app = (cui_app *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     if (!app) {
@@ -508,25 +623,10 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         return 0;
     case WM_DROPFILES: {
         HDROP drop = (HDROP)wp;
-        UINT n = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
-        if (n > 64) n = 64;
         POINT pt = { 0, 0 };
         DragQueryPoint(drop, &pt);
-        char *paths[64] = { 0 };   /* zeroed: MinGW cannot tell that only the first `got` are read */
-        int got = 0;
-        for (UINT i = 0; i < n; i++) {
-            UINT len = DragQueryFileW(drop, i, NULL, 0);
-            WCHAR *wbuf = (WCHAR *)malloc(sizeof(WCHAR) * (len + 1));
-            if (!wbuf) continue;
-            DragQueryFileW(drop, i, wbuf, len + 1);
-            int u = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, NULL, 0, NULL, NULL);
-            char *ubuf = u > 0 ? (char *)malloc((size_t)u) : NULL;
-            if (ubuf) { WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, ubuf, u, NULL, NULL); paths[got++] = ubuf; }
-            free(wbuf);
-        }
+        cui__win32_deliver_drop(app, drop, (float)pt.x / s, (float)pt.y / s);
         DragFinish(drop);
-        cui_input_file_drop(ui, (const char *const *)paths, got, (float)pt.x / s, (float)pt.y / s);
-        for (int i = 0; i < got; i++) free(paths[i]);
         SetForegroundWindow(hwnd);
         return 0;
     }
@@ -620,7 +720,9 @@ bool cui__plat_init(cui_app *app) {
     if (!w->hwnd) { free(w); app->plat = NULL; return false; }
     if (app->desc.custom_titlebar)   /* recompute the client area: no title bar or frame */
         SetWindowPos(w->hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    DragAcceptFiles(w->hwnd, TRUE);   /* files dropped from Explorer arrive as WM_DROPFILES */
+    /* files dropped from Explorer arrive as WM_DROPFILES, or through OLE (with the hover before) when asked for */
+    if (app->desc.file_hover && cui__win32_dt_register(app, w->hwnd)) w->ole_drop = true;
+    else DragAcceptFiles(w->hwnd, TRUE);
     w->scale = cui__win32_window_scale(w->hwnd);
     if (w->scale != scale) {
         RECT r2 = { 0, 0, (LONG)(app->desc.width * w->scale), (LONG)(app->desc.height * w->scale) };
@@ -688,6 +790,7 @@ void cui__plat_shutdown(cui_app *app) {
     if (w->glrc) { wglMakeCurrent(NULL, NULL); wglDeleteContext(w->glrc); }
     if (w->hdc) ReleaseDC(w->hwnd, w->hdc);
     if (w->timer) CloseHandle(w->timer);
+    if (w->ole_drop) RevokeDragDrop(w->hwnd);   /* before the window goes: the target points at the app */
     SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);   /* no more messages to the app */
     DestroyWindow(w->hwnd);
     free(w);

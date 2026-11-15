@@ -3133,6 +3133,265 @@ static void test_reorder(void) {
     cui_destroy(ui);
 }
 
+/* ---- tree with several selected rows, drag and drop, OS drops ---- */
+
+/* src (1): a.c 11, b.c 12, c.c 13 | docs (2, closed): r.md 21 | x.txt 3 | y.txt 4 */
+typedef struct {
+    bool open_src, open_docs, drag, wrap, with_items, deny_self;
+    cui_tree_sel sel;
+    cui_tree_multi_result res;
+    cui_rect rect[32];
+    int clicks;
+    int dropped, drop_count, os_dropped, os_count, key_delete, key_rename, context, expanded;
+    uint64_t drop_target, os_target, drop_items[8], context_item, expanded_item;
+    bool drop_copy;
+    char os_first[64];
+} tt_ctx;
+
+static bool tt_can_drop(void *u, const uint64_t *items, int count, uint64_t target) {
+    tt_ctx *t = u;
+    if (!t->deny_self) return true;
+    for (int i = 0; i < count; i++) if (items[i] == target) return false;
+    return true;
+}
+
+static void tt_node(cui_ctx *ui, tt_ctx *t, const char *name, uint64_t item, bool *open, const uint64_t *kids,
+                    const char *const *kid_names, int nk) {
+    cui_tree_opts o = { 0 };
+    if (t->with_items) o.item = item;
+    o.leaf = open == NULL;
+    bool is_open = cui_tree_begin(ui, name, open, &o);
+    t->rect[item] = cui_get_rect(ui, cui_last_id(ui));
+    if (!open && cui_tree_clicked(ui)) t->clicks++;
+    if (!is_open) return;
+    for (int i = 0; i < nk; i++) {
+        cui_tree_opts k = { 0 };
+        if (t->with_items) { k.item = kids[i]; k.parent = item; }
+        k.leaf = true;
+        cui_tree_begin(ui, kid_names[i], NULL, &k);
+        t->rect[kids[i]] = cui_get_rect(ui, cui_last_id(ui));
+        if (cui_tree_clicked(ui)) t->clicks++;
+    }
+    cui_tree_end(ui);
+}
+
+static void build_tt(cui_ctx *ui, void *u) {
+    tt_ctx *t = u;
+    static const uint64_t k1[] = { 11, 12, 13 }, k2[] = { 21 };
+    static const char *const n1[] = { "a.c", "b.c", "c.c" }, *const n2[] = { "r.md" };
+    cui_column(ui, .pad = 10, .width = CUI_PX(300)) {
+        if (t->wrap) cui_tree_multi_begin(ui, .sel = &t->sel, .drag = t->drag, .os_drop = true, .root_item = 100, .can_drop = tt_can_drop, .user = t);
+        tt_node(ui, t, "src", 1, &t->open_src, k1, n1, 3);
+        tt_node(ui, t, "docs", 2, &t->open_docs, k2, n2, 1);
+        tt_node(ui, t, "x.txt", 3, NULL, NULL, NULL, 0);
+        tt_node(ui, t, "y.txt", 4, NULL, NULL, NULL, 0);
+        if (t->wrap) {
+            t->res = cui_tree_multi_end(ui);
+            if (t->res.dropped) {
+                t->dropped++; t->drop_count = t->res.drop_count; t->drop_target = t->res.drop_target; t->drop_copy = t->res.drop_copy;
+                for (int i = 0; i < t->res.drop_count && i < 8; i++) t->drop_items[i] = t->res.drop_items[i];
+            }
+            if (t->res.os_dropped) {
+                t->os_dropped++; t->os_target = t->res.os_target; t->os_count = t->res.os_count;
+                snprintf(t->os_first, sizeof t->os_first, "%s", cui_dropped_file(ui, 0));
+            }
+            t->key_delete += t->res.key_delete; t->key_rename += t->res.key_rename;
+            if (t->res.context) { t->context++; t->context_item = t->res.context_item; }
+            if (t->res.expanded) { t->expanded++; t->expanded_item = t->res.expanded; }
+        }
+    }
+}
+
+static cui_vec2 tt_at(const tt_ctx *t, int item) { return center(t->rect[item]); }
+static void tt_click(cui_ctx *ui, tt_ctx *t, int item, int mods) {
+    cui_vec2 p = tt_at(t, item);
+    cui_input_key(ui, CUI_KEY_NONE, true, mods);
+    click_at(ui, build_tt, t, p.x, p.y);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_tt, t, 1);
+}
+static void tt_key(cui_ctx *ui, tt_ctx *t, cui_key k, int mods) {
+    cui_input_key(ui, k, true, mods);
+    run(ui, build_tt, t, 1);
+    cui_input_key(ui, k, false, 0);
+    run(ui, build_tt, t, 1);
+}
+static bool tt_sel(const tt_ctx *t, int item) { return cui_tree_sel_has(&t->sel, (uint64_t)item); }
+static void tt_right_click(cui_ctx *ui, tt_ctx *t, int item) {
+    cui_vec2 p = tt_at(t, item);
+    cui_input_mouse_move(ui, p.x, p.y);
+    run(ui, build_tt, t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, true);
+    run(ui, build_tt, t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_RIGHT, false);
+    run(ui, build_tt, t, 1);
+}
+
+/* a drag from item `from` to item `to`, released there (Ctrl held at the release with `copy`) */
+static void tt_drag(cui_ctx *ui, tt_ctx *t, int from, int to, bool copy, int hover_frames) {
+    cui_vec2 a = tt_at(t, from), b = tt_at(t, to);
+    if (from == to) b.x += 24;   /* a drag within the row: far enough to start one */
+    cui_input_mouse_move(ui, a.x, a.y);
+    run(ui, build_tt, t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_tt, t, 1);
+    for (int i = 1; i <= 6; i++) {
+        cui_input_mouse_move(ui, a.x + (b.x - a.x) * (float)i / 6, a.y + (b.y - a.y) * (float)i / 6);
+        run(ui, build_tt, t, 1);
+    }
+    run(ui, build_tt, t, hover_frames);
+    if (copy) cui_input_key(ui, CUI_KEY_NONE, true, CUI_MOD_CTRL);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_tt, t, 1);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    run(ui, build_tt, t, 2);
+}
+
+static void test_tree_multi(void) {
+    printf("data: tree multi-select, drag and drop, OS drop\n");
+    /* opt in only: item numbers without the wrapper draw the tree as before */
+    {
+        tt_ctx plain = { .open_src = true }, items = { .open_src = true, .with_items = true };
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        run(ua, build_tt, &plain, 3);
+        run(ub, build_tt, &items, 3);
+        CHECK(cui_get_draw_data(ua)->vertex_count == cui_get_draw_data(ub)->vertex_count);
+        CHECK(frame_hash(ua) == frame_hash(ub));
+        cui_destroy(ua); cui_destroy(ub);
+    }
+
+    tt_ctx t = { .open_src = true, .wrap = true, .with_items = true };
+    cui_ctx *ui = new_ctx();
+    run(ui, build_tt, &t, 4);
+
+    /* a click selects one row (and is reported); Ctrl+click toggles without being reported */
+    tt_click(ui, &t, 11, 0);
+    CHECK(t.sel.count == 1 && tt_sel(&t, 11) && t.clicks == 1);
+    tt_click(ui, &t, 13, CUI_MOD_CTRL);
+    CHECK(t.sel.count == 2 && tt_sel(&t, 11) && tt_sel(&t, 13) && t.clicks == 1);
+    tt_click(ui, &t, 13, CUI_MOD_CTRL);
+    CHECK(t.sel.count == 1 && tt_sel(&t, 11));
+    /* Shift+click: the rows between the anchor (the last row clicked, as in Explorer) and the clicked one, in the order shown */
+    tt_click(ui, &t, 11, 0);
+    tt_click(ui, &t, 13, CUI_MOD_SHIFT);
+    CHECK(t.sel.count == 3 && tt_sel(&t, 11) && tt_sel(&t, 12) && tt_sel(&t, 13) && t.clicks == 2);
+    tt_click(ui, &t, 4, 0);
+    CHECK(t.sel.count == 1 && tt_sel(&t, 4));
+    tt_click(ui, &t, 12, CUI_MOD_SHIFT);   /* upwards over the closed folder "docs": 12 13 docs x y */
+    CHECK(t.sel.count == 5 && tt_sel(&t, 12) && tt_sel(&t, 2) && tt_sel(&t, 3) && tt_sel(&t, 4) && !tt_sel(&t, 21) && !tt_sel(&t, 11));
+    /* keyboard: Up and Down move the cursor, Shift extends, Ctrl+A selects what is shown */
+    tt_click(ui, &t, 11, 0);
+    tt_key(ui, &t, CUI_KEY_DOWN, 0);
+    CHECK(t.sel.count == 1 && tt_sel(&t, 12) && t.sel.cursor == 12);
+    tt_key(ui, &t, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+    CHECK(t.sel.count == 2 && tt_sel(&t, 12) && tt_sel(&t, 13));
+    tt_key(ui, &t, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+    CHECK(t.sel.count == 3 && tt_sel(&t, 2));
+    tt_key(ui, &t, CUI_KEY_UP, 0);
+    CHECK(t.sel.count == 1 && tt_sel(&t, 13));
+    tt_key(ui, &t, CUI_KEY_A, CUI_MOD_CTRL);
+    CHECK(t.sel.count == 7);   /* src a b c docs x y */
+    /* Delete and F2 are reported for the app to act on */
+    tt_key(ui, &t, CUI_KEY_DELETE, 0);
+    CHECK(t.key_delete == 1 && t.key_rename == 0);
+    tt_key(ui, &t, CUI_KEY_F2, 0);
+    CHECK(t.key_rename == 1);
+    /* right click: an unselected row becomes the selection, a selected one keeps it; both are reported */
+    tt_click(ui, &t, 11, 0);
+    tt_click(ui, &t, 12, CUI_MOD_CTRL);
+    tt_right_click(ui, &t, 3);
+    CHECK(t.context == 1 && t.context_item == 3 && t.sel.count == 1 && tt_sel(&t, 3));
+    tt_click(ui, &t, 11, 0);
+    tt_click(ui, &t, 12, CUI_MOD_CTRL);
+    tt_right_click(ui, &t, 12);
+    CHECK(t.context == 2 && t.context_item == 12 && t.sel.count == 2);
+
+    /* without .drag nothing is dragged */
+    tt_click(ui, &t, 11, 0);
+    tt_drag(ui, &t, 11, 3, false, 2);
+    CHECK(t.dropped == 0);
+
+    /* a drag reports what was dragged and where it was dropped */
+    t.drag = true;
+    tt_click(ui, &t, 11, 0);
+    tt_click(ui, &t, 12, CUI_MOD_CTRL);
+    tt_drag(ui, &t, 12, 3, false, 2);   /* x.txt is a file row at the top: the drop goes to root_item */
+    CHECK(t.dropped == 1 && t.drop_count == 2 && t.drop_target == 100 && !t.drop_copy);
+    CHECK(t.drop_items[0] == 11 && t.drop_items[1] == 12);
+    CHECK(t.sel.count == 2);
+    tt_drag(ui, &t, 12, 2, true, 2);    /* onto the folder "docs", Ctrl held: copy */
+    CHECK(t.dropped == 2 && t.drop_target == 2 && t.drop_copy && t.drop_count == 2);
+    /* a row outside the selection drags alone and becomes the selection */
+    tt_drag(ui, &t, 4, 2, false, 2);
+    CHECK(t.dropped == 3 && t.drop_count == 1 && t.drop_items[0] == 4 && t.sel.count == 1 && tt_sel(&t, 4));
+    /* a click without movement is a click, not a drop */
+    tt_click(ui, &t, 12, 0);
+    CHECK(t.dropped == 3 && t.sel.count == 1 && tt_sel(&t, 12));
+
+    /* onto itself: reported as the target for the app to refuse, or refused by can_drop (no drop) */
+    tt_drag(ui, &t, 2, 2, false, 2);
+    CHECK(t.dropped == 4 && t.drop_target == 2 && t.drop_items[0] == 2);
+    t.deny_self = true;
+    tt_drag(ui, &t, 2, 2, false, 2);
+    CHECK(t.dropped == 4);
+    t.deny_self = false;
+
+    /* a closed folder opens after being hovered about 600 ms, and not before */
+    CHECK(!t.open_docs && t.expanded == 0);
+    tt_drag(ui, &t, 4, 2, false, 20);
+    CHECK(!t.open_docs && t.expanded == 0);
+    tt_drag(ui, &t, 4, 2, false, 45);
+    CHECK(t.open_docs && t.expanded >= 1 && t.expanded_item == 2);
+    t.open_docs = false;
+    run(ui, build_tt, &t, 3);
+
+    /* Escape cancels: the release drops nothing and the selection stays */
+    {
+        int before = t.dropped;
+        cui_vec2 a = tt_at(&t, 4), b = tt_at(&t, 2);
+        cui_input_mouse_move(ui, a.x, a.y);
+        run(ui, build_tt, &t, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        run(ui, build_tt, &t, 1);
+        for (int i = 1; i <= 4; i++) { cui_input_mouse_move(ui, a.x + (b.x - a.x) * (float)i / 4, a.y + (b.y - a.y) * (float)i / 4); run(ui, build_tt, &t, 1); }
+        CHECK(t.res.dragging);
+        tt_key(ui, &t, CUI_KEY_ESCAPE, 0);
+        CHECK(!t.res.dragging);
+        cui_input_mouse_move(ui, b.x + 2, b.y);
+        run(ui, build_tt, &t, 2);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        run(ui, build_tt, &t, 3);
+        CHECK(t.dropped == before && !t.res.dragging);
+    }
+
+    /* files from the OS: the row under them is highlighted while they hover; the drop reports paths and target */
+    {
+        uint32_t quiet = frame_hash(ui);
+        cui_vec2 p = tt_at(&t, 2);
+        cui_input_file_hover(ui, true, p.x, p.y);
+        run(ui, build_tt, &t, 2);
+        CHECK(frame_hash(ui) != quiet);
+        cui_input_file_hover(ui, false, 0, 0);
+        run(ui, build_tt, &t, 2);
+        CHECK(frame_hash(ui) == quiet);
+        const char *paths[] = { "C:\\Users\\me\\one.txt", "C:\\Users\\me\\two.txt" };
+        cui_input_file_drop(ui, paths, 2, p.x, p.y);
+        run(ui, build_tt, &t, 1);
+        CHECK(t.os_dropped == 1 && t.os_target == 2 && t.os_count == 2 && !strcmp(t.os_first, paths[0]));
+        run(ui, build_tt, &t, 2);
+        CHECK(t.os_dropped == 1);
+        p = tt_at(&t, 12);   /* onto a file row: its folder */
+        cui_input_file_drop(ui, paths, 1, p.x, p.y);
+        run(ui, build_tt, &t, 1);
+        CHECK(t.os_dropped == 2 && t.os_target == 1 && t.os_count == 1);
+        cui_input_file_drop(ui, paths, 1, 780, 580);   /* nowhere near the tree */
+        run(ui, build_tt, &t, 1);
+        CHECK(t.os_dropped == 2);
+    }
+    cui_tree_sel_free(&t.sel);
+    cui_destroy(ui);
+}
+
 /* a press on a row the list no longer has must not start a drag: the drag used
  * slot geometry this frame never measured, and a later frame could commit it */
 typedef struct { int order[4]; int count; int changed; } reorder_n_ctx;
@@ -13284,6 +13543,7 @@ int main(void) {
     test_extras();
     test_toast_deadline();
     test_reorder();
+    test_tree_multi();
     test_reorder_shrink();
     test_chrome();
     test_status_progress_click();
