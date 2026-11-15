@@ -1876,8 +1876,16 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * selection lasts while the text stays the same.
  * Set .no_select when the view sits inside something that takes its own clicks.
  * Code blocks have a copy button.
- * Parsing allocates only from the frame arena (about 16 bytes a line and a
- * few dozen per inline marker), so a long reply re-parses every frame. */
+ * A short text is parsed every frame from the frame arena (about 16 bytes a
+ * line and a few dozen per inline marker), so a long reply simply re-parses.
+ * A text of 32 KB or more is cut into its blocks once, on another thread when
+ * it is long (the top shows at once), and again only when it changes; only the
+ * blocks near the window are built each frame, so a note of tens of megabytes
+ * opens and scrolls like a short one, in about twice its size of memory. Its
+ * heights come from layout as blocks are seen, and the scroll area around the
+ * view moves to keep what is on screen in place when blocks above it turn out
+ * taller or shorter. Comparing the text with its copy costs about a millisecond
+ * per 10 MB a frame; .revision skips even that. */
 typedef struct cui_markdown_opts {
     int _;
     cui_size width;            /* default fill */
@@ -1903,6 +1911,8 @@ typedef struct cui_markdown_opts {
                                 * indentation. A tab goes to the next stop of 4 space widths from the line's left edge (in the body font,
                                 * not a fixed grid). Lines still wrap at blanks; a blank run that wraps is dropped, a line's own indentation
                                 * stays, and a wrapped continuation starts at the left edge. Copy is unchanged (it always returned the source) */
+    int revision;              /* big texts: nonzero, a number you change whenever the text changes; while it and the text pointer and length
+                                * stay the same the view does not read the text (it otherwise compares it with its copy each frame) */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */

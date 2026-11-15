@@ -12,9 +12,22 @@
  * byte offset into the block's runs joined, a hard break counting one byte; for
  * a diagram, into its labels a line each). Those stay put while the text and
  * the callouts' folds do, at any width. A press, a drag or a shift click asks
- * each block in turn for the position under the pointer, from its latest rect. */
+ * each block in turn for the position under the pointer, from its latest rect.
+ *
+ * Big texts (see "Big texts" below) take another path to the same blocks: the
+ * text is cut once into its top level blocks, on a worker for the biggest, and
+ * only the blocks near the window are built, each by the same code. */
 #include "cui_internal.h"
 
+#if defined(_MSC_VER)
+#include <intrin.h>   /* _InterlockedExchangeAdd */
+#endif
+#if defined(_WIN32)
+#include <process.h>  /* _beginthread: a big text is cut into blocks on another thread */
+#elif !defined(__wasm__) || defined(__EMSCRIPTEN_PTHREADS__)
+#include <pthread.h>
+#define MD_PTHREADS 1
+#endif
 
 #define MD_MAX_DEPTH 12      /* containers nested deeper show as text */
 #define MD_WINDOW 64         /* how far back a closing * or _ looks for its opener */
@@ -59,6 +72,44 @@ static md_line md_trim(md_line L) {
     return L;
 }
 static bool md_has(md_line L, char c) { return L.len > 0 && memchr(L.s, c, (size_t)L.len) != NULL; }
+
+/* Scratch memory for the block scanner where there is no frame (a worker): zeroed pieces from
+ * chunks, freed together. NULL when out of memory. */
+typedef struct md_chunk { struct md_chunk *next; size_t used, cap; } md_chunk;
+typedef struct { md_chunk *head; } md_arena;
+#define MD_CHUNK_HEAD ((sizeof(md_chunk) + 15) & ~(size_t)15)
+
+static void *md_arena_alloc(md_arena *a, size_t n) {
+    if (n > ((size_t)-1) / 2) return NULL;
+    n = (n + 15) & ~(size_t)15;
+    if (!a->head || a->head->cap - a->head->used < n) {
+        size_t cap = n > (64u << 10) ? n : (64u << 10);
+        md_chunk *c = malloc(MD_CHUNK_HEAD + cap);
+        if (!c) return NULL;
+        c->next = a->head; c->used = 0; c->cap = cap;
+        a->head = c;
+    }
+    char *p = (char *)a->head + MD_CHUNK_HEAD + a->head->used;
+    a->head->used += n;
+    memset(p, 0, n);
+    return p;
+}
+static void md_arena_reset(md_arena *a) {   /* keeps the newest chunk */
+    if (!a->head) return;
+    md_chunk *c = a->head->next;
+    while (c) { md_chunk *nx = c->next; free(c); c = nx; }
+    a->head->next = NULL;
+    a->head->used = 0;
+}
+static void md_arena_free(md_arena *a) {
+    md_arena_reset(a);
+    free(a->head);
+    a->head = NULL;
+}
+/* n * size, or (size_t)-1 when that does not fit */
+static size_t md_mul(size_t n, size_t size) { return size && n > ((size_t)-1) / size ? (size_t)-1 : n * size; }
+/* malloc of n items of size, NULL when that does not fit */
+static void *md_malloc_n(size_t n, size_t size) { size_t b = md_mul(n, size); return b == (size_t)-1 ? NULL : malloc(b ? b : 1); }
 
 /* ------------------------------------------------------------------------ */
 /* Inline parsing                                                           */
@@ -646,11 +697,15 @@ static void md_layout(cui_ctx *ui, const md_inline *in, const md_font *f, float 
 #define MD_SEL_END (1 << 30)   /* a block number past every block: the end of the text */
 #define MD_DRAG_START 4.0f     /* points a press on a link travels before it selects instead */
 
-typedef struct { int block, off; } md_pos;
+/* top: the top level block of a big text the block is in (0 for any other text), so positions
+ * keep their order in blocks that are not built */
+typedef struct { int top, block, off; } md_pos;
 static int md_pos_cmp(md_pos a, md_pos b) {
+    if (a.top != b.top) return a.top < b.top ? -1 : 1;
     if (a.block != b.block) return a.block < b.block ? -1 : 1;
     return (a.off > b.off) - (a.off < b.off);
 }
+static md_pos md_mkpos(int top, int block, int off) { md_pos p; p.top = top; p.block = block; p.off = off; return p; }
 
 enum { MD_BY_CHAR, MD_BY_WORD, MD_BY_BLOCK };
 typedef struct {
@@ -664,8 +719,8 @@ typedef struct {
     bool link_drag;             /* a press on a link moved: select from where it went down, next frame */
 } md_sel_state;
 
-typedef struct md_code_sel { cui__code_sel cs; int block; struct md_code_sel *next; } md_code_sel;
-typedef struct md_diag_sel { cui__mermaid_sel ms; int block; struct md_diag_sel *next; } md_diag_sel;
+typedef struct md_code_sel { cui__code_sel cs; md_pos block; struct md_code_sel *next; } md_code_sel;
+typedef struct md_diag_sel { cui__mermaid_sel ms; md_pos block; struct md_diag_sel *next; } md_diag_sel;
 
 /* One frame of selection work, shared by the blocks as they are built and read by their paint. */
 typedef struct {
@@ -753,11 +808,17 @@ static bool md_sel_offer(md_sel *S, cui_rect r) {
     return true;
 }
 
-/* The part of block blk inside the selection, as [*a, *b); false when none. */
-static bool md_sel_range(const md_sel *S, int blk, int *a, int *b) {
-    if (md_pos_cmp(S->lo, S->hi) >= 0 || blk < S->lo.block || blk > S->hi.block) return false;
-    *a = blk == S->lo.block ? S->lo.off : 0;
-    *b = blk == S->hi.block ? S->hi.off : 0x7FFFFFFF;
+/* The part of block blk (its top and block, off unused) inside the selection, as [*a, *b); false when none. */
+static bool md_sel_range(const md_sel *S, md_pos blk, int *a, int *b) {
+    md_pos lo = S->lo, hi = S->hi;
+    if (md_pos_cmp(lo, hi) >= 0) return false;
+    bool at_lo = blk.top == lo.top && blk.block == lo.block, at_hi = blk.top == hi.top && blk.block == hi.block;
+    blk.off = 0x7FFFFFFF;
+    if (!at_lo && md_pos_cmp(blk, lo) < 0) return false;
+    blk.off = 0;
+    if (!at_hi && md_pos_cmp(blk, hi) > 0) return false;
+    *a = at_lo ? lo.off : 0;
+    *b = at_hi ? hi.off : 0x7FFFFFFF;
     return *b > *a;
 }
 
@@ -776,7 +837,7 @@ static void md_sel_put(cui_ctx *ui, md_sel *S, const char *p, int n) {
 }
 
 /* Ctrl+C: appends the selected part of block blk (its runs, or plain code). */
-static void md_sel_copy(cui_ctx *ui, md_sel *S, int blk, const md_run *runs, int nruns, const char *code, int code_len) {
+static void md_sel_copy(cui_ctx *ui, md_sel *S, md_pos blk, const md_run *runs, int nruns, const char *code, int code_len) {
     int a, b;
     char sep = S->sep;
     int gap = S->gap;
@@ -810,7 +871,7 @@ typedef struct {
     const float *hover, *focus;   /* per link of the block */
     bool underline_rest;          /* links keep a full underline (text on a colored surface) */
     const md_sel *sel;            /* the view's selection, final when this paints */
-    int block;                    /* this block's number in it */
+    md_pos block;                 /* this block's number in it */
 } md_paint;
 
 /* Slants the glyphs drawn since v0 around the baseline: a synthesized italic. */
@@ -921,7 +982,32 @@ typedef struct {
     cui_markdown_heading *heads; int nheads;
     cui_markdown_result *res;
     md_sel *sel;
+    /* big texts (md_big): */
+    bool big;                    /* only some top level blocks are built, one at a time */
+    bool dry;                    /* this block is not built: its selected text is copied (Ctrl+C), nothing else */
+    int top;                     /* the top level block being built: selection positions start with it */
+    cui_id bid;                  /* salts the ids of links and text blocks: the view's id, or in a big text per top level block */
+    const struct md_head *bheads; int bnheads;   /* a big text's headings, for their ids */
+    uint32_t big_gen;            /* a big text's generation: changes with the text (instead of hashing it) */
+    /* the block scanner on a worker (no ui): */
+    md_arena *ar;                /* scratch memory instead of the frame's */
+    bool oom;
+    struct md_doc *doc;          /* the doc whose headings it collects */
 } md_ctx;
+
+/* Scratch memory: the frame's, or the worker's arena (NULL when out of memory there). */
+static void *md_scratch(md_ctx *c, size_t n) {
+    if (c->ar) {
+        void *p = n == (size_t)-1 ? NULL : md_arena_alloc(c->ar, n);
+        if (!p) c->oom = true;
+        return p;
+    }
+    return cui__frame_alloc(c->ui, n);
+}
+
+/* The next selectable block's number: in document order, under the top level block being built. */
+static md_pos md_next_sel(md_ctx *c) { return md_mkpos(c->top, c->sel->seq++, 0); }
+static cui_id md_pos_id(const md_ctx *c, md_pos p) { return cui__hash(&p.block, sizeof p.block, c->bid ^ 0x5E1B1u); }
 
 typedef struct { float w; int depth; bool tight; cui_color fg; } md_box;
 
@@ -942,7 +1028,7 @@ static bool md_tail(md_ctx *c, md_line last) { return c->streaming && last.off +
 static bool md_open_line(md_ctx *c, md_line L) { return c->streaming && L.off + L.len >= c->len; }
 
 static void md_space(md_ctx *c, float h) {
-    if (h > 0) cui__leaf(c->ui, 0, CUI_PX(1), CUI_PX(h));
+    if (h > 0 && !c->dry) cui__leaf(c->ui, 0, CUI_PX(1), CUI_PX(h));
 }
 
 static float md_gap_before(md_ctx *c, const md_box *b, int prev, int kind, int level) {
@@ -954,7 +1040,7 @@ static float md_gap_before(md_ctx *c, const md_box *b, int prev, int kind, int l
     return g * c->u;
 }
 
-static cui_id md_link_id(md_ctx *c, int seq) { return cui__hash(&seq, sizeof seq, c->id ^ 0x3D11Au); }
+static cui_id md_link_id(md_ctx *c, int seq) { return cui__hash(&seq, sizeof seq, c->bid ^ 0x3D11Au); }
 
 /* A press on a link or a fold header that travels past MD_DRAG_START is a selection from
  * where it went down, not a click: the view takes the press (md_sel_begin goes on next frame). */
@@ -966,7 +1052,7 @@ static void md_sel_drag_off(md_ctx *c, cui_interact r) {
     if (dx * dx + dy * dy > MD_DRAG_START * MD_DRAG_START) { ui->active = c->id; S->st->link_drag = true; ui->animating = true; }
 }
 
-typedef struct { const md_sel *sel; int block; } md_text_paint;
+typedef struct { const md_sel *sel; md_pos block; } md_text_paint;
 
 /* x of byte k of a one line text node w wide, from its left edge, as cui__paint_text places it. */
 static float md_text_node_x(cui_ctx *ui, const cui_node *n, float w, int k) {
@@ -991,8 +1077,8 @@ static void md_paint_text_sel(cui_ctx *ui, cui_node *n, void *data) {
 static void md_sel_text_node(md_ctx *c, int node, const md_inline *in) {
     cui_ctx *ui = c->ui;
     md_sel *S = c->sel;
-    int blk = S->seq++;
-    cui_id lid = cui__hash(&blk, sizeof blk, c->id ^ 0x5E1B1u);
+    md_pos blk = md_next_sel(c);
+    cui_id lid = md_pos_id(c, blk);
     cui_node *n = &ui->nodes[node];
     md_text_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->sel = S; p->block = blk;
@@ -1008,7 +1094,7 @@ static void md_sel_text_node(md_ctx *c, int node, const md_inline *in) {
                 float d = fabsf(r.x + md_text_node_x(ui, n, r.w, k) - S->x);
                 if (d < bd) { bd = d; best = k; }
             }
-            S->at.block = blk; S->at.off = best;
+            S->at = blk; S->at.off = best;
             S->runs = in->runs; S->nruns = in->nruns; S->code = NULL; S->diag = false;
         }
     }
@@ -1023,7 +1109,7 @@ static void md_sel_diagram(md_ctx *c, md_diag_sel *ds, cui_id panel) {
     md_sel *S = c->sel;
     md_sel_state *st = S->st;
     const cui__mermaid_sel *m = &ds->ms;
-    ds->block = S->seq++;
+    ds->block = md_next_sel(c);
     ds->next = S->diags; S->diags = ds;
     if (cui__has_prev_rect(ui, panel)) {
         cui_rect r = cui__prev_rect(ui, panel);
@@ -1032,7 +1118,7 @@ static void md_sel_diagram(md_ctx *c, md_diag_sel *ds, cui_id panel) {
             if (cui__rect_contains(m->rect[k], S->x, S->y) && cui__rect_contains(r, S->x, S->y)) lab = k;
         bool over = S->over_text;
         if ((S->hover || S->probe) && md_sel_offer(S, r)) {
-            S->at.block = ds->block;
+            S->at = ds->block;
             S->at.off = lab >= 0 ? m->at[lab] : S->y < r.y + r.h * 0.5f ? 0 : m->len;
             S->code = m->text; S->code_len = m->len; S->runs = NULL;
             S->diag = true;
@@ -1040,8 +1126,8 @@ static void md_sel_diagram(md_ctx *c, md_diag_sel *ds, cui_id panel) {
         }
         if (lab < 0) S->over_text = over;   /* the I-beam only over a label */
         if (lab >= 0 && !S->probe && st->focused && ui->mpressed[CUI_MOUSE_LEFT] && ui->click_count == 2 && ui->hot == panel) {
-            st->anchor = st->unit0 = (md_pos){ ds->block, m->at[lab] };
-            st->head = st->unit1 = (md_pos){ ds->block, m->at[lab + 1] - 1 };
+            st->anchor = st->unit0 = md_mkpos(ds->block.top, ds->block.block, m->at[lab]);
+            st->head = st->unit1 = md_mkpos(ds->block.top, ds->block.block, m->at[lab + 1] - 1);
             st->anchored = true; st->dragging = false;
         }
     }
@@ -1053,10 +1139,14 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
     cui_ctx *ui = c->ui;
     md_sel *S = c->sel;
     md_lay L;
-    md_layout(ui, in, f, CUI_MAX(W, 24.0f), align, &L);
-    int blk = S->seq++;
+    md_pos blk = md_next_sel(c);
     int base = c->link_seq;
     c->link_seq += in->nlinks;
+    if (c->dry) {   /* not built: only its text, when it is copied */
+        md_sel_copy(ui, S, blk, in->runs, in->nruns, NULL, 0);
+        return 0;
+    }
+    md_layout(ui, in, f, CUI_MAX(W, 24.0f), align, &L);
     float *hover = cui__frame_alloc(ui, sizeof(float) * (size_t)(in->nlinks * 2 + 1)), *focus = hover + in->nlinks;
     cui_id *ids = cui__frame_alloc(ui, sizeof(cui_id) * (size_t)(in->nlinks + 1));
     for (int k = 0; k < in->nlinks; k++) {
@@ -1084,7 +1174,7 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
         if (!lk->autolink) { ui->last_id = id; cui_tooltip(ui, r.hovered && url ? url : ""); }
     }
     cui_id lid = c->leaf_id;
-    if (!lid && S->st) lid = cui__hash(&blk, sizeof blk, c->id ^ 0x5E1B1u);   /* its rect, to find text under the pointer */
+    if (!lid && S->st) lid = md_pos_id(c, blk);   /* its rect, to find text under the pointer */
     int leaf = cui__leaf(ui, lid, CUI_FILL, CUI_PX((float)L.lines * f->lh));
     c->leaf_id = 0;
     md_paint *p = cui__frame_alloc(ui, sizeof *p);
@@ -1096,7 +1186,7 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
     if (S->st && (S->hover || S->probe) && cui__has_prev_rect(ui, lid)) {
         cui_rect r = cui__prev_rect(ui, lid);
         if (md_sel_offer(S, r)) {
-            S->at.block = blk; S->at.off = md_hit_inline(ui, &L, f, S->x - r.x, S->y - r.y);
+            S->at = blk; S->at.off = md_hit_inline(ui, &L, f, S->x - r.x, S->y - r.y);
             S->runs = in->runs; S->nruns = in->nruns; S->code = NULL; S->diag = false;
         }
     }
@@ -1323,6 +1413,10 @@ static void md_paint_img(cui_ctx *ui, cui_node *n, void *data) {
 /* The picture as a block of its own, or a quiet line with an icon and the alt text. */
 static float md_image_block(md_ctx *c, const md_img *m, float W) {
     cui_ctx *ui = c->ui;
+    if (c->dry) {   /* no text of its own to copy */
+        if (m->link_len > 0) c->link_seq++;
+        return 0;
+    }
     const char *path = md_image_path(c, m);
     md_img_state *t = path ? md_img_tex(ui, path) : NULL;
     bool ok = t && t->tex;
@@ -1430,7 +1524,14 @@ static float md_paragraph(md_ctx *c, const md_box *b, const md_line *L, int n) {
 }
 
 /* Records a heading for the result: its line and its top in the latest layout. */
+static int md_head_find(const struct md_head *h, int n, int off);
 static void md_note_heading(md_ctx *c, int level, md_line src) {
+    if (c->dry) return;
+    if (c->big) {   /* the doc found the headings: here only the id that finds its rect */
+        int k = md_head_find(c->bheads, c->bnheads, src.off);
+        if (k >= 0) { k++; c->leaf_id = cui__hash(&k, sizeof k, c->id ^ 0x4EAD1u); }
+        return;
+    }
     if (!c->heads || c->nheads >= c->nlines) return;
     int lo = 0, hi = c->nlines - 1;
     while (lo < hi) { int mid = (lo + hi + 1) / 2; if (c->lines[mid].off <= src.off) lo = mid; else hi = mid - 1; }
@@ -1481,6 +1582,11 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
     memset(&co, 0, sizeof co);
     co.lang = lg;
     co.size = c->body;
+    if (c->dry) {   /* only its text, when it is copied (a diagram off screen copies its source) */
+        c->code_seq++;
+        if (c->sel->st) md_sel_copy(ui, c->sel, md_next_sel(c), NULL, 0, buf, o);
+        return 0;
+    }
     const char *cid = cui__frame_printf(ui, "code%d", c->code_seq++);
     float mw;
     md_sel *S = c->sel;
@@ -1497,13 +1603,13 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
         return c->fit ? widest + 42 : 0;
     }
     md_code_sel *cs = cui__frame_alloc(ui, sizeof *cs);
-    cs->block = S->seq++;
+    cs->block = md_next_sel(c);
     cs->cs.color = S->color;
     cs->next = S->codes; S->codes = cs;
     cui__code_block_sel(ui, cid, buf, &co, &cs->cs);
     if ((S->hover || S->probe) && cui__has_prev_rect(ui, cs->cs.canvas)) {
         if (md_sel_offer(S, cui__prev_rect(ui, cs->cs.canvas))) {
-            S->at.block = cs->block; S->at.off = cui__code_sel_hit(ui, &cs->cs, buf, o, S->x, S->y);
+            S->at = cs->block; S->at.off = cui__code_sel_hit(ui, &cs->cs, buf, o, S->x, S->y);
             S->code = buf; S->code_len = o; S->runs = NULL; S->diag = false;
         }
     }
@@ -1654,10 +1760,14 @@ static int md_table_at(md_ctx *c, const md_line *L, int n, int i, uint8_t *align
 
 static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b);
 
-static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, float *nat) {
-    cui_ctx *ui = c->ui;
-    typedef struct { int start, end, content_col; md_line first; bool task, checked; int task_off; } md_item;
-    md_item *items = cui__frame_alloc(ui, sizeof(md_item) * (size_t)(n - i + 1));
+typedef struct { int start, end, content_col; md_line first; bool task, checked; int task_off; } md_item;
+
+/* The list that starts at line i: how many items it has, whether it is loose, its first marker,
+ * and with items (room for all of them) the items. Returns the line after it. Counting before
+ * filling keeps the memory to the items: it used to take room for every line to the end of
+ * the text, for each list, which made a text of many small lists quadratic. */
+static int md_list_scan(const md_line *L, int n, int i, md_item *items, int *count_out, bool *loose_out, md_marker *m0_out) {
+    md_item spare;
     int count = 0;
     bool loose = false;
     md_marker m0;
@@ -1670,7 +1780,8 @@ static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, f
         if (ind >= 4 || !md_list_marker(T, &m)) break;
         if (count > 0 && (m.ordered != m0.ordered || m.ch != m0.ch)) break;
         if (count == 0) m0 = m;
-        md_item *it = &items[count++];
+        md_item *it = items ? &items[count] : &spare;
+        count++;
         md_line R = md_skip(T, m.w);
         int sb, sp = md_indent(R, &sb);
         if (md_blank(R)) { it->content_col = ind + m.w + 1; R = md_skip(R, R.len); }
@@ -1711,7 +1822,45 @@ static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, f
         if (k > it->end) loose = true;
         j = k;
     }
+    *count_out = count;
+    if (loose_out) *loose_out = loose;
+    if (m0_out) *m0_out = m0;
+    return j;
+}
+
+/* An item's lines with the list prefix removed (NULL when out of scratch memory). */
+static md_line *md_item_lines(md_ctx *c, const md_line *L, const md_item *it, int *nl_out) {
+    int nl = it->end - it->start;
+    md_line *sub = md_scratch(c, md_mul((size_t)nl, sizeof(md_line)));
+    *nl_out = nl;
+    if (!sub) return NULL;
+    sub[0] = it->first;
+    for (int q = 1; q < nl; q++) {
+        md_line Lq = L[it->start + q];
+        int qi = md_indent(Lq, NULL);
+        sub[q] = md_blank(Lq) ? md_skip(Lq, Lq.len) : md_strip_cols(Lq, CUI_MIN(qi, it->content_col));
+    }
+    return sub;
+}
+
+static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, float *nat) {
+    cui_ctx *ui = c->ui;
+    int count = 0;
+    bool loose = false;
+    md_marker m0;
+    md_list_scan(L, n, i, NULL, &count, &loose, &m0);
     if (count == 0) return i + 1;
+    md_item *items = cui__frame_alloc(ui, sizeof(md_item) * (size_t)count);
+    int j = md_list_scan(L, n, i, items, &count, &loose, &m0);
+    if (c->dry) {   /* only the items' text */
+        for (int k = 0; k < count; k++) {
+            int nl;
+            md_line *sub = md_item_lines(c, L, &items[k], &nl);
+            md_box cb = { b->w, b->depth + 1, !loose, b->fg };
+            md_blocks(c, sub, nl, &cb);
+        }
+        return j;
+    }
     md_font f = md_body(c);
     float u = c->u;
     bool any_task = false;
@@ -1758,15 +1907,8 @@ static int md_list(md_ctx *c, const md_box *b, const md_line *L, int n, int i, f
             ui->nodes[mk].paint = md_paint_marker;
             ui->nodes[mk].paint_data = mp;
         }
-        /* the item's lines with the list prefix removed */
-        int nl = it->end - it->start;
-        md_line *sub = cui__frame_alloc(ui, sizeof(md_line) * (size_t)nl);
-        sub[0] = it->first;
-        for (int q = 1; q < nl; q++) {
-            md_line Lq = L[it->start + q];
-            int qi = md_indent(Lq, NULL);
-            sub[q] = md_blank(Lq) ? md_skip(Lq, Lq.len) : md_strip_cols(Lq, CUI_MIN(qi, it->content_col));
-        }
+        int nl;
+        md_line *sub = md_item_lines(c, L, it, &nl);
         int col = cui__node_new(ui, 0);
         ui->nodes[col].w = CUI_FILL;
         cui__open(ui, col);
@@ -1876,6 +2018,18 @@ static void md_callout(md_ctx *c, const md_box *b, const md_line *sub, int count
     float u = c->u;
     bool foldable = h->fold != 0;
     cui_id hid = md_callout_id(c, h, sub + 1, count - 1);
+    if (c->dry) {   /* the title and, when open, the body: their text */
+        md_callout_state *ds = foldable ? cui__state_lazy(ui, hid, sizeof *ds, false) : NULL;
+        bool open = !foldable || (ds && ds->init ? ds->open : h->fold == '+');
+        md_run run = { title, title_len, 0, -1, 0 };
+        md_inline tin = { &run, 1, NULL, 0, false };
+        md_inline_emit(c, &tin, NULL, tone, CUI_TEXT_LEFT, 0);
+        if (open && count > 1) {
+            md_box cb = { b->w, b->depth + 1, false, c->fg };
+            md_blocks(c, sub + 1, count - 1, &cb);
+        }
+        return;
+    }
     md_callout_state *st = NULL;
     cui_interact r = { 0 };
     if (foldable) {
@@ -1932,9 +2086,9 @@ static void md_callout(md_ctx *c, const md_box *b, const md_line *sub, int count
     if (nat) *nat = w + padx * 2 + 3 * u;
 }
 
-static int md_quote(md_ctx *c, const md_box *b, const md_line *L, int n, int i, float *nat) {
-    cui_ctx *ui = c->ui;
-    md_line *sub = cui__frame_alloc(ui, sizeof(md_line) * (size_t)(n - i));
+/* The quote that starts at line i: how many lines it has and, with sub (room for all of them),
+ * its lines with the > removed. Returns the line after it. */
+static int md_quote_scan(const md_line *L, int n, int i, md_line *sub, int *count_out) {
     int count = 0, j = i;
     bool prev_text = false;
     while (j < n) {
@@ -1943,16 +2097,33 @@ static int md_quote(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
         if (ind < 4 && T.len > 0 && T.s[0] == '>') {
             T = md_skip(T, 1);
             if (T.len > 0 && md_sp(T.s[0])) T = md_skip(T, 1);
-            sub[count++] = T;
+            if (sub) sub[count] = T;
+            count++;
             prev_text = !md_blank(T);
         } else if (prev_text && !md_blank(L[j]) && !md_interrupts(L[j])) {
-            sub[count++] = L[j];   /* lazy continuation of a quoted paragraph */
+            if (sub) sub[count] = L[j];   /* lazy continuation of a quoted paragraph */
+            count++;
         } else break;
         j++;
     }
+    *count_out = count;
+    return j;
+}
+
+static int md_quote(md_ctx *c, const md_box *b, const md_line *L, int n, int i, float *nat) {
+    cui_ctx *ui = c->ui;
+    int count = 0;
+    md_quote_scan(L, n, i, NULL, &count);
+    md_line *sub = cui__frame_alloc(ui, sizeof(md_line) * (size_t)(count + 1));
+    int j = md_quote_scan(L, n, i, sub, &count);
     md_callout_head ch;
     if (count > 0 && md_callout_parse(sub[0], &ch)) {
         md_callout(c, b, sub, count, &ch, nat);
+        return j;
+    }
+    if (c->dry) {
+        md_box qb = { b->w, b->depth + 1, false, c->fg2 };
+        md_blocks(c, sub, count, &qb);
         return j;
     }
     float u = c->u;
@@ -1972,13 +2143,36 @@ static int md_quote(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
     return j;
 }
 
+/* The line after the table that starts at line i; *has_delim: it has its alignment row. */
+static int md_table_end(md_ctx *c, const md_line *L, int n, int i, bool *has_delim) {
+    uint8_t scratch[MD_MAX_COLS];
+    bool hd = i + 1 < n && md_delim_row(L[i + 1], scratch, MD_MAX_COLS, md_open_line(c, L[i + 1])) > 0;
+    int j = i + (hd ? 2 : 1);
+    while (j < n && !md_blank(L[j]) && md_has(L[j], '|')) j++;
+    if (has_delim) *has_delim = hd;
+    return j;
+}
+
 static int md_table(md_ctx *c, const md_box *b, const md_line *L, int n, int i, int ncols, const uint8_t *align, float *nat) {
     cui_ctx *ui = c->ui;
     if (ncols > MD_MAX_COLS) ncols = MD_MAX_COLS;
-    bool has_delim = i + 1 < n && md_delim_row(L[i + 1], (uint8_t[MD_MAX_COLS]){ 0 }, MD_MAX_COLS, md_open_line(c, L[i + 1])) > 0;
-    int j = i + (has_delim ? 2 : 1);
-    while (j < n && !md_blank(L[j]) && md_has(L[j], '|')) j++;
+    bool has_delim;
+    int j = md_table_end(c, L, n, i, &has_delim);
     int nrows = j - i - (has_delim ? 2 : 1);
+    if (c->dry) {   /* the cells' text: a tab between cells, a line per row */
+        md_line cl[MD_MAX_COLS];
+        for (int r = 0; r <= nrows; r++) {
+            int nc = CUI_MIN(md_cells(L[r == 0 ? i : i + (has_delim ? 2 : 1) + r - 1], cl, MD_MAX_COLS), ncols);
+            for (int k = 0; k < nc; k++) {
+                md_inline in = md_parse_inline(ui, cl[k].s, cl[k].len, false);
+                c->sel->sep = k > 0 ? '\t' : '\n';
+                if (r == 0) md_sel_copy(ui, c->sel, md_next_sel(c), in.runs, in.nruns, NULL, 0);
+                else md_inline_emit(c, &in, NULL, b->fg, align[k], 0);
+            }
+        }
+        c->sel->sep = '\n';
+        return j;
+    }
     md_font f = md_body(c);
     md_font hf = md_make_font(c, c->ui->theme.text_sm * c->body / c->ui->theme.text_body, CUI_FONT_MEDIUM, CUI_FONT_MEDIUM, 1.3f);
     md_inline *cells = cui__frame_alloc(ui, sizeof(md_inline) * (size_t)((nrows + 1) * ncols));
@@ -2056,6 +2250,73 @@ static int md_table(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
     return j;
 }
 
+/* What starts at a line that is not blank: kind is the BK_* its spacing goes by, sub how it is
+ * built. The building (md_blocks) and the block scanner of big texts (md_block_end) both start
+ * here, so they cut the text the same way. */
+enum { MD_SUB_NONE, MD_SUB_ICODE, MD_SUB_FENCE, MD_SUB_ATX, MD_SUB_SETEXT, MD_SUB_WAIT };
+typedef struct {
+    int kind, sub, level, ind;
+    int j;                       /* indented code: its last line; a fence: its closing line (or n); a paragraph: its end or underline */
+    md_line info, content;
+    int ncols;                   /* a table */
+    uint8_t align[MD_MAX_COLS];
+} md_bk;
+
+static void md_block_at(md_ctx *c, const md_line *L, int n, int i, md_bk *k) {
+    md_line Li = L[i];
+    int bytes, ind = md_indent(Li, &bytes);
+    md_line T = md_skip(Li, bytes);
+    char fch;
+    int flen, level;
+    md_marker m;
+    k->sub = MD_SUB_NONE; k->level = 0; k->ind = ind; k->j = i;
+    if (ind >= 4) {   /* indented code */
+        int j = i, last = i;
+        while (j < n && (md_blank(L[j]) || md_indent(L[j], NULL) >= 4)) { if (!md_blank(L[j])) last = j; j++; }
+        k->kind = BK_CODE; k->sub = MD_SUB_ICODE; k->j = last;
+    } else if (md_fence(T, &fch, &flen, &k->info)) {
+        int j = i + 1;
+        while (j < n && !md_fence_close(L[j], fch, flen)) j++;
+        k->kind = BK_CODE; k->sub = MD_SUB_FENCE; k->j = j;
+    } else if (md_atx(T, &level, &k->content)) {
+        k->kind = BK_HEADING; k->sub = MD_SUB_ATX; k->level = level;
+    } else if (md_hrule(T)) {
+        k->kind = BK_HR;
+    } else if (T.s[0] == '>') {
+        k->kind = BK_QUOTE;
+    } else if (md_list_marker(T, &m)) {
+        k->kind = BK_LIST;
+    } else if ((k->ncols = md_table_at(c, L, n, i, k->align)) > 0) {
+        k->kind = BK_TABLE;
+    } else {   /* paragraph, or a setext heading */
+        int j = i + 1, setext = 0;
+        uint8_t align[MD_MAX_COLS];
+        while (j < n && !md_blank(L[j])) {
+            if (md_indent(L[j], NULL) < 4 && (setext = md_setext(L[j])) > 0) break;
+            if (md_interrupts(L[j]) || md_table_at(c, L, n, j, align)) break;
+            j++;
+        }
+        k->j = j;
+        if (setext && md_open_line(c, L[j])) { k->kind = BK_PARA; k->sub = MD_SUB_WAIT; }   /* the underline may still be a list or a rule: wait for its line */
+        else if (setext) { k->kind = BK_HEADING; k->sub = MD_SUB_SETEXT; k->level = setext; }
+        else k->kind = BK_PARA;
+    }
+}
+
+/* The line after the block that starts at line i (md_block_at gave k). */
+static int md_block_end(md_ctx *c, const md_line *L, int n, int i, const md_bk *k) {
+    int count;
+    switch (k->kind) {
+    case BK_CODE: return k->sub == MD_SUB_ICODE ? k->j + 1 : (k->j < n ? k->j + 1 : n);
+    case BK_QUOTE: return md_quote_scan(L, n, i, NULL, &count);
+    case BK_LIST: { int j = md_list_scan(L, n, i, NULL, &count, NULL, NULL); return count ? j : i + 1; }
+    case BK_TABLE: return md_table_end(c, L, n, i, NULL);
+    case BK_PARA: return k->sub == MD_SUB_WAIT ? k->j + 1 : k->j;
+    case BK_HEADING: return k->sub == MD_SUB_SETEXT ? k->j + 1 : i + 1;
+    default: return i + 1;
+    }
+}
+
 static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b) {
     cui_ctx *ui = c->ui;
     float best = 0;
@@ -2070,77 +2331,55 @@ static float md_blocks(md_ctx *c, const md_line *L, int n, const md_box *b) {
     while (i < n) {
         md_line Li = L[i];
         if (md_blank(Li)) { i++; continue; }
-        int bytes, ind = md_indent(Li, &bytes);
-        md_line T = md_skip(Li, bytes), info, content;
+        md_bk k;
+        md_block_at(c, L, n, i, &k);
         float w = 0;
-        char fch;
-        int flen, level;
-        uint8_t align[MD_MAX_COLS];
-        md_marker m;
-        if (ind >= 4) {   /* indented code */
-            int j = i, last = i;
-            while (j < n && (md_blank(L[j]) || md_indent(L[j], NULL) >= 4)) { if (!md_blank(L[j])) last = j; j++; }
-            md_space(c, md_gap_before(c, b, prev, BK_CODE, 0));
+        md_space(c, md_gap_before(c, b, prev, k.kind, k.level));
+        switch (k.sub) {
+        case MD_SUB_ICODE: {
             md_line none = { "", 0, 0 };
-            w = md_code(c, L + i, last - i + 1, 4, none);
-            prev = BK_CODE;
-            i = last + 1;
-        } else if (md_fence(T, &fch, &flen, &info)) {
-            int j = i + 1;
-            while (j < n && !md_fence_close(L[j], fch, flen)) j++;
-            md_space(c, md_gap_before(c, b, prev, BK_CODE, 0));
-            w = md_code(c, L + i + 1, j - i - 1, ind, info);
-            prev = BK_CODE;
-            i = j < n ? j + 1 : n;
-        } else if (md_atx(T, &level, &content)) {
-            md_space(c, md_gap_before(c, b, prev, BK_HEADING, level));
-            w = md_heading(c, b, level, content, content.s, content.len, md_tail(c, Li));
-            prev = BK_HEADING;
+            w = md_code(c, L + i, k.j - i + 1, 4, none);
+            i = k.j + 1;
+            break;
+        }
+        case MD_SUB_FENCE:
+            w = md_code(c, L + i + 1, k.j - i - 1, k.ind, k.info);
+            i = k.j < n ? k.j + 1 : n;
+            break;
+        case MD_SUB_ATX:
+            w = md_heading(c, b, k.level, k.content, k.content.s, k.content.len, md_tail(c, Li));
             i++;
-        } else if (md_hrule(T)) {
-            md_space(c, md_gap_before(c, b, prev, BK_HR, 0));
-            int r = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));
-            ui->nodes[r].bg = c->rule_c;
-            prev = BK_HR;
-            i++;
-        } else if (T.s[0] == '>') {
-            md_space(c, md_gap_before(c, b, prev, BK_QUOTE, 0));
-            i = md_quote(c, b, L, n, i, &w);
-            prev = BK_QUOTE;
-        } else if (md_list_marker(T, &m)) {
-            md_space(c, md_gap_before(c, b, prev, BK_LIST, 0));
-            i = md_list(c, b, L, n, i, &w);
-            prev = BK_LIST;
-        } else if ((level = md_table_at(c, L, n, i, align)) > 0) {
-            md_space(c, md_gap_before(c, b, prev, BK_TABLE, 0));
-            i = md_table(c, b, L, n, i, level, align, &w);
-            prev = BK_TABLE;
-        } else {   /* paragraph, or a setext heading */
-            int j = i + 1, setext = 0;
-            while (j < n && !md_blank(L[j])) {
-                if (md_indent(L[j], NULL) < 4 && (setext = md_setext(L[j])) > 0) break;
-                if (md_interrupts(L[j]) || md_table_at(c, L, n, j, align)) break;
-                j++;
-            }
-            if (setext && md_open_line(c, L[j])) {   /* the underline may still be a list or a rule: wait for its line */
-                md_space(c, md_gap_before(c, b, prev, BK_PARA, 0));
-                w = md_paragraph(c, b, L + i, j - i);
-                prev = BK_PARA;
-                i = j + 1;
-            } else if (setext) {
-                int len;
-                const char *s = md_join(c, L + i, j - i, &len);
-                md_space(c, md_gap_before(c, b, prev, BK_HEADING, setext));
-                w = md_heading(c, b, setext, md_trim(L[i]), s, len, false);
-                prev = BK_HEADING;
-                i = j + 1;
-            } else {
-                md_space(c, md_gap_before(c, b, prev, BK_PARA, 0));
-                w = md_paragraph(c, b, L + i, j - i);
-                prev = BK_PARA;
-                i = j;
+            break;
+        case MD_SUB_WAIT:
+            w = md_paragraph(c, b, L + i, k.j - i);
+            i = k.j + 1;
+            break;
+        case MD_SUB_SETEXT: {
+            int len;
+            const char *s = md_join(c, L + i, k.j - i, &len);
+            w = md_heading(c, b, k.level, md_trim(L[i]), s, len, false);
+            i = k.j + 1;
+            break;
+        }
+        default:
+            switch (k.kind) {
+            case BK_HR:
+                if (!c->dry) {
+                    int r = cui__leaf(ui, 0, CUI_FILL, CUI_PX(1));   /* may move the nodes: index after */
+                    ui->nodes[r].bg = c->rule_c;
+                }
+                i++;
+                break;
+            case BK_QUOTE: i = md_quote(c, b, L, n, i, &w); break;
+            case BK_LIST: i = md_list(c, b, L, n, i, &w); break;
+            case BK_TABLE: i = md_table(c, b, L, n, i, k.ncols, k.align, &w); break;
+            default:
+                w = md_paragraph(c, b, L + i, k.j - i);
+                i = k.j;
+                break;
             }
         }
+        prev = k.kind;
         best = CUI_MAX(best, w);
     }
     return best;
@@ -2346,7 +2585,7 @@ static int md_char_class(unsigned char ch) {   /* 0 space, 1 word, 2 punctuation
 /* The word (or whole block) around the probe's position, from the candidate block's text. */
 static void md_sel_unit(cui_ctx *ui, const md_sel *S, int unit, md_pos *w0, md_pos *w1) {
     if (S->diag && unit == MD_BY_WORD) {   /* in a diagram a word is a whole label */
-        w0->block = w1->block = S->at.block;
+        *w0 = *w1 = S->at;
         w0->off = S->lab_a >= 0 ? S->lab_a : S->at.off;
         w1->off = S->lab_a >= 0 ? S->lab_b : S->at.off;
         return;
@@ -2364,7 +2603,7 @@ static void md_sel_unit(cui_ctx *ui, const md_sel *S, int unit, md_pos *w0, md_p
         }
         t = buf;
     }
-    w0->block = w1->block = S->at.block;
+    *w0 = *w1 = S->at;
     if (unit == MD_BY_BLOCK) { w0->off = 0; w1->off = len; return; }
     int off = CUI_CLAMP(S->at.off, 0, len), k = off;
     if (len == 0) { w0->off = w1->off = 0; return; }
@@ -2376,7 +2615,8 @@ static void md_sel_unit(cui_ctx *ui, const md_sel *S, int unit, md_pos *w0, md_p
     w0->off = a; w1->off = b;
 }
 
-static uint32_t md_text_hash(md_ctx *c) { return cui__hash(c->src, (size_t)c->len, 0x5E1EC7u); }
+/* the text the selection belongs to: its hash, or for a big text (not read every frame) its generation */
+static uint32_t md_text_hash(md_ctx *c) { return c->big ? c->big_gen : cui__hash(c->src, (size_t)c->len, 0x5E1EC7u); }
 
 static void md_sel_order(md_sel *S) {
     bool fwd = md_pos_cmp(S->st->anchor, S->st->head) <= 0;
@@ -2426,8 +2666,8 @@ static void md_sel_begin(md_ctx *c, int root) {
     }
     if (st->focused && !ui->edit_prev) {
         if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_A)) {
-            st->anchor.block = st->anchor.off = 0;
-            st->head.block = MD_SEL_END; st->head.off = 0;
+            st->anchor = md_mkpos(0, 0, 0);
+            st->head = md_mkpos(MD_SEL_END, 0, 0);
             st->dragging = false;
             S->probe = false;
             has = true;
@@ -2444,10 +2684,10 @@ static void md_sel_end(md_ctx *c) {
     md_sel_state *st = S->st;
     if (!st) return;
     if (S->probe) {
-        md_pos at = { 0, 0 }, w0, w1;   /* above every block: the start */
+        md_pos at = md_mkpos(0, 0, 0), w0, w1;   /* above every block: the start */
         if (S->found) at = S->at;
         if (S->found && S->diag && S->lab_a >= 0 && st->unit == MD_BY_CHAR) {   /* labels select whole */
-            md_pos a0 = { at.block, S->lab_a }, a1 = { at.block, S->lab_b };
+            md_pos a0 = md_mkpos(at.top, at.block, S->lab_a), a1 = md_mkpos(at.top, at.block, S->lab_b);
             at = (S->pressing && !S->extend) || md_pos_cmp(a0, st->anchor) < 0 ? a0 : a1;
         }
         w0 = w1 = at;
@@ -2475,8 +2715,726 @@ static void md_sel_end(md_ctx *c) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Big texts                                                                */
+/* ------------------------------------------------------------------------ */
+
+/* A text of cui__md_big_bytes or more is cut once into its top level blocks (md_doc): byte
+ * ranges with their kind, nesting and line, and the headings at any depth, never copies of
+ * the text. The cut reads a snapshot of the text: at once when it is short enough, else on a
+ * worker, with the first part cut at once so the top shows in the first frame. It is made
+ * again only when the text changes (compared with the snapshot, or not at all while
+ * .revision stays the same).
+ *
+ * Each frame builds only the blocks near the window, each with md_blocks over its own lines,
+ * so it looks and behaves as the small path does. The others stand in as two spacers. Block
+ * heights are estimated until a block is built and then measured (at a width), and summed in
+ * a Fenwick tree to find the blocks at a scroll offset. When blocks above the first one in view
+ * turn out taller or shorter than estimated, the scroll area around the view moves by as much
+ * in the same frame, so what is on screen stays put.
+ *
+ * Selection positions start with the top level block (md_pos.top), so they keep their order
+ * across blocks that are not built; Ctrl+C walks the selected blocks that are not built
+ * without building them (md_ctx.dry). */
+
+/* the limits (tests lower them): a text this long takes this path, one longer than sync_bytes
+ * is cut on a worker, and the first first_bytes of it are cut at once meanwhile */
+int cui__md_big_bytes = 32 * 1024;
+int cui__md_sync_bytes = 256 * 1024;
+int cui__md_first_bytes = 64 * 1024;
+
+typedef struct {
+    int off, end;                 /* bytes: its first line up to the end of its last (no line break) */
+    int line;                     /* its first line, 0 based */
+    int nl;                       /* lines in it that are not blank */
+    int pre;                      /* blank lines before it (plain text spaces by them) */
+    int heads;                    /* headings before it */
+    uint8_t kind, level;          /* BK_*, and a heading's level */
+} md_blk;
+typedef struct md_head { int off, len, line, level, blk; } md_head;   /* line 1 based, as cui_markdown_heading */
+
+typedef struct md_doc {
+    volatile long refs, cancel, done;
+    char *text; int len;          /* the snapshot */
+    struct md_doc *owner;         /* the doc whose snapshot this one reads (the first part of a text), or NULL: its own */
+    bool plain, ok;
+    uint32_t gen;                 /* the generation of the text it was cut from */
+    int covered;                  /* the blocks reach this far: len, or less for the first part */
+    int fm_end;                   /* the line that closes the front matter, or -1 */
+    md_blk *blk; int nblk, blk_cap;
+    md_head *head; int nhead, head_cap;
+    struct md_doc *old;           /* while cutting: the doc it follows */
+    int *map;                     /* map[k]: the block of that doc that block k is, or -1 */
+    const md_line *lines; int nlines;   /* while cutting */
+} md_doc;
+
+static long md_atomic(volatile long *p, long add) {   /* the value after adding (0: a read) */
+#if defined(_MSC_VER)
+    return _InterlockedExchangeAdd(p, add) + add;
+#else
+    return __atomic_add_fetch(p, add, __ATOMIC_ACQ_REL);
+#endif
+}
+
+static void md_doc_release(md_doc *d) {
+    if (!d || md_atomic(&d->refs, -1) != 0) return;
+    if (d->owner) md_doc_release(d->owner);
+    else free(d->text);
+    md_doc_release(d->old);
+    free(d->blk); free(d->head); free(d->map);
+    free(d);
+}
+
+/* A doc over a snapshot of text (or, with owner, over owner's), following old for the heights. */
+static md_doc *md_doc_new(const char *text, int len, md_doc *owner, bool plain, uint32_t gen, md_doc *old) {
+    md_doc *d = calloc(1, sizeof *d);
+    if (!d) return NULL;
+    if (owner) { d->text = owner->text; d->owner = owner; md_atomic(&owner->refs, 1); }
+    else {
+        d->text = malloc((size_t)len + 1);
+        if (!d->text) { free(d); return NULL; }
+        if (len) memcpy(d->text, text, (size_t)len);
+        d->text[len] = 0;
+    }
+    d->len = len; d->plain = plain; d->gen = gen; d->refs = 1; d->fm_end = -1;
+    if (old) { d->old = old; md_atomic(&old->refs, 1); }
+    return d;
+}
+
+/* The heading whose text starts at off, or -1. */
+static int md_head_find(const md_head *h, int n, int off) {
+    int lo = 0, hi = n - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (h[mid].off == off) return mid;
+        if (h[mid].off < off) lo = mid + 1; else hi = mid - 1;
+    }
+    return -1;
+}
+
+static bool md_grow(void **p, int *cap, int need, size_t elem) {
+    if (need <= *cap) return true;
+    int nc = *cap ? *cap : 64;
+    while (nc < need) { if (nc > INT_MAX / 2) return false; nc *= 2; }
+    size_t bytes = md_mul((size_t)nc, elem);
+    if (bytes == (size_t)-1) return false;
+    void *np = realloc(*p, bytes);
+    if (!np) return false;
+    *p = np; *cap = nc;
+    return true;
+}
+
+static void md_doc_add_head(md_ctx *c, md_line src, int level) {
+    md_doc *d = c->doc;
+    if (!md_grow((void **)&d->head, &d->head_cap, d->nhead + 1, sizeof(md_head))) { c->oom = true; return; }
+    int lo = 0, hi = d->nlines - 1;   /* its line, as md_note_heading finds it */
+    while (lo < hi) { int mid = (lo + hi + 1) / 2; if (d->lines[mid].off <= src.off) lo = mid; else hi = mid - 1; }
+    md_head *h = &d->head[d->nhead++];
+    h->off = src.off; h->len = src.len; h->line = lo + 1; h->level = level; h->blk = d->nblk;
+}
+
+/* The headings in lines L, as md_blocks would meet them at this depth: in lists, quotes and the
+ * callouts that start open (a callout folded with [!type]- hides its headings until opened). */
+static void md_walk(md_ctx *c, const md_line *L, int n, int depth) {
+    if (depth > MD_MAX_DEPTH) return;
+    int i = 0;
+    while (i < n && !c->oom) {
+        if (md_blank(L[i])) { i++; continue; }
+        md_bk k;
+        md_block_at(c, L, n, i, &k);
+        if (k.sub == MD_SUB_ATX) md_doc_add_head(c, k.content, k.level);
+        else if (k.sub == MD_SUB_SETEXT) md_doc_add_head(c, md_trim(L[i]), k.level);
+        else if (k.kind == BK_QUOTE) {
+            int count;
+            md_quote_scan(L, n, i, NULL, &count);
+            md_line *sub = md_scratch(c, md_mul((size_t)count + 1, sizeof(md_line)));
+            if (!sub) return;
+            int j = md_quote_scan(L, n, i, sub, &count);
+            md_callout_head ch;
+            if (count > 0 && md_callout_parse(sub[0], &ch)) { if (ch.fold != '-' && count > 1) md_walk(c, sub + 1, count - 1, depth + 1); }
+            else md_walk(c, sub, count, depth + 1);
+            i = j;
+            continue;
+        } else if (k.kind == BK_LIST) {
+            int count;
+            md_list_scan(L, n, i, NULL, &count, NULL, NULL);
+            if (count == 0) { i++; continue; }
+            md_item *items = md_scratch(c, md_mul((size_t)count, sizeof(md_item)));
+            if (!items) return;
+            int j = md_list_scan(L, n, i, items, &count, NULL, NULL);
+            for (int q = 0; q < count && !c->oom; q++) {
+                int nl;
+                md_line *sub = md_item_lines(c, L, &items[q], &nl);
+                if (!sub) return;
+                md_walk(c, sub, nl, depth + 1);
+            }
+            i = j;
+            continue;
+        }
+        i = md_block_end(c, L, n, i, &k);
+    }
+}
+
+/* Every line of text[0, len), as the small path finds them (a line break at the very end
+ * starts no line), in frame memory with ui, else malloc'd (NULL when out of memory). */
+static md_line *md_split(cui_ctx *ui, const char *text, int len, int *count) {
+    size_t cap = cui__count_byte(text, (size_t)len, '\n') + 1;
+    md_line *L = ui ? cui__frame_alloc(ui, sizeof *L * cap) : md_malloc_n(cap, sizeof *L);
+    *count = 0;
+    if (!L) return NULL;
+    int n = 0, st = 0;
+    while (st <= len) {
+        const char *nlp = st < len ? cui__find_byte(text + st, (size_t)(len - st), '\n') : NULL;
+        int k = nlp ? (int)(nlp - text) : len, e = k;
+        if (e > st && text[e - 1] == '\r') e--;
+        if (!(k == len && st == len && n > 0)) { L[n].s = text + st; L[n].len = e - st; L[n].off = st; n++; }
+        st = k + 1;
+    }
+    *count = len > 0 ? n : 0;
+    return L;
+}
+
+/* Cuts the doc's text into top level blocks and finds its headings, reading only the doc: it
+ * runs on a worker. limit < len cuts the first limit bytes (to a line end) only, without the
+ * block at that end, which may go on past it. False when out of memory or stopped. */
+static bool md_doc_cut(md_doc *d, int limit) {
+    int len = d->len;
+    bool part = limit < len;
+    if (part) { while (limit > 0 && d->text[limit - 1] != '\n') limit--; len = limit; }
+    int total;
+    md_line *L = md_split(NULL, d->text, len, &total);
+    if (!L) return false;
+    md_arena ar = { NULL };
+    md_ctx c;
+    memset(&c, 0, sizeof c);
+    c.src = d->text; c.len = d->len; c.content_end = d->len; c.ar = &ar; c.doc = d;
+    d->lines = L; d->nlines = total;
+    int i = 0, blanks = 0;
+    if (!d->plain) {
+        int fe = md_fm_end(L, total);
+        if (fe >= 0) { d->fm_end = fe; i = fe + 1; }
+    }
+    bool ok = true;
+    while (i < total) {
+        if ((d->nblk & 255) == 0 && md_atomic(&d->cancel, 0)) { ok = false; break; }
+        if (md_blank(L[i])) { blanks++; i++; continue; }
+        md_bk k;
+        int j;
+        if (d->plain) { j = i; while (j < total && !md_blank(L[j])) j++; k.kind = BK_PARA; k.sub = MD_SUB_NONE; k.level = 0; }
+        else { md_block_at(&c, L, total, i, &k); j = md_block_end(&c, L, total, i, &k); }
+        if (!md_grow((void **)&d->blk, &d->blk_cap, d->nblk + 1, sizeof(md_blk))) { ok = false; break; }
+        md_blk *B = &d->blk[d->nblk];
+        B->off = L[i].off; B->end = L[j - 1].off + L[j - 1].len; B->line = i; B->pre = blanks;
+        B->kind = (uint8_t)k.kind; B->level = (uint8_t)k.level; B->heads = d->nhead;
+        B->nl = 0;
+        for (int q = i; q < j; q++) B->nl += !md_blank(L[q]);
+        if (!d->plain) {
+            if (k.sub == MD_SUB_ATX) md_doc_add_head(&c, k.content, k.level);
+            else if (k.sub == MD_SUB_SETEXT) md_doc_add_head(&c, md_trim(L[i]), k.level);
+            else if (k.kind == BK_QUOTE || k.kind == BK_LIST) { md_arena_reset(&ar); md_walk(&c, L + i, j - i, 0); }
+        }
+        if (c.oom) { ok = false; break; }
+        d->nblk++;
+        blanks = 0;
+        i = j;
+    }
+    if (ok && part && d->nblk > 1) { d->nblk--; d->nhead = d->blk[d->nblk].heads; }
+    d->covered = part ? (d->nblk > 0 ? d->blk[d->nblk - 1].end : 0) : d->len;
+    d->lines = NULL;
+    free(L);
+    md_arena_free(&ar);
+    return ok;
+}
+
+/* The bytes two texts share at their start (or end), compared a page at a time first. */
+static int md_common_head(const char *a, const char *b, int n) {
+    int p = 0;
+    while (p + 4096 <= n && !memcmp(a + p, b + p, 4096)) p += 4096;
+    while (p < n && a[p] == b[p]) p++;
+    return p;
+}
+static int md_common_tail(const char *a, int na, const char *b, int nb, int n) {
+    int s = 0;
+    while (s + 4096 <= n && !memcmp(a + na - s - 4096, b + nb - s - 4096, 4096)) s += 4096;
+    while (s < n && a[na - 1 - s] == b[nb - 1 - s]) s++;
+    return s;
+}
+static int md_blk_find(const md_blk *b, int n, int off) {
+    int lo = 0, hi = n - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (b[mid].off == off) return mid;
+        if (b[mid].off < off) lo = mid + 1; else hi = mid - 1;
+    }
+    return -1;
+}
+
+/* Which block of the doc it follows each block is: the same bytes before the first change or
+ * after the last, so they keep their measured heights. */
+static void md_doc_map(md_doc *d) {
+    md_doc *o = d->old;
+    if (!o || !o->ok || d->nblk == 0) return;
+    d->map = md_malloc_n((size_t)d->nblk, sizeof(int));
+    if (!d->map) return;
+    int n = CUI_MIN(o->len, d->len);
+    int p = md_common_head(o->text, d->text, n);
+    int s = md_common_tail(o->text, o->len, d->text, d->len, n - p);
+    int delta = d->len - o->len;
+    for (int k = 0; k < d->nblk; k++) {
+        const md_blk *B = &d->blk[k];
+        int q = -1;
+        if (B->end <= p) q = md_blk_find(o->blk, o->nblk, B->off);
+        else if (B->off >= d->len - s) q = md_blk_find(o->blk, o->nblk, B->off - delta);
+        if (q >= 0 && (o->blk[q].end - o->blk[q].off != B->end - B->off || o->blk[q].kind != B->kind)) q = -1;
+        d->map[k] = q;
+    }
+}
+
+static void md_doc_work(md_doc *d) {
+    d->ok = md_doc_cut(d, d->len);
+    if (d->ok) md_doc_map(d);
+    md_doc_release(d->old);
+    d->old = NULL;
+}
+
+#if defined(_WIN32)
+static void __cdecl md_thread_main(void *arg) { md_doc *d = arg; md_doc_work(d); md_atomic(&d->done, 1); md_doc_release(d); }
+static bool md_thread(md_doc *d) { return _beginthread(md_thread_main, 0, d) != (uintptr_t)-1; }
+#elif defined(MD_PTHREADS)
+static void *md_thread_main(void *arg) { md_doc *d = arg; md_doc_work(d); md_atomic(&d->done, 1); md_doc_release(d); return NULL; }
+static bool md_thread(md_doc *d) {
+    pthread_attr_t at;
+    pthread_t t;
+    if (pthread_attr_init(&at) != 0) return false;
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    bool ok = pthread_create(&t, &at, md_thread_main, d) == 0;
+    pthread_attr_destroy(&at);
+    return ok;
+}
+#else
+static bool md_thread(md_doc *d) { (void)d; return false; }
+#endif
+
+/* Cuts the doc on a worker, or here when no thread can be had. */
+static void md_doc_go(md_doc *d) {
+    md_atomic(&d->refs, 1);   /* the worker's */
+    if (md_thread(d)) return;
+    md_doc_work(d);
+    md_atomic(&d->done, 1);
+    md_doc_release(d);
+}
+
+/* ---- the view's state ---- */
+
+typedef struct {
+    md_doc *doc;                  /* the blocks shown */
+    md_doc *job;                  /* a newer cut on a worker, or NULL */
+    const char *src; int len, rev;   /* the caller's text, last found the same as the newest snapshot (src NULL: it is not) */
+    uint32_t gen;                 /* changes with the text */
+    bool plain;
+    /* heights, per block of doc, at a width */
+    float W, body; bool compact;
+    float lh, cw;                 /* body line height and an average character's width there */
+    int hn;                       /* blocks the arrays are for */
+    float *h;                     /* content heights, measured or estimated */
+    uint8_t *meas;                /* measured */
+    double *fen;                  /* Fenwick tree of the slots (gap before + height), hn + 1 */
+    float *hdy;                   /* per heading of doc: how far below its block's top it was when last built (nested headings) */
+    /* the latest frame */
+    const md_doc *built; int b0, b1;   /* the blocks it built */
+    int anchor;                   /* the first block in view */
+    float scroll_used;            /* the scroll area's offset it used */
+    bool scroll_known;
+    double shift;                 /* move the scroll area by this much in this frame */
+} md_big;
+
+static void md_big_free(cui_ctx *ui, void *data) {
+    (void)ui;
+    md_big *st = data;
+    if (st->job) md_atomic(&st->job->cancel, 1);
+    md_doc_release(st->job);
+    md_doc_release(st->doc);
+    free(st->h); free(st->meas); free(st->fen); free(st->hdy);
+    memset(st, 0, sizeof *st);
+}
+
+static void md_fen_build(double *f, const float *v, int n) {
+    f[0] = 0;
+    for (int i = 1; i <= n; i++) f[i] = v[i - 1];
+    for (int i = 1; i <= n; i++) { int j = i + (i & -i); if (j <= n) f[j] += f[i]; }
+}
+static void md_fen_add(double *f, int n, int k, double d) { for (int i = k + 1; i <= n; i += i & -i) f[i] += d; }
+static double md_fen_sum(const double *f, int k) {   /* slots [0, k) */
+    double s = 0;
+    for (int i = k; i > 0; i -= i & -i) s += f[i];
+    return s;
+}
+/* The block whose slot holds y (0 above the first; n past the last). */
+static int md_fen_find(const double *f, int n, double y) {
+    if (y < 0) return 0;
+    int pos = 0, step = 1;
+    while (step <= n / 2) step *= 2;
+    for (; step > 0; step /= 2)
+        if (pos + step <= n && f[pos + step] <= y) { pos += step; y -= f[pos]; }
+    return pos;
+}
+
+static float md_big_gap(md_ctx *c, const md_big *st, const md_doc *d, int k) {
+    const md_blk *B = &d->blk[k];
+    if (d->plain) return (float)B->pre * st->lh;
+    md_box top = { 0, 0, false, c->fg };
+    return md_gap_before(c, &top, k > 0 ? d->blk[k - 1].kind : BK_NONE, B->kind, B->level);
+}
+
+/* A block's height before it is built: from its kind, lines and bytes at the width. */
+static float md_big_est(md_ctx *c, const md_big *st, const md_blk *B) {
+    float W = CUI_MAX(st->W, 60.0f), u = c->u, lh = st->lh, cw = st->cw;
+    float bytes = (float)(B->end - B->off), nl = (float)CUI_MAX(1, B->nl);
+    float rows = bytes * cw / W;
+    switch (B->kind) {
+    case BK_HEADING: {
+        cui_theme *t = &c->ui->theme;
+        float size = (c->compact ? (B->level == 1 ? t->heading[3] : B->level == 2 ? t->text_lg : t->text_body)
+                                 : (B->level == 1 ? t->heading[1] : B->level == 2 ? t->heading[2] : B->level == 3 ? t->heading[3]
+                                    : B->level == 4 ? t->text_lg : t->text_body)) * c->body / t->text_body;
+        float fs = cui__fs(c->ui, size), r = CUI_MAX(1.0f, ceilf(bytes * cw * size / c->body / W));
+        return r * fs * (size >= 26 ? 1.2f : 1.35f);
+    }
+    case BK_CODE: return (nl - (B->nl > 2 ? 2.0f : 0.0f)) * cui__fs(c->ui, c->body) * 1.5f + 46 * u;
+    case BK_TABLE: return CUI_MAX(1.0f, nl - 1) * (lh + 12 * u) + 8 * u;
+    case BK_HR: return 1;
+    case BK_LIST: return (nl * 0.6f + bytes * cw / CUI_MAX(W - 18 * u, 40.0f)) * lh + (nl - 1) * 4 * u;
+    case BK_QUOTE: return (nl * 0.3f + bytes * cw / CUI_MAX(W - 14 * u, 40.0f) + 0.5f) * lh;
+    default:
+        if (st->plain) return CUI_MAX(nl, nl * 0.5f + rows) * lh;
+        return CUI_MAX(1.0f, ceilf(rows)) * lh;
+    }
+}
+
+/* The slots of every block from h, with the gaps between them. */
+static void md_big_sums(md_ctx *c, md_big *st, const md_doc *d) {
+    float *v = cui__frame_alloc(c->ui, sizeof(float) * (size_t)(st->hn + 1));
+    for (int k = 0; k < st->hn; k++) v[k] = md_big_gap(c, st, d, k) + st->h[k];
+    md_fen_build(st->fen, v, st->hn);
+}
+
+/* Makes d the doc shown: blocks it shares with the one before keep their heights, the others are
+ * estimated, and the first block in view stays where it was. False when out of memory. */
+static bool md_big_take(md_ctx *c, md_big *st, md_doc *d) {
+    int n = d->nblk;
+    float *h = md_malloc_n((size_t)n + 1, sizeof(float));
+    uint8_t *meas = malloc((size_t)n + 1);
+    double *fen = md_malloc_n((size_t)n + 1, sizeof(double));
+    if (!h || !meas || !fen) { free(h); free(meas); free(fen); return false; }
+    double old_top = st->doc && st->hn > 0 ? md_fen_sum(st->fen, CUI_CLAMP(st->anchor, 0, st->hn)) : 0;
+    int anchor = -1;
+    for (int k = 0; k < n; k++) {
+        int q = d->map ? d->map[k] : -1;
+        if (q >= 0 && q < st->hn) { h[k] = st->h[q]; meas[k] = st->meas[q]; if (q == st->anchor) anchor = k; }
+        else { h[k] = md_big_est(c, st, &d->blk[k]); meas[k] = 0; }
+    }
+    free(st->h); free(st->meas); free(st->fen);
+    st->h = h; st->meas = meas; st->fen = fen; st->hn = n;
+    free(st->hdy);
+    st->hdy = calloc((size_t)d->nhead + 1, sizeof(float));
+    md_doc_release(st->doc);
+    st->doc = d;
+    free(d->map);
+    d->map = NULL;
+    md_big_sums(c, st, d);
+    if (anchor >= 0) st->shift += md_fen_sum(fen, anchor) - old_top;
+    st->anchor = anchor >= 0 ? anchor : CUI_CLAMP(st->anchor, 0, CUI_MAX(0, n - 1));
+    st->built = NULL;
+    return true;
+}
+
+/* Before the selection: the state, a finished cut, and whether the text changed (a new cut). */
+static md_big *md_big_prepare(md_ctx *c, const cui_markdown_opts *o, float W) {
+    cui_ctx *ui = c->ui;
+    cui_id sid = c->id ^ 0xB16D0C5u;
+    md_big *st = cui_state(ui, sid, sizeof *st);
+    cui__state_set_dtor(ui, sid, md_big_free);
+    if (st->plain != o->plain && (st->doc || st->job)) {   /* cut another way */
+        if (st->job) md_atomic(&st->job->cancel, 1);
+        md_doc_release(st->job); st->job = NULL;
+        md_doc_release(st->doc); st->doc = NULL;
+        st->hn = 0; st->built = NULL;
+    }
+    st->plain = o->plain;
+    md_font f = md_body(c);
+    bool units = st->W != W || st->body != c->body || st->compact != c->compact;
+    if (units) {
+        static const char sample[] = "the quick brown fox jumps over the lazy dog, then 42 more";
+        st->W = W; st->body = c->body; st->compact = c->compact;
+        st->lh = f.lh;
+        st->cw = cui__text_width(ui, f.reg, f.size, sample, (int)sizeof sample - 1, false) / (float)(sizeof sample - 1);
+    }
+    if (st->job && md_atomic(&st->job->done, 0)) {   /* a cut came back */
+        md_doc *j = st->job;
+        st->job = NULL;
+        if (!j->ok || !md_big_take(c, st, j)) md_doc_release(j);
+    }
+    md_doc *newest = st->job ? st->job : st->doc;
+    bool same;
+    if (newest && o->revision && o->revision == st->rev && c->src == st->src && c->len == st->len) same = true;   /* promised */
+    else same = newest && newest->len == c->len && (c->len == 0 || !memcmp(newest->text, c->src, (size_t)c->len));
+    if (!same) {
+        st->gen++;
+        if (c->len <= cui__md_sync_bytes) {   /* cut it here */
+            md_doc *d = md_doc_new(c->src, c->len, NULL, o->plain, st->gen, st->doc);
+            if (d) {
+                md_doc_work(d);
+                d->done = 1;
+                if (!d->ok || !md_big_take(c, st, d)) md_doc_release(d);
+                else same = true;
+            }
+        } else if (!st->job) {   /* on a worker; the first part at once when there is nothing to show */
+            md_doc *d = md_doc_new(c->src, c->len, NULL, o->plain, st->gen, st->doc);
+            if (d) {
+                st->job = d;
+                md_doc_go(d);
+                if (!st->doc) {
+                    md_doc *p = md_doc_new(NULL, d->len, d, o->plain, st->gen, NULL);
+                    if (p) {
+                        p->ok = md_doc_cut(p, cui__md_first_bytes);
+                        p->done = 1;
+                        if (!p->ok || !md_big_take(c, st, p)) md_doc_release(p);
+                    }
+                }
+                same = true;
+            }
+        }
+    }
+    if (same) { st->src = c->src; st->len = c->len; st->rev = o->revision; }
+    else st->src = NULL;
+    if (st->job) cui__wakeup_after(ui, 1.0f / 60.0f);
+    if (units && st->doc && st->hn > 0) {   /* another width: estimates again, the first block in view kept */
+        double old_top = md_fen_sum(st->fen, CUI_CLAMP(st->anchor, 0, st->hn));
+        for (int k = 0; k < st->hn; k++) { st->h[k] = md_big_est(c, st, &st->doc->blk[k]); st->meas[k] = 0; }
+        if (st->hdy) memset(st->hdy, 0, sizeof(float) * (size_t)st->doc->nhead);
+        md_big_sums(c, st, st->doc);
+        st->shift += md_fen_sum(st->fen, CUI_CLAMP(st->anchor, 0, st->hn)) - old_top;
+        st->built = NULL;
+    }
+    c->big_gen = st->gen;
+    return st;
+}
+
+static cui_id md_big_wid(md_ctx *c, int k) { return cui__hash(&k, sizeof k, c->id ^ 0xB10C1u); }
+
+/* Builds top level block k of d (or with c->dry only copies its selected text). */
+static void md_big_block(md_ctx *c, const md_doc *d, int k, const char *t, float W) {
+    cui_ctx *ui = c->ui;
+    const md_blk *B = &d->blk[k];
+    int n = (int)cui__count_byte(t + B->off, (size_t)(B->end - B->off), '\n') + 1;
+    md_line *L = cui__frame_alloc(ui, sizeof(md_line) * (size_t)n);
+    int st = B->off, q = 0;
+    while (q < n) {
+        const char *nlp = st < B->end ? cui__find_byte(t + st, (size_t)(B->end - st), '\n') : NULL;
+        int e = nlp ? (int)(nlp - t) : B->end, ee = e;
+        if (ee > st && t[ee - 1] == '\r') ee--;
+        L[q].s = t + st; L[q].len = ee - st; L[q].off = st;
+        q++;
+        st = e + 1;
+    }
+    c->top = k;
+    c->bid = cui__hash(&k, sizeof k, c->id ^ 0xB1D5u);
+    c->link_seq = c->code_seq = c->table_seq = c->callout_n = 0;
+    c->leaf_id = 0;
+    c->sel->seq = 0;
+    cui_push_id_int(ui, k);
+    if (d->plain) {
+        c->sel->gap = k > 0 ? B->pre : 0;
+        md_plain_text(c, L, n, W);
+    } else {
+        md_box box = { W, 0, false, c->fg };
+        md_blocks(c, L, n, &box);
+    }
+    cui_pop_id(ui);
+}
+
+/* After the selection: the blocks near the window, spacers for the rest, the headings. */
+static void md_big_build(md_ctx *c, md_big *st, const cui_markdown_opts *o, float W) {
+    cui_ctx *ui = c->ui;
+    md_doc *d = st->doc;
+    if (!d) return;
+    bool current = d->gen == st->gen && st->src != NULL;   /* its snapshot is the caller's text */
+    const char *t = current ? c->src : d->text;
+    const char *keep_src = c->src;
+    c->src = t;
+    int n = d->nblk;
+    /* front matter: a properties block, not markdown */
+    if (d->fm_end >= 0) {
+        int nf;
+        md_line *F = md_split(ui, t, n > 0 ? d->blk[0].off : d->covered, &nf);
+        if (F && nf > d->fm_end) {
+            md_prop *props;
+            int np = md_fm_parse(ui, F + 1, d->fm_end - 1, &props);
+            if (np > 0 && !o->no_front_matter) {
+                md_front_matter(c, props, np, W);
+                if (n > 0) md_space(c, (c->compact ? 8.0f : 16.0f) * c->u);
+            }
+        }
+    }
+    if (n == 0) { c->src = keep_src; return; }
+    bool changed_below = false;   /* a block in view or under it changed */
+    /* heights measured in the latest frame */
+    if (st->built == d && st->b1 > st->b0) {
+        for (int k = st->b0; k < st->b1 && k < n; k++) {
+            cui_id wid = md_big_wid(c, k);
+            if (!cui__has_prev_rect(ui, wid)) continue;
+            float hh = cui__prev_rect(ui, wid).h;
+            if (!st->meas[k] || fabsf(hh - st->h[k]) > 0.01f) {
+                double dh = (double)hh - st->h[k];
+                st->h[k] = hh; st->meas[k] = 1;
+                md_fen_add(st->fen, n, k, dh);
+                if (k < st->anchor) st->shift += dh;
+                else changed_below = true;
+            }
+        }
+    }
+    /* the window: the scroll area around the view (moved first by what changed above it), or the window itself */
+    cui_id cid = c->id ^ 0xB10C5u;
+    int sn = -1;
+    for (int q = ui->parent_depth - 1; q >= 0 && sn < 0; q--) {
+        int ni = ui->parents[q];
+        if (ni >= 0 && (ui->nodes[ni].flags & CUI_NF_SCROLL_Y)) sn = ni;
+    }
+    float sy = 0, vis_top = 0, vis_h = ui->vh;
+    cui_id scid = sn >= 0 ? ui->nodes[sn].id : 0;
+    if (sn >= 0) {
+        cui_scroll_state *ss = scid ? cui__state_lazy(ui, scid, sizeof *ss, false) : NULL;
+        bool at_end = ss && ss->content_h > ss->view_h && ss->ty >= ss->content_h - ss->view_h - 1.0f;
+        if (ss && st->shift != 0 && st->scroll_known) {
+            float s = ui->scale > 0 ? ui->scale : 1.0f;
+            ss->y += (float)st->shift; ss->ty += (float)st->shift;
+            if (ss->pend) ss->pend_y += (float)st->shift;
+            if (ss->y < 0) ss->y = 0;
+            if (ss->ty < 0) ss->ty = 0;
+            ui->nodes[sn].scroll_y = roundf(ss->y * s) / s;
+        }
+        if (at_end && (changed_below || st->shift != 0) && st->scroll_known) {
+            ss->pend = true; ss->pend_y = CUI_SCROLL_BOTTOM; ss->pend_instant = true;   /* it was at the end: it stays there */
+        }
+        sy = ui->nodes[sn].scroll_y;
+        if (ss && ss->pend && ss->pend_instant) {   /* a jump this frame's layout makes: build where it lands */
+            float max_y = CUI_MAX(0.0f, ss->content_h - ss->view_h);
+            sy = CUI_CLAMP(ss->pend_y, 0.0f, max_y);
+        }
+    }
+    if (st->shift != 0 || changed_below) ui->animating = true;   /* laid out with other heights than shown: once more */
+    st->shift = 0;
+    if (sn >= 0 && st->scroll_known && cui__has_prev_rect(ui, cid) && cui__has_prev_rect(ui, scid)) {
+        cui_rect sr = cui__prev_rect(ui, scid);
+        vis_top = sy - st->scroll_used - (cui__prev_rect(ui, cid).y - sr.y);
+        vis_h = sr.h;
+    } else if (cui__has_prev_rect(ui, cid)) vis_top = -cui__prev_rect(ui, cid).y;
+    st->scroll_used = sy;
+    st->scroll_known = sn >= 0;
+    double sum = md_fen_sum(st->fen, n);
+    double tail = d->covered < d->len && d->covered > 0 ? (double)(d->len - d->covered) * sum / (double)d->covered : 0;
+    float over = CUI_MAX(200.0f, vis_h * 0.5f);
+    int first = md_fen_find(st->fen, n, (double)vis_top - over), last = md_fen_find(st->fen, n, (double)(vis_top + vis_h + over));
+    if (first >= n) first = n - 1;
+    if (last >= n) last = n - 1;
+    /* the anchor: the block at the top of the window keeps its top where it is; what changes above it moves the scroll area */
+    st->anchor = CUI_MIN(md_fen_find(st->fen, n, vis_top), n - 1);
+    /* the headings, where the latest layout put them (or where they would be) */
+    if (d->nhead > 0) {
+        cui_markdown_heading *hs = cui__frame_alloc(ui, sizeof(cui_markdown_heading) * (size_t)d->nhead);
+        bool rects = cui__has_prev_rect(ui, c->root_id) && cui__has_prev_rect(ui, cid);
+        float ry = cui__prev_rect(ui, c->root_id).y, coff = rects ? cui__prev_rect(ui, cid).y - ry : 0;
+        for (int k = 0; k < d->nhead; k++) {
+            const md_head *h = &d->head[k];
+            cui_markdown_heading *ho = &hs[k];
+            ho->level = h->level; ho->line = h->line; ho->text = t + h->off; ho->text_len = h->len;
+            ho->y = coff + (float)md_fen_sum(st->fen, h->blk) + md_big_gap(c, st, d, h->blk) + (st->hdy ? st->hdy[k] : 0);
+            if (rects && st->built == d && h->blk >= st->b0 && h->blk < st->b1) {
+                int id1 = k + 1;
+                cui_id lid = cui__hash(&id1, sizeof id1, c->id ^ 0x4EAD1u);
+                if (cui__has_prev_rect(ui, lid)) {
+                    ho->y = cui__prev_rect(ui, lid).y - ry;
+                    cui_id wid = md_big_wid(c, h->blk);
+                    if (st->hdy && cui__has_prev_rect(ui, wid)) st->hdy[k] = cui__prev_rect(ui, lid).y - cui__prev_rect(ui, wid).y;
+                }
+            }
+        }
+        c->res->headings = hs; c->res->heading_count = d->nhead;
+    }
+    c->bheads = d->head; c->bnheads = d->nhead;
+    md_sel *S = c->sel;
+    bool copy = S->st && S->copying && md_pos_cmp(S->lo, S->hi) < 0;
+    if (copy) {   /* selected blocks above the built ones: their text, nothing built */
+        c->dry = true;
+        for (int k = CUI_MAX(0, S->lo.top); k < first && k <= S->hi.top; k++) md_big_block(c, d, k, t, W);
+        c->dry = false;
+    }
+    int cn = cui__node_new(ui, cid);
+    ui->nodes[cn].w = CUI_FILL;
+    cui__open(ui, cn);
+    double above = md_fen_sum(st->fen, first);
+    if (above > 0) cui__leaf(ui, 0, CUI_PX(1), CUI_PX((float)above));
+    for (int k = first; k <= last; k++) {
+        md_space(c, md_big_gap(c, st, d, k));
+        int wn = cui__node_new(ui, md_big_wid(c, k));
+        ui->nodes[wn].w = CUI_FILL;
+        cui__open(ui, wn);
+        md_big_block(c, d, k, t, W);
+        cui__close(ui);
+        if (!st->meas[k]) ui->animating = true;   /* laid out with its estimate: once more with its height */
+    }
+    double below = sum - md_fen_sum(st->fen, last + 1) + tail;
+    if (below > 0) cui__leaf(ui, 0, CUI_PX(1), CUI_PX((float)below));
+    cui__close(ui);
+    if (copy) {   /* and below them */
+        c->dry = true;
+        for (int k = CUI_MAX(last + 1, S->lo.top); k < n && k <= S->hi.top; k++) md_big_block(c, d, k, t, W);
+        c->dry = false;
+    }
+    st->built = d; st->b0 = first; st->b1 = last + 1;
+    if (!current) { c->res->task_offset = -1; c->res->task_line = 0; }   /* offsets into an older text: nothing to apply */
+    c->src = keep_src;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Public                                                                   */
 /* ------------------------------------------------------------------------ */
+
+/* Any other text: every line, every block, every frame. Returns the natural width (fit_content). */
+static float md_small_view(md_ctx *c, const cui_markdown_opts *o, float W) {
+    cui_ctx *ui = c->ui;
+    const char *text = c->src;
+    int len = c->len;
+    int nlines = 1;
+    for (int k = 0; k < len; k++) if (text[k] == '\n') nlines++;
+    md_line *lines = cui__frame_alloc(ui, sizeof(md_line) * (size_t)nlines);
+    int n = 0, st = 0;
+    for (int k = 0; k <= len; k++) {
+        if (k < len && text[k] != '\n') continue;
+        int e = k;
+        if (e > st && text[e - 1] == '\r') e--;
+        if (!(k == len && st == len && n > 0)) { lines[n].s = text + st; lines[n].len = e - st; lines[n].off = st; n++; }
+        st = k + 1;
+    }
+    int total = len > 0 ? n : 0, first = 0;
+    c->lines = lines; c->nlines = total;
+    c->heads = total > 0 ? cui__frame_alloc(ui, sizeof(cui_markdown_heading) * (size_t)total) : NULL;
+    int fe = o->plain ? -1 : md_fm_end(lines, total);
+    if (fe >= 0) {   /* front matter: a properties block, not markdown */
+        first = fe + 1;
+        md_prop *props;
+        int np = md_fm_parse(ui, lines + 1, fe - 1, &props);
+        if (np > 0 && !o->no_front_matter) {
+            md_front_matter(c, props, np, W);
+            bool more = false;
+            for (int k = first; k < total && !more; k++) more = !md_blank(lines[k]);
+            if (more) md_space(c, (c->compact ? 8.0f : 16.0f) * c->u);
+        }
+    }
+    md_box box = { W, 0, false, c->fg };
+    float natural = o->plain ? md_plain_text(c, lines, total, W) : md_blocks(c, lines + first, total - first, &box);
+    c->res->headings = c->heads; c->res->heading_count = c->nheads;
+    return natural;
+}
 
 cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char *text, const cui_markdown_opts *o) {
     cui_markdown_opts d;
@@ -2526,6 +3484,10 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     else if (cui__has_prev_rect(ui, id) && pr.w > 0) W = pr.w;
     else { W = CUI_MIN(ui->vw, 640.0f); ui->animating = true; }
     res.height = pr.h;
+    c.bid = id; c.root_id = id;
+    /* a big text: only the blocks near the window are built (see "Big texts") */
+    md_big *big = NULL;
+    if (len >= cui__md_big_bytes && !o->fit_content && !o->streaming) { c.big = true; big = md_big_prepare(&c, o, W); }
 
     int root = cui__node_new(ui, id);
     cui_node *rn = &ui->nodes[root];
@@ -2541,35 +3503,9 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     cui__open(ui, root);
     cui_push_id(ui, id_str);
 
-    int nlines = 1;
-    for (int k = 0; k < len; k++) if (text[k] == '\n') nlines++;
-    md_line *lines = cui__frame_alloc(ui, sizeof(md_line) * (size_t)nlines);
-    int n = 0, st = 0;
-    for (int k = 0; k <= len; k++) {
-        if (k < len && text[k] != '\n') continue;
-        int e = k;
-        if (e > st && text[e - 1] == '\r') e--;
-        if (!(k == len && st == len && n > 0)) { lines[n].s = text + st; lines[n].len = e - st; lines[n].off = st; n++; }
-        st = k + 1;
-    }
-    int total = len > 0 ? n : 0, first = 0;
-    c.lines = lines; c.nlines = total; c.root_id = id;
-    c.heads = total > 0 ? cui__frame_alloc(ui, sizeof(cui_markdown_heading) * (size_t)total) : NULL;
-    int fe = o->plain ? -1 : md_fm_end(lines, total);
-    if (fe >= 0) {   /* front matter: a properties block, not markdown */
-        first = fe + 1;
-        md_prop *props;
-        int np = md_fm_parse(ui, lines + 1, fe - 1, &props);
-        if (np > 0 && !o->no_front_matter) {
-            md_front_matter(&c, props, np, W);
-            bool more = false;
-            for (int k = first; k < total && !more; k++) more = !md_blank(lines[k]);
-            if (more) md_space(&c, (c.compact ? 8.0f : 16.0f) * c.u);
-        }
-    }
-    md_box box = { W, 0, false, c.fg };
-    float natural = o->plain ? md_plain_text(&c, lines, total, W) : md_blocks(&c, lines + first, total - first, &box);
-    res.headings = c.heads; res.heading_count = c.nheads;
+    float natural = 0;
+    if (big) md_big_build(&c, big, o, W);
+    else natural = md_small_view(&c, o, W);
     md_sel_end(&c);
 
     cui_pop_id(ui);

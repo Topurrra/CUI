@@ -116,6 +116,30 @@ In the chat 19% of the window is drawn and 30% moved per frame; the rest did not
 
 A shadow above or below its shape is now worked out once per row instead of for every pixel.
 
+### Big markdown notes
+
+`cui_bench_markdown` opens a generated note in a reader (a scroll area with the note in a column, 1180×780), waits until the view asks for no more frames, scrolls 300 wheel notches a frame at a time and jumps to the middle, the end and the top; one note per run, so the peak memory is the note's own. Notes are lists (small lists under headings), quotes (small quotes, some callouts), tables (a paragraph and a table under each heading) or mixed (all of them, code too). Windows 11, i5-8350U, Release; frame times are `cui_begin_frame` to `cui_end_frame`.
+
+| Note | Before: a frame (first / scrolling) | After: first frame | After: scrolling, median / p95 / max | Memory, before → after (the note counted once) |
+|---|---|---|---|---|
+| 0.5 MB lists | 109 / 76 ms | 5.1 ms | 0.49 / 0.59 / 1.1 ms | 283 MB → 3.3 MB |
+| 0.5 MB quotes | 99 / 44 ms | 4.4 ms | 0.43 / 0.51 / 0.7 ms | 268 MB → 3.0 MB |
+| 0.5 MB tables | 95 / 53 ms | 4.4 ms | 0.37 / 0.72 / 0.9 ms | 91 MB → 3.7 MB |
+| 0.5 MB mixed | 87 / 48 ms | 5.2 ms | 0.50 / 0.95 / 1.3 ms | 158 MB → 3.1 MB |
+| 2 MB quotes | 1,473 / 477 ms | 5.6 ms | 0.86 / 1.5 / 2.9 ms | 4,143 MB → 7.1 MB |
+| 2 MB tables | 435 / 231 ms | 5.6 ms | 0.69 / 1.1 / 1.9 ms | 360 MB → 7.0 MB |
+| 2 MB mixed | 544 / 297 ms | 5.9 ms | 0.76 / 1.4 / 2.6 ms | 1,129 MB → 6.6 MB |
+| 10 MB lists, quotes, mixed | did not finish (quadratic) | 7.1 to 8.2 ms | 2.2 to 3.1 / 2.9 to 5.5 / 3.9 to 12.5 ms | 26 to 32 MB (2.6 to 3.2× the note) |
+| 10 MB tables | 2,336 / 1,202 ms | 10.6 ms | 2.3 / 3.2 / 5.2 ms | 1,803 MB → 26 MB (2.6×) |
+
+What changed:
+
+- **Lists and quotes take what they need.** Each list took frame memory for an item per line from its first line to the end of the text, and each quote a line per line (zeroed), so a note of many small lists or quotes was quadratic: at 0.5 MB 140 MB of frame memory a frame, 88% of it list items (93% quote lines for quotes); at 2 MB 2.2 GB. They now count first and take their own lines.
+- **A big text is cut once.** A text of 32 KB or more is cut into its top level blocks (byte ranges with their kind, line and headings, about 32 bytes a block) on a copy of the text: at once up to 256 KB, else on another thread, with the first 64 KB cut at once so the top shows in the first frame. 10 MB is cut in 30 to 150 ms while frames stay under 4 ms. It is cut again only when the text differs from the copy (a compare of about a millisecond per 10 MB a frame, skipped with `.revision`), and blocks before and after the change keep their measured heights.
+- **Only the blocks near the window are built**, half a window above and below, each by the same code as a short text, so they draw the same vertices (`tests/test_markdown_big.c` compares both paths over the docs folder and generated notes). The others are spacers: heights are estimated from a block's kind, lines and bytes until it is built and measured, and summed in a Fenwick tree that finds the blocks at an offset. When blocks above the window are measured, the scroll area moves by their change in the same frame, so nothing on screen jumps.
+
+The memory left is the note's copy and the blocks; the frame arena stays under 1.1 MB. Notes under 32 KB take the old path and cost the same as before (20 KB: 1.7 ms a scrolled frame before and after).
+
 ### Checks
 
 - AddressSanitizer and UndefinedBehaviorSanitizer runs of Chat and Pulse, and Valgrind runs of Notes and Mixer, report no errors.

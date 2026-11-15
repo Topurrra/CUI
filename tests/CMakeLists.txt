@@ -80,6 +80,12 @@ if(WIN32)
     target_link_libraries(cui_bench_diff PRIVATE psapi)
 endif()
 
+add_executable(cui_bench_markdown bench_markdown.c)   # the markdown view over big generated notes (0.5 to 10 MB)
+target_link_libraries(cui_bench_markdown PRIVATE cui::cui)
+if(WIN32)
+    target_link_libraries(cui_bench_markdown PRIVATE psapi)
+endif()
+
 add_executable(cui_bench_scroll bench_scroll.c ../examples/gallery_ui.c ../examples/gallery_more.c)   # a whole window scrolling, software renderer, per phase
 target_link_libraries(cui_bench_scroll PRIVATE cui::cui)
 # incremental frames (moved pixels included) against frames drawn whole, while scrolling
@@ -178,6 +184,9 @@ add_test(NAME cui_test_langs COMMAND cui_test_langs)
 add_executable(cui_test_editor_jobs test_editor_jobs.c)   # the code editor's work on other threads
 target_link_libraries(cui_test_editor_jobs PRIVATE cui::cui)
 add_test(NAME cui_test_editor_jobs COMMAND cui_test_editor_jobs)
+add_executable(cui_test_markdown_big test_markdown_big.c)   # the markdown view's big path against the small one
+target_link_libraries(cui_test_markdown_big PRIVATE cui::cui)
+add_test(NAME cui_test_markdown_big COMMAND cui_test_markdown_big ${CMAKE_SOURCE_DIR}/docs)
 
 # Windows rendering probe: what a window costs with OpenGL, Direct3D 11 and GDI (see the file's header).
 option(CUI_BUILD_RENDER_PROBE "Build the Windows rendering probe (OpenGL against Direct3D 11)" OFF)
