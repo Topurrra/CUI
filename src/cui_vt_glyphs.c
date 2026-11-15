@@ -526,12 +526,61 @@ static bool cui__vg_halves(cui__vg *g, uint32_t cp) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Status line shapes                                                       */
+/* ------------------------------------------------------------------------ */
+
+/* U+E0B0..U+E0BE: solid triangles filling the cell edge to edge (so they join the coloured cell next to them without a
+ * seam), thin chevrons, half circles, and the corner triangles */
+static bool cui__vg_powerline(cui__vg *g, uint32_t cp) {
+    float w = (float)g->w, h = (float)g->h, t = (float)g->light;
+    switch (cp) {
+    case 0xE0B0: { float p[6] = { 0, 0, w, h * 0.5f, 0, h }; cui__vg_poly(g, p, 3, g->col); return true; }
+    case 0xE0B2: { float p[6] = { w, 0, 0, h * 0.5f, w, h }; cui__vg_poly(g, p, 3, g->col); return true; }
+    case 0xE0B1: case 0xE0B3: {
+        float ang = atan2f(h * 0.5f, w), tip = w - t * 0.5f / sinf(ang);
+        ang = atan2f(h * 0.5f, tip > 1 ? tip : 1); tip = w - t * 0.5f / sinf(ang);
+        if (tip < 1) tip = 1;
+        if (cp == 0xE0B1) { float p[6] = { 0, 0, tip, h * 0.5f, 0, h }; cui__vg_line(g, p, 3, t); }
+        else { float p[6] = { w, 0, w - tip, h * 0.5f, w, h }; cui__vg_line(g, p, 3, t); }
+        return true;
+    }
+    case 0xE0B4: case 0xE0B6: {              /* half circles: the flat side on the cell's edge, as wide as the cell */
+        float p[2 * 17];
+        const int n = 16;
+        for (int i = 0; i <= n; i++) {
+            float a = -CUI_PI * 0.5f + (float)i * CUI_PI / (float)n, c = cosf(a), s = sinf(a);
+            p[2 * i] = cp == 0xE0B4 ? w * c : w - w * c;
+            p[2 * i + 1] = h * 0.5f + h * 0.5f * s;
+        }
+        cui__vg_poly(g, p, n + 1, g->col);
+        return true;
+    }
+    case 0xE0B5: case 0xE0B7: {              /* the outlines of the half circles */
+        float p[2 * 17], rx = w - t * 0.5f, ry = h * 0.5f - t * 0.5f;
+        const int n = 16;
+        for (int i = 0; i <= n; i++) {
+            float a = -CUI_PI * 0.5f + (float)i * CUI_PI / (float)n, c = cosf(a), s = sinf(a);
+            p[2 * i] = cp == 0xE0B5 ? rx * c : w - rx * c;
+            p[2 * i + 1] = h * 0.5f + ry * s;
+        }
+        cui__vg_line(g, p, n + 1, t);
+        return true;
+    }
+    case 0xE0B8: { float p[6] = { 0, 0, w, h, 0, h }; cui__vg_poly(g, p, 3, g->col); return true; }
+    case 0xE0BA: { float p[6] = { w, 0, w, h, 0, h }; cui__vg_poly(g, p, 3, g->col); return true; }
+    case 0xE0BC: { float p[6] = { 0, 0, w, 0, 0, h }; cui__vg_poly(g, p, 3, g->col); return true; }
+    case 0xE0BE: { float p[6] = { 0, 0, w, 0, w, h }; cui__vg_poly(g, p, 3, g->col); return true; }
+    default: return false;
+    }
+}
+
+/* ------------------------------------------------------------------------ */
 /* Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
 bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (cp < 0x2500) return false;
-    bool ours = (cp <= 0x259F) || (cp >= 0x2800 && cp <= 0x28FF) || (cp >= 0x1FB00 && cp <= 0x1FB9F);
+    bool ours = (cp <= 0x259F) || (cp >= 0x2800 && cp <= 0x28FF) || (cp >= 0xE0B0 && cp <= 0xE0BE) || (cp >= 0x1FB00 && cp <= 0x1FB9F);
     if (!ours) return false;
     cui__vg g;
     g.ui = ui;
@@ -549,6 +598,7 @@ bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (cp <= 0x257F) drawn = cui__vg_box(&g, cp);
     else if (cp <= 0x259F) drawn = cui__vg_block(&g, cp);
     else if (cp >= 0x2800 && cp <= 0x28FF) cui__vg_braille(&g, cp);
+    else if (cp >= 0xE0B0 && cp <= 0xE0BE) drawn = cui__vg_powerline(&g, cp);
     else if (cp <= 0x1FB3B) cui__vg_sextant(&g, cui__vt_sextant_bits(cp));
     else if (cp <= 0x1FB67) cui__vg_wedge(&g, (int)(cp - 0x1FB3C));
     else if (cp <= 0x1FB6F) cui__vg_triangles(&g, cp);
