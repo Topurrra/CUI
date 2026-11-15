@@ -658,7 +658,15 @@ void cui__plat_show(cui_app *app) {
     si.cb = sizeof si;
     GetStartupInfoW(&si);
     WORD how = (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : (WORD)SW_SHOWNORMAL;
-    if (how == SW_SHOWNORMAL || how == SW_SHOW || how == SW_SHOWDEFAULT) { w->show_pending = true; return; }
+    bool plain = how == SW_SHOWNORMAL || how == SW_SHOW || how == SW_SHOWDEFAULT;
+    if (plain && app->desc.start_maximized) {
+        /* maximized changes the size before the first picture, so it is shown now, like a
+         * shortcut set to maximized */
+        ShowWindow(w->hwnd, SW_SHOWMAXIMIZED);
+        UpdateWindow(w->hwnd);
+        return;
+    }
+    if (plain) { w->show_pending = true; return; }
     ShowWindow(w->hwnd, SW_SHOWDEFAULT);
     UpdateWindow(w->hwnd);
 }

@@ -120,7 +120,10 @@ bool cui__plat_init(cui_app *app) {
     return true;
 }
 
-void cui__plat_show(cui_app *app) { SDL_ShowWindow(cui__s(app)->win); }
+void cui__plat_show(cui_app *app) {
+    SDL_ShowWindow(cui__s(app)->win);
+    if (app->desc.start_maximized) SDL_MaximizeWindow(cui__s(app)->win);
+}
 
 void cui__plat_shutdown(cui_app *app) {
     cui__sdl *s = cui__s(app);

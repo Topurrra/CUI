@@ -83,6 +83,9 @@ typedef struct cui_app_desc {
      * custom_titlebar or off Windows. */
     int (*hit_test)(void *user, float x, float y);
     void *hit_test_user;        /* passed to hit_test */
+    /* Open the window maximized. A shortcut set to start minimized or maximized still wins on
+     * Windows. Unset: today's behavior, a normal window at width x height. */
+    bool start_maximized;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */

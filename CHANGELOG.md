@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ## Added
 
+- **Start maximized.** `cui_app_desc.start_maximized` opens the window maximized (Win32, GLFW, SDL2). A Windows shortcut set to minimized or maximized still wins; unset keeps the current behaviour.
 - **Menus and tooltips for app toolbars.** `cui_menu_item_opts` gains `.badge` (a small pill after the label, drawn as `cui_badge` at its small size, before the shortcut), `.badge_tone` (a `cui_tone`, zero neutral) and `.tooltip` (shown on hover to the right of the row, to its left at the screen edge); keys navigate as before. New `cui_menu_close(ui)` closes the menu being built and the menus it is a submenu of, as choosing an item does, from custom content inside it, and `cui_popover_close_self` now closes a menu too (the innermost open popover or menu). `cui_select_opts` gains `.size` (`CUI_SIZE_SM` is `theme.control_sm` high, the same as a small `cui_input`; zero is the usual height). New `cui_tooltip_ex(ui, text, &(cui_tooltip_opts){ .placement = CUI_PLACE_RIGHT })` places a tooltip right, left, below or above (zero is above, as `cui_tooltip`); it flips at the screen edge. Zero options draw exactly as before.
 
 

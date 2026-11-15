@@ -158,7 +158,10 @@ bool cui__plat_init(cui_app *app) {
     return true;
 }
 
-void cui__plat_show(cui_app *app) { glfwShowWindow(cui__g(app)->win); }
+void cui__plat_show(cui_app *app) {
+    glfwShowWindow(cui__g(app)->win);
+    if (app->desc.start_maximized) glfwMaximizeWindow(cui__g(app)->win);
+}
 
 void cui__plat_shutdown(cui_app *app) {
     cui__glfw *g = cui__g(app);
