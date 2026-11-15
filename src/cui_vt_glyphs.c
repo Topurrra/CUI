@@ -261,12 +261,132 @@ static bool cui__vg_block(cui__vg *g, uint32_t cp) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Braille                                                                  */
+/* ------------------------------------------------------------------------ */
+
+/* Dots on a 2 by 4 grid, each as large as fits with a clear pixel between neighbours (also to the next cell), centred in its
+ * quarter or eighth of the cell. The size is the same in every cell. A screenful of braille is thousands of dots, so the 256
+ * patterns are drawn once into a small texture (per cell size, kept with the context) and each cell is one textured rectangle. */
+
+static int cui__vg_dot_size(const cui__vg *g) {
+    int dw = (int)g->cw / 2 - 1, dh = (int)g->ch / 4 - 1;
+    int d = dw < dh ? dw : dh;
+    int cap = (int)(0.8f * (g->cw / 2 < g->ch / 4 ? g->cw / 2 : g->ch / 4));
+    if (d > cap) d = cap;
+    return d < 1 ? 1 : d;
+}
+
+/* where dot i (bit i of the pattern: 0..2 down the left column, 3..5 down the right, 6 and 7 the bottom row) starts in a cell of w by h */
+static void cui__vg_dot_pos(int w, int h, int d, int i, int *x0, int *y0) {
+    static const uint8_t col_of[8] = { 0, 0, 0, 1, 1, 1, 0, 1 }, row_of[8] = { 0, 1, 2, 0, 1, 2, 3, 3 };
+    *x0 = (int)floorf((float)w * (0.25f + 0.5f * (float)col_of[i]) - (float)d * 0.5f + 0.5f);
+    *y0 = (int)floorf((float)h * (0.125f + 0.25f * (float)row_of[i]) - (float)d * 0.5f + 0.5f);
+}
+
+/* the pixels of one dot of d by d as rectangles (x0, y0, x1, y1 relative to the dot): a square, a plus at 3 pixels, a rounded
+ * square at 4; from 5 pixels the dot is a circle (anti-aliased, only in the texture) */
+static int cui__vg_dot_rects(int d, int r[3][4]) {
+    if (d == 3) { int a[2][4] = { { 0, 1, 3, 2 }, { 1, 0, 2, 3 } }; memcpy(r, a, sizeof a); return 2; }
+    if (d == 4) { int a[3][4] = { { 1, 0, 3, 4 }, { 0, 1, 1, 3 }, { 3, 1, 4, 3 } }; memcpy(r, a, sizeof a); return 3; }
+    r[0][0] = 0; r[0][1] = 0; r[0][2] = d; r[0][3] = d;
+    return 1;
+}
+
+typedef struct {
+    int w, h, d;               /* the cell size and the dot size this texture is for */
+    cui_texture tex;
+    int aw, ah;                /* the texture's size in pixels: 16 by 16 cells, each with a transparent pixel round it */
+    uint32_t used;
+} cui__vg_atlas;
+
+typedef struct { cui__vg_atlas a[6]; uint32_t tick; } cui__vg_cache;
+
+static void cui__vg_cache_free(cui_ctx *ui, void *data) {
+    cui__vg_cache *c = (cui__vg_cache *)data;
+    for (int i = 0; i < 6; i++) if (c->a[i].tex) cui_image_destroy(ui, c->a[i].tex);
+}
+
+static void cui__vg_atlas_build(cui_ctx *ui, cui__vg_atlas *at, int w, int h, int d) {
+    int sw = w + 2, sh = h + 2, aw = sw * 16, ah = sh * 16;
+    unsigned char *px = (unsigned char *)calloc((size_t)aw * (size_t)ah, 4);
+    if (!px) return;
+    for (int p = 0; p < 256; p++) {
+        int ox = (p & 15) * sw + 1, oy = (p >> 4) * sh + 1;
+        for (int i = 0; i < 8; i++) {
+            if (!(p & (1 << i))) continue;
+            int x0, y0;
+            cui__vg_dot_pos(w, h, d, i, &x0, &y0);
+            for (int y = 0; y < d; y++) for (int x = 0; x < d; x++) {
+                int xx = x0 + x, yy = y0 + y;
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+                float a;
+                if (d >= 5) {                                  /* a circle: 4 by 4 samples per pixel */
+                    int in = 0;
+                    float rad = (float)d * 0.5f;
+                    for (int sy = 0; sy < 4; sy++) for (int sx = 0; sx < 4; sx++) {
+                        float dx = (float)x + ((float)sx + 0.5f) * 0.25f - rad, dy = (float)y + ((float)sy + 0.5f) * 0.25f - rad;
+                        in += dx * dx + dy * dy <= rad * rad;
+                    }
+                    a = (float)in / 16.0f;
+                } else {
+                    int r[3][4], n = cui__vg_dot_rects(d, r);
+                    a = 0;
+                    for (int k = 0; k < n; k++) if (x >= r[k][0] && x < r[k][2] && y >= r[k][1] && y < r[k][3]) a = 1;
+                }
+                unsigned char *q = &px[((size_t)(oy + yy) * (size_t)aw + (size_t)(ox + xx)) * 4];
+                q[0] = q[1] = q[2] = 255;
+                q[3] = (unsigned char)(a * 255.0f + 0.5f);
+            }
+        }
+    }
+    at->tex = cui_image_create(ui, aw, ah, px);
+    at->w = w; at->h = h; at->d = d; at->aw = aw; at->ah = ah;
+    free(px);
+}
+
+static bool cui__vg_braille_texture(cui__vg *g, unsigned bits, int d) {
+    cui__vg_cache *c = (cui__vg_cache *)cui_state(g->ui, 0xB7A11E01u, sizeof *c);
+    if (c->tick == 0) { c->tick = 1; cui_state_on_free(g->ui, 0xB7A11E01u, cui__vg_cache_free); }
+    cui__vg_atlas *at = NULL, *victim = &c->a[0];
+    for (int i = 0; i < 6; i++) {
+        cui__vg_atlas *a = &c->a[i];
+        if (a->tex && a->w == g->w && a->h == g->h && a->d == d) { at = a; break; }
+        if (!a->tex || a->used < victim->used) victim = a;
+    }
+    if (!at) {
+        if (victim->tex) { cui_image_destroy(g->ui, victim->tex); victim->tex = 0; }
+        cui__vg_atlas_build(g->ui, victim, g->w, g->h, d);
+        if (!victim->tex) return false;
+        at = victim;
+    }
+    at->used = ++c->tick;
+    float k = 1.0f / g->s, fw = (float)at->aw, fh = (float)at->ah;
+    cui_rect uv = { (float)((bits & 15) * (g->w + 2) + 1) / fw, (float)((bits >> 4) * (g->h + 2) + 1) / fh, (float)g->w / fw, (float)g->h / fh };
+    cui_draw_image(g->ui, at->tex, (cui_rect){ (float)g->x * k, (float)g->y * k, (float)g->w * k, (float)g->h * k }, uv, CUI_CORNERS(0), g->col);
+    return true;
+}
+
+static void cui__vg_braille(cui__vg *g, uint32_t cp) {
+    unsigned bits = cp - 0x2800;
+    if (!bits) return;
+    int d = cui__vg_dot_size(g);
+    if (cui__vg_braille_texture(g, bits, d)) return;
+    /* no texture (or no memory): the dots as rectangles */
+    for (int i = 0; i < 8; i++) {
+        if (!(bits & (1u << i))) continue;
+        int x0, y0, r[3][4], n = cui__vg_dot_rects(d, r);
+        cui__vg_dot_pos(g->w, g->h, d, i, &x0, &y0);
+        for (int k = 0; k < n; k++) cui__vg_fill(g, x0 + r[k][0], y0 + r[k][1], x0 + r[k][2], y0 + r[k][3]);
+    }
+}
+
+/* ------------------------------------------------------------------------ */
 /* Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
 bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (cp < 0x2500) return false;
-    bool ours = (cp <= 0x259F);
+    bool ours = (cp <= 0x259F) || (cp >= 0x2800 && cp <= 0x28FF);
     if (!ours) return false;
     cui__vg g;
     g.ui = ui;
@@ -282,7 +402,8 @@ bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col) {
     if (g.w <= 0 || g.h <= 0) return true;
     bool drawn = true;
     if (cp <= 0x257F) drawn = cui__vg_box(&g, cp);
-    else drawn = cui__vg_block(&g, cp);
+    else if (cp <= 0x259F) drawn = cui__vg_block(&g, cp);
+    else cui__vg_braille(&g, cp);
     cui__vg_flush(&g);
     return drawn;
 }
