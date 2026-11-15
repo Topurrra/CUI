@@ -4876,6 +4876,167 @@ typedef struct cui_commit_graph_result {
 } cui_commit_graph_result;
 CUI_API cui_commit_graph_result cui_commit_graph_ex(cui_ctx *ui, const char *id, const cui_commit *commits, int count, const cui_commit_graph_opts *opts);
 
+/* ---- Source control lists ---- */
+
+/* Three data driven pieces for a version control view. They take plain data
+ * (rows with labels, state letters, tones and lane edges) and report what was
+ * clicked; they know nothing about git, so any app can feed them from its own
+ * reader. Rows are given as an array or are filled one at a time by a callback,
+ * and only the rows in view are asked for, so tens of thousands cost what a
+ * screenful does. Text is copied during the call: a row's strings may live in
+ * a buffer the callback reuses. */
+
+/* A list of changed files in sections (Staged, Changes...): a header with a
+ * chevron, a title, a count and buttons shown on hover, then the section's
+ * rows: an icon, the file name, its folder dimmed, a state letter in a tone,
+ * and buttons shown on hover (each an icon with a tooltip). A click on a row
+ * selects it and is reported; a click on a header folds the section. With the
+ * list focused: Up, Down, Home, End, PageUp and PageDown move the cursor,
+ * Enter reports the row (a header folds), Space reports `space`, Left and
+ * Right fold and unfold a header. */
+typedef struct cui_change_action {
+    const char *icon;                /* a CUI_ICON_* */
+    const char *tooltip;             /* shown on hover; may be NULL */
+    int id;                          /* given back in cui_changes_result.action; yours, not 0 */
+} cui_change_action;
+typedef struct cui_change_row {
+    const char *name;                /* the file name */
+    const char *dir;                 /* its folder, dimmed after the name; NULL for none */
+    const char *icon;                /* NULL: CUI_ICON_FILE */
+    char state;                      /* 'M', 'A', 'D', 'U'...; 0 for none */
+    cui_tone state_tone;             /* the letter's color; zero is neutral */
+    bool struck;                     /* muted and struck through (a deleted file) */
+    const cui_change_action *actions; int nactions;   /* shown on hover, the last one at the right */
+} cui_change_row;
+typedef struct cui_change_section {
+    const char *title;
+    int count;                       /* rows; a section with none is left out */
+    const cui_change_row *rows;      /* the rows as an array, or... */
+    bool (*row_at)(void *user, int i, cui_change_row *out);   /* ...filled by this when `rows` is NULL; false draws a blank row */
+    void *user;
+    const cui_change_action *actions; int nactions;           /* header buttons, shown on hover */
+} cui_change_section;
+typedef struct cui_change_ref { int section, row; } cui_change_ref;   /* row -1: the header; section -1: nothing */
+typedef struct cui_changes_opts {
+    int _;
+    cui_size width, height;          /* width fills; height fills (a fixed height scrolls inside it) */
+    float row_height;                /* zero: 22 */
+    bool *collapsed;                 /* one flag per section, kept by you (up to the section count); NULL: kept inside */
+    cui_change_ref *cursor;          /* the selected row or header, kept by you; NULL: kept inside. -1 -1 is none */
+} cui_changes_opts;
+typedef struct cui_changes_result {
+    cui_change_ref clicked;          /* row or header clicked, or Enter on a row, this frame (section -1: none) */
+    cui_change_ref action_at;        /* the row (or header) whose button was clicked this frame (section -1: none) */
+    int action;                      /* that button's `id` (0: none) */
+    cui_change_ref space;            /* Space pressed on this row or header (section -1: none) */
+    cui_change_ref cursor;           /* the selected row or header now */
+    int folded;                      /* the section folded or unfolded this frame, or -1 */
+    bool focused;                    /* the list has the keyboard */
+} cui_changes_result;
+CUI_API cui_changes_result cui_changes_list_ex(cui_ctx *ui, const char *id, const cui_change_section *sections, int nsections, const cui_changes_opts *opts);
+/* Scrolls so the cursor is in view at the next frame (after the app moved it). */
+CUI_API void cui_changes_list_reveal(cui_ctx *ui, const char *id);
+
+/* A commit history list: the branch lanes of a graph beside each commit's
+ * short hash, ref chips, subject, author and date. A row carries the lane
+ * pieces drawn in its band (as a layout like git's gives them: a line through
+ * the row, a line into the dot, a line out of it), the dot's lane and kind,
+ * and its chips. Lane colors come from the theme in light and dark. Only
+ * the rows in view are asked for and drawn. A row that is not loaded yet is
+ * left blank, and `want` tells you how far to load. Up, Down, PageUp, PageDown,
+ * Home and End move the selection when the list is focused and `keys` is set;
+ * a click selects, a double click or Enter activates, a right click asks for
+ * a context menu. */
+typedef struct cui_lane_edge {
+    int16_t from, to;                /* lanes: `from` at the top of the row, `to` at its bottom */
+    uint8_t kind;                    /* CUI_LANE_PASS, CUI_LANE_IN or CUI_LANE_OUT */
+    uint16_t color;                  /* a number: the lane's color is the theme's palette[color % 8] */
+} cui_lane_edge;
+enum { CUI_LANE_PASS = 0, CUI_LANE_IN = 1, CUI_LANE_OUT = 2 };   /* PASS: from top to bottom; IN: from the top into the dot; OUT: from the dot to the bottom */
+typedef struct cui_log_chip {
+    const char *text;                /* "main", "origin/main", "v1.0" */
+    const char *suffix;              /* dimmer text after it ("origin"), or NULL */
+    cui_tone tone;                   /* zero neutral; success for a branch, info for a remote, warning for a tag */
+    bool strong;                     /* the accent fill (the checked out branch) */
+} cui_log_chip;
+typedef struct cui_log_row {
+    const char *hash;                /* what is shown, in the mono font ("a1b2c3d") */
+    const char *subject, *author, *date;
+    const cui_lane_edge *edges; int nedges;
+    int lane;                        /* the dot's lane */
+    uint16_t color;                  /* the dot's color number */
+    bool merge;                      /* the dot is a ring */
+    bool tip;                        /* nothing arrives from above: no line over the dot */
+    bool head;                       /* a second ring in the accent: the checked out commit */
+    const cui_log_chip *chips; int nchips;
+    int more_chips;                  /* chips left out, shown as "+n" */
+    bool blank;                      /* not loaded yet: draws empty */
+} cui_log_row;
+typedef struct cui_commit_log_opts {
+    int _;
+    cui_size width, height;          /* fill, fill */
+    int count;                       /* rows in all */
+    const cui_log_row *rows;         /* the rows as an array, or... */
+    bool (*row_at)(void *user, int i, cui_log_row *out);   /* ...filled by this when `rows` is NULL; false: blank */
+    void *user;
+    int loaded;                      /* rows available so far (zero: all of `count`); `want` asks for more past this */
+    int prefetch;                    /* rows to ask for beyond the last one in view; zero: 300 */
+    int lanes;                       /* lane columns of the graph (the widest row); zero: no graph (a filtered list) */
+    float font_size;                 /* zero: the theme's text_sm; the row is twice as high */
+    int *selected;                   /* the selected row or -1, kept by you; NULL: kept inside */
+    bool keys;                       /* may take the arrow keys, PageUp/Down, Home and End when focused */
+} cui_commit_log_opts;
+typedef struct cui_commit_log_result {
+    int clicked;                     /* row clicked this frame, or -1 */
+    int activated;                   /* row double-clicked or chosen with Enter this frame, or -1 */
+    int context;                     /* row right clicked this frame, or -1 (it is selected as well) */
+    float mouse_x, mouse_y;          /* where, for `context`, in window coordinates */
+    int selected;                    /* the selected row now, or -1 */
+    bool moved;                      /* the selection changed by keys this frame (it may be a row not loaded yet) */
+    int want;                        /* rows wanted in all (the view is near the end of what is loaded); 0: enough */
+    int first, last;                 /* the rows in view */
+    int rows_per_page;
+} cui_commit_log_result;
+CUI_API cui_commit_log_result cui_commit_log_ex(cui_ctx *ui, const char *id, const cui_commit_log_opts *opts);
+/* Scrolls the list so `row` is in view at the next frame (nothing moves when it already is); `top` scrolls to the
+ * start instead. */
+CUI_API void cui_commit_log_reveal(cui_ctx *ui, const char *id, int row, bool top);
+/* The color of lane (or dot) number n in the current theme. */
+CUI_API cui_color cui_lane_color(cui_ctx *ui, int n);
+
+/* A branch picker for a popover: a filter field, sections of names (local,
+ * remote...) with a check on the current one, and a create action. Call it
+ * every frame where the popover is wanted: it draws only while the popover
+ * `id` is open (open it with cui_popover_toggle). Choosing a name or the
+ * create row closes it and is reported. The filter matches anywhere in a
+ * name, ignoring case; the create row names the filter when it is a name that
+ * does not exist yet. */
+typedef struct cui_pick_item { const char *name; bool current; } cui_pick_item;
+typedef struct cui_pick_section {
+    const char *title;               /* "Local branches" */
+    const char *icon;                /* on every item; NULL: none */
+    int count;
+    const cui_pick_item *items;      /* an array, or... */
+    bool (*item_at)(void *user, int i, cui_pick_item *out);   /* ...a callback when `items` is NULL */
+    void *user;
+} cui_pick_section;
+typedef struct cui_branch_picker_opts {
+    int _;
+    cui_placement placement;         /* zero: top start */
+    float width;                     /* zero: 300 */
+    float list_height;               /* zero: 280 */
+    int max_shown;                   /* per section; zero: 300 */
+    const char *placeholder;         /* the filter's hint; NULL: "Find a branch" */
+    const char *create_noun;         /* "branch" in "Create branch..."; NULL: "branch" */
+} cui_branch_picker_opts;
+typedef struct cui_branch_picker_result {
+    int section, item;               /* the name chosen this frame (-1 -1: none) */
+    const char *picked;              /* its text, valid until the next frame; NULL: none */
+    bool create;                     /* the create row was chosen */
+    const char *create_name;         /* the filter text when it is a new name, else NULL (open your own dialog) */
+} cui_branch_picker_result;
+CUI_API cui_branch_picker_result cui_branch_picker_ex(cui_ctx *ui, const char *id, const cui_pick_section *sections, int nsections, const cui_branch_picker_opts *opts);
+
 /* ---- Dependency graph ---- */
 
 /* Nodes and directed edges laid out in layers (each edge points to a later
@@ -5828,6 +5989,9 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_schedule_picker(ui, id, cron, cap, ...) cui_schedule_picker_ex((ui), (id), (cron), (cap), CUI__OPTS(cui_schedule_opts, __VA_ARGS__))
 #define cui_keymap(ui, id, bindings, count, ...) cui_keymap_ex((ui), (id), (bindings), (count), CUI__OPTS(cui_keymap_opts, __VA_ARGS__))
 #define cui_commit_graph(ui, id, commits, count, ...) cui_commit_graph_ex((ui), (id), (commits), (count), CUI__OPTS(cui_commit_graph_opts, __VA_ARGS__))
+#define cui_changes_list(ui, id, sections, n, ...) cui_changes_list_ex((ui), (id), (sections), (n), CUI__OPTS(cui_changes_opts, __VA_ARGS__))
+#define cui_commit_log(ui, id, ...) cui_commit_log_ex((ui), (id), CUI__OPTS(cui_commit_log_opts, __VA_ARGS__))
+#define cui_branch_picker(ui, id, sections, n, ...) cui_branch_picker_ex((ui), (id), (sections), (n), CUI__OPTS(cui_branch_picker_opts, __VA_ARGS__))
 #define cui_graph_view(ui, id, nodes, node_count, edges, edge_count, ...) \
     cui_graph_view_ex((ui), (id), (nodes), (node_count), (edges), (edge_count), CUI__OPTS(cui_graph_opts, __VA_ARGS__))
 #define cui_waterfall(ui, id, requests, count, ...) cui_waterfall_ex((ui), (id), (requests), (count), CUI__OPTS(cui_waterfall_opts, __VA_ARGS__))

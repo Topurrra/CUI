@@ -1424,6 +1424,50 @@ cui_commit_graph(ui, "history", log, count, .selected = &selected, .height = 320
 
 Each commit's dot sits in its lane, curves join branches and merges, and a merge commit is drawn as a ring. Refs show as badges: local branches green, remote branches gray, and tags violet. The lanes are worked out once when the history changes, so fifty thousand commits take a few milliseconds to lay out and then cost nothing more. Up and Down move the selection, and Enter or a double click reports `activated`. Below 560 points the author and date are left out.
 
+### Source control lists
+
+Three pieces for an app that shows a repository: a list of changed files, a history list with lanes, and a branch picker. They take plain data and know nothing about git, so an app feeds them from its own reader. Rows are an array, or are filled one at a time by a callback, and only the rows in view are asked for: ten thousand changed files or twenty thousand commits cost what a screenful does. Text is copied during the call, so a callback may reuse one buffer for every row.
+
+**Changes list.** Sections (Staged, Changes...) each with a header (chevron, title, count, buttons shown on hover) and rows (icon, file name, folder dimmed, a state letter in a tone, buttons shown on hover, each an icon with a tooltip).
+
+```c
+static const cui_change_action acts[] = { { CUI_ICON_UNDO_2, "Discard changes", 1 }, { CUI_ICON_PLUS, "Stage", 2 } };
+static bool row_at(void *user, int i, cui_change_row *r) {
+    const my_file *f = &((my_files *)user)->file[i];
+    r->name = f->name; r->dir = f->dir; r->state = 'M'; r->state_tone = CUI_TONE_WARNING;
+    r->actions = acts; r->nactions = 2;
+    return true;
+}
+cui_change_section sec[] = { { .title = "Changes", .count = n, .row_at = row_at, .user = &files } };
+cui_changes_result r = cui_changes_list(ui, "changes", sec, 1, .collapsed = fold, .cursor = &cursor);
+if (r.action == 2) stage(r.action_at);            /* a button: which one and on which row (row -1: the header) */
+else if (r.clicked.section >= 0) open(r.clicked); /* a click, or Enter, on a row */
+```
+
+A click selects a row and reports `clicked`; a click on a header folds its section (`folded`). With the list focused, Up, Down, Home, End, PageUp and PageDown move the cursor, Enter reports the row (on a header it folds), Space reports `space`, and Left and Right fold and unfold a header. `.cursor` and `.collapsed` are kept by you when you want to restore them after the data changes; without them the list keeps them.
+
+**Commit log.** One row per commit: lanes beside the short hash, ref chips, subject, author and date.
+
+```c
+cui_commit_log_result r = cui_commit_log(ui, "log", .count = total, .loaded = loaded, .row_at = row_at, .user = &feed,
+                                         .lanes = widest, .selected = &sel, .keys = true);
+if (r.want) load_more(r.want);                       /* the view is near the end of what is loaded */
+if (r.context >= 0) open_menu(r.context, r.mouse_x, r.mouse_y);
+```
+
+A row gives the lane pieces of its band: `CUI_LANE_PASS` (a line through the row, `from` to `to`), `CUI_LANE_IN` (from the top into the dot) and `CUI_LANE_OUT` (from the dot to the bottom), its dot lane, `merge` (a ring), `tip` (no line above the dot) and `head` (the accent ring). That is what a graph layout such as git's gives, and the lane colors are the theme's, in light and dark (`cui_lane_color`). A row that is not loaded yet draws blank; `.loaded` and `r.want` page the rest in. A click selects, a double click or Enter reports `activated`, a right click reports `context` with the pointer's position. `cui_commit_log_reveal` scrolls to a row. Without `.lanes` no graph is drawn (a filtered list). `.keys` takes Up, Down, PageUp, PageDown, Home and End whenever no text field or popup has the keyboard.
+
+**Branch picker.** The content of a popover: a filter field, sections of names with a check on the current one, and a create row.
+
+```c
+if (cui_status_bar_item(ui, "main")) cui_popover_toggle(ui, "branches");
+cui_branch_picker_result r = cui_branch_picker(ui, "branches", sections, 2, .create_noun = "branch");
+if (r.picked) switch_to(r.section, r.picked);
+if (r.create) create_branch(r.create_name);          /* NULL: ask for a name */
+```
+
+Call it every frame where the popover belongs; it draws only while the popover is open. The filter matches anywhere in a name, ignoring case. The create row names the filter when it is a new name (`create_name`), else it asks you to find a name yourself. Choosing anything closes the popover, the current branch included.
+
 ### Dependency graph
 
 Nodes and directed edges laid out in layers, for build targets, packages, services or call graphs.
