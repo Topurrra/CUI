@@ -252,11 +252,11 @@ static void test_speed(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; float line_height; } scene;
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports, .line_height = s->line_height); }
     cui_end_frame(ui);
     s->focus = false;
 }
@@ -276,7 +276,7 @@ static void test_view(void) {
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
     cui_set_viewport(ui, 640, 400, 1);
     cui_set_reduced_motion(ui, true);
-    scene s = { cui_vt_create(80, 24, 1000), { 0 }, true, 640, 400 };
+    scene s = { cui_vt_create(80, 24, 1000), { 0 }, true, 640, 400, false, false, 0 };
     for (int i = 0; i < 3; i++) build(ui, &s);
     CHECK(s.r.cols > 40 && s.r.cols < 100);
     CHECK(s.r.rows > 10 && s.r.rows < 30);
@@ -350,6 +350,403 @@ static void test_view(void) {
     cui_destroy(ui);
 }
 
+/* ---- mouse reports ---- */
+
+static void at_cell(cui_ctx *ui, scene *s, int col, int row) {     /* the middle of a cell (7.8 x 19 pixels, 10 and 6 of padding) */
+    cui_input_mouse_move(ui, 10 + ((float)col + 0.5f) * 7.8f, 6 + ((float)row + 0.5f) * 19.0f);
+    build(ui, s);
+}
+static void button(cui_ctx *ui, scene *s, cui_mouse_button b, bool down) { cui_input_mouse_button(ui, b, down); build(ui, s); }
+static void mods(cui_ctx *ui, scene *s, int m) { cui_input_key(ui, CUI_KEY_NONE, true, m); build(ui, s); }
+
+static cui_ctx *mouse_ctx(scene *s, float w) {
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+    cui_set_viewport(ui, w, 400, 1);
+    cui_set_reduced_motion(ui, true);
+    memset(s, 0, sizeof *s);
+    s->vt = cui_vt_create(80, 24, 1000); s->focus = true; s->mouse = true;
+    for (int i = 0; i < 3; i++) build(ui, s);
+    return ui;
+}
+
+static void test_mouse(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    CHECK(!cui_vt_mouse_reporting(s.vt));
+    /* the program asks: SGR, press and release only */
+    W(s.vt, "\x1b[?1000h\x1b[?1006h");
+    CHECK(cui_vt_mouse_reporting(s.vt));
+    at_cell(ui, &s, 5, 3);
+    CHECK_EQ(s.r.input_len, 0);                                    /* 1000: no motion */
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[<0;6;4M"));
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[<0;6;4m"));
+    button(ui, &s, CUI_MOUSE_MIDDLE, true);  CHECK(got(&s, "\x1b[<1;6;4M"));
+    button(ui, &s, CUI_MOUSE_MIDDLE, false); CHECK(got(&s, "\x1b[<1;6;4m"));
+    button(ui, &s, CUI_MOUSE_RIGHT, true);  CHECK(got(&s, "\x1b[<2;6;4M"));      /* a right click is not a paste */
+    CHECK(!s.r.paste);
+    button(ui, &s, CUI_MOUSE_RIGHT, false); CHECK(got(&s, "\x1b[<2;6;4m"));
+    /* the wheel: one report per notch, and the screen does not scroll */
+    cui_input_scroll(ui, 0, 1); build(ui, &s); CHECK(got(&s, "\x1b[<64;6;4M"));
+    cui_input_scroll(ui, 0, -1); build(ui, &s); CHECK(got(&s, "\x1b[<65;6;4M"));
+    cui_input_scroll(ui, 0, -2); build(ui, &s); CHECK(got(&s, "\x1b[<65;6;4M\x1b[<65;6;4M"));
+    /* modifiers */
+    mods(ui, &s, CUI_MOD_CTRL);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[<16;6;4M"));
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[<16;6;4m"));
+    mods(ui, &s, CUI_MOD_ALT);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[<8;6;4M"));
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[<8;6;4m"));
+    /* Shift keeps it local: a drag selects, nothing is reported, the pointer is the I-beam */
+    mods(ui, &s, CUI_MOD_SHIFT);
+    W(s.vt, "\x1b[2J\x1b[Hhello world");
+    build(ui, &s);
+    at_cell(ui, &s, 1, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK_EQ(s.r.input_len, 0);
+    CHECK_EQ(cui_get_cursor(ui), CUI_CURSOR_TEXT);
+    at_cell(ui, &s, 8, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK_EQ(s.r.input_len, 0);
+    mods(ui, &s, 0);
+    CHECK_EQ(cui_get_cursor(ui), CUI_CURSOR_ARROW);                   /* the program has the mouse: an arrow */
+    /* a click and release in one frame is both reports, in order */
+    at_cell(ui, &s, 2, 2);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); build(ui, &s);
+    CHECK(got(&s, "\x1b[<0;3;3M\x1b[<0;3;3m"));
+
+    /* 1002: motion with a button down, only when the cell changes; a release outside is reported, clamped */
+    W(s.vt, "\x1b[?1002h");
+    at_cell(ui, &s, 4, 1);
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK(got(&s, "\x1b[<0;5;2M"));
+    at_cell(ui, &s, 4, 1); CHECK_EQ(s.r.input_len, 0);
+    cui_input_mouse_move(ui, 10 + 4.9f * 7.8f, 6 + 1.5f * 19); build(ui, &s); CHECK_EQ(s.r.input_len, 0);   /* same cell */
+    at_cell(ui, &s, 7, 1); CHECK(got(&s, "\x1b[<32;8;2M"));
+    at_cell(ui, &s, 7, 4); CHECK(got(&s, "\x1b[<32;8;5M"));
+    char want[32];
+    snprintf(want, sizeof want, "\x1b[<32;1;%dM", s.r.rows);
+    cui_input_mouse_move(ui, -500, 5000); build(ui, &s);
+    CHECK(got(&s, want));                                                                 /* clamped to the grid */
+    snprintf(want, sizeof want, "\x1b[<0;1;%dm", s.r.rows);
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, want));
+    /* 1002 does not report motion with no button */
+    at_cell(ui, &s, 2, 2); CHECK_EQ(s.r.input_len, 0);
+    /* 1003: all motion, code 35 with no button */
+    W(s.vt, "\x1b[?1003h");
+    at_cell(ui, &s, 3, 2); CHECK(got(&s, "\x1b[<35;4;3M"));
+    at_cell(ui, &s, 3, 2); CHECK_EQ(s.r.input_len, 0);
+    W(s.vt, "\x1b[?1003l\x1b[?1002l");
+
+    /* the classic encoding: ESC [ M and three bytes */
+    W(s.vt, "\x1b[?1006l");
+    at_cell(ui, &s, 5, 3);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK(got(&s, "\x1b[M \x26\x24"));      /* 32+0, 32+6, 32+4 */
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK(got(&s, "\x1b[M#\x26\x24"));      /* a release is button 3 */
+    cui_input_scroll(ui, 0, 1); build(ui, &s); CHECK(got(&s, "\x1b[M`\x26\x24"));  /* 32+64 */
+
+    /* a button still down when the window loses the focus is released */
+    W(s.vt, "\x1b[?1006h");
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK_EQ(s.r.input_len, 9);
+    cui_input_focus(ui, false); build(ui, &s);
+    CHECK(got(&s, "\x1b[<0;6;4m"));
+    cui_input_focus(ui, true); build(ui, &s);
+
+    /* looking back in the history keeps the wheel and the clicks local */
+    for (int i = 0; i < 100; i++) { char b[32]; snprintf(b, sizeof b, "row %d\r\n", i); W(s.vt, b); }
+    build(ui, &s);
+    mods(ui, &s, CUI_MOD_SHIFT);
+    cui_input_scroll(ui, 0, 2); build(ui, &s);                                      /* Shift+wheel: history */
+    CHECK_EQ(s.r.input_len, 0);
+    mods(ui, &s, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK_EQ(s.r.input_len, 0);               /* scrolled back: local */
+    button(ui, &s, CUI_MOUSE_LEFT, false);
+    cui_input_scroll(ui, 0, -2); build(ui, &s); CHECK_EQ(s.r.input_len, 0);        /* the wheel scrolls back down */
+    button(ui, &s, CUI_MOUSE_LEFT, true); CHECK(s.r.input_len > 0);                 /* live again: reported */
+    button(ui, &s, CUI_MOUSE_LEFT, false);
+
+    /* ESC c and soft reset forget the mouse */
+    W(s.vt, "\x1b" "c"); CHECK(!cui_vt_mouse_reporting(s.vt));
+    W(s.vt, "\x1b[?1000h"); CHECK(cui_vt_mouse_reporting(s.vt));
+    W(s.vt, "\x1b[!p"); CHECK(!cui_vt_mouse_reporting(s.vt));
+    W(s.vt, "\x1b[?1000h\x1b[?1000l"); CHECK(!cui_vt_mouse_reporting(s.vt));
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+
+    /* .mouse = false: nothing is reported, the wheel and the clicks do what they did before */
+    ui = mouse_ctx(&s, 640);
+    s.mouse = false;
+    W(s.vt, "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1049h");
+    CHECK(cui_vt_mouse_reporting(s.vt));                                               /* remembered */
+    at_cell(ui, &s, 5, 3); CHECK_EQ(s.r.input_len, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, true);  CHECK_EQ(s.r.input_len, 0);
+    button(ui, &s, CUI_MOUSE_LEFT, false); CHECK_EQ(s.r.input_len, 0);
+    CHECK_EQ(cui_get_cursor(ui), CUI_CURSOR_TEXT);
+    cui_input_scroll(ui, 0, -1); build(ui, &s); CHECK(got(&s, "\x1b[B\x1b[B\x1b[B"));   /* the alternate screen's wheel: arrow keys */
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+
+    /* classic coordinates stop at 223 */
+    ui = mouse_ctx(&s, 2200);
+    W(s.vt, "\x1b[?1000h");
+    at_cell(ui, &s, 250, 3);
+    CHECK(s.r.cols > 240);
+    button(ui, &s, CUI_MOUSE_LEFT, true);
+    CHECK(s.r.input_len == 6 && (unsigned char)s.r.input[4] == 255);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
+/* ---- SGR: underline styles, overline, colon forms ---- */
+
+static cui_vt_cell sgr_cell(cui_vt *v, const char *seq) {       /* the cell an "X" written after `seq` gets */
+    cui_vt_cell c;
+    W(v, "\x1b[0m\x1b[2J\x1b[H");
+    W(v, seq);
+    W(v, "X");
+    CHECK(cui_vt_cell_at(v, 0, 0, &c));
+    return c;
+}
+
+static void test_sgr(void) {
+    cui_vt *v = cui_vt_create(40, 6, 0);
+    const int U = CUI_VT_UNDERLINE;
+    CHECK_EQ(sgr_cell(v, "\x1b[4m").attrs, U);                                       /* plain: as before, no style bit */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:0m").attrs, 0);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:1m").attrs, U);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:2m").attrs, U | CUI_VT_UNDERLINE_DOUBLE);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3m").attrs, U | CUI_VT_UNDERLINE_CURLY);            /* not italic */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:4m").attrs, U | CUI_VT_UNDERLINE_DOTTED);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:5m").attrs, U | CUI_VT_UNDERLINE_DASHED);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:9m").attrs, U);                                     /* unknown style: a plain line */
+    CHECK_EQ(sgr_cell(v, "\x1b[21m").attrs, U | CUI_VT_UNDERLINE_DOUBLE);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3;24m").attrs, 0);                                  /* 24 ends any style */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3m\x1b[4:0m").attrs, 0);
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3m\x1b[4m").attrs, U);                              /* a new style replaces the old */
+    CHECK_EQ(sgr_cell(v, "\x1b[4:3;1m").attrs, U | CUI_VT_UNDERLINE_CURLY | CUI_VT_BOLD);     /* the next parameter after a colon group */
+    CHECK_EQ(sgr_cell(v, "\x1b[4;3m").attrs, U | CUI_VT_ITALIC);                     /* with semicolons it is two attributes */
+    CHECK_EQ(sgr_cell(v, "\x1b[1;4:2;3m").attrs, CUI_VT_BOLD | U | CUI_VT_UNDERLINE_DOUBLE | CUI_VT_ITALIC);
+    CHECK_EQ(sgr_cell(v, "\x1b[53m").attrs, CUI_VT_OVERLINE);
+    CHECK_EQ(sgr_cell(v, "\x1b[53;55m").attrs, 0);
+    CHECK_EQ(sgr_cell(v, "\x1b[53;4:3;9m").attrs, CUI_VT_OVERLINE | U | CUI_VT_UNDERLINE_CURLY | CUI_VT_STRIKE);
+    CHECK_EQ(sgr_cell(v, "\x1b[53;4:3;1m\x1b[0m").attrs, 0);                         /* reset clears them */
+    CHECK_EQ(sgr_cell(v, "\x1b[53;4:3m\x1b[m").attrs, 0);
+    /* the style survives save and restore of the cursor, and an erase does not keep it */
+    W(v, "\x1b[2J\x1b[H\x1b[4:4m\x1b" "7\x1b[0m\x1b" "8Y");
+    { cui_vt_cell c; CHECK(cui_vt_cell_at(v, 0, 0, &c)); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_DOTTED); }
+    W(v, "\x1b[2J\x1b[H\x1b[4:4m\x1b[K");
+    { cui_vt_cell c; CHECK(cui_vt_cell_at(v, 0, 0, &c)); CHECK_EQ(c.attrs, 0); }
+    /* a wide character and the style */
+    W(v, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3m\xe4\xb8\xad");
+    { cui_vt_cell c; CHECK(cui_vt_cell_at(v, 0, 0, &c)); CHECK_EQ(c.ch, 0x4E2D); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); }
+
+    /* colors in the colon forms and the old semicolon forms */
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2::255:0:0m").fg, 0x1FF0000);
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2:1:2:3m").fg, 0x1010203);
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2:0:9:8:7m").fg, 0x1090807);                        /* with a color space id */
+    CHECK_EQ(sgr_cell(v, "\x1b[38:5:196m").fg, 196);
+    CHECK_EQ(sgr_cell(v, "\x1b[48:2::10:20:30m").bg, 0x10A141E);
+    CHECK_EQ(sgr_cell(v, "\x1b[48:5:7m").bg, 7);
+    CHECK_EQ(sgr_cell(v, "\x1b[38;2;4;5;6m").fg, 0x1040506);
+    CHECK_EQ(sgr_cell(v, "\x1b[38;5;21m").fg, 21);
+    CHECK_EQ(sgr_cell(v, "\x1b[48;2;4;5;6m").bg, 0x1040506);
+    { cui_vt_cell c = sgr_cell(v, "\x1b[4:3;38:2::10:20:30;48;5;7;1m"); CHECK_EQ(c.fg, 0x10A141E); CHECK_EQ(c.bg, 7); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY | CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[1;38;5;9m"); CHECK_EQ(c.fg, 9); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    CHECK_EQ(sgr_cell(v, "\x1b[38:2:1m").fg, -1);                                    /* too short: ignored */
+    CHECK_EQ(sgr_cell(v, "\x1b[38;5m").fg, -1);
+    CHECK_EQ(sgr_cell(v, "\x1b[38:9:1:2:3m").fg, -1);
+    /* the underline color is read and dropped, and never swallows what follows it */
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58:2::255:0:0;1m"); CHECK_EQ(c.fg, -1); CHECK_EQ(c.bg, -1); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58;2;255;0;0;1m"); CHECK_EQ(c.fg, -1); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58:5:9;1m"); CHECK_EQ(c.fg, -1); CHECK_EQ(c.attrs, CUI_VT_BOLD); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[58;5;9;4:3m"); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[4:3m\x1b[59m"); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); }
+    { cui_vt_cell c = sgr_cell(v, "\x1b[4:3;58:2::1:2:3;38:5:2m"); CHECK_EQ(c.attrs, U | CUI_VT_UNDERLINE_CURLY); CHECK_EQ(c.fg, 2); }
+    /* colons outside SGR do not change other sequences */
+    W(v, "\x1b[2J\x1b[2;3Hz");
+    { char b[64]; cui_vt_line_text(v, 1, b, sizeof b); CHECK_STR(b, "  z"); }
+    cui_vt_destroy(v);
+}
+
+/* ---- cursor shape ---- */
+
+static void test_cursor_shape(void) {
+    cui_vt *v = cui_vt_create(20, 4, 0);
+    CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[3 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_UNDERLINE);
+    W(v, "\x1b[2 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[4 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_UNDERLINE);
+    W(v, "\x1b[5 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BAR);
+    W(v, "\x1b[1 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[6 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BAR);
+    W(v, "\x1b[ q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);        /* no parameter: the default, a block */
+    W(v, "\x1b[6 q\x1b[9 q"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BAR); /* unknown: ignored */
+    W(v, "\x1b" "c"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[5 q\x1b[!p"); CHECK_EQ(cui_vt_cursor_shape(v), CUI_VT_CURSOR_BLOCK);
+    W(v, "\x1b[5 qab");                                                           /* it prints nothing and moves nothing */
+    int x, y; cui_vt_cursor(v, &x, &y);
+    CHECK_EQ(x, 2); CHECK_EQ(y, 0);
+    CHECK_STR(row(v, 0), "ab");
+    cui_vt_destroy(v);
+}
+
+/* ---- query replies ---- */
+
+static size_t reply_of(cui_vt *v, char *b, size_t cap) { size_t n = cui_vt_reply(v, b, cap - 1); b[n] = 0; return n; }
+
+static void test_queries(void) {
+    char b[160];
+    cui_vt *v = cui_vt_create(30, 10, 0);
+    W(v, "\x1b[18t"); reply_of(v, b, sizeof b); CHECK_STR(b, "\x1b[8;10;30t");
+    W(v, "\x1b[14t\x1b[16t"); CHECK_EQ(reply_of(v, b, sizeof b), 0);        /* no view has drawn yet: the cell size is not known */
+    W(v, "\x1b[>q"); reply_of(v, b, sizeof b); CHECK_STR(b, "\x1bP>|cui_vt\x1b\\");
+    W(v, "\x1b[?u\x1b[?q\x1b[q\x1b[1 q"); CHECK_EQ(reply_of(v, b, sizeof b), 0);        /* kitty keyboard query and look-alikes: no answer */
+    W(v, "\x1b[c\x1b[5n"); reply_of(v, b, sizeof b); CHECK_STR(b, "\x1b[?1;0c\x1b[0n");   /* the old replies are unchanged */
+    cui_vt_destroy(v);
+
+    for (int sc = 1; sc <= 2; sc++) {                                          /* the view tells the screen its cell size */
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+        cui_set_viewport(ui, 640.0f * (float)sc, 400.0f * (float)sc, (float)sc);
+        cui_set_reduced_motion(ui, true);
+        scene s = { cui_vt_create(80, 24, 0), { 0 }, true, 640, 400, false, false, 0 };
+        for (int i = 0; i < 3; i++) build(ui, &s);
+        W(s.vt, "\x1b[14t\x1b[16t\x1b[18t");
+        reply_of(s.vt, b, sizeof b);
+        int ph = 0, pw = 0, ch = 0, cw = 0, rows = 0, cols = 0;
+        CHECK_EQ(sscanf(b, "\x1b[4;%d;%dt\x1b[6;%d;%dt\x1b[8;%d;%dt", &ph, &pw, &ch, &cw, &rows, &cols), 6);
+        CHECK_EQ(ch, 19 * sc);                                                  /* ceil(13 * 1.4) points, in device pixels */
+        CHECK(cw >= 7 * sc && cw <= 9 * sc);
+        CHECK_EQ(rows, s.r.rows); CHECK_EQ(cols, s.r.cols);
+        CHECK_EQ(ph, rows * ch); CHECK_EQ(pw, cols * cw);
+        cui_vt_destroy(s.vt);
+        cui_destroy(ui);
+    }
+}
+
+/* ---- line height ---- */
+
+static void test_line_height(void) {
+    static const float lhs[] = { 0, 1.4f, 1.2f, 1.0f, 5.0f, 0.5f };           /* a multiplier of the font size, 0 is 1.4, clamped to 1..3 */
+    static const int want[] = { 19, 19, 16, 13, 39, 13 };                      /* rows of 13 pt text, ceil(13 * m) */
+    for (int i = 0; i < 6; i++) {
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+        cui_set_viewport(ui, 640, 400, 1);
+        cui_set_reduced_motion(ui, true);
+        scene s = { cui_vt_create(80, 24, 0), { 0 }, true, 640, 400, false, false, lhs[i] };
+        for (int k = 0; k < 3; k++) build(ui, &s);
+        char b[64]; int ch = 0, cw = 0;
+        W(s.vt, "\x1b[16t");
+        cui_vt_reply(s.vt, b, sizeof b - 1);
+        CHECK_EQ(sscanf(b, "\x1b[6;%d;%dt", &ch, &cw), 2);
+        CHECK_EQ(ch, want[i]);
+        CHECK_EQ(s.r.rows, (400 - 12) / want[i]);
+        cui_vt_destroy(s.vt);
+        cui_destroy(ui);
+    }
+}
+
+/* ---- what is painted: synchronized output, underline styles, cursor shapes ---- */
+
+static uint32_t paint_hash(cui_ctx *ui, int x0, int y0, int x1, int y1) {     /* a hash of a rectangle of the last frame, 640 x 400 */
+    static uint32_t px[640 * 400];
+    cui_sw_render(g_sw, cui_get_draw_data(ui), px, 640, 400, 640 * 4, CUI_SW_RGBA);
+    uint32_t h = 2166136261u;
+    for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) h = (h ^ px[y * 640 + x]) * 16777619u;
+    return h;
+}
+
+static void test_sync(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    size_t mem0 = cui_vt_memory(s.vt);
+    W(s.vt, "\x1b[2J\x1b[Hold text");
+    build(ui, &s);
+    uint32_t old = paint_hash(ui, 0, 0, 200, 60);
+    CHECK(!cui_vt_synchronized(s.vt));
+    W(s.vt, "\x1b[?2026h");
+    CHECK(cui_vt_synchronized(s.vt));
+    CHECK(cui_vt_memory(s.vt) > mem0);                                         /* the one copy of the screen is counted */
+    W(s.vt, "\x1b[2J\x1b[Hnew text");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), old);                              /* the screen as it was */
+    char b[32]; cui_vt_line_text(s.vt, 0, b, sizeof b); CHECK_STR(b, "new text");   /* the program's screen is the new one */
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), old);
+    W(s.vt, "\x1b[?2026l");
+    build(ui, &s);
+    uint32_t cur = paint_hash(ui, 0, 0, 200, 60);
+    CHECK(cur != old);                                                         /* the end of the update shows the new screen at once */
+    /* an update that never ends shows the live screen after about 150 ms of frames */
+    W(s.vt, "\x1b[?2026h\x1b[2J\x1b[Hthird");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), cur);
+    for (int i = 0; i < 12; i++) build(ui, &s);                                /* 12 frames of 16.7 ms */
+    uint32_t third = paint_hash(ui, 0, 0, 200, 60);
+    CHECK(third != cur);
+    W(s.vt, "\x1b[?2026l");
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 60), third);
+    /* the copy is reused for the next update, a reset and a resize close one */
+    size_t mem1 = cui_vt_memory(s.vt);
+    W(s.vt, "\x1b[?2026h"); CHECK(cui_vt_synchronized(s.vt)); CHECK_EQ(cui_vt_memory(s.vt), mem1);
+    W(s.vt, "\x1b" "c"); CHECK(!cui_vt_synchronized(s.vt));
+    W(s.vt, "\x1b[?2026h\x1b[?1049h"); CHECK(!cui_vt_synchronized(s.vt));      /* the other screen: no stale picture */
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
+static void test_look(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    uint32_t seen[8];
+    int n = 0;
+    static const char *const seq[] = { "\x1b[4m", "\x1b[4:2m", "\x1b[4:3m", "\x1b[4:4m", "\x1b[4:5m", "\x1b[53m", "\x1b[m" };
+    for (int i = 0; i < 7; i++) {                                              /* every style draws something of its own */
+        W(s.vt, "\x1b[0m\x1b[2J\x1b[H"); W(s.vt, seq[i]); W(s.vt, "Hello Hello");
+        build(ui, &s);
+        seen[n] = paint_hash(ui, 10, 6, 120, 26);
+        for (int k = 0; k < n; k++) CHECK(seen[k] != seen[n]);
+        n++;
+    }
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3m\x1b[58:2::255:0:0mHello Hello");     /* the underline color is not drawn: the same picture */
+    build(ui, &s);
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3mHello Hello");
+    uint32_t a = (build(ui, &s), paint_hash(ui, 10, 6, 120, 26));
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[H\x1b[4:3m\x1b[58:2::255:0:0mHello Hello");
+    CHECK_EQ(paint_hash(ui, 10, 6, 120, 26), a);                               /* (the frame has not changed: only the screen did) */
+    build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 10, 6, 120, 26), a);
+    /* the cursor: a block, an underline and a bar are three pictures, and the character stays under the line and the bar */
+    W(s.vt, "\x1b[0m\x1b[2J\x1b[Hab\x1b[1D");
+    uint32_t shape[3];
+    static const char *const cs[] = { "\x1b[2 q", "\x1b[4 q", "\x1b[6 q" };
+    for (int i = 0; i < 3; i++) { W(s.vt, cs[i]); build(ui, &s); shape[i] = paint_hash(ui, 10, 6, 40, 26); }
+    CHECK(shape[0] != shape[1] && shape[1] != shape[2] && shape[0] != shape[2]);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
+/* ---- focus reports ---- */
+
+static void test_focus(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    s.freports = true;
+    build(ui, &s);
+    cui_input_focus(ui, false); build(ui, &s);
+    CHECK_EQ(s.r.input_len, 0);                                    /* the program did not ask */
+    cui_input_focus(ui, true); build(ui, &s);
+    CHECK_EQ(s.r.input_len, 0);
+    W(s.vt, "\x1b[?1004h");
+    cui_input_focus(ui, false); build(ui, &s); CHECK(got(&s, "\x1b[O"));
+    build(ui, &s); CHECK_EQ(s.r.input_len, 0);                     /* once */
+    cui_input_focus(ui, true); build(ui, &s); CHECK(got(&s, "\x1b[I"));
+    s.freports = false;
+    cui_input_focus(ui, false); build(ui, &s); CHECK_EQ(s.r.input_len, 0);   /* not opted in */
+    cui_input_focus(ui, true); build(ui, &s); CHECK_EQ(s.r.input_len, 0);
+    s.freports = true;
+    W(s.vt, "\x1b[?1004l");
+    cui_input_focus(ui, false); build(ui, &s); CHECK_EQ(s.r.input_len, 0);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 int main(void) {
     g_sw = cui_sw_create();
     test_text();
@@ -363,6 +760,14 @@ int main(void) {
     test_resize_and_limits();
     test_speed();
     test_view();
+    test_mouse();
+    test_focus();
+    test_sgr();
+    test_cursor_shape();
+    test_queries();
+    test_line_height();
+    test_sync();
+    test_look();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

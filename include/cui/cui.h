@@ -4160,10 +4160,20 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  *     char reply[64]; size_t n = cui_vt_reply(vt, reply, sizeof reply);   // answers to the program's queries: send them too
  *
  * Understood: cursor movement, erase, insert and delete (characters and lines), scrolling regions, 16, 256
- * and true colors, bold, dim, italic, underline, inverse, strike, wide characters, the alternate screen
+ * and true colors, bold, dim, italic, underline (single, double, curly, dotted, dashed: `4:0` to `4:5`, `21`; `58` and `59` are read but the line takes the text color: a cell has no room for a second color), overline (`53`, `55`), inverse, strike, colors in the colon forms (`38:2::r:g:b`, `38:2:r:g:b`, `38:5:n`), wide characters, the alternate screen
  * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2),
- * cursor position and device attribute reports. Not understood (skipped): mouse reporting, hyperlinks,
- * images, character sets.
+ * cursor shape (`CSI Ps SP q`: block, underline, bar; never blinking), synchronized output (`?2026`: the view shows the screen as it was until the update ends, for at most about 150 ms), cursor position, device attribute, XTVERSION (`ESC [ > q`) and size reports (`ESC [ 14 t`, `16 t` and `18 t`, with the cell size the view records each frame), mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
+ * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, images, character sets.
+ *
+ * Mouse (`.mouse = true`): while the program asked for the mouse (`cui_vt_mouse_reporting`), clicks, drags,
+ * motion, the wheel (one report per notch) and the right click go to the program through `input`, as keys do, and
+ * the pointer is an arrow. Shift held, or looking back in the history, keeps everything local (selection, scrollback,
+ * paste, I-beam), as in xterm and Windows Terminal; Shift+wheel looks back. A button released outside the view is
+ * still reported, with the cell clamped to the grid, so the program never sees a stuck button. Without `.mouse`
+ * the requests are remembered and nothing is reported.
+ *
+ * Focus (`.focus_reports = true`): a program that asked with mode 1004 gets ESC [ I when the view has the keyboard
+ * and the window the focus, ESC [ O when either is lost. A view that is no longer built (a hidden tab) sends nothing.
  *
  * Memory is fixed: two grids of 8 bytes per cell, and a scrollback ring of `lines * 48` cells (lines are
  * stored without their blank right end). Scrolling moves no cell data. Writing never allocates and parses
@@ -4180,7 +4190,10 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * sends arrow keys. Drag, double click and triple click select. */
 enum {
     CUI_VT_BOLD = 1 << 24, CUI_VT_DIM = 1 << 25, CUI_VT_ITALIC = 1 << 26, CUI_VT_UNDERLINE = 1 << 27,
-    CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29
+    CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29,
+    /* CUI_VT_UNDERLINE is set for every underline style; one of these says which (none of them: a single line) */
+    CUI_VT_UNDERLINE_DOUBLE = 1 << 20, CUI_VT_UNDERLINE_CURLY = 1 << 21, CUI_VT_UNDERLINE_DOTTED = 1 << 22, CUI_VT_UNDERLINE_DASHED = 1 << 23,
+    CUI_VT_OVERLINE = 1 << 30
 };
 typedef struct cui_vt cui_vt;
 typedef struct cui_vt_cell {
@@ -4199,6 +4212,10 @@ CUI_API void cui_vt_cursor(const cui_vt *vt, int *x, int *y);
 CUI_API bool cui_vt_alt_screen(const cui_vt *vt);
 CUI_API bool cui_vt_app_cursor(const cui_vt *vt);
 CUI_API bool cui_vt_bracketed_paste(const cui_vt *vt);
+CUI_API bool cui_vt_mouse_reporting(const cui_vt *vt);                        /* the program asked for the mouse (1000, 1002 or 1003) */
+CUI_API bool cui_vt_synchronized(const cui_vt *vt);                              /* a synchronized update (?2026h ... ?2026l) is open: the view shows the screen as it was at h, for about 150 ms of frames */
+enum { CUI_VT_CURSOR_BLOCK = 0, CUI_VT_CURSOR_UNDERLINE = 1, CUI_VT_CURSOR_BAR = 2 };
+CUI_API int cui_vt_cursor_shape(const cui_vt *vt);                            /* CUI_VT_CURSOR_*, set by the program with CSI Ps SP q; block until then (no blinking is drawn) */
 CUI_API int cui_vt_scrollback_count(const cui_vt *vt);
 CUI_API size_t cui_vt_memory(const cui_vt *vt);                               /* bytes held */
 /* One screen row as text with its blank right end cut: row 0 is the top of the live screen, -1 the newest scrollback line. Returns the length. */
@@ -4210,6 +4227,9 @@ typedef struct cui_vt_opts {
     float size;                    /* font size, default 13 */
     bool focus;                    /* take the keyboard now (once, when you open it) */
     bool no_input;                 /* show only: no keys, no paste */
+    bool mouse;                    /* report the mouse to a program that asks for it (see "Mouse" above); false: nothing is reported */
+    bool focus_reports;            /* tell a program that asked (mode 1004) with ESC [ I and ESC [ O when the view gains or loses the keyboard, or the window the focus */
+    float line_height;             /* a row's height in font sizes, from 1 to 3; 0 is 1.4. Pictures made of half blocks want cells near 1:2 (1.2 for most monospace fonts) */
 } cui_vt_opts;
 typedef struct cui_vt_result {
     const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */

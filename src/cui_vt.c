@@ -14,10 +14,15 @@
 #define CUI__VT_PALETTE 257         /* color ids: 0 default, 1..256 palette index + 1, 257.. an entry of the rgb table */
 
 enum { CUI__VT_SPACER = 1u << 30 };  /* the second cell of a wide character */
+#define CUI__VT_OVER 0x80000000u       /* overline */
+#define CUI__VT_ULS_SHIFT 21           /* underline style 0..5 (none, single, double, curly, dotted, dashed) in the 3 free bits below the attributes */
+#define CUI__VT_ULS_MASK 0x00E00000u
+#define CUI__VT_ULS(ca) (((ca) & CUI__VT_ULS_MASK) >> CUI__VT_ULS_SHIFT)
 #define CUI__VT_CP(ca) ((ca) & 0x1FFFFFu)
-#define CUI__VT_ATTRS(ca) ((ca) & 0x7F000000u)
+#define CUI__VT_ATTRS(ca) ((ca) & 0xFFE00000u)
 
 typedef struct { uint32_t ca; uint16_t fg, bg; } cui__vt_cell;
+typedef char cui__vt_cell_is_8_bytes[sizeof(cui__vt_cell) == 8 ? 1 : -1];
 typedef struct { cui__vt_cell *cells; uint16_t *map; uint8_t *wrap; } cui__vt_screen;
 typedef struct { uint32_t off; uint16_t len; uint8_t wrapped; } cui__vt_line;
 
@@ -35,6 +40,7 @@ struct cui_vt {
     bool autowrap, app_cursor, bracketed, cursor_vis;
     int state;
     int p[16], np; bool pany; char priv, inter;
+    uint16_t pcolon;                  /* bit i: the separator before p[i] was a colon (a sub-parameter) */
     uint32_t cp; int need;            /* a UTF-8 sequence cut by the end of a write */
     char osc[160]; int osc_n;
     char title[128];
@@ -44,7 +50,17 @@ struct cui_vt {
     uint64_t sb_total;                /* lines ever pushed to the scrollback */
     uint32_t rgb[CUI__VT_RGB_MAX]; int rgb_n;
     uint8_t *tabs;
+    uint8_t mouse_modes;              /* what the program asked for: CUI__VT_M1000, _M1002, _M1003 */
+    bool mouse_sgr;                   /* encoding 1006 */
+    bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
+    uint8_t cursor_shape;             /* CUI_VT_CURSOR_* from CSI Ps SP q */
+    int cell_w, cell_h;               /* the view's cell in device pixels, for the size reports (0 before a view has drawn) */
+    cui__vt_cell *snap;               /* synchronized output (?2026): the screen as it was at h, allocated at the first h and kept */
+    int snap_cols, snap_rows, snap_cx, snap_cy; bool snap_cursor;
+    bool sync_on; uint32_t sync_seq;  /* an update is open; counts the h that opened one */
 };
+
+enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
 
 /* ------------------------------------------------------------------------ */
 /* Screens                                                                  */
@@ -95,13 +111,14 @@ cui_vt *cui_vt_create(int cols, int rows, int scrollback_lines) {
 void cui_vt_destroy(cui_vt *v) {
     if (!v) return;
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
-    free(v->sb); free(v->sb_lines); free(v->tabs);
+    free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap);
     free(v);
 }
 
 size_t cui_vt_memory(const cui_vt *v) {
     size_t n = sizeof *v + (size_t)CUI__VT_MAX_COLS;
     n += (size_t)v->cols * (size_t)v->rows * sizeof(cui__vt_cell) * (v->scr[1].cells ? 2 : 1);
+    if (v->snap) n += (size_t)v->snap_cols * (size_t)v->snap_rows * sizeof(cui__vt_cell);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -250,35 +267,65 @@ static uint16_t cui__vt_rgb_id(cui_vt *v, int r, int g, int b) {
     return (uint16_t)(CUI__VT_PALETTE + best);
 }
 
+static void cui__vt_underline(cui_vt *v, int style) {
+    v->attr &= ~(uint32_t)(CUI_VT_UNDERLINE | CUI__VT_ULS_MASK);
+    if (style < 0 || style > 5) style = 1;                 /* an unknown style is a plain line */
+    if (style > 0) v->attr |= CUI_VT_UNDERLINE | ((uint32_t)style << CUI__VT_ULS_SHIFT);
+}
+
+/* The color after a 38, 48 or 58 at p[k]; `end` is where its colon group stops (k + 1 when it has no sub-parameters).
+ * Forms: 38;5;n  38;2;r;g;b  38:5:n  38:2:r:g:b  38:2::r:g:b (an empty color space id). Returns the index of the last
+ * parameter used, or -1 when the form is not understood. */
+static int cui__vt_sgr_color(cui_vt *v, int k, int end, uint16_t *col) {
+    if (end > k + 1) {                                      /* colons */
+        int n = end - k - 1;
+        const int *s = &v->p[k + 1];
+        if (s[0] == 5 && n >= 2) { *col = (uint16_t)(1 + (s[1] & 255)); return end - 1; }
+        if (s[0] == 2 && n >= 5) { *col = cui__vt_rgb_id(v, s[2], s[3], s[4]); return end - 1; }
+        if (s[0] == 2 && n == 4) { *col = cui__vt_rgb_id(v, s[1], s[2], s[3]); return end - 1; }
+        return -1;
+    }
+    if (k + 2 < v->np && v->p[k + 1] == 5) { *col = (uint16_t)(1 + (v->p[k + 2] & 255)); return k + 2; }
+    if (k + 4 < v->np && v->p[k + 1] == 2) { *col = cui__vt_rgb_id(v, v->p[k + 2], v->p[k + 3], v->p[k + 4]); return k + 4; }
+    return -1;
+}
+
 static void cui__vt_sgr(cui_vt *v) {
     if (v->np == 0) { v->attr = 0; v->fg = v->bg = 0; return; }
     for (int k = 0; k < v->np; k++) {
         int c = v->p[k];
+        int end = k + 1;
+        if (v->pcolon) while (end < v->np && ((v->pcolon >> end) & 1u)) end++;      /* a colon group is k .. end - 1 */
         if (c == 0) { v->attr = 0; v->fg = v->bg = 0; }
         else if (c == 1) v->attr |= CUI_VT_BOLD;
+        else if (c >= 30 && c <= 37) v->fg = (uint16_t)(1 + c - 30);
         else if (c == 2) v->attr |= CUI_VT_DIM;
         else if (c == 3) v->attr |= CUI_VT_ITALIC;
-        else if (c == 4 || c == 21) v->attr |= CUI_VT_UNDERLINE;
+        else if (c == 4) cui__vt_underline(v, end > k + 1 ? v->p[k + 1] : 1);
+        else if (c == 21) cui__vt_underline(v, 2);
         else if (c == 7) v->attr |= CUI_VT_INVERSE;
         else if (c == 9) v->attr |= CUI_VT_STRIKE;
         else if (c == 22) v->attr &= ~(uint32_t)(CUI_VT_BOLD | CUI_VT_DIM);
         else if (c == 23) v->attr &= ~(uint32_t)CUI_VT_ITALIC;
-        else if (c == 24) v->attr &= ~(uint32_t)CUI_VT_UNDERLINE;
+        else if (c == 24) cui__vt_underline(v, 0);
         else if (c == 27) v->attr &= ~(uint32_t)CUI_VT_INVERSE;
         else if (c == 29) v->attr &= ~(uint32_t)CUI_VT_STRIKE;
-        else if (c >= 30 && c <= 37) v->fg = (uint16_t)(1 + c - 30);
+        else if (c == 53) v->attr |= CUI__VT_OVER;
+        else if (c == 55) v->attr &= ~CUI__VT_OVER;
         else if (c >= 90 && c <= 97) v->fg = (uint16_t)(1 + c - 90 + 8);
         else if (c >= 40 && c <= 47) v->bg = (uint16_t)(1 + c - 40);
         else if (c >= 100 && c <= 107) v->bg = (uint16_t)(1 + c - 100 + 8);
         else if (c == 39) v->fg = 0;
         else if (c == 49) v->bg = 0;
-        else if ((c == 38 || c == 48) && k + 1 < v->np) {
-            uint16_t col;
-            if (v->p[k + 1] == 5 && k + 2 < v->np) { col = (uint16_t)(1 + (v->p[k + 2] & 255)); k += 2; }
-            else if (v->p[k + 1] == 2 && k + 4 < v->np) { col = cui__vt_rgb_id(v, v->p[k + 2], v->p[k + 3], v->p[k + 4]); k += 4; }
-            else continue;
-            if (c == 38) v->fg = col; else v->bg = col;
+        else if (c == 38 || c == 48 || c == 58) {
+            uint16_t col = 0;
+            int last = cui__vt_sgr_color(v, k, end, &col);
+            if (last >= 0) {
+                if (c == 38) v->fg = col; else if (c == 48) v->bg = col;      /* 58, the underline color, has no room in a cell: the line takes the text color */
+                end = last + 1;
+            }
         }
+        k = end - 1;                                        /* the sub-parameters of a colon group, or the parameters of a color, are used */
     }
 }
 
@@ -296,6 +343,7 @@ static void cui__vt_cursor_to(cui_vt *v, int x, int y) {
 
 static void cui__vt_switch_screen(cui_vt *v, bool alt, bool save) {
     if (alt == (v->cur == 1)) return;
+    v->sync_on = false;
     if (alt) {
         if (!v->scr[1].cells && !cui__vt_screen_alloc(&v->scr[1], v->cols, v->rows)) return;
         if (save) { v->sx = v->cx; v->sy = v->cy; v->spend = v->pend; v->sattr = v->attr; v->sfg = v->fg; v->sbg = v->bg; }
@@ -308,6 +356,20 @@ static void cui__vt_switch_screen(cui_vt *v, bool alt, bool save) {
     v->stop = 0; v->sbot = v->rows - 1;
 }
 
+/* ?2026h: the view keeps painting the screen as it is now until ?2026l (or about 150 ms of frames). One copy of the visible
+ * cells, allocated at the first use and kept for the next ones; a program that never asks costs nothing. */
+static void cui__vt_sync_begin(cui_vt *v) {
+    if (!v->snap || v->snap_cols != v->cols || v->snap_rows != v->rows) {
+        free(v->snap);
+        v->snap_cols = v->cols; v->snap_rows = v->rows;
+        v->snap = (cui__vt_cell *)malloc((size_t)v->cols * (size_t)v->rows * sizeof(cui__vt_cell));
+        if (!v->snap) return;
+    }
+    for (int y = 0; y < v->rows; y++) memcpy(v->snap + (size_t)y * (size_t)v->cols, cui__vt_row(v, CUI__VT_S(v), y), sizeof(cui__vt_cell) * (size_t)v->cols);
+    v->snap_cx = v->cx; v->snap_cy = v->cy; v->snap_cursor = v->cursor_vis;
+    v->sync_on = true; v->sync_seq++;
+}
+
 static void cui__vt_mode(cui_vt *v, bool set) {
     for (int i = 0; i < v->np; i++) {
         int m = v->p[i];
@@ -318,7 +380,15 @@ static void cui__vt_mode(cui_vt *v, bool set) {
         case 25: v->cursor_vis = set; break;
         case 47: case 1047: cui__vt_switch_screen(v, set, false); break;
         case 1049: cui__vt_switch_screen(v, set, true); break;
+        case 1000: case 1002: case 1003: {
+            uint8_t bit = m == 1000 ? CUI__VT_M1000 : m == 1002 ? CUI__VT_M1002 : CUI__VT_M1003;
+            if (set) v->mouse_modes |= bit; else v->mouse_modes &= (uint8_t)~bit;
+            break;
+        }
+        case 1006: v->mouse_sgr = set; break;
+        case 1004: v->focus_mode = set; break;
         case 2004: v->bracketed = set; break;
+        case 2026: if (set) { if (!v->sync_on) cui__vt_sync_begin(v); } else v->sync_on = false; break;
         default: break;
         }
     }
@@ -327,13 +397,18 @@ static void cui__vt_mode(cui_vt *v, bool set) {
 static void cui__vt_csi(cui_vt *v, char f) {
     int n = cui__vt_arg(v, 0, 1);
     cui__vt_screen *s = CUI__VT_S(v);
-    if (v->priv && f != 'h' && f != 'l' && f != 'c') return;
-    if (v->inter == '!' && f == 'p') {      /* soft reset */
-        v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
-        v->app_cursor = false; v->pend = false;
+    if (v->priv && f != 'h' && f != 'l' && f != 'c' && f != 'q') return;
+    if (v->inter) {                         /* the few sequences with an intermediate byte; the common ones pay one test */
+        if (v->inter == '!' && f == 'p') {      /* soft reset */
+            v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
+            v->app_cursor = false; v->pend = false;
+            v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
+        } else if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking is not drawn) */
+            int m = v->np ? v->p[0] : 0;
+            if (m <= 2) v->cursor_shape = CUI_VT_CURSOR_BLOCK; else if (m <= 4) v->cursor_shape = CUI_VT_CURSOR_UNDERLINE; else if (m <= 6) v->cursor_shape = CUI_VT_CURSOR_BAR;
+        }
         return;
     }
-    if (v->inter) return;
     switch (f) {
     case '@': {         /* insert blank characters */
         cui__vt_cell *row = cui__vt_row(v, s, v->cy);
@@ -395,6 +470,15 @@ static void cui__vt_csi(cui_vt *v, char f) {
         if (v->priv == '>') cui__vt_reply(v, "\x1b[>0;0;0c");
         else if (!v->priv && (v->np == 0 || v->p[0] == 0)) cui__vt_reply(v, "\x1b[?1;0c");
         break;
+    case 't': {         /* size reports: the text area and the cell in pixels, the grid in characters */
+        int m = v->np ? v->p[0] : 0;
+        char b[48];
+        if (m == 14 && v->cell_w > 0) { snprintf(b, sizeof b, "\x1b[4;%d;%dt", v->rows * v->cell_h, v->cols * v->cell_w); cui__vt_reply(v, b); }
+        else if (m == 16 && v->cell_w > 0) { snprintf(b, sizeof b, "\x1b[6;%d;%dt", v->cell_h, v->cell_w); cui__vt_reply(v, b); }
+        else if (m == 18) { snprintf(b, sizeof b, "\x1b[8;%d;%dt", v->rows, v->cols); cui__vt_reply(v, b); }
+        break;
+    }
+    case 'q': if (v->priv == '>') cui__vt_reply(v, "\x1bP>|cui_vt\x1b\\"); break;      /* XTVERSION */
     case 'r': {
         int top = cui__vt_arg(v, 0, 1) - 1, bot = cui__vt_arg(v, 1, v->rows) - 1;
         if (bot >= v->rows) bot = v->rows - 1;
@@ -422,6 +506,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
     case 'c': {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -468,7 +553,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             }
             if (c < 0x20) {
                 v->need = 0;
-                if (c == 0x1B) { v->state = CUI__VT_ESC; v->np = 0; v->pany = false; v->priv = v->inter = 0; }
+                if (c == 0x1B) { v->state = CUI__VT_ESC; v->np = 0; v->pcolon = 0; v->pany = false; v->priv = v->inter = 0; }
                 else cui__vt_control(v, c);
             } else if (c >= 0xC2 && c <= 0xF4) {
                 v->need = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : 1;
@@ -479,7 +564,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             } else { v->need = 0; cui__vt_put(v, 0xFFFD); }
             break;
         case CUI__VT_ESC:
-            if (c == '[') { v->state = CUI__VT_CSI; v->np = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
+            if (c == '[') { v->state = CUI__VT_CSI; v->np = 0; v->pcolon = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
             else if (c == ']') { v->state = CUI__VT_OSC; v->osc_n = 0; }
             else if (c == 'P' || c == 'X' || c == '^' || c == '_') v->state = CUI__VT_STR;
             else if (c >= 0x20 && c <= 0x2F) v->state = CUI__VT_ESC_INT;       /* ( ) # % and the like: one more byte */
@@ -497,6 +582,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             } else if (c == ';' || c == ':') {
                 if (v->np == 0) v->np = 1;
                 if (v->np < 16) v->np++;
+                if (c == ':') v->pcolon |= (uint16_t)(1u << (v->np - 1));
                 v->pany = true;
             } else if (c >= '<' && c <= '?') v->priv = (char)c;
             else if (c >= 0x20 && c <= 0x2F) v->inter = (char)c;
@@ -538,6 +624,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     cols = CUI_CLAMP(cols, 2, CUI__VT_MAX_COLS);
     rows = CUI_CLAMP(rows, 1, CUI__VT_MAX_ROWS);
     if (cols == v->cols && rows == v->rows) return;
+    v->sync_on = false;
     /* the cursor must stay on screen: rows above it move into the scrollback */
     if (v->cur == 0 && v->cy >= rows) {
         int drop = v->cy - rows + 1;
@@ -583,6 +670,9 @@ void cui_vt_cursor(const cui_vt *v, int *x, int *y) { if (x) *x = v->cx; if (y) 
 bool cui_vt_alt_screen(const cui_vt *v) { return v->cur == 1; }
 bool cui_vt_app_cursor(const cui_vt *v) { return v->app_cursor; }
 bool cui_vt_bracketed_paste(const cui_vt *v) { return v->bracketed; }
+bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; }
+bool cui_vt_synchronized(const cui_vt *v) { return v && v->sync_on; }
+int cui_vt_cursor_shape(const cui_vt *v) { return v ? v->cursor_shape : CUI_VT_CURSOR_BLOCK; }
 int cui_vt_scrollback_count(const cui_vt *v) { return v->sb_count; }
 
 /* the cells of row `row` counted from the top of the live screen: negative rows are scrollback, -1 the newest */
@@ -635,7 +725,13 @@ bool cui_vt_cell_at(const cui_vt *v, int x, int y, cui_vt_cell *out) {
     if (x < 0 || y < 0 || x >= v->cols || y >= v->rows) return false;
     const cui__vt_cell *c = &cui__vt_row(v, &v->scr[v->cur], y)[x];
     out->ch = CUI__VT_CP(c->ca);
-    out->attrs = (int)CUI__VT_ATTRS(c->ca) & ~(int)CUI__VT_SPACER;
+    {
+        uint32_t a = c->ca, style = CUI__VT_ULS(a);
+        int at = (int)(a & 0x3F000000u);                                          /* bold .. strike: the same bits as CUI_VT_* */
+        if (style >= 2) at |= CUI_VT_UNDERLINE_DOUBLE << (style - 2);
+        if (a & CUI__VT_OVER) at |= CUI_VT_OVERLINE;
+        out->attrs = at;
+    }
     for (int k = 0; k < 2; k++) {
         uint16_t id = k ? c->bg : c->fg;
         int32_t r = id == 0 ? -1 : id < CUI__VT_PALETTE ? id - 1 : (int32_t)(0x1000000u | v->rgb[id - CUI__VT_PALETTE]);
@@ -657,6 +753,10 @@ typedef struct {
     float press_x, press_y;
     uint64_t seen_total;
     char out[768]; int out_n;
+    uint8_t btn_down;                 /* buttons whose press went to the program */
+    uint32_t sync_seen; double sync_t0;   /* the update the view last saw open, and when the view first drew it */
+    int mcol, mrow; bool mvalid;      /* the last cell the mouse was reported in */
+    bool finit, fin;                  /* the view had the keyboard and the window had the focus, as of the last frame */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -665,6 +765,64 @@ static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
     st->out_n += n;
 }
 static void cui__vt_outs(cui__vt_state *st, const char *s) { cui__vt_out(st, s, (int)strlen(s)); }
+
+/* ------------------------------------------------------------------------ */
+/* View: mouse reports                                                      */
+/* ------------------------------------------------------------------------ */
+
+typedef struct { cui_rect pr; float padx, pady, cw, lh; } cui__vt_geom;
+
+/* the cell under a point, 0-based and clamped to the grid: the geometry selection uses */
+static void cui__vt_grid_at(const cui_vt *v, const cui__vt_geom *g, float mx, float my, int *col, int *row) {
+    *row = CUI_CLAMP((int)floorf((my - g->pr.y - g->pady) / g->lh), 0, v->rows - 1);
+    *col = CUI_CLAMP((int)floorf((mx - g->pr.x - g->padx) / g->cw), 0, v->cols - 1);
+}
+
+/* one report: SGR (ESC [ < b ; x ; y M or m) or the classic ESC [ M with bytes, coordinates capped at 223 */
+static void cui__vt_mouse_out(cui__vt_state *st, const cui_vt *v, int code, int col, int row, bool release) {
+    char b[32];
+    int x = col + 1, y = row + 1, n;
+    if (v->mouse_sgr) n = snprintf(b, sizeof b, "\x1b[<%d;%d;%d%c", code, x, y, release ? 'm' : 'M');
+    else {
+        if (release) code = (code & ~3) | 3;
+        b[0] = 0x1b; b[1] = '['; b[2] = 'M';
+        b[3] = (char)(32 + code); b[4] = (char)(32 + CUI_MIN(x, 223)); b[5] = (char)(32 + CUI_MIN(y, 223));
+        n = 6;
+    }
+    cui__vt_out(st, b, n);
+}
+
+static int cui__vt_mouse_mods(int mods) {
+    return ((mods & CUI_MOD_SHIFT) ? 4 : 0) | ((mods & CUI_MOD_ALT) ? 8 : 0) | ((mods & CUI_MOD_CTRL) ? 16 : 0);
+}
+
+/* the buttons, motion and wheel of this frame as reports. `can_press`: a new press goes to the program (no Shift).
+ * A release is always reported while a press is open, wherever the pointer is, so the program never sees a stuck button. */
+static void cui__vt_mouse_frame(cui_ctx *ui, cui__vt_state *st, const cui_vt *v, const cui__vt_geom *g, bool hovered, bool can_press) {
+    int col = st->mcol, row = st->mrow;
+    if (ui->mouse_inside) cui__vt_grid_at(v, g, ui->mx, ui->my, &col, &row);
+    int mods = cui__vt_mouse_mods(ui->mods);
+    bool moved = !st->mvalid || col != st->mcol || row != st->mrow;
+    for (int b = 0; b < 3; b++) {
+        uint8_t bit = (uint8_t)(1u << b);
+        int code = b == CUI_MOUSE_RIGHT ? 2 : b == CUI_MOUSE_MIDDLE ? 1 : 0;
+        if ((st->btn_down & bit) && ui->mreleased[b]) { cui__vt_mouse_out(st, v, code + mods, col, row, true); st->btn_down &= (uint8_t)~bit; }
+        if (can_press && hovered && ui->mpressed[b]) {
+            cui__vt_mouse_out(st, v, code + mods, col, row, false);
+            st->btn_down |= bit; moved = false;
+            st->has_sel = false; st->selecting = false;
+        }
+        if ((st->btn_down & bit) && !ui->mdown[b]) { cui__vt_mouse_out(st, v, code + mods, col, row, true); st->btn_down &= (uint8_t)~bit; }
+    }
+    if (moved && (st->btn_down || hovered)) {
+        if (st->btn_down) {
+            int first = st->btn_down & 1 ? 0 : st->btn_down & 4 ? 1 : 2;       /* the lowest button held, as a protocol code */
+            if (v->mouse_modes & (CUI__VT_M1002 | CUI__VT_M1003)) cui__vt_mouse_out(st, v, first + 32 + mods, col, row, false);
+        } else if (can_press && (v->mouse_modes & CUI__VT_M1003)) cui__vt_mouse_out(st, v, 3 + 32 + mods, col, row, false);
+    }
+    if (st->btn_down || hovered) { st->mcol = col; st->mrow = row; st->mvalid = true; }
+    else st->mvalid = false;
+}
 
 /* ESC [ code ; mods final, or without mods ESC [ final (or ESC O final in application mode) */
 static void cui__vt_out_key(cui__vt_state *st, bool app, int mods, const char *code, char final) {
@@ -923,6 +1081,9 @@ typedef struct {
     float cw, lh, size, padx, pady;
     int off;
     bool focused, show_cursor, has_sel;
+    int shape;                        /* CUI_VT_CURSOR_* */
+    const cui__vt_cell *snap;         /* paint this copy of the screen (a synchronized update is open) instead of the live one */
+    int scx, scy; bool scursor;
     cui__vt_pos s0, s1;
     cui_color fg, bg, sel, cursor, bar;
     float bar_t;
@@ -949,6 +1110,54 @@ static bool cui__vt_run_same(const cui__vt_cell *a, const cui__vt_cell *b) {
     return a->fg == b->fg && a->bg == b->bg && CUI__VT_ATTRS(a->ca) == CUI__VT_ATTRS(b->ca);
 }
 
+/* The underline (a style, or the plain line as it always was) and the overline of `n` cells from cell `x` of a row at `ry`, in
+ * the text color. Every edge is put on a whole device pixel, so the lines are the same at any scale. */
+static void cui__vt_decor(cui_ctx *ui, const cui__vt_paint *p, uint32_t at, float x0, int x, int n, float ry, cui_color col) {
+    float s = ui->scale > 0 ? ui->scale : 1;
+    float left = x0 + (float)x * p->cw, right = x0 + (float)(x + n) * p->cw;
+    float t = fmaxf(1.0f, floorf(p->lh / 16.0f * s + 0.5f)) / s;       /* line thickness: the box light line's */
+    float yb = ry + p->lh - 1.0f;                                       /* bottom edge of an underline */
+    uint32_t style = (at & CUI_VT_UNDERLINE) ? CUI__VT_ULS(at) : 0;
+    if (at & CUI__VT_OVER) cui__vt_snap_rect(ui, left, ry, right, ry + t, col);
+    if (!(at & CUI_VT_UNDERLINE)) return;
+    switch (style) {
+    case 2:                                                             /* double: two lines with a gap of one */
+        cui__vt_snap_rect(ui, left, yb - t, right, yb, col);
+        cui__vt_snap_rect(ui, left, yb - 3 * t, right, yb - 2 * t, col);
+        break;
+    case 3: {                                                           /* curly: a wave one cell long, column by column on device pixels */
+        float amp = fmaxf(2.0f, floorf(0.12f * p->lh * s + 0.5f));      /* device pixels */
+        float per = fmaxf(4.0f, floorf(p->cw * s + 0.5f));
+        float top = yb - t - amp / s;
+        int a = (int)floorf(left * s + 0.5f), b = (int)floorf(right * s + 0.5f);
+        int run0 = a, lev = -1;
+        for (int d = a; d <= b; d++) {
+            int l = -1;
+            if (d < b) l = (int)floorf(amp * 0.5f * (1.0f - cosf(6.2831853f * fmodf((float)d, per) / per)) + 0.5f);
+            if (l != lev) {
+                if (lev >= 0) cui__vt_snap_rect(ui, (float)run0 / s, top + (float)lev / s, (float)d / s, top + (float)lev / s + t, col);
+                run0 = d; lev = l;
+            }
+        }
+        break;
+    }
+    case 4: {                                                           /* dotted: dots of the line's width, one dot of gap */
+        float dot = t, step = 2 * t;
+        for (float dx = ceilf(left / step) * step; dx < right; dx += step) cui__vt_snap_rect(ui, dx, yb - t, fminf(dx + dot, right), yb, col);
+        break;
+    }
+    case 5:                                                             /* dashed: a dash of 0.6 cell in every cell */
+        for (int k = 0; k < n; k++) {
+            float cx = left + (float)k * p->cw;
+            cui__vt_snap_rect(ui, cx, yb - t, cx + p->cw * 0.6f, yb, col);
+        }
+        break;
+    default:                                                            /* single: as it was drawn before the styles */
+        cui_draw_rect(ui, (cui_rect){ left, ry + p->lh - 2, right - left, 1 }, CUI_CORNERS(0), col);
+        break;
+    }
+}
+
 static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     cui__vt_paint *p = (cui__vt_paint *)data;
     const cui_vt *v = p->v;
@@ -963,6 +1172,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
         int cn; bool wrapped;
         int64_t arow = (int64_t)v->sb_total - p->off + y;
         const cui__vt_cell *cells = cui__vt_cells_abs(v, arow, &cn, &wrapped);
+        if (p->snap && arow >= (int64_t)v->sb_total && arow - (int64_t)v->sb_total < v->rows) { cells = p->snap + (size_t)(arow - (int64_t)v->sb_total) * (size_t)v->cols; cn = v->cols; }
         /* selection under the text */
         if (p->has_sel && arow >= p->s0.row && arow <= p->s1.row) {
             int c0 = arow == p->s0.row ? p->s0.col : 0, c1 = arow == p->s1.row ? p->s1.col + 1 : v->cols;
@@ -994,7 +1204,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, u, (int)k, true);
                 if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, u, (int)k, true);
-                if (at & CUI_VT_UNDERLINE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh - 2, p->cw, 1 }, CUI_CORNERS(0), fg);
+                if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, x + 1 < cn && (cells[x + 1].ca & CUI__VT_SPACER) ? 2 : 1, ry, fg);
                 x++;
                 continue;
             }
@@ -1010,19 +1220,32 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             len = last - x + 1;
             cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, buf, len, true);
             if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, buf, len, true);
-            if (at & CUI_VT_UNDERLINE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh - 2, len * p->cw, 1 }, CUI_CORNERS(0), fg);
+            if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, len, ry, fg);
             if (at & CUI_VT_STRIKE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh * 0.5f, len * p->cw, 1 }, CUI_CORNERS(0), fg);
             x = e;
         }
     }
-    /* the cursor */
-    if (p->show_cursor && v->cursor_vis && p->off == 0) {
-        float cx = x0 + v->cx * p->cw, cy = y0 + v->cy * p->lh;
-        if (p->focused) {
+    /* the cursor (where it was when a synchronized update opened, while one is shown) */
+    int ccx = p->snap ? p->scx : v->cx, ccy = p->snap ? p->scy : v->cy;
+    bool cvis = p->snap ? p->scursor : v->cursor_vis;
+    if (p->show_cursor && cvis && p->off == 0) {
+        float cx = x0 + (float)ccx * p->cw, cy = y0 + (float)ccy * p->lh;
+        if (p->shape != CUI_VT_CURSOR_BLOCK) {              /* an underline or a bar, on whole device pixels; the character under it stays as it is */
+            float s = ui->scale > 0 ? ui->scale : 1;
+            cui_color col = p->focused ? p->cursor : cui_alpha(p->cursor, 0.55f);
+            if (p->shape == CUI_VT_CURSOR_UNDERLINE) {
+                float t = fmaxf(1.0f, floorf(p->lh * 0.1f * s + 0.5f)) / s;
+                cui__vt_snap_rect(ui, cx, cy + p->lh - t, cx + p->cw, cy + p->lh, col);
+            } else {
+                float t = fmaxf(1.0f, floorf(p->cw * 0.2f * s + 0.5f)) / s;
+                cui__vt_snap_rect(ui, cx, cy, cx + t, cy + p->lh, col);
+            }
+        } else if (p->focused) {
             cui__vt_snap_rect(ui, cx, cy, cx + p->cw, cy + p->lh, p->cursor);
             int cn; bool w;
-            const cui__vt_cell *cells = cui__vt_cells_at(v, v->cy, &cn, &w);
-            uint32_t ch = cells && v->cx < cn ? CUI__VT_CP(cells[v->cx].ca) : 0;
+            const cui__vt_cell *cells = p->snap ? p->snap + (size_t)ccy * (size_t)v->cols : cui__vt_cells_at(v, ccy, &cn, &w);
+            if (p->snap) cn = v->cols;
+            uint32_t ch = cells && ccx < cn ? CUI__VT_CP(cells[ccx].ca) : 0;
             if (ch > ' ' && ch != 0x7F) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, cx, cy + (p->lh - fh) * 0.5f, p->bg, u, (int)k, true);
@@ -1053,13 +1276,18 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     float size = cui__fs(ui, o->size > 0 ? o->size : 13);
     float cw = cui__text_width(ui, CUI_FONT_MONO, size, "0", 1, true);
     if (cw <= 0) cw = size * 0.6f;
-    float lh = ceilf(size * 1.4f), padx = 10, pady = 6;
+    float lh = ceilf(size * (o->line_height > 0 ? CUI_CLAMP(o->line_height, 1.0f, 3.0f) : 1.4f)), padx = 10, pady = 6;
     cui_rect pr = cui__prev_rect(ui, id);
     if (!v) return res;
+    v->cell_w = (int)lroundf(cw * (ui->scale > 0 ? ui->scale : 1.0f)); v->cell_h = (int)lroundf(lh * (ui->scale > 0 ? ui->scale : 1.0f));
     if (o->focus) ui->focus = id;
     cui_interact in = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
     bool focused = ui->focus == id;
     res.focused = focused;
+    /* focus reports (opt in): when the view gains or loses the keyboard, or the window the focus, a program that asked gets ESC [ I or O */
+    bool has_keys = focused && ui->window_focused;
+    if (st->finit && has_keys != st->fin && o->focus_reports && !o->no_input && v->focus_mode) cui__vt_outs(st, has_keys ? "\x1b[I" : "\x1b[O");
+    st->fin = has_keys; st->finit = true;
     /* the grid follows the view's size */
     if (pr.w > 0 && pr.h > 0) {
         int cols = (int)((pr.w - 2 * padx) / cw), rows = (int)((pr.h - 2 * pady) / lh);
@@ -1072,8 +1300,22 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     st->seen_total = v->sb_total; st->init = true;
     if (st->off > v->sb_count) st->off = v->sb_count;
     if (v->cur == 1) st->off = 0;
+    /* the program has the mouse (opt in): its clicks, drags and wheel are reports, Shift or scrolled-back history keeps them local */
+    bool mshift = (ui->mods & CUI_MOD_SHIFT) != 0;
+    bool can_grab = o->mouse && !o->no_input && v->mouse_modes != 0 && st->off == 0;
+    bool grab = can_grab && (!mshift || st->btn_down != 0);
+    cui__vt_geom geom = { pr, padx, pady, cw, lh };
     /* wheel */
-    if (ui->scroll_target == wid && ui->scroll_dy != 0) {
+    if (ui->scroll_target == wid && ui->scroll_dy != 0 && grab) {
+        float d = ui->scroll_dy;
+        int k = CUI_CLAMP((int)lroundf(fabsf(d)), 1, 8), col, row;      /* one report per notch */
+        cui__vt_grid_at(v, &geom, ui->mx, ui->my, &col, &row);
+        for (int i = 0; i < k; i++) cui__vt_mouse_out(st, v, (d > 0 ? 64 : 65) + cui__vt_mouse_mods(ui->mods), col, row, false);
+        ui->scroll_dy = 0;
+    } else if (can_grab && mshift && in.hovered && v->cur == 0 && ui->scroll_dy != 0) {      /* Shift+wheel looks back in the history */
+        st->off = CUI_CLAMP(st->off + (int)lroundf(ui->scroll_dy * 3), 0, v->sb_count);
+        ui->scroll_dy = 0;
+    } else if (ui->scroll_target == wid && ui->scroll_dy != 0) {
         float d = ui->scroll_dy;
         if (v->cur == 0) st->off = CUI_CLAMP(st->off + (int)lroundf(d * 3), 0, v->sb_count);
         else {   /* a full screen program has no scrollback: the wheel moves its cursor */
@@ -1083,8 +1325,9 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         ui->scroll_dy = 0;
     }
     /* mouse: select */
-    if (in.hovered) cui__set_cursor(ui, CUI_CURSOR_TEXT);
-    if (pr.w > 0) {
+    if (grab || st->btn_down) cui__vt_mouse_frame(ui, st, v, &geom, in.hovered, can_grab && !mshift);
+    if (in.hovered && !grab) cui__set_cursor(ui, CUI_CURSOR_TEXT);
+    if (pr.w > 0 && !grab) {
         cui__vt_pos at = cui__vt_pos_at(v, st, pr, padx, pady, cw, lh, ui->mx, ui->my);
         if (in.active && ui->mpressed[CUI_MOUSE_LEFT]) {
             if (ui->click_count >= 3) { st->a = (cui__vt_pos){ at.row, 0 }; st->b = (cui__vt_pos){ at.row, v->cols - 1 }; st->has_sel = true; st->selecting = false; }
@@ -1129,7 +1372,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         for (int k = 1; k < CUI_KEY_COUNT; k++) ui->kpressed[k] = 0;   /* nothing else sees what the program got */
     }
     /* right click: copy the selection, or paste */
-    if (in.right_clicked && !o->no_input) {
+    if (in.right_clicked && !o->no_input && !grab) {
         if (st->has_sel) {
             char *t = cui__vt_selection_text(ui, v, st);
             if (t) { cui_set_clipboard_text(ui, t); cui__free(ui, t); res.copied = true; }
@@ -1150,7 +1393,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     cui__vt_paint *p = (cui__vt_paint *)cui__frame_alloc(ui, sizeof *p);
     memset(p, 0, sizeof *p);
     p->v = v; p->cw = cw; p->lh = lh; p->size = size; p->padx = padx; p->pady = pady; p->off = st->off;
-    p->focused = focused; p->show_cursor = true;
+    p->focused = focused; p->show_cursor = true; p->shape = v->cursor_shape;
     p->has_sel = st->has_sel;
     cui__vt_sel_order(st, &p->s0, &p->s1);
     p->fg = CUI_C(ui, FOREGROUND);
@@ -1160,6 +1403,15 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     p->bar = CUI_C(ui, BORDER_STRONG);
     p->bar_t = in.hovered || st->off > 0 ? 1.0f : 0.0f;
     p->wheel = wid;
+    /* an update bracketed by ?2026h and ?2026l is open: show the screen as it was when it opened, for about 150 ms of frames at most */
+    if (v->sync_on && v->snap && st->off == 0 && v->snap_cols == v->cols && v->snap_rows == v->rows) {
+        if (st->sync_seen != v->sync_seq) { st->sync_seen = v->sync_seq; st->sync_t0 = ui->time; }
+        double left = 0.15 - (ui->time - st->sync_t0);
+        if (left > 0) {
+            p->snap = v->snap; p->scx = v->snap_cx; p->scy = v->snap_cy; p->scursor = v->snap_cursor;
+            cui_request_wakeup(ui, (float)left + 0.002f);           /* the live screen shows again even if nothing else asks for a frame */
+        }
+    }
     ln->paint = cui__paint_vt;
     ln->paint_data = p;
     ui->last_id = id;
