@@ -54,6 +54,7 @@ struct cui_vt {
     bool mouse_sgr;                   /* encoding 1006 */
     bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
     uint8_t cursor_shape;             /* CUI_VT_CURSOR_* from CSI Ps SP q */
+    int cell_w, cell_h;               /* the view's cell in device pixels, for the size reports (0 before a view has drawn) */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -376,7 +377,7 @@ static void cui__vt_mode(cui_vt *v, bool set) {
 static void cui__vt_csi(cui_vt *v, char f) {
     int n = cui__vt_arg(v, 0, 1);
     cui__vt_screen *s = CUI__VT_S(v);
-    if (v->priv && f != 'h' && f != 'l' && f != 'c') return;
+    if (v->priv && f != 'h' && f != 'l' && f != 'c' && f != 'q') return;
     if (v->inter == '!' && f == 'p') {      /* soft reset */
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = false; v->pend = false;
@@ -450,6 +451,15 @@ static void cui__vt_csi(cui_vt *v, char f) {
         if (v->priv == '>') cui__vt_reply(v, "\x1b[>0;0;0c");
         else if (!v->priv && (v->np == 0 || v->p[0] == 0)) cui__vt_reply(v, "\x1b[?1;0c");
         break;
+    case 't': {         /* size reports: the text area and the cell in pixels, the grid in characters */
+        int m = v->np ? v->p[0] : 0;
+        char b[48];
+        if (m == 14 && v->cell_w > 0) { snprintf(b, sizeof b, "\x1b[4;%d;%dt", v->rows * v->cell_h, v->cols * v->cell_w); cui__vt_reply(v, b); }
+        else if (m == 16 && v->cell_w > 0) { snprintf(b, sizeof b, "\x1b[6;%d;%dt", v->cell_h, v->cell_w); cui__vt_reply(v, b); }
+        else if (m == 18) { snprintf(b, sizeof b, "\x1b[8;%d;%dt", v->rows, v->cols); cui__vt_reply(v, b); }
+        break;
+    }
+    case 'q': if (v->priv == '>') cui__vt_reply(v, "\x1bP>|cui_vt\x1b\\"); break;      /* XTVERSION */
     case 'r': {
         int top = cui__vt_arg(v, 0, 1) - 1, bot = cui__vt_arg(v, 1, v->rows) - 1;
         if (bot >= v->rows) bot = v->rows - 1;
@@ -1241,6 +1251,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     float lh = ceilf(size * 1.4f), padx = 10, pady = 6;
     cui_rect pr = cui__prev_rect(ui, id);
     if (!v) return res;
+    v->cell_w = (int)lroundf(cw * (ui->scale > 0 ? ui->scale : 1.0f)); v->cell_h = (int)lroundf(lh * (ui->scale > 0 ? ui->scale : 1.0f));
     if (o->focus) ui->focus = id;
     cui_interact in = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
     bool focused = ui->focus == id;

@@ -586,6 +586,39 @@ static void test_cursor_shape(void) {
     cui_vt_destroy(v);
 }
 
+/* ---- query replies ---- */
+
+static size_t reply_of(cui_vt *v, char *b, size_t cap) { size_t n = cui_vt_reply(v, b, cap - 1); b[n] = 0; return n; }
+
+static void test_queries(void) {
+    char b[160];
+    cui_vt *v = cui_vt_create(30, 10, 0);
+    W(v, "\x1b[18t"); reply_of(v, b, sizeof b); CHECK_STR(b, "\x1b[8;10;30t");
+    W(v, "\x1b[14t\x1b[16t"); CHECK_EQ(reply_of(v, b, sizeof b), 0);        /* no view has drawn yet: the cell size is not known */
+    W(v, "\x1b[>q"); reply_of(v, b, sizeof b); CHECK_STR(b, "\x1bP>|cui_vt\x1b\\");
+    W(v, "\x1b[?u\x1b[?q\x1b[q\x1b[1 q"); CHECK_EQ(reply_of(v, b, sizeof b), 0);        /* kitty keyboard query and look-alikes: no answer */
+    W(v, "\x1b[c\x1b[5n"); reply_of(v, b, sizeof b); CHECK_STR(b, "\x1b[?1;0c\x1b[0n");   /* the old replies are unchanged */
+    cui_vt_destroy(v);
+
+    for (int sc = 1; sc <= 2; sc++) {                                          /* the view tells the screen its cell size */
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+        cui_set_viewport(ui, 640.0f * (float)sc, 400.0f * (float)sc, (float)sc);
+        cui_set_reduced_motion(ui, true);
+        scene s = { cui_vt_create(80, 24, 0), { 0 }, true, 640, 400, false, false };
+        for (int i = 0; i < 3; i++) build(ui, &s);
+        W(s.vt, "\x1b[14t\x1b[16t\x1b[18t");
+        reply_of(s.vt, b, sizeof b);
+        int ph = 0, pw = 0, ch = 0, cw = 0, rows = 0, cols = 0;
+        CHECK_EQ(sscanf(b, "\x1b[4;%d;%dt\x1b[6;%d;%dt\x1b[8;%d;%dt", &ph, &pw, &ch, &cw, &rows, &cols), 6);
+        CHECK_EQ(ch, 19 * sc);                                                  /* ceil(13 * 1.4) points, in device pixels */
+        CHECK(cw >= 7 * sc && cw <= 9 * sc);
+        CHECK_EQ(rows, s.r.rows); CHECK_EQ(cols, s.r.cols);
+        CHECK_EQ(ph, rows * ch); CHECK_EQ(pw, cols * cw);
+        cui_vt_destroy(s.vt);
+        cui_destroy(ui);
+    }
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -628,6 +661,7 @@ int main(void) {
     test_focus();
     test_sgr();
     test_cursor_shape();
+    test_queries();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
