@@ -24,6 +24,7 @@
  *   text editing primitives          cui_textedit.c (shared with the code editor)
  *   syntax highlighting              cui_code.c (code block, code editor, diff viewer), cui_code_langs.c
  *   layered graph layout             cui_graph.c (dependency graph, mermaid flowcharts)
+ *   cell grid                        cui_cellgrid.c (the pure parts: column search, selection keys; see below)
  *   mermaid diagrams                 cui_mermaid.c (fenced mermaid blocks in markdown)
  *
  * Naming: cui__ for internal functions, CUI__ for internal constants and macros, cui_ for
@@ -782,6 +783,15 @@ cui_chart_annotation *cui__copy_annotations(cui_ctx *ui, const cui_chart_annotat
 /* a dashed hairline from x0 to x1 at y: `dash` points drawn every `period` (cui_instrument.c) */
 void cui__draw_hdash(cui_ctx *ui, float x0, float x1, float y, float dash, float period, cui_color c);
 void cui__scroll_end_ex(cui_ctx *ui);
+
+/* ---- cell grid (cui_cellgrid.c): the parts that are pure functions, so the tests can call them ---- */
+enum { CUI__CG_NAV_NONE = 0, CUI__CG_NAV_SAME, CUI__CG_NAV_MOVED, CUI__CG_NAV_ALL };   /* not a nav key; unchanged; moved (follow it); select all (do not scroll) */
+int cui__cg_col_at(const double *edges, int cols, double x);   /* the column holding x among cols + 1 ascending edges, or -1 */
+int cui__cg_nav(cui_cellgrid_sel *s, int rows, int cols, cui_key key, int mods, int page);
+double cui__cg_into_view(double scroll, double view, double lo, double hi);
+static inline bool cui__cg_sel_same(const cui_cellgrid_sel *a, const cui_cellgrid_sel *b) {
+    return a->row == b->row && a->col == b->col && a->anchor_row == b->anchor_row && a->anchor_col == b->anchor_col;
+}
 cui_color cui__backdrop(cui_ctx *ui);
 
 void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);

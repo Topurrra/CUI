@@ -711,6 +711,37 @@ Only the rows in view are built, so the row count barely matters. Headers are st
 
 The filter bar keeps one bit mask per field in `selected`; each active field shows as a chip that opens its value list, "Filter" adds one and "Clear all" resets them. `cui_tree_cell` draws a disclosure chevron and indentation inside any table or grid cell for tree tables.
 
+### Cell grid
+
+A spreadsheet-like view of a big table: millions of rows and thousands of columns, with cells drawn as text from a callback. Where the data grid builds a component per cell (so a cell can hold an avatar or a progress bar), the cell grid draws plain text, and a full screen costs a few hundred text draws whatever the size of the table.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/cell-grid-dark.png"><img src="images/components/cell-grid.png" alt="Cell grid"></picture>
+
+```c
+static float widths[NCOLS];                 /* yours, in and out: the user resizes; fill once, <= 0 means 120 */
+static cui_cellgrid_sel sel = { 0, 0, 0, 0 };
+static cui_table_sort sort = { -1, false };
+
+static const char *my_cell(void *ctx, int row, int col, char *buf, size_t cap) {
+    table *t = ctx;
+    if (row < 0) return t->header[col];                          /* column col's header */
+    if (col < 0) { snprintf(buf, cap, "%d", row + 1); return buf; }   /* row row's label, in the row-number column */
+    return table_text(t, row, col);                              /* or write into buf */
+}
+
+int ev = cui_cellgrid(ui, "orders", nrows, NCOLS, .cell = my_cell, .ctx = &table, .col_widths = widths,
+                      .header = true, .row_numbers = true, .right_align = numeric_columns, .sort = &sort, .sel = &sel,
+                      .striped = true, .grid_lines = true);
+if (ev & CUI_CELLGRID_SORTED) sort_rows(&table, sort.column, sort.descending);
+if (ev & CUI_CELLGRID_COPY) copy_range(&sel);
+```
+
+The callback is asked only for the cells in view, during the call. Rows and columns are virtualized: the first column in view comes from a binary search over cumulative widths (kept in the grid's state and rebuilt only when a width or the column count changes), the first row from the row height, and the scroll offsets are doubles, so row 10,000,000 sits exactly where it should. Up to 16,384 columns are used.
+
+The header stays on top and the row-number column on the left, wide enough for the biggest label (the last row's). Click a header to sort (a second click toggles descending; you sort your rows), drag a header edge to resize a column, double click an edge to fit the column to the cells in view. Click a cell or drag over several for a rectangle; Shift+click extends it; a click on a row number selects the row, on the corner everything. With the grid focused: the arrows move the cursor, Page Up and Page Down move a screen, Home and End go to the row's first and last cell, Ctrl+Home and Ctrl+End to the first and last cell of the table, Ctrl with an arrow to the table's edge, Shift with any of them extends the selection, Ctrl+A selects all, Enter reports `CUI_CELLGRID_ACTIVATE` (as a double click does) and Ctrl+C reports `CUI_CELLGRID_COPY` (you copy: you know the text). The wheel scrolls three rows a notch, Shift+wheel and a sideways touchpad scroll move along the columns, and the scroll bars can be dragged. Setting `sel` from your code scrolls its cursor into view. Selection changes and column resizes are reported (`CUI_CELLGRID_SELECTED`, `CUI_CELLGRID_RESIZED`, `CUI_CELLGRID_SORTED`).
+
+Text is cut with an ellipsis when it does not fit and shows at most its first 1,024 bytes; line breaks and tabs show as spaces. A frame at 10,000,000 rows by 2,000 columns takes about the time of one screen of cells (see `cui_bench_cellgrid`).
+
 ### Tree table and path bar
 
 A tree with columns, as in a file explorer or a debugger's variables, and a path bar for moving up through folders.

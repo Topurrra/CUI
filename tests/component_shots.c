@@ -913,6 +913,42 @@ SCENE(data_grid) {
         cui_data_grid_end(ui);
     }
 }
+/* a cell grid: a header with a sort arrow, row numbers, a selected rectangle, 12 columns of 50,000 rows */
+static const char *cg_cell(void *ctx, int row, int col, char *buf, size_t cap) {
+    static const char *const head[] = { "Order", "Customer", "Country", "Product", "Qty", "Price", "Total", "Date", "Status", "Channel", "Rep", "Notes" };
+    static const char *const who[] = { "Maya Okafor", "Jonas Berg", "Lena Fischer", "Sam Whitfield", "Daniel Mensah", "Ines Duarte" };
+    static const char *const land[] = { "Nigeria", "Sweden", "Germany", "Canada", "Ghana", "Portugal" };
+    static const char *const prod[] = { "Desk lamp", "Notebook", "Monitor arm", "Keyboard", "Headphones", "USB hub" };
+    static const char *const state[] = { "Shipped", "Paid", "Packed", "Returned" };
+    static const char *const chan[] = { "Web", "Store", "Phone" };
+    (void)ctx;
+    if (row < 0) { snprintf(buf, cap, "%s", head[col]); return buf; }
+    if (col < 0) { snprintf(buf, cap, "%d", row + 1); return buf; }
+    int h = row * 31 + 7;
+    switch (col) {
+    case 0: snprintf(buf, cap, "SO-%05d", 10000 + row); break;
+    case 1: return who[h % 6];
+    case 2: return land[(h / 7) % 6];
+    case 3: return prod[(h / 5) % 6];
+    case 4: snprintf(buf, cap, "%d", 1 + h % 9); break;
+    case 5: snprintf(buf, cap, "%.2f", 9.5 + (double)(h % 40) * 3.25); break;
+    case 6: snprintf(buf, cap, "%.2f", (1 + h % 9) * (9.5 + (double)(h % 40) * 3.25)); break;
+    case 7: snprintf(buf, cap, "2026-%02d-%02d", 1 + h % 12, 1 + h % 27); break;
+    case 8: return state[(h / 3) % 4];
+    case 9: return chan[h % 3];
+    case 10: return who[(h / 11) % 6];
+    default: return row % 5 == 2 ? "Gift wrap, deliver to the back door after 5pm" : "";
+    }
+    return buf;
+}
+SCENE(cell_grid) {
+    static float widths[12] = { 90, 130, 100, 120, 56, 80, 90, 100, 90, 80, 130, 220 };
+    static const unsigned char right[12] = { 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0 };
+    static cui_cellgrid_sel sel = { 4, 2, 7, 5 };
+    static cui_table_sort sort = { 0, false };
+    cui_cellgrid(ui, "orders", 50000, 12, .cell = cg_cell, .col_widths = widths, .right_align = right, .header = true, .row_numbers = true,
+                 .sort = &sort, .sel = &sel, .striped = true, .grid_lines = true, .height = CUI_PX(236));
+}
 /* a project explorer: a path bar over a tree table, kept in sync. Folders
  * marked lazy load their children after a short pretend delay. */
 typedef struct { const char *name; int parent; int bytes; long long stamp; const char *kind; bool lazy; } tt_entry;
@@ -4980,7 +5016,7 @@ int main(int argc, char **argv) {
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
-        { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
+        { "data-grid", scene_data_grid, 760, 312, true }, { "cell-grid", scene_cell_grid, 760, 300, true }, { "code-block", scene_code_block, 720, 340, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true },{ "markdown-images", scene_markdown_images, 560, 600, true },
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true }, { "mermaid-back", scene_mermaid_back, 920, 1000, true }, { "mermaid-narrow", scene_mermaid_narrow, 420, 760, true }, { "mermaid-expand", scene_mermaid_expand, 420, 760, true }, { "mermaid-expand-wide", scene_mermaid_expand_wide, 1000, 600, true },

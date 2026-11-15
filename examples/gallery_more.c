@@ -411,6 +411,20 @@ static int cmp_people(const void *a, const void *b) {
     return people_sort.descending ? -r : r;
 }
 
+/* the cell grid's cells, made up from their row and column */
+static const char *gallery_cell(void *ctx, int row, int col, char *buf, size_t cap) {
+    (void)ctx;
+    if (row < 0) { snprintf(buf, cap, "Column %d", col + 1); return buf; }
+    if (col < 0) { snprintf(buf, cap, "%d", row + 1); return buf; }
+    unsigned h = (unsigned)row * 2654435761u + (unsigned)col * 40503u;
+    switch (col % 3) {
+    case 0: snprintf(buf, cap, "Item %u-%d", h % 997u, col); break;
+    case 1: snprintf(buf, cap, "%.2f", (double)(h % 1000000u) / 100.0); break;
+    default: snprintf(buf, cap, "2026-%02u-%02u", h % 12u + 1u, h % 27u + 1u); break;
+    }
+    return buf;
+}
+
 static void page_grid(cui_ctx *ui) {
     static bool init;
     static cui_table_sort last_sort = { -1, false };
@@ -487,6 +501,26 @@ static void page_grid(cui_ctx *ui) {
         cui_data_grid_end(ui);
     }
     cui_muted(ui, n_sel ? "Rows selected. Press Esc to clear." : "Click a row, Shift+click to select a range, Ctrl+A for all.");
+
+    section(ui, "Cell grid", "10,000,000 rows by 2,000 columns, drawn as text from a callback. Click, drag, Shift+click, arrows, Ctrl+A, wheel, Shift+wheel, drag a header edge.");
+    {
+        enum { CG_COLS = 2000 };
+        static float widths[CG_COLS];
+        static unsigned char right[CG_COLS];
+        static bool ready;
+        static cui_cellgrid_sel sel = { 2, 1, 2, 1 };
+        static cui_table_sort sort = { -1, false };
+        if (!ready) {
+            for (int k = 0; k < CG_COLS; k++) { widths[k] = 96.0f + (float)((k * 37) % 70); right[k] = (unsigned char)(k % 3 == 1); }
+            ready = true;
+        }
+        int ev = cui_cellgrid(ui, "cells", 10000000, CG_COLS, .cell = gallery_cell, .col_widths = widths, .right_align = right, .header = true, .row_numbers = true,
+                              .sort = &sort, .sel = &sel, .striped = true, .grid_lines = true, .height = CUI_PX(300));
+        (void)ev;
+        static char note[64];
+        snprintf(note, sizeof note, "Cell R%dC%d selected.", sel.row + 1, sel.col + 1);
+        cui_muted(ui, note);
+    }
 
     section(ui, "Tree table", "Tree cells inside a table: disclosure, indentation, totals.");
     {
