@@ -79,6 +79,7 @@ struct cui_sw_renderer {
     int *jobs; int jobs_cap;               /* parts to draw: x0, y0, x1, y1, tile row */
     int shifts[3];                         /* this frame's move distances (what 1, 3, 4) */
     uint8_t *spare; size_t spare_cap;      /* pixels of tiles moved by the second and third distance */
+    struct cui__sw_scratch *scratch;       /* the jobs' tables when one thread draws a frame (made on first use) */
     /* texture parts written since the last frame: triangles sampling them are drawn again
      * (new glyphs go to unused parts, so text already on screen stays put) */
     struct { cui_texture t; int x0, y0, x1, y1; } changed[32];
@@ -214,6 +215,7 @@ void cui_sw_destroy(cui_sw_renderer *r) {
     free(r->vy);
     free(r->jobs);
     free(r->spare);
+    free(r->scratch);
     free(r);
 }
 
@@ -462,7 +464,17 @@ static inline void cui__blend_shadow(uint8_t *p, const uint32_t c8[4], float al)
 
 struct cui__sw_wtab { float ca; bool ok; uint16_t w[256]; };
 /* a job's scratch tables for cui__raster_quad */
-struct cui__sw_scratch { float f[2][CUI__SH_COLS], q[2][CUI__SH_COLS]; uint16_t a[2][CUI__SH_COLS], w[CUI__SH_COLS]; uint8_t side[CUI__SH_COLS]; };
+/* a job's scratch tables for cui__raster_quad. A shadow's column tables depend on the quad and the
+ * columns only, so the jobs below one another (one thread drawing a frame) reuse them: key is the
+ * quad's first vertex (this frame's draw data; cleared each frame) and kx0, kx1 the columns. */
+struct cui__sw_scratch {
+    float f[2][CUI__SH_COLS], q[2][CUI__SH_COLS];
+    uint16_t a[2][CUI__SH_COLS], w[CUI__SH_COLS];
+    uint8_t side[CUI__SH_COLS];
+    const cui_vertex *key; int kx0, kx1;
+    bool a_ok[2]; int mid, cl[2], cr[2];   /* the weights made for each half; the first right side column; per half the end of the left corner columns, the start of the right ones */
+    struct cui__sw_wtab wtab;
+};
 
 typedef struct {
     const cui_draw_data *dd;
@@ -673,8 +685,8 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
     float (*sh_f)[CUI__SH_COLS] = job->sc->f, (*sh_q)[CUI__SH_COLS] = job->sc->q, sh_rad[2][2] = { { 0, 0 }, { 0, 0 } }, sh_k = 1;
     uint8_t *sh_side = job->sc->side;
     uint16_t (*sh_a)[CUI__SH_COLS] = job->sc->a, *sh_w = job->sc->w;   /* one color: the columns' 16 bit weights (cui__shadow_w16), each half made when first needed; a row's */
-    bool sh_a_ok[2] = { false, false };
-    int sh_mid = 0, sh_cl[2] = { 0, 0 }, sh_cr[2] = { 0, 0 };   /* the first right side column; per half the end of the left corner columns, the start of the right ones */
+    struct cui__sw_scratch *sc = job->sc;
+    bool *sh_a_ok = sc->a_ok;
     bool sh_cols = mode == CUI_SHADE_SHADOW && x1 - x0 <= CUI__SH_COLS;
     if (sh_cols) {
         float m = hw < hh ? hw : hh;
@@ -682,7 +694,9 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
         for (int half = 0; half < 2; half++)
             for (int sd = 0; sd < 2; sd++) sh_rad[half][sd] = rr[half][sd] > m ? m : rr[half][sd];
         sh_k = (bw > 0.01f ? bw : 0.01f) * 1.41421356f;
-        for (int x = x0; x < x1; x++) {
+        bool cached = sc->key == v0 && sc->kx0 == x0 && sc->kx1 == x1;
+        if (!cached) { sc->key = v0; sc->kx0 = x0; sc->kx1 = x1; sc->a_ok[0] = sc->a_ok[1] = false; }
+        for (int x = cached ? x1 : x0; x < x1; x++) {
             float lx = v0->lx + (((float)x + 0.5f) - qx0);
             int i = x - x0, sd = lx < 0 ? 0 : 1;
             sh_side[i] = (uint8_t)sd;
@@ -884,7 +898,7 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
                     int lend = 0, rstart = mid;
                     while (lend < mid && qc[lend] > 0) lend++;
                     while (rstart < n && !(qc[rstart] > 0)) rstart++;
-                    sh_mid = mid; sh_cl[half] = lend; sh_cr[half] = rstart;
+                    sc->mid = mid; sc->cl[half] = lend; sc->cr[half] = rstart;
                     sh_a_ok[half] = true;
                 }
                 const uint16_t *ac = sh_a[half];
@@ -894,12 +908,12 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
                     int xa = seg ? (sx0 < sx1 ? sx1 : x1) : x0, xb = seg ? x1 : (sx0 < sx1 ? sx0 : x1);
                     if (xa >= xb) continue;
                     for (int sd = 0; sd < 2; sd++) {
-                        int lo = sd ? CUI_MAX(xa - x0, sh_mid) : xa - x0, hi = sd ? xb - x0 : CUI_MIN(xb - x0, sh_mid);
+                        int lo = sd ? CUI_MAX(xa - x0, sc->mid) : xa - x0, hi = sd ? xb - x0 : CUI_MIN(xb - x0, sc->mid);
                         uint16_t arv = ar[sd];
                         for (int i = lo; i < hi; i++) sh_w[i] = ac[i] < arv ? ac[i] : arv;
                         if (!(qyr[sd] > 0)) continue;
                         /* a corner: the one place the distance needs both */
-                        int c0 = sd ? CUI_MAX(lo, sh_cr[half]) : lo, c1 = sd ? hi : CUI_MIN(hi, sh_cl[half]);
+                        int c0 = sd ? CUI_MAX(lo, sc->cr[half]) : lo, c1 = sd ? hi : CUI_MIN(hi, sc->cl[half]);
                         for (int i = c0; i < c1; i++) {
                             float qx = qc[i];
                             float d = sqrtf(qx * qx + qyr[sd] * qyr[sd]) - sh_rad[half][sd];
@@ -1425,6 +1439,7 @@ typedef struct {
     uint8_t *pixels;
     int width, height, stride;
     cui_sw_format fmt;
+    struct cui__sw_scratch *sc;   /* drawn on one thread: the scratch the jobs share, else NULL */
 } cui__sw_frame;
 
 /* one part of the frame: cleared, then everything over its tile row drawn in order */
@@ -1453,11 +1468,10 @@ static void cui__sw_paint_job(void *ctx, int j) {
         cui__sw_fill(line, x1 - x0, c4);
     }
     cui__sw_job job;
-    struct cui__sw_wtab wtab;
-    struct cui__sw_scratch sc;
-    job.sc = &sc;
-    wtab.ok = false; wtab.ca = 0;
-    job.wtab = &wtab;
+    struct cui__sw_scratch own, *sc = f->sc;   /* the frame's when one thread draws it all, else this job's */
+    if (!sc) { sc = &own; own.key = NULL; own.wtab.ok = false; }
+    job.sc = sc;
+    job.wtab = &sc->wtab;
     job.dd = dd; job.r = r; job.pixels = f->pixels;
     job.width = f->width; job.height = f->height; job.stride = f->stride; job.fmt = f->fmt;
     job.x0 = x0; job.y0 = y0; job.x1 = x1; job.y1 = y1;
@@ -1637,9 +1651,14 @@ void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, in
     /* then drawing */
     double area;
     int njobs = cui__sw_plan(r, tw, th, width, height, &area);
-    cui__sw_frame f = { r, dd, pixels, width, height, stride, fmt };
+    cui__sw_frame f = { r, dd, pixels, width, height, stride, fmt, NULL };
     if (area >= CUI__SW_THREADS_DRAW) cui__sw_threads_run(r, njobs, cui__sw_paint_job, &f);
-    else for (int j = 0; j < njobs; j++) cui__sw_paint_job(&f, j);
+    else {
+        if (!r->scratch) { r->scratch = cui__sw_xrealloc(NULL, sizeof *r->scratch); r->scratch->wtab.ok = false; }
+        r->scratch->key = NULL;   /* vertices are this frame's */
+        f.sc = r->scratch;
+        for (int j = 0; j < njobs; j++) cui__sw_paint_job(&f, j);
+    }
     if (r->incremental) { uint64_t *t = r->prev; r->prev = r->tiles; r->tiles = t; }
     cui__sw_prim *pp = r->prims; r->prims = r->pprims; r->pprims = pp;
     int pc = r->prims_cap; r->prims_cap = r->pprims_cap; r->pprims_cap = pc;
