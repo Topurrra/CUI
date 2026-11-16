@@ -418,6 +418,45 @@ void cui__tm_block(cui_ctx *ui, int k, cui_rect c, cui_color col);
 bool cui__vt_glyph(cui_ctx *ui, uint32_t cp, cui_rect cell, cui_color col);
 uint8_t cui__vt_box_arms(uint32_t cp);          /* U+2500..U+257F: left, right, up, down arms, 2 bits each: 0 none, 1 light, 2 heavy, 3 double */
 int cui__vt_sextant_bits(uint32_t cp);          /* U+1FB00..U+1FB3B: the six cells as bits (upper left first), 0 outside */
+/* The VT screen's opt-in parts (cui_vt_sixel.c, switched on with cui_vt_set_features): answers to the queries a console
+ * host forwards, and sixel pictures kept with the rows of the screen. cui_vt.c owns the grid and calls the hooks below only
+ * while the parts exist (the screen's extension is set) or a picture is kept (the bits of cui__vt_pic_bits). Rows are named
+ * by their slot, the index of their cells that the row map points at, so pictures move with the rows for free. */
+typedef struct cui__vt_x cui__vt_x;
+typedef struct { int cols, rows, cur, cx, cy, stop, sbot, sb_count, sb_max; uint64_t sb_total; } cui__vt_info;
+enum { CUI__VT_PIC_MAIN = 1, CUI__VT_PIC_ALT = 2, CUI__VT_PIC_SB = 4 };   /* where pictures are kept: the two screens, the scrollback */
+typedef struct { cui_texture tex; int c0, c1; } cui__vt_pic_draw;       /* one row's picture for the view: columns c0..c1-1 */
+/* cui_vt.c, for cui_vt_sixel.c */
+void cui__vt_get_info(const cui_vt *v, cui__vt_info *o);
+cui__vt_x *cui__vt_ext(const cui_vt *v);          /* the extension (NULL until features or colors are set) */
+void cui__vt_set_ext(cui_vt *v, cui__vt_x *x);
+void cui__vt_set_pic_bits(cui_vt *v, uint8_t bits);   /* CUI__VT_PIC_*, kept up to date by cui_vt_sixel.c */
+int cui__vt_slot(const cui_vt *v, int scr, int y);
+void cui__vt_reply(cui_vt *v, const char *s);
+void cui__vt_scroll_lines(cui_vt *v, int n);      /* n line feeds at the bottom of the scroll region (rows leave into the scrollback) */
+void cui__vt_set_cursor(cui_vt *v, int x, int y);
+int cui__vt_mode_report(const cui_vt *v, int mode, bool dec);     /* DECRQM: 0 not recognized, 1 set, 2 reset */
+/* cui_vt_sixel.c, for cui_vt.c */
+void cui__vt_x_free(cui_vt *v);
+size_t cui__vt_x_memory(const cui_vt *v);
+void cui__vt_x_reset(cui_vt *v);                  /* RIS: sixel display mode off, a picture being read is dropped */
+bool cui__vt_x_reply(cui_vt *v, char *inl, int *inl_n, size_t inl_cap, const char *s, size_t n);   /* true: queued past the inline buffer */
+size_t cui__vt_x_take(cui_vt *v, char *out, size_t cap);
+bool cui__vt_query_csi(cui_vt *v, char f, char priv, char inter, const int *p, int np);   /* true: answered here */
+void cui__vt_query_osc(cui_vt *v, int code, const char *arg, int n, bool bel);
+bool cui__vt_sixel_begin(cui_vt *v, const int *p, int np);        /* DCS P1;P2;P3 q: true when the data that follows is read */
+size_t cui__vt_sixel_feed(cui_vt *v, const unsigned char *d, size_t n);   /* bytes used, stopping before ESC, CAN or SUB */
+void cui__vt_sixel_end(cui_vt *v);
+void cui__vt_sixel_mode(cui_vt *v, bool set);     /* DECSDM (?80) */
+void cui__vt_pic_erase(cui_vt *v, int scr, int slot, int x0, int x1);
+void cui__vt_pic_shift(cui_vt *v, int slot, int x, int n);        /* the current screen's row: n > 0 inserts n cells at x, n < 0 deletes */
+void cui__vt_pic_pushed(cui_vt *v, int slot);     /* the main screen's row in slot went into the scrollback (or away when it keeps none) */
+void cui__vt_pic_trim_sb(cui_vt *v);              /* scrollback lines were dropped or cleared */
+void cui__vt_pic_drop_screen(cui_vt *v, int scr);
+void cui__vt_x_resize(cui_vt *v, int scr, const uint16_t *old_map, int old_rows, int cols, int rows);
+const cui__vt_pic_draw *cui__vt_pic_view(cui_ctx *ui, cui_id id, const cui_vt *v, int off, bool frozen);   /* per visible row, valid this frame; NULL: none */
+uint32_t cui__vt_pic_px(const cui_vt *v, int row, int px, int py);   /* tests: a picture pixel (r | g << 8 | b << 16 | a << 24) */
+int cui__vt_pic_count(const cui_vt *v);                             /* tests: slices kept */
 
 /* ---- per id state ---- */
 typedef struct cui_state_entry {
