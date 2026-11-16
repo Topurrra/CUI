@@ -177,7 +177,9 @@ static void cui__vg_dashes(cui__vg *g, bool vertical, int n, bool heavy) {
 }
 
 /* A round corner: a quarter circle as wide as half the cell, tangent to straight lines that run on to the cell's edges, the same
- * strokes (the same pixels) as the lines of the neighbouring cells. */
+ * strokes (the same pixels) as the lines of the neighbouring cells. The quarter ring is laid out pixel by pixel: how much of a
+ * stroke as wide as a light line covers each pixel, in four steps of alpha, a run of one step in a row as one rectangle. So the
+ * curve is exactly as thick as the lines it joins and meets them on whole pixels, and a corner costs a handful of rectangles. */
 static void cui__vg_arc(cui__vg *g, bool right, bool down) {
     int vs[2][2], hs[2][2];
     cui__vg_strokes(1, g->w, g->light, g->light, vs);
@@ -185,19 +187,27 @@ static void cui__vg_arc(cui__vg *g, bool right, bool down) {
     float xc = (float)(vs[0][0] + vs[0][1]) * 0.5f, yc = (float)(hs[0][0] + hs[0][1]) * 0.5f;
     float sx = right ? 1.0f : -1.0f, sy = down ? 1.0f : -1.0f;
     float rx = right ? (float)g->w - xc : xc, ry = down ? (float)g->h - yc : yc;
-    float rr = rx < ry ? rx : ry;                                    /* a circle: as wide as the half cell, then straight on */
-    float cx = xc + sx * rr, cy = yc + sy * rr;
-    float p[2 * 17];
-    int n = (int)(rr * 0.8f) + 3;                                      /* segments: enough for the radius, few for the cost */
-    if (n > 16) n = 16;
-    for (int i = 0; i <= n; i++) {
-        float a = (float)i * (CUI_PI * 0.5f) / (float)n;
-        p[2 * i] = cx - sx * rr * cosf(a);
-        p[2 * i + 1] = cy - sy * rr * sinf(a);
-    }
-    cui__vg_line(g, p, n + 1, (float)g->light + 0.35f);       /* a little wider: one anti-aliased pixel looks thin next to the exact lines */
-    /* the straight parts to the cell's edges: the same pixels as the lines of the neighbouring cells */
+    float rr = floorf(rx < ry ? rx : ry);                             /* a circle: as wide as the half cell, then straight on */
+    float cx = xc + sx * rr, cy = yc + sy * rr, half = (float)g->light * 0.5f;
     int ey = (int)floorf(cy + 0.5f), ex = (int)floorf(cx + 0.5f);
+    int bx0 = right ? vs[0][0] : ex, bx1 = right ? ex : vs[0][1];
+    int by0 = down ? hs[0][0] : ey, by1 = down ? ey : hs[0][1];
+    for (int py = by0; py < by1; py++) {
+        int run0 = bx0, lev = 0;
+        for (int px = bx0; px <= bx1; px++) {
+            int l = 0;
+            if (px < bx1) {
+                float dx = (float)px + 0.5f - cx, dy = (float)py + 0.5f - cy;
+                float c = half + 0.5f - fabsf(sqrtf(dx * dx + dy * dy) - rr);
+                l = c >= 1.0f ? 4 : c <= 0.0f ? 0 : (int)(c * 4.0f + 0.5f);
+            }
+            if (l != lev) {
+                if (lev) cui__vg_fillc(g, run0, py, px, py + 1, lev == 4 ? g->col : cui_alpha(g->col, (float)lev * 0.25f));
+                run0 = px; lev = l;
+            }
+        }
+    }
+    /* the straight parts to the cell's edges: the same pixels as the lines of the neighbouring cells */
     if (down) cui__vg_fill(g, vs[0][0], ey, vs[0][1], g->h); else cui__vg_fill(g, vs[0][0], 0, vs[0][1], ey);
     if (right) cui__vg_fill(g, ex, hs[0][0], g->w, hs[0][1]); else cui__vg_fill(g, 0, hs[0][0], ex, hs[0][1]);
 }
