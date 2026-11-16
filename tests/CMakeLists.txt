@@ -108,8 +108,15 @@ endif()
 add_executable(cui_test_sw_shadow test_sw_shadow.c)   # software shadows against the shadow formula drawn pixel by pixel
 target_link_libraries(cui_test_sw_shadow PRIVATE cui::cui)
 add_test(NAME cui_test_sw_shadow COMMAND cui_test_sw_shadow)
+add_executable(cui_test_sw_fast test_sw_fast.c)   # glyphs, fills, pictures and hidden parts against the per pixel float formulas
+target_link_libraries(cui_test_sw_fast PRIVATE cui::cui)
+add_test(NAME cui_test_sw_fast COMMAND cui_test_sw_fast)
 add_executable(cui_bench_sw_shadow bench_sw_shadow.c)   # a popover's shadow, a full-window picture and a popover opening, software renderer
 target_link_libraries(cui_bench_sw_shadow PRIVATE cui::cui)
+if(CUI_WITH_APP)
+    add_executable(cui_bench_sw_app bench_sw_app.c)   # a browser-like window: popover cycles and list scrolling, process CPU per step, either renderer
+    target_link_libraries(cui_bench_sw_app PRIVATE cui::cui)
+endif()
 
 add_executable(cui_bench_scroll bench_scroll.c ../examples/gallery_ui.c ../examples/gallery_more.c)   # a whole window scrolling, software renderer, per phase
 target_link_libraries(cui_bench_scroll PRIVATE cui::cui)

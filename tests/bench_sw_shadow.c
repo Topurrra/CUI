@@ -62,8 +62,26 @@ static void pop_frame(cui_ctx *ui) {
                                       cui__rgba(255, 255, 255, 255));
         if (g_open_req) { cui_popover_open(ui, "p"); g_open_req = false; }
         if (g_close_req) { cui_popover_close(ui, "p"); g_close_req = false; }
-        if (cui_popover_at_begin(ui, "p", ui->vw - 60, 50, CUI_PLACE_BOTTOM_END, &(cui_popover_opts){ .width = 340 })) {
-            for (int i = 0; i < 12; i++) cui_text(ui, "A line of popover text");
+        if (cui_popover_at_begin(ui, "p", ui->vw - 60, 50, CUI_PLACE_BOTTOM_END, &(cui_popover_opts){ .width = 330, .pad = 14 })) {
+            /* what a browser's shield popover holds: a title, a big number, lines, switches, buttons */
+            cui_row(ui, .width = CUI_FILL, .gap = 8, .align = CUI_ALIGN_CENTER) {
+                cui_icon(ui, CUI_ICON_SHIELD, 18, CUI_C(ui, ACCENT));
+                cui_text(ui, "news.example", .font = CUI_FONT_MEDIUM, .size = 14, .width = CUI_FILL, .nowrap = true);
+            }
+            cui_row(ui, .width = CUI_FILL, .gap = 8, .align = CUI_ALIGN_END) {
+                cui_text(ui, "12", .font = CUI_FONT_MEDIUM, .size = 34);
+                cui_text(ui, "trackers and ads blocked", .color = CUI_COLOR_TEXT_SECONDARY, .size = 13);
+            }
+            cui_text(ui, "on this page, including requests made after it loaded", .color = CUI_COLOR_TEXT_MUTED, .size = 11.5f);
+            for (int i = 0; i < 3; i++) cui_text(ui, "3 scripts, 1 image, 1 frame: about 240 KB not loaded", .size = 12.5f);
+            static bool on[3] = { true, false, true };
+            cui_switch(ui, "Protection on this site", &on[0]);
+            cui_switch(ui, "Block third-party cookies", &on[1]);
+            cui_switch(ui, "Clean tracking parameters", &on[2]);
+            cui_row(ui, .width = CUI_FILL, .gap = 8) {
+                cui_button(ui, "Settings", .variant = CUI_BUTTON_SECONDARY);
+                cui_button(ui, "Privacy and speed", .variant = CUI_BUTTON_GHOST);
+            }
             cui_popover_end(ui);
         }
     }
