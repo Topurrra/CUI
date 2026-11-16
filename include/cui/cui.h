@@ -4172,6 +4172,15 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * still reported, with the cell clamped to the grid, so the program never sees a stuck button. Without `.mouse`
  * the requests are remembered and nothing is reported.
  *
+ * Key records (`.win32_keys = true`): a program that asked with mode 9001 (`cui_vt_win32_input`; a Windows console host
+ * asks at start) gets every key as `ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _` (virtual key, scan code of a US layout, UTF-16 unit,
+ * 1 down or 0 up, control key state with Left Ctrl, Left Alt and Shift and ENHANCED_KEY for the arrows and navigation block,
+ * repeat count 1) instead of terminal bytes: Shift+Enter, Ctrl+Enter, Ctrl+Backspace, Alt+letter and Ctrl+Space then reach
+ * the program as what they are. A release follows when the key goes up; Shift, Ctrl and Alt alone are records too; typed
+ * text (composed, IME, AltGr) goes out once, in the record of the key that made it or with Vk 0, a character beyond the
+ * BMP as two UTF-16 records. Mouse and focus reports and pasted text are sent as always, and the view's own keys (copy, paste,
+ * Shift+Page Up) stay its own. Without the option, or while the mode is off, the bytes are exactly those of a terminal.
+ *
  * Focus (`.focus_reports = true`): a program that asked with mode 1004 gets ESC [ I when the view has the keyboard
  * and the window the focus, ESC [ O when either is lost. A view that is no longer built (a hidden tab) sends nothing.
  *
@@ -4212,6 +4221,7 @@ CUI_API void cui_vt_cursor(const cui_vt *vt, int *x, int *y);
 CUI_API bool cui_vt_alt_screen(const cui_vt *vt);
 CUI_API bool cui_vt_app_cursor(const cui_vt *vt);
 CUI_API bool cui_vt_bracketed_paste(const cui_vt *vt);
+CUI_API bool cui_vt_win32_input(const cui_vt *vt);                            /* the program asked for key records (mode 9001); the view sends them only with .win32_keys */
 CUI_API bool cui_vt_mouse_reporting(const cui_vt *vt);                        /* the program asked for the mouse (1000, 1002 or 1003) */
 CUI_API bool cui_vt_synchronized(const cui_vt *vt);                              /* a synchronized update (?2026h ... ?2026l) is open: the view shows the screen as it was at h, for about 150 ms of frames */
 enum { CUI_VT_CURSOR_BLOCK = 0, CUI_VT_CURSOR_UNDERLINE = 1, CUI_VT_CURSOR_BAR = 2 };
@@ -4232,6 +4242,7 @@ typedef struct cui_vt_opts {
     float line_height;             /* a row's height in font sizes, from 1 to 3; 0 is 1.4. Pictures made of half blocks want cells near 1:2 (1.2 for most monospace fonts) */
     bool glyphs;                   /* draw by hand, complete and meeting exactly across cells: all box drawing (round corners, dashes, double junctions), all block elements, braille, sextants and wedges, status line shapes (U+E0B0..); false: box lines and the first block elements as before, the rest from the font */
     bool italic;                   /* draw italic text (SGR 3) slanted; false: upright as before */
+    bool win32_keys;               /* send keys as Windows key records (ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _) to a program that asked with mode 9001 (a Windows console host does at start); false: the bytes of a terminal, whatever the program asks */
 } cui_vt_opts;
 typedef struct cui_vt_result {
     const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */

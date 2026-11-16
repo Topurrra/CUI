@@ -53,6 +53,7 @@ struct cui_vt {
     uint8_t mouse_modes;              /* what the program asked for: CUI__VT_M1000, _M1002, _M1003 */
     bool mouse_sgr;                   /* encoding 1006 */
     bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
+    bool win32_input;                 /* 9001: the program wants every key as a Windows key record (sent only with .win32_keys) */
     uint8_t cursor_shape;             /* CUI_VT_CURSOR_* from CSI Ps SP q */
     int cell_w, cell_h;               /* the view's cell in device pixels, for the size reports (0 before a view has drawn) */
     cui__vt_cell *snap;               /* synchronized output (?2026): the screen as it was at h, allocated at the first h and kept */
@@ -387,6 +388,7 @@ static void cui__vt_mode(cui_vt *v, bool set) {
         }
         case 1006: v->mouse_sgr = set; break;
         case 1004: v->focus_mode = set; break;
+        case 9001: v->win32_input = set; break;
         case 2004: v->bracketed = set; break;
         case 2026: if (set) { if (!v->sync_on) cui__vt_sync_begin(v); } else v->sync_on = false; break;
         default: break;
@@ -507,6 +509,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
         v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
+        v->win32_input = false;     /* a full reset only: the soft reset leaves it, the console host asks for it once and never again */
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -670,6 +673,7 @@ void cui_vt_cursor(const cui_vt *v, int *x, int *y) { if (x) *x = v->cx; if (y) 
 bool cui_vt_alt_screen(const cui_vt *v) { return v->cur == 1; }
 bool cui_vt_app_cursor(const cui_vt *v) { return v->app_cursor; }
 bool cui_vt_bracketed_paste(const cui_vt *v) { return v->bracketed; }
+bool cui_vt_win32_input(const cui_vt *v) { return v && v->win32_input; }
 bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; }
 bool cui_vt_synchronized(const cui_vt *v) { return v && v->sync_on; }
 int cui_vt_cursor_shape(const cui_vt *v) { return v ? v->cursor_shape : CUI_VT_CURSOR_BLOCK; }
@@ -752,7 +756,12 @@ typedef struct {
     cui__vt_pos a, b;
     float press_x, press_y;
     uint64_t seen_total;
-    char out[768]; int out_n;
+    char out[4096]; int out_n;
+    bool w_on;                        /* key records are being sent: the next fields are live */
+    uint8_t w_cs;                     /* Shift, Ctrl and Alt as the program was last told */
+    char w_pend[256]; int w_pend_n;   /* text not yet sent because a frame's output was full */
+    uint8_t w_held[CUI_KEY_COUNT];    /* keys whose press went out and whose release has not */
+    uint16_t w_uc[CUI_KEY_COUNT];     /* the character of that press, repeated in the release */
     uint8_t btn_down;                 /* buttons whose press went to the program */
     uint32_t sync_seen; double sync_t0;   /* the update the view last saw open, and when the view first drew it */
     int mcol, mrow; bool mvalid;      /* the last cell the mouse was reported in */
@@ -914,6 +923,162 @@ static void cui__vt_keys(cui_ctx *ui, const cui_vt *v, cui__vt_state *st) {
                 cui__vt_out(st, &ch, 1);
             }
         }
+    }
+}
+
+/* ------------------------------------------------------------------------ */
+/* View: Windows key records (mode 9001, opt in with .win32_keys)           */
+/* ------------------------------------------------------------------------ */
+
+/* The record is ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _ : the virtual key, the scan code, the UTF-16 unit, down (1) or up (0),
+ * the control key state, the repeat count. Scan codes are a fixed US layout table; Left and Right modifiers are not told
+ * apart (CUI reports one flag each), so the Left ones are sent. Numpad, Insert and F13 and up are keys CUI does not have.
+ * The tables below are indexed by cui_key and follow its order: none, Tab, Enter, Escape, Backspace, Delete, Space, Left,
+ * Right, Up, Down, Home, End, Page Up, Page Down, A to Z, 0 to 9, - = , . /, F1 to F12, backslash, grave. */
+enum { CUI__VT_CS_RALT = 0x01, CUI__VT_CS_LALT = 0x02, CUI__VT_CS_LCTRL = 0x08, CUI__VT_CS_SHIFT = 0x10, CUI__VT_CS_ENHANCED = 0x100 };
+
+static const uint8_t cui__vt_w_vk[CUI_KEY_COUNT] = {
+    0, 9, 13, 27, 8, 46, 32, 37, 39, 38, 40, 36, 35, 33, 34,
+    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+    48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 189, 187, 188, 190, 191,
+    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 220, 192 };
+static const uint8_t cui__vt_w_sc[CUI_KEY_COUNT] = {
+    0, 15, 28, 1, 14, 83, 57, 75, 77, 72, 80, 71, 79, 73, 81,
+    30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,
+    11, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 51, 52, 53,
+    59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88, 43, 41 };
+/* what a US keyboard types on the key, plain and with Shift (0: nothing) */
+static const char cui__vt_w_c0[] = "\0\0\0\0\0\0 \0\0\0\0\0\0\0\0" "abcdefghijklmnopqrstuvwxyz" "0123456789" "-=,./" "\0\0\0\0\0\0\0\0\0\0\0\0" "\\`";
+static const char cui__vt_w_c1[] = "\0\0\0\0\0\0 \0\0\0\0\0\0\0\0" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ")!@#$%^&*(" "_+<>?" "\0\0\0\0\0\0\0\0\0\0\0\0" "|~";
+typedef char cui__vt_w_tables_follow_cui_key[sizeof cui__vt_w_c0 == CUI_KEY_COUNT + 1 && sizeof cui__vt_w_c1 == CUI_KEY_COUNT + 1 ? 1 : -1];
+
+/* Keys are a few a second: small code beats fast code here, and the record writer is one copy (it is called from a dozen
+ * places with constant arguments, which GCC would otherwise clone for each). */
+#if defined(__GNUC__) && !defined(__clang__)
+#  define CUI__VT_SMALL __attribute__((optimize("Os")))
+#  define CUI__VT_ONCE __attribute__((optimize("Os"), noinline, noclone))
+#elif defined(__GNUC__)
+#  define CUI__VT_SMALL
+#  define CUI__VT_ONCE __attribute__((noinline))
+#else
+#  define CUI__VT_SMALL
+#  define CUI__VT_ONCE
+#endif
+CUI__VT_ONCE static void cui__vt_w_rec(cui__vt_state *st, int vk, int sc, int uc, bool down, int cs) {
+    char b[48];
+    int n = snprintf(b, sizeof b, "\x1b[%d;%d;%d;%d;%d;1_", vk, sc, uc, down ? 1 : 0, cs);
+    if (n > 0) cui__vt_out(st, b, n);
+}
+
+/* the control key state a key adds: the arrows and the navigation block are the enhanced keys */
+static int cui__vt_w_enh(int k) { return k == CUI_KEY_DELETE || (k >= CUI_KEY_LEFT && k <= CUI_KEY_PAGE_DOWN) ? CUI__VT_CS_ENHANCED : 0; }
+
+/* the character of a press that came with no text of its own: the control code under Ctrl, the letter under Alt,
+ * the control keys' own codes; a plain printable key with no text is a dead key and has none */
+CUI__VT_SMALL static int cui__vt_w_uc(int k, bool shift, bool ctrl, bool alt) {
+    bool plain_ctrl = ctrl && !alt;
+    switch (k) {
+    case CUI_KEY_ENTER: return plain_ctrl ? 0x0A : 0x0D;
+    case CUI_KEY_ESCAPE: return 0x1B;
+    case CUI_KEY_BACKSPACE: return plain_ctrl ? 0x7F : 0x08;
+    case CUI_KEY_TAB: return plain_ctrl ? 0 : 0x09;
+    default: break;
+    }
+    int ch = shift ? cui__vt_w_c1[k] : cui__vt_w_c0[k];
+    if (!ch || ctrl != plain_ctrl) return 0;       /* no character, or AltGr: its characters come as text */
+    if (plain_ctrl) return k >= CUI_KEY_A && k <= CUI_KEY_Z ? 1 + (k - CUI_KEY_A) : k == CUI_KEY_BACKSLASH ? 0x1C : k == CUI_KEY_MINUS ? 0x1F : 0;
+    return alt ? ch : 0;
+}
+
+/* the keys of this frame as records: modifier changes, then text with the key that made it, then the rest of the presses,
+ * then a release for every key that went up. Text and keys arrive separately (a key event and a text event), so each
+ * character takes the pressed key that types it (or the one left over) and goes out once, in that record. */
+CUI__VT_SMALL static void cui__vt_keys32(cui_ctx *ui, const cui_vt *v, cui__vt_state *st) {
+    int mods = ui->mods;
+    bool ctrl = (mods & CUI_MOD_CTRL) != 0, alt = (mods & CUI_MOD_ALT) != 0, shift = (mods & CUI_MOD_SHIFT) != 0;
+    int want = (shift ? CUI__VT_CS_SHIFT : 0) | (ctrl ? CUI__VT_CS_LCTRL : 0) | (alt ? CUI__VT_CS_LALT : 0);
+    static const uint8_t mk[3][3] = { { CUI__VT_CS_SHIFT, 0x10, 0x2A }, { CUI__VT_CS_LCTRL, 0x11, 0x1D }, { CUI__VT_CS_LALT, 0x12, 0x38 } };
+    int cs = st->w_cs;
+    for (int i = 0; i < 3; i++) {
+        if (!((want ^ cs) & mk[i][0])) continue;
+        cs = (cs & ~(int)mk[i][0]) | (want & mk[i][0]);
+        cui__vt_w_rec(st, mk[i][1], mk[i][2], 0, (want & mk[i][0]) != 0, cs);
+    }
+    st->w_cs = (uint8_t)want;
+    cs = want;
+
+    /* the view keeps Ctrl+C, Ctrl+V and Shift+Page Up for itself exactly where cui__vt_keys does (its own copy of a selection
+     * was taken out of kpressed already) */
+    uint8_t rp[CUI_KEY_COUNT];
+    bool sent[CUI_KEY_COUNT];
+    bool sup = (mods & CUI_MOD_SUPER) != 0;
+    memcpy(rp, ui->kpressed, sizeof rp);
+    memset(sent, 0, sizeof sent);
+    rp[0] = 0;
+    if (shift && !ctrl && v->cur == 0) rp[CUI_KEY_PAGE_UP] = rp[CUI_KEY_PAGE_DOWN] = rp[CUI_KEY_HOME] = rp[CUI_KEY_END] = 0;
+    if ((ctrl && (st->has_sel || shift)) || sup) rp[CUI_KEY_C] = 0;
+    if ((ctrl && !alt) || sup) rp[CUI_KEY_V] = 0;
+
+    /* text: what did not fit the last frame, then this frame's (nothing under a plain Ctrl), decoded; each character is given the key that types it */
+    char txt[512]; int tl = st->w_pend_n;
+    memcpy(txt, st->w_pend, (size_t)tl);
+    if (ui->text_in_len > 0 && !(ctrl && !alt)) { memcpy(txt + tl, ui->text_in, (size_t)ui->text_in_len); tl += ui->text_in_len; }
+    ui->text_in_len = 0; ui->text_in[0] = 0;
+    st->w_pend_n = 0;
+    uint32_t cps[512]; uint8_t nb[512]; int key_of[512]; int nc = 0;
+    for (int i = 0; i < tl && nc < 512; nc++) {
+        int n = cui__utf8_decode(txt + i, tl - i, &cps[nc]);
+        nb[nc] = (uint8_t)n; key_of[nc] = -1; i += n;
+    }
+    for (int pass = 0; pass < 2; pass++) {    /* first the key that types the character; then, for another layout, any pressed key left over */
+        for (int i = 0; i < nc; i++) {
+            if (key_of[i] >= 0 || cps[i] > 0xFFFF || (pass && alt && !ctrl)) continue;
+            for (int k = 1; k < CUI_KEY_COUNT; k++) {
+                if (!rp[k] || !cui__vt_w_c0[k] || (!pass && cps[i] != (uint32_t)cui__vt_w_c0[k] && cps[i] != (uint32_t)cui__vt_w_c1[k])) continue;
+                key_of[i] = k; rp[k]--;
+                break;
+            }
+        }
+    }
+    int done = 0;
+    for (int i = 0; i < nc; i++, done += nb[i - 1]) {
+        if (st->out_n + 12 * 48 > (int)sizeof st->out) { cui_request_redraw(ui); break; }     /* the rest goes next frame */
+        int ccs = ctrl && alt ? (cs & ~(int)CUI__VT_CS_LALT) | CUI__VT_CS_RALT : cs;          /* AltGr: Left Ctrl and Right Alt */
+        int k = key_of[i];
+        uint32_t c = cps[i];
+        if (k >= 0) {
+            cui__vt_w_rec(st, cui__vt_w_vk[k], cui__vt_w_sc[k], (int)c, true, ccs | cui__vt_w_enh(k));
+            st->w_uc[k] = (uint16_t)c; sent[k] = true;
+            continue;
+        }
+        int units = 1, u0 = (int)c, u1 = 0;      /* no key (an IME, a dead key, a composed character): Vk 0, down and up; beyond the BMP two units */
+        if (c > 0xFFFF) { units = 2; u0 = (int)(0xD800 + ((c - 0x10000) >> 10)); u1 = (int)(0xDC00 + ((c - 0x10000) & 0x3FF)); }
+        for (int u = 0; u < units; u++) for (int d = 1; d >= 0; d--) cui__vt_w_rec(st, 0, 0, u ? u1 : u0, d != 0, ccs);
+    }
+    if (done < tl) {                  /* what did not fit waits for the next frame (a text event is 255 bytes at most, so this is rare) */
+        int left = CUI_MIN(tl - done, (int)sizeof st->w_pend);
+        memcpy(st->w_pend, txt + done, (size_t)left);
+        st->w_pend_n = left;
+    }
+
+    /* the presses nothing typed: control and navigation keys, Ctrl and Alt combinations, a dead key */
+    for (int k = 1; k < CUI_KEY_COUNT; k++) {
+        if (!cui__vt_w_vk[k]) continue;
+        int uc = cui__vt_w_uc(k, shift, ctrl, alt);
+        for (int r = 0; r < rp[k] && st->out_n + 2 * 48 <= (int)sizeof st->out; r++) {
+            cui__vt_w_rec(st, cui__vt_w_vk[k], cui__vt_w_sc[k], uc, true, cs | cui__vt_w_enh(k));
+            st->w_uc[k] = (uint16_t)uc; sent[k] = true;
+        }
+    }
+    /* releases: a key that went up this frame, or since the last */
+    for (int k = 1; k < CUI_KEY_COUNT; k++) {
+        if (!sent[k] && !st->w_held[k]) continue;
+        if (ui->kdown[k]) { st->w_held[k] = 1; continue; }
+        st->w_held[k] = 0;
+        if (st->out_n + 48 > (int)sizeof st->out) continue;
+        int kcs = cs | cui__vt_w_enh(k);
+        if (ctrl && alt && st->w_uc[k] >= 0x20) kcs = (kcs & ~(int)CUI__VT_CS_LALT) | CUI__VT_CS_RALT;      /* AltGr's character */
+        cui__vt_w_rec(st, cui__vt_w_vk[k], cui__vt_w_sc[k], st->w_uc[k], false, kcs);
     }
 }
 
@@ -1387,7 +1552,11 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
             if (cui_key_pressed(ui, CUI_KEY_END)) st->off = 0;
         }
         int before = st->out_n;
-        cui__vt_keys(ui, v, st);
+        if (o->win32_keys && v->win32_input) { st->w_on = true; cui__vt_keys32(ui, v, st); }
+        else {
+            if (st->w_on) { st->w_on = false; st->w_cs = 0; st->w_pend_n = 0; memset(st->w_held, 0, sizeof st->w_held); }     /* the program no longer takes records: plain bytes again */
+            cui__vt_keys(ui, v, st);
+        }
         if (st->out_n > before) { st->off = 0; st->has_sel = false; }
         for (int k = 1; k < CUI_KEY_COUNT; k++) ui->kpressed[k] = 0;   /* nothing else sees what the program got */
     }
