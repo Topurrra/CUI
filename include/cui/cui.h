@@ -4163,7 +4163,7 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * and true colors, bold, dim, italic, underline (single, double, curly, dotted, dashed: `4:0` to `4:5`, `21`; `58` and `59` are read but the line takes the text color: a cell has no room for a second color), overline (`53`, `55`), inverse, strike, colors in the colon forms (`38:2::r:g:b`, `38:2:r:g:b`, `38:5:n`), wide characters, the alternate screen
  * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2),
  * cursor shape (`CSI Ps SP q`: block, underline, bar; never blinking), synchronized output (`?2026`: the view shows the screen as it was until the update ends, for at most about 150 ms), cursor position, device attribute, XTVERSION (`ESC [ > q`) and size reports (`ESC [ 14 t`, `16 t` and `18 t`, with the cell size the view records each frame), mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
- * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, images, character sets.
+ * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, character sets, pictures (sixel ones with `CUI_VT_FEATURE_SIXEL`, below).
  *
  * Mouse (`.mouse = true`): while the program asked for the mouse (`cui_vt_mouse_reporting`), clicks, drags,
  * motion, the wheel (one report per notch) and the right click go to the program through `input`, as keys do, and
@@ -4231,6 +4231,25 @@ CUI_API size_t cui_vt_memory(const cui_vt *vt);                               /*
 /* One screen row as text with its blank right end cut: row 0 is the top of the live screen, -1 the newest scrollback line. Returns the length. */
 CUI_API size_t cui_vt_line_text(const cui_vt *vt, int row, char *out, size_t cap);
 CUI_API bool cui_vt_cell_at(const cui_vt *vt, int x, int y, cui_vt_cell *out);
+/* Opt-in parts of the screen, for a program behind a console host that passes queries and pictures through (Windows
+ * Terminal's OpenConsole.exe). With none set the screen parses, answers, draws and uses memory exactly as before.
+ *   CUI_VT_FEATURE_QUERIES  answer what such a host forwards instead of answering itself: device attributes as a VT220-class
+ *                           terminal (ESC [ c: ESC [ ? 62 ; 22 c, with 4 added for sixel; ESC [ > c; ESC [ = c), the cursor
+ *                           position with the page (ESC [ ? 6 n), DECRQM for every mode the screen knows and "not recognized"
+ *                           for the rest (ESC [ ? Ps $ p and ESC [ Ps $ p), and OSC 10, 11 and 12 with the colors of
+ *                           cui_vt_set_colors (rgb:rrrr/gggg/bbbb, ended as the query was).
+ *   CUI_VT_FEATURE_SIXEL    keep and draw sixel pictures (DCS P1;P2;P3 q ... ST), placed as Windows Terminal places them: on a
+ *                           virtual grid of 10 x 20 pixels a cell, drawn scaled (filtered) to the real cells, with the cursor
+ *                           where Windows Terminal leaves it; ESC [ 14 t and ESC [ 16 t then report that virtual size, the
+ *                           device attributes include 4, and XTSMGRAPHICS (ESC [ ? Pi ; Pa ; Pv S) is answered. Pictures belong
+ *                           to the rows: they scroll into the scrollback, erasing or writing text over a cell removes its piece,
+ *                           the alternate screen's pictures go when it is left. Kitty and iTerm2 pictures are never shown.
+ * The view creates a texture only for the rows of picture on screen and frees it when they leave or the view is gone. */
+#define CUI_VT_FEATURE_QUERIES 1u
+#define CUI_VT_FEATURE_SIXEL   2u
+CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
+CUI_API void cui_vt_set_picture_budget(cui_vt *vt, size_t bytes);       /* most picture pixels kept (8 MB unless set); over it the rows drawn longest ago go first */
+CUI_API void cui_vt_set_colors(cui_vt *vt, cui_color fg, cui_color bg, cui_color cursor);   /* what OSC 10, 11, 12 answer: plain colors; alpha 0 (or a token) is "no answer" */
 typedef struct cui_vt_opts {
     int _;
     cui_size width, height;        /* default fill */

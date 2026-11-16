@@ -2733,6 +2733,41 @@ SCENE(vt_terminal) {
     }
     if (++frames == 3) vt_demo_fill(vt);      /* once the grid has the size of its view */
 }
+/* A sixel picture on the terminal screen (CUI_VT_FEATURE_SIXEL): 48 HLS colors in a hue by lightness grid with a white
+ * border, 240 x 120 pixels, which is 24 x 6 cells of the virtual 10 x 20 grid, with text beside and below it. */
+static int vt_sixel_px(int x, int y) { return (x == 0 || y == 0 || x == 239 || y == 119) ? 48 : x * 12 / 240 + 12 * (y * 4 / 120); }
+static void vt_sixel_fill(cui_vt *vt) {
+    static char s[256 * 1024];                /* about 70 KB used */
+    size_t o = (size_t)snprintf(s, sizeof s, "\x1b[2J\x1b[H\x1b[1m sixel picture\x1b[0m\r\n\r\n  \x1bP9;1;0q\"1;1;240;120");
+    for (int i = 0; i < 48; i++) o += (size_t)snprintf(s + o, sizeof s - o, "#%d;1;%d;%d;70", i, (i % 12) * 30, 25 + (i / 12) * 15);
+    o += (size_t)snprintf(s + o, sizeof s - o, "#48;2;100;100;100");
+    for (int y0 = 0; y0 < 120; y0 += 6) {
+        for (int c = 0; c <= 48; c++) {
+            bool any = false;
+            char band[241];
+            for (int x = 0; x < 240; x++) {
+                int bits = 0;
+                for (int r = 0; r < 6; r++) if (vt_sixel_px(x, y0 + r) == c) bits |= 1 << r;
+                band[x] = (char)(63 + bits);
+                any |= bits != 0;
+            }
+            if (!any) continue;
+            o += (size_t)snprintf(s + o, sizeof s - o, "#%d%.*s$", c, 240, band);
+        }
+        s[o++] = '-';
+    }
+    o += (size_t)snprintf(s + o, sizeof s - o, "\x1b\\\x1b[3;29Hbeside the picture\x1b[4;29H\x1b[36mHLS colors, 240 x 120 px\x1b[0m\x1b[10;3Hbelow it, the cursor goes on here\r\n");
+    cui_vt_write(vt, s, o);
+}
+SCENE(vt_sixel) {
+    static cui_vt *vt;
+    static int frames;
+    if (!vt) { vt = cui_vt_create(90, 14, 0); cui_vt_set_features(vt, CUI_VT_FEATURE_QUERIES | CUI_VT_FEATURE_SIXEL); }
+    cui_box(ui, UPTO(820)) {
+        cui_vt_view(ui, "vt", vt, .height = CUI_PX(280), .no_input = true);
+    }
+    if (++frames == 3) vt_sixel_fill(vt);
+}
 SCENE(emoji_picker) {
     static char recent[256] = "\xf0\x9f\x91\x8d \xf0\x9f\x8e\x89 \xe2\x9c\x85 \xf0\x9f\x98\x82 \xf0\x9f\x9a\x80 \xf0\x9f\x91\x80 \xe2\x9d\xa4\xef\xb8\x8f \xf0\x9f\x99\x8f";
     static int tone = 0;
@@ -5028,7 +5063,7 @@ int main(int argc, char **argv) {
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
         { "markdown-select-all", scene_markdown_select_all, 560, 340, true },
-        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "vt-terminal", scene_vt_terminal, 820, 420, true }, { "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
+        { "inspector", scene_inspector, 520, 640, true }, { "log-console", scene_log_console, 820, 440, true }, { "terminal", scene_terminal, 820, 420, true }, { "vt-terminal", scene_vt_terminal, 820, 420, true }, { "vt-sixel", scene_vt_sixel, 820, 300, true },{ "emoji-picker", scene_emoji_picker, 720, 470, true }, { "chat", scene_chat, 560, 440, true },
         { "hex-viewer", scene_hex_viewer, 760, 420, true },
         { "curve-editor", scene_curve_editor, 660, 400, true }, { "gradient-editor", scene_gradient_editor, 600, 210, true },
         { "timeline-editor", scene_timeline_editor, 960, 660, true },

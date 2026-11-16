@@ -26,7 +26,8 @@ typedef char cui__vt_cell_is_8_bytes[sizeof(cui__vt_cell) == 8 ? 1 : -1];
 typedef struct { cui__vt_cell *cells; uint16_t *map; uint8_t *wrap; } cui__vt_screen;
 typedef struct { uint32_t off; uint16_t len; uint8_t wrapped; } cui__vt_line;
 
-enum { CUI__VT_GROUND, CUI__VT_ESC, CUI__VT_ESC_INT, CUI__VT_CSI, CUI__VT_OSC, CUI__VT_OSC_ESC, CUI__VT_STR, CUI__VT_STR_ESC };
+enum { CUI__VT_GROUND, CUI__VT_ESC, CUI__VT_ESC_INT, CUI__VT_CSI, CUI__VT_OSC, CUI__VT_OSC_ESC, CUI__VT_STR, CUI__VT_STR_ESC,
+       CUI__VT_DCS, CUI__VT_SIXEL };   /* the last two only with an extension (cui_vt_sixel.c): a DCS's parameters, sixel data */
 
 struct cui_vt {
     int cols, rows;
@@ -59,6 +60,8 @@ struct cui_vt {
     cui__vt_cell *snap;               /* synchronized output (?2026): the screen as it was at h, allocated at the first h and kept */
     int snap_cols, snap_rows, snap_cx, snap_cy; bool snap_cursor;
     bool sync_on; uint32_t sync_seq;  /* an update is open; counts the h that opened one */
+    cui__vt_x *x;                     /* the opt-in parts (cui_vt_sixel.c): NULL until cui_vt_set_features or cui_vt_set_colors */
+    uint8_t pic_on;                   /* CUI__VT_PIC_*: where pictures are kept; 0 keeps every picture hook off the text paths */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -111,6 +114,7 @@ cui_vt *cui_vt_create(int cols, int rows, int scrollback_lines) {
 
 void cui_vt_destroy(cui_vt *v) {
     if (!v) return;
+    if (v->x) cui__vt_x_free(v);
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
     free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap);
     free(v);
@@ -120,6 +124,7 @@ size_t cui_vt_memory(const cui_vt *v) {
     size_t n = sizeof *v + (size_t)CUI__VT_MAX_COLS;
     n += (size_t)v->cols * (size_t)v->rows * sizeof(cui__vt_cell) * (v->scr[1].cells ? 2 : 1);
     if (v->snap) n += (size_t)v->snap_cols * (size_t)v->snap_rows * sizeof(cui__vt_cell);
+    if (v->x) n += cui__vt_x_memory(v);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -166,6 +171,7 @@ static void cui__vt_clear_row(cui_vt *v, int y) {
     cui__vt_screen *s = CUI__VT_S(v);
     cui__vt_fill(cui__vt_row(v, s, y), v->cols, v->bg);
     s->wrap[s->map[y]] = 0;
+    if ((v->pic_on >> v->cur) & 1) cui__vt_pic_erase(v, v->cur, s->map[y], 0, v->cols);
 }
 
 /* rows top..bot move up by one (the first row leaves), n times; rows that leave the top of the main screen go to the scrollback */
@@ -174,7 +180,10 @@ static void cui__vt_scroll_rows(cui_vt *v, int top, int bot, int n, bool keep) {
     n = CUI_MIN(n, bot - top + 1);
     for (int i = 0; i < n; i++) {
         uint16_t slot = s->map[top];
-        if (keep && v->cur == 0 && top == 0) cui__vt_sb_push(v, cui__vt_row(v, s, top), v->cols, s->wrap[slot]);
+        if (keep && v->cur == 0 && top == 0) {
+            cui__vt_sb_push(v, cui__vt_row(v, s, top), v->cols, s->wrap[slot]);
+            if (v->pic_on & (CUI__VT_PIC_MAIN | CUI__VT_PIC_SB)) cui__vt_pic_pushed(v, slot);
+        }
         memmove(&s->map[top], &s->map[top + 1], sizeof(uint16_t) * (size_t)(bot - top));
         s->map[bot] = slot;
         cui__vt_clear_row(v, bot);
@@ -229,6 +238,7 @@ static void cui__vt_put(cui_vt *v, uint32_t c) {
         v->pend = false;
     }
     cui__vt_cell *row = cui__vt_row(v, s, v->cy);
+    if (v->pic_on) cui__vt_pic_erase(v, v->cur, s->map[v->cy], v->cx, v->cx + w);     /* text over a picture takes its cells */
     if (row[v->cx].ca & CUI__VT_SPACER && v->cx > 0) row[v->cx - 1].ca = 0;         /* overwriting half of a wide character */
     row[v->cx] = (cui__vt_cell){ c | v->attr, v->fg, v->bg };
     if (w == 2) {
@@ -242,10 +252,12 @@ static void cui__vt_erase(cui_vt *v, int y, int x0, int x1) {   /* cells x0..x1-
     if (x0 < 0) x0 = 0;
     if (x1 > v->cols) x1 = v->cols;
     if (x1 > x0) cui__vt_fill(cui__vt_row(v, CUI__VT_S(v), y) + x0, x1 - x0, v->bg);
+    if (x1 > x0 && ((v->pic_on >> v->cur) & 1)) cui__vt_pic_erase(v, v->cur, CUI__VT_S(v)->map[y], x0, x1);
 }
 
-static void cui__vt_reply(cui_vt *v, const char *s) {
+void cui__vt_reply(cui_vt *v, const char *s) {
     size_t n = strlen(s);
+    if (v->x && cui__vt_x_reply(v, v->reply, &v->reply_n, sizeof v->reply, s, n)) return;     /* a burst past the 256 bytes */
     if ((size_t)v->reply_n + n > sizeof v->reply) return;
     memcpy(v->reply + v->reply_n, s, n);
     v->reply_n += (int)n;
@@ -352,6 +364,7 @@ static void cui__vt_switch_screen(cui_vt *v, bool alt, bool save) {
         for (int y = 0; y < v->rows; y++) { uint16_t b = v->bg; v->bg = 0; cui__vt_clear_row(v, y); v->bg = b; }
     } else {
         v->cur = 0;
+        if (v->pic_on & CUI__VT_PIC_ALT) cui__vt_pic_drop_screen(v, 1);      /* the other screen's pictures go with it */
         if (save) { cui__vt_cursor_to(v, v->sx, v->sy); v->pend = v->spend; v->attr = v->sattr; v->fg = v->sfg; v->bg = v->sbg; }
     }
     v->stop = 0; v->sbot = v->rows - 1;
@@ -391,6 +404,7 @@ static void cui__vt_mode(cui_vt *v, bool set) {
         case 9001: v->win32_input = set; break;
         case 2004: v->bracketed = set; break;
         case 2026: if (set) { if (!v->sync_on) cui__vt_sync_begin(v); } else v->sync_on = false; break;
+        case 80: if (v->x) cui__vt_sixel_mode(v, set); break;            /* DECSDM: sixel display mode (cui_vt_sixel.c) */
         default: break;
         }
     }
@@ -399,6 +413,7 @@ static void cui__vt_mode(cui_vt *v, bool set) {
 static void cui__vt_csi(cui_vt *v, char f) {
     int n = cui__vt_arg(v, 0, 1);
     cui__vt_screen *s = CUI__VT_S(v);
+    if (v->x && cui__vt_query_csi(v, f, v->priv, v->inter, v->p, v->np)) return;      /* the opt-in answers (cui_vt_sixel.c) */
     if (v->priv && f != 'h' && f != 'l' && f != 'c' && f != 'q') return;
     if (v->inter) {                         /* the few sequences with an intermediate byte; the common ones pay one test */
         if (v->inter == '!' && f == 'p') {      /* soft reset */
@@ -417,6 +432,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
         n = CUI_MIN(n, v->cols - v->cx);
         memmove(row + v->cx + n, row + v->cx, sizeof *row * (size_t)(v->cols - v->cx - n));
         cui__vt_fill(row + v->cx, n, v->bg);
+        if ((v->pic_on >> v->cur) & 1) cui__vt_pic_shift(v, s->map[v->cy], v->cx, n);
         v->pend = false;
         break;
     }
@@ -436,7 +452,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
         if (m == 0) { cui__vt_erase(v, v->cy, v->cx, v->cols); for (int y = v->cy + 1; y < v->rows; y++) cui__vt_erase(v, y, 0, v->cols); }
         else if (m == 1) { for (int y = 0; y < v->cy; y++) cui__vt_erase(v, y, 0, v->cols); cui__vt_erase(v, v->cy, 0, v->cx + 1); }
         else if (m == 2 || m == 3) { if (m == 2) for (int y = 0; y < v->rows; y++) cui__vt_erase(v, y, 0, v->cols);
-                                     else if (v->cur == 0) { v->sb_count = 0; v->sb_pos = 0; } }
+                                     else if (v->cur == 0) { v->sb_count = 0; v->sb_pos = 0; if (v->pic_on & CUI__VT_PIC_SB) cui__vt_pic_trim_sb(v); } }
         v->pend = false;
         break;
     }
@@ -455,6 +471,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
         n = CUI_MIN(n, v->cols - v->cx);
         memmove(row + v->cx, row + v->cx + n, sizeof *row * (size_t)(v->cols - v->cx - n));
         cui__vt_fill(row + v->cols - n, n, v->bg);
+        if ((v->pic_on >> v->cur) & 1) cui__vt_pic_shift(v, s->map[v->cy], v->cx, -n);
         v->pend = false;
         break;
     }
@@ -510,6 +527,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
         v->app_cursor = v->bracketed = false;
         v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
         v->win32_input = false;     /* a full reset only: the soft reset leaves it, the console host asks for it once and never again */
+        if (v->x) cui__vt_x_reset(v);
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
@@ -519,10 +537,11 @@ static void cui__vt_esc(cui_vt *v, char c) {
     }
 }
 
-static void cui__vt_osc_end(cui_vt *v) {
+static void cui__vt_osc_end(cui_vt *v, bool bel) {
     v->osc[v->osc_n] = 0;
     int code = 0, i = 0;
-    while (i < v->osc_n && v->osc[i] >= '0' && v->osc[i] <= '9') code = code * 10 + (v->osc[i++] - '0');
+    while (i < v->osc_n && v->osc[i] >= '0' && v->osc[i] <= '9' && code < 100000) code = code * 10 + (v->osc[i++] - '0');
+    if (v->x && i < v->osc_n && v->osc[i] == ';') cui__vt_query_osc(v, code, v->osc + i + 1, v->osc_n - i - 1, bel);   /* color queries (cui_vt_sixel.c) */
     if ((code == 0 || code == 2) && i < v->osc_n && v->osc[i] == ';') {
         const char *t = v->osc + i + 1;
         size_t k = 0;
@@ -569,6 +588,7 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
         case CUI__VT_ESC:
             if (c == '[') { v->state = CUI__VT_CSI; v->np = 0; v->pcolon = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
             else if (c == ']') { v->state = CUI__VT_OSC; v->osc_n = 0; }
+            else if (c == 'P' && v->x) { v->state = CUI__VT_DCS; v->np = 0; v->pcolon = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
             else if (c == 'P' || c == 'X' || c == '^' || c == '_') v->state = CUI__VT_STR;
             else if (c >= 0x20 && c <= 0x2F) v->state = CUI__VT_ESC_INT;       /* ( ) # % and the like: one more byte */
             else if (c == 0x1B) {}
@@ -598,12 +618,12 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             else v->state = CUI__VT_GROUND;
             break;
         case CUI__VT_OSC:
-            if (c == 0x07) { cui__vt_osc_end(v); v->state = CUI__VT_GROUND; }
+            if (c == 0x07) { cui__vt_osc_end(v, true); v->state = CUI__VT_GROUND; }
             else if (c == 0x1B) v->state = CUI__VT_OSC_ESC;
             else if (v->osc_n + 1 < (int)sizeof v->osc) v->osc[v->osc_n++] = (char)c;
             break;
         case CUI__VT_OSC_ESC:
-            if (c == '\\') { cui__vt_osc_end(v); v->state = CUI__VT_GROUND; }
+            if (c == '\\') { cui__vt_osc_end(v, false); v->state = CUI__VT_GROUND; }
             else { v->state = CUI__VT_ESC; i--; }
             break;
         case CUI__VT_STR:
@@ -614,6 +634,23 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             if (c == '\\') v->state = CUI__VT_GROUND;
             else { v->state = CUI__VT_ESC; i--; }
             break;
+        case CUI__VT_DCS:                   /* only with an extension: DCS P1;P2;... final, as a CSI's parameters */
+            if (c >= '0' && c <= '9') { if (v->np == 0) v->np = 1; int *p = &v->p[CUI_MIN(v->np, 16) - 1]; if (*p < 100000) *p = *p * 10 + (c - '0'); }
+            else if (c == ';' || c == ':') { if (v->np == 0) v->np = 1; if (v->np < 16) v->np++; }
+            else if (c >= '<' && c <= '?') v->priv = (char)c;
+            else if (c >= 0x20 && c <= 0x2F) v->inter = (char)c;
+            else if (c >= 0x40 && c <= 0x7E) v->state = c == 'q' && !v->priv && !v->inter && cui__vt_sixel_begin(v, v->p, v->np) ? CUI__VT_SIXEL : CUI__VT_STR;
+            else if (c == 0x1B) v->state = CUI__VT_STR_ESC;
+            else if (c == 0x07 || c == 0x18 || c == 0x1A) v->state = CUI__VT_GROUND;
+            break;
+        case CUI__VT_SIXEL: {               /* picture data, read in runs up to the terminator */
+            i += cui__vt_sixel_feed(v, d + i, len - i);
+            if (i >= len) break;
+            cui__vt_sixel_end(v);
+            if (d[i] == 0x1B) v->state = CUI__VT_STR_ESC;      /* ESC \ ends it; any other ESC starts its sequence */
+            else v->state = CUI__VT_GROUND;                    /* CAN, SUB */
+            break;
+        }
         }
     }
 }
@@ -634,6 +671,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
         for (int i = 0; i < drop; i++) {
             cui__vt_screen *s = &v->scr[0];
             cui__vt_sb_push(v, cui__vt_row(v, s, 0), v->cols, s->wrap[s->map[0]]);
+            if (v->pic_on & (CUI__VT_PIC_MAIN | CUI__VT_PIC_SB)) cui__vt_pic_pushed(v, s->map[0]);
             uint16_t slot = s->map[0];
             memmove(&s->map[0], &s->map[1], sizeof(uint16_t) * (size_t)(v->rows - 1));
             s->map[v->rows - 1] = slot;
@@ -649,6 +687,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
             memcpy(n.cells + (size_t)y * (size_t)cols, old->cells + (size_t)old->map[y] * (size_t)v->cols, sizeof(cui__vt_cell) * (size_t)cx);
             n.wrap[y] = old->wrap[old->map[y]];
         }
+        if (v->x) cui__vt_x_resize(v, k, old->map, v->rows, cols, rows);     /* pictures follow their rows to the new slots */
         cui__vt_screen_free(old);
         *old = n;
     }
@@ -660,6 +699,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
 
 size_t cui_vt_reply(cui_vt *v, char *out, size_t cap) {
     if (!v) return 0;
+    if (v->x) { size_t k = cui__vt_x_take(v, out, cap); if (k) return k; }
     size_t n = CUI_MIN((size_t)v->reply_n, cap);
     memcpy(out, v->reply, n);
     memmove(v->reply, v->reply + n, (size_t)v->reply_n - n);
@@ -742,6 +782,46 @@ bool cui_vt_cell_at(const cui_vt *v, int x, int y, cui_vt_cell *out) {
         if (k) out->bg = r; else out->fg = r;
     }
     return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* What the opt-in parts (cui_vt_sixel.c) reach                             */
+/* ------------------------------------------------------------------------ */
+
+void cui__vt_get_info(const cui_vt *v, cui__vt_info *o) {
+    o->cols = v->cols; o->rows = v->rows; o->cur = v->cur; o->cx = v->cx; o->cy = v->cy; o->stop = v->stop; o->sbot = v->sbot;
+    o->sb_count = v->sb_count; o->sb_max = v->sb_max; o->sb_total = v->sb_total;
+}
+cui__vt_x *cui__vt_ext(const cui_vt *v) { return v->x; }
+void cui__vt_set_ext(cui_vt *v, cui__vt_x *x) { v->x = x; }
+void cui__vt_set_pic_bits(cui_vt *v, uint8_t bits) { v->pic_on = bits; }
+int cui__vt_slot(const cui_vt *v, int scr, int y) { return v->scr[scr].map ? v->scr[scr].map[y] : y; }
+void cui__vt_set_cursor(cui_vt *v, int x, int y) { cui__vt_cursor_to(v, x, y); }
+
+void cui__vt_scroll_lines(cui_vt *v, int n) {
+    v->cy = v->sbot;
+    cui__vt_scroll_up(v, v->stop, v->sbot, n);
+}
+
+int cui__vt_mode_report(const cui_vt *v, int m, bool dec) {
+    if (!dec) return 0;                                     /* no ANSI mode (IRM, LNM...) can be set here */
+    bool on;
+    switch (m) {
+    case 1: on = v->app_cursor; break;
+    case 7: on = v->autowrap; break;
+    case 25: on = v->cursor_vis; break;
+    case 47: case 1047: case 1049: on = v->cur == 1; break;
+    case 1000: on = (v->mouse_modes & CUI__VT_M1000) != 0; break;
+    case 1002: on = (v->mouse_modes & CUI__VT_M1002) != 0; break;
+    case 1003: on = (v->mouse_modes & CUI__VT_M1003) != 0; break;
+    case 1004: on = v->focus_mode; break;
+    case 1006: on = v->mouse_sgr; break;
+    case 2004: on = v->bracketed; break;
+    case 2026: on = v->sync_on; break;
+    case 9001: on = v->win32_input; break;
+    default: return 0;
+    }
+    return on ? 1 : 2;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1250,6 +1330,7 @@ typedef struct {
     bool glyphs, italic;              /* the opt-in looks: hand-drawn characters, slanted italic */
     const cui__vt_cell *snap;         /* paint this copy of the screen (a synchronized update is open) instead of the live one */
     int scx, scy; bool scursor;
+    const cui__vt_pic_draw *pics;     /* each visible row's picture (cui_vt_sixel.c), or NULL when none is on screen */
     cui__vt_pos s0, s1;
     cui_color fg, bg, sel, cursor, bar;
     float bar_t;
@@ -1408,6 +1489,18 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, len, ry, fg);
             if (at & CUI_VT_STRIKE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh * 0.5f, len * p->cw, 1 }, CUI_CORNERS(0), fg);
             x = e;
+        }
+        /* a picture: over the row's text, as Windows Terminal paints it (text written into a cell removes that cell's piece,
+         * so only text that was there before the picture is covered); the selection and the cursor stay visible on it */
+        if (p->pics && p->pics[y].tex) {
+            const cui__vt_pic_draw *pd = &p->pics[y];
+            float s = ui->scale > 0 ? ui->scale : 1, px0 = floorf((x0 + pd->c0 * p->cw) * s + 0.5f) / s, px1 = floorf((x0 + pd->c1 * p->cw) * s + 0.5f) / s;
+            float py0 = floorf(ry * s + 0.5f) / s, py1 = floorf((ry + p->lh) * s + 0.5f) / s;
+            cui_draw_image(ui, pd->tex, (cui_rect){ px0, py0, px1 - px0, py1 - py0 }, (cui_rect){ 0, 0, 1, 1 }, CUI_CORNERS(0), cui__rgba(255, 255, 255, 255));
+            if (p->has_sel && arow >= p->s0.row && arow <= p->s1.row) {
+                int c0 = CUI_MAX(arow == p->s0.row ? p->s0.col : 0, pd->c0), c1 = CUI_MIN(arow == p->s1.row ? p->s1.col + 1 : v->cols, pd->c1);
+                if (c1 > c0) cui__vt_snap_rect(ui, x0 + c0 * p->cw, ry, x0 + c1 * p->cw, ry + p->lh, p->sel);
+            }
         }
     }
     /* the cursor (where it was when a synchronized update opened, while one is shown) */
@@ -1602,6 +1695,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
             cui_request_wakeup(ui, (float)left + 0.002f);           /* the live screen shows again even if nothing else asks for a frame */
         }
     }
+    if (v->x) p->pics = cui__vt_pic_view(ui, id, v, st->off, p->snap != NULL);   /* textures for the rows of picture on screen */
     ln->paint = cui__paint_vt;
     ln->paint_data = p;
     ui->last_id = id;
