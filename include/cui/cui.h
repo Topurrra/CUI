@@ -4247,6 +4247,11 @@ CUI_API bool cui_vt_cell_at(const cui_vt *vt, int x, int y, cui_vt_cell *out);
  * The view creates a texture only for the rows of picture on screen and frees it when they leave or the view is gone. */
 #define CUI_VT_FEATURE_QUERIES 1u
 #define CUI_VT_FEATURE_SIXEL   2u
+/* With SIXEL: keep a picture's proportions on cells that are not 1:2. The virtual cell stays 20 pixels high (rows and the
+ * cursor as above) but is W = round(20 * cell width / cell height) of the view's real cell wide (6..14; 10 until a view has
+ * drawn): ESC [ 16 t answers 6;20;W, ESC [ 14 t rows*20 by cols*W, and a picture covers width / W cells, rounded up. A row of
+ * picture keeps the W it was drawn with; a picture drawn with another W into the same row first scales the row's old cells. */
+#define CUI_VT_FEATURE_SIXEL_ASPECT 4u
 CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
 CUI_API void cui_vt_set_picture_budget(cui_vt *vt, size_t bytes);       /* most picture pixels kept (8 MB unless set); over it the rows drawn longest ago go first */
 CUI_API void cui_vt_set_colors(cui_vt *vt, cui_color fg, cui_color bg, cui_color cursor);   /* what OSC 10, 11, 12 answer: plain colors; alpha 0 (or a token) is "no answer" */

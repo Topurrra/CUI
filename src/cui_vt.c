@@ -62,6 +62,7 @@ struct cui_vt {
     bool sync_on; uint32_t sync_seq;  /* an update is open; counts the h that opened one */
     cui__vt_x *x;                     /* the opt-in parts (cui_vt_sixel.c): NULL until cui_vt_set_features or cui_vt_set_colors */
     uint8_t pic_on;                   /* CUI__VT_PIC_*: where pictures are kept; 0 keeps every picture hook off the text paths */
+    uint16_t cell_w16;                /* the view's cell width in 1/16 device pixels (cell_w is rounded), for sixel pictures' aspect */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -791,6 +792,7 @@ bool cui_vt_cell_at(const cui_vt *v, int x, int y, cui_vt_cell *out) {
 void cui__vt_get_info(const cui_vt *v, cui__vt_info *o) {
     o->cols = v->cols; o->rows = v->rows; o->cur = v->cur; o->cx = v->cx; o->cy = v->cy; o->stop = v->stop; o->sbot = v->sbot;
     o->sb_count = v->sb_count; o->sb_max = v->sb_max; o->sb_total = v->sb_total;
+    o->cell_w = v->cell_w; o->cell_h = v->cell_h; o->cell_w16 = v->cell_w16;
 }
 cui__vt_x *cui__vt_ext(const cui_vt *v) { return v->x; }
 void cui__vt_set_ext(cui_vt *v, cui__vt_x *x) { v->x = x; }
@@ -1558,6 +1560,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     cui_rect pr = cui__prev_rect(ui, id);
     if (!v) return res;
     v->cell_w = (int)lroundf(cw * (ui->scale > 0 ? ui->scale : 1.0f)); v->cell_h = (int)lroundf(lh * (ui->scale > 0 ? ui->scale : 1.0f));
+    v->cell_w16 = (uint16_t)CUI_CLAMP(lroundf(cw * (ui->scale > 0 ? ui->scale : 1.0f) * 16.0f), 0, 65535);
     if (o->focus) ui->focus = id;
     cui_interact in = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
     bool focused = ui->focus == id;
