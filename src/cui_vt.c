@@ -986,7 +986,7 @@ CUI__VT_SMALL static int cui__vt_w_uc(int k, bool shift, bool ctrl, bool alt) {
     }
     int ch = shift ? cui__vt_w_c1[k] : cui__vt_w_c0[k];
     if (!ch || ctrl != plain_ctrl) return 0;       /* no character, or AltGr: its characters come as text */
-    if (plain_ctrl) return k >= CUI_KEY_A && k <= CUI_KEY_Z ? 1 + (k - CUI_KEY_A) : k == CUI_KEY_BACKSLASH ? 0x1C : k == CUI_KEY_MINUS ? 0x1F : 0;
+    if (plain_ctrl) return k >= CUI_KEY_A && k <= CUI_KEY_Z ? 1 + (k - CUI_KEY_A) : k == CUI_KEY_BACKSLASH ? 0x1C : k == CUI_KEY_MINUS ? 0x1F : k == CUI_KEY_SPACE ? 0x20 : 0;     /* Ctrl+Space keeps its space, as a Windows keyboard gives it */
     return alt ? ch : 0;
 }
 

@@ -81,7 +81,7 @@ static void test_table(void) {
         { CUI_KEY_TAB, CUI_MOD_SHIFT, NULL, 9, 15, 9, SH, "Shift+Tab" },
         { CUI_KEY_TAB, CUI_MOD_CTRL, NULL, 9, 15, 0, CT, "Ctrl+Tab" },
         { CUI_KEY_ESCAPE, 0, NULL, 27, 1, 27, 0, "Escape" },
-        { CUI_KEY_SPACE, CUI_MOD_CTRL, NULL, 32, 57, 0, CT, "Ctrl+Space" },
+        { CUI_KEY_SPACE, CUI_MOD_CTRL, NULL, 32, 57, 32, CT, "Ctrl+Space" },
         { CUI_KEY_SPACE, 0, " ", 32, 57, 32, 0, "Space" },
         { CUI_KEY_SPACE, CUI_MOD_SHIFT, " ", 32, 57, 32, SH, "Shift+Space" },
         { CUI_KEY_LEFT, 0, NULL, 37, 75, 0, ENH, "Left" },
