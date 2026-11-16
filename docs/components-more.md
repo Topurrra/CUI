@@ -2255,6 +2255,25 @@ cui_tab_bar(ui, "tabs", tabs, 4, &tab);
 
 The player shows artwork (a texture, or `art_color`), a play button that morphs between play and pause, and a scrubber that thickens and shows its knob under the pointer. The time on the right counts down. The waveform resamples its peaks to fit its width; the played part takes the accent color and a ghost shows where a click would seek. The tab bar's pill glides to the selection, and arrow keys move it.
 
+### Activity bar
+
+The narrow column of icons on the edge of an IDE-style window that picks what the side bar shows. The selected item gets a bar on its outer edge; items can sit at the bottom (account, settings) and can be plain buttons that never take the selection.
+
+```c
+static const cui_activity_item items[] = {
+    { CUI_ICON_FILE_TEXT, "Explorer" },
+    { CUI_ICON_SEARCH, "Search" },
+    { CUI_ICON_GIT_BRANCH, "Source control", .badge = 3 },
+    { CUI_ICON_USER, "Account", .bottom = true, .button = true },
+    { CUI_ICON_SETTINGS, "Settings", .bottom = true, .button = true },
+};
+static int view = 0;   /* -1: the side bar is hidden */
+int clicked = cui_activity_bar(ui, "activity", items, 5, &view, .toggle = true);
+if (clicked == 4) open_settings();
+```
+
+It returns the item clicked this frame (or -1) and updates `*selected`. With `.toggle`, clicking the selected item again sets it to -1, the usual way to hide the side bar. `.right` puts the mark on the right edge for a bar on the right of a window. Up and Down move the keyboard focus along the bar; Space or Enter click.
+
 ## AI interfaces
 
 The pieces of an assistant: thinking, tools, plans, sources and the composer. See the *AI* page in the gallery for them working together.

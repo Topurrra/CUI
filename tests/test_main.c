@@ -6476,6 +6476,59 @@ static void build_motion(cui_ctx *ui, void *u) {
     }
 }
 
+typedef struct { int sel, clicked, settings; cui_id bar_id; } ab_ctx;
+
+static void build_activity(cui_ctx *ui, void *u) {
+    ab_ctx *a = u;
+    static const cui_activity_item items[] = {
+        { CUI_ICON_FILE_TEXT, "Files", 0, false, false },
+        { CUI_ICON_SEARCH, "Search", 0, false, false },
+        { CUI_ICON_GIT_BRANCH, "Source control", 12, false, false },
+        { CUI_ICON_SETTINGS, "Settings", 0, true, true },
+    };
+    cui_row(ui, .width = CUI_FILL, .height = CUI_PX(400)) {
+        int c = cui_activity_bar(ui, "ab", items, 4, &a->sel, .toggle = true);
+        a->bar_id = cui_last_id(ui);
+        if (c >= 0) a->clicked = c;
+        if (c == 3) a->settings++;
+        cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { cui_text(ui, "side"); }
+    }
+}
+
+static void test_activity_bar(void) {
+    printf("activity bar: select, toggle off, bottom button, keyboard\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 600, 400, 1);
+    ab_ctx a;
+    memset(&a, 0, sizeof a);
+    a.sel = 0;
+    a.clicked = -1;
+    run(ui, build_activity, &a, 2);
+    cui_rect br = rect_of(ui, a.bar_id);
+    CHECK(br.w == 48 && br.h == 400);
+    /* the second item: selected */
+    click_at(ui, build_activity, &a, br.x + 24, br.y + 4 + 48 + 2 + 24);
+    CHECK(a.sel == 1 && a.clicked == 1);
+    /* clicked again with .toggle: none selected (the side bar hides) */
+    click_at(ui, build_activity, &a, br.x + 24, br.y + 4 + 48 + 2 + 24);
+    CHECK(a.sel == -1);
+    /* the bottom item is a button: reported, never selected */
+    click_at(ui, build_activity, &a, br.x + 24, br.y + br.h - 4 - 24);
+    CHECK(a.settings == 1 && a.clicked == 3 && a.sel == -1);
+    /* keyboard, in a fresh window: Tab to the first item, Down moves on, Space selects */
+    cui_destroy(ui);
+    ui = new_ctx();
+    cui_set_viewport(ui, 600, 400, 1);
+    a.sel = 0;
+    a.clicked = -1;
+    run(ui, build_activity, &a, 2);
+    key(ui, build_activity, &a, CUI_KEY_TAB, 0);
+    key(ui, build_activity, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_activity, &a, CUI_KEY_SPACE, 0);
+    CHECK(a.sel == 1);
+    cui_destroy(ui);
+}
+
 static void test_motion(void) {
     printf("motion: typewriter streams and restarts, tiles, tab bar, waveform seek, player, dock\n");
     cui_ctx *ui = new_ctx();
@@ -13821,6 +13874,7 @@ int main(void) {
     test_media();
     test_viz();
     test_motion();
+    test_activity_bar();
     test_typing_indicator_motion();
     test_running_task_motion();
     test_running_job_motion();

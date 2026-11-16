@@ -2871,6 +2871,28 @@ typedef struct cui_tab_bar_opts {
 } cui_tab_bar_opts;
 CUI_API bool cui_tab_bar_ex(cui_ctx *ui, const char *id, const cui_tab_bar_item *items, int count, int *selected, const cui_tab_bar_opts *opts);
 
+/* Activity bar: the narrow column of icons on a window's edge that picks what the side bar shows (an IDE's Files,
+ * Search, Source control, Run...). *selected is the selected item (-1: none); the selected one gets a bar on its outer
+ * edge. Returns the item clicked this frame, or -1. Items with .bottom sit at the bottom (account, settings); items with
+ * .button report clicks but never take the selection. Up and Down move the focus, Enter or Space click. */
+typedef struct cui_activity_item {
+    const char *icon;
+    const char *tooltip;
+    int badge;                 /* a count on the icon ("99+" above 99); 0 for none */
+    bool bottom;               /* at the bottom of the bar */
+    bool button;               /* a plain button: clicking does not select it */
+} cui_activity_item;
+typedef struct cui_activity_bar_opts {
+    int _;
+    float width;               /* the bar's width and each item's height; 0: 48 */
+    cui_size height;           /* default CUI_FILL */
+    cui_color bg;              /* default the muted surface */
+    cui_color badge_color;     /* default the accent */
+    bool toggle;               /* clicking the selected item again unselects it (*selected = -1): a side bar that hides */
+    bool right;                /* the bar sits on the right edge: the selection mark goes on that side */
+} cui_activity_bar_opts;
+CUI_API int cui_activity_bar_ex(cui_ctx *ui, const char *id, const cui_activity_item *items, int count, int *selected, const cui_activity_bar_opts *opts);
+
 /* Control tile: a large toggle with an icon, a label and a state line. */
 typedef struct cui_tile_opts {
     int _;
@@ -6062,6 +6084,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_dock(ui, id, ...)               CUI__SCOPE(cui_dock_begin((ui), (id), CUI__OPTS(cui_dock_opts, __VA_ARGS__)), cui_dock_end(ui))
 #define cui_dock_item(ui, icon, label, ...) cui_dock_item_ex((ui), (icon), (label), CUI__OPTS(cui_dock_item_opts, __VA_ARGS__))
 #define cui_tab_bar(ui, id, items, n, sel, ...) cui_tab_bar_ex((ui), (id), (items), (n), (sel), CUI__OPTS(cui_tab_bar_opts, __VA_ARGS__))
+#define cui_activity_bar(ui, id, items, n, sel, ...) cui_activity_bar_ex((ui), (id), (items), (n), (sel), CUI__OPTS(cui_activity_bar_opts, __VA_ARGS__))
 #define cui_control_tile(ui, label, on, ...) cui_control_tile_ex((ui), (label), (on), CUI__OPTS(cui_tile_opts, __VA_ARGS__))
 #define cui_waveform(ui, id, peaks, n, progress, ...) cui_waveform_ex((ui), (id), (peaks), (n), (progress), CUI__OPTS(cui_waveform_opts, __VA_ARGS__))
 #define cui_now_playing(ui, id, np, ...)    cui_now_playing_ex((ui), (id), (np), CUI__OPTS(cui_now_playing_opts, __VA_ARGS__))

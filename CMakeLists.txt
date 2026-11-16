@@ -64,6 +64,7 @@ set(CUI_CORE_SOURCES
     src/cui_dock.c
     src/cui_viz.c
     src/cui_motion.c
+    src/cui_activity_bar.c
     src/cui_ai.c
     src/cui_voice.c
     src/cui_image.c
