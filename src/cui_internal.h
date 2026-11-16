@@ -423,7 +423,7 @@ int cui__vt_sextant_bits(uint32_t cp);          /* U+1FB00..U+1FB3B: the six cel
  * while the parts exist (the screen's extension is set) or a picture is kept (the bits of cui__vt_pic_bits). Rows are named
  * by their slot, the index of their cells that the row map points at, so pictures move with the rows for free. */
 typedef struct cui__vt_x cui__vt_x;
-typedef struct { int cols, rows, cur, cx, cy, stop, sbot, sb_count, sb_max; uint64_t sb_total; } cui__vt_info;
+typedef struct { int cols, rows, cur, cx, cy, stop, sbot, sb_count, sb_max; uint64_t sb_total; int cell_w, cell_h, cell_w16; } cui__vt_info;
 enum { CUI__VT_PIC_MAIN = 1, CUI__VT_PIC_ALT = 2, CUI__VT_PIC_SB = 4 };   /* where pictures are kept: the two screens, the scrollback */
 typedef struct { cui_texture tex; int c0, c1; } cui__vt_pic_draw;       /* one row's picture for the view: columns c0..c1-1 */
 /* cui_vt.c, for cui_vt_sixel.c */

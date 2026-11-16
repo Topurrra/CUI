@@ -574,6 +574,93 @@ static void test_paint(void) {
     cui_vt_destroy(v);
 }
 
+/* ---- the virtual cell keeps the view's cell shape (CUI_VT_FEATURE_SIXEL_ASPECT) ---- */
+
+static void build_h(cui_ctx *ui, cui_vt *vt, float size, float lh, float h) {
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { cui_vt_view(ui, "t", vt, .size = size, .line_height = lh, .height = h > 0 ? CUI_PX(h) : CUI_FILL); }
+    cui_end_frame(ui);
+}
+static void build_sized(cui_ctx *ui, cui_vt *vt, float size, float lh) { build_h(ui, vt, size, lh, 0); }
+
+/* columns of row `r` holding picture (its first pixel column), counted with the row's own cell width `cw` */
+static int pic_cells(const cui_vt *v, int r, int cw) { int n = 0; for (int c = 0; c < 200; c++) if (PX(v, r, c * cw, 10)) n++; return n; }
+
+static void test_aspect(void) {
+    cui_vt *v = mk(80, 24, 100, Q | SX | CUI_VT_FEATURE_SIXEL_ASPECT);
+    W(v, "\x1b[16t\x1b[14t"); CHECK_STR(reply(v), "\x1b[6;20;10t\x1b[4;480;800t");   /* no view has drawn: 10 x 20 */
+    cui_vt_destroy(v);
+    v = mk(80, 24, 100, Q | SX);                                               /* without the flag: always 10 x 20 */
+    static const struct { float size, lh, scale; } shapes[] = { { 13, 0, 1 }, { 13, 0, 2 }, { 16, 1.2f, 1 }, { 14, 1.4f, 1.5f }, { 20, 1.0f, 1 } };
+    for (size_t i = 0; i < sizeof shapes / sizeof *shapes; i++) {
+        cui_ctx *ui = ctx();
+        cui_set_viewport(ui, 640 * shapes[i].scale, 400 * shapes[i].scale, shapes[i].scale);
+        cui_vt *ref = cui_vt_create(80, 24, 0), *a = mk(80, 24, 100, Q | SX | CUI_VT_FEATURE_SIXEL_ASPECT);
+        for (int k = 0; k < 3; k++) { build_sized(ui, ref, shapes[i].size, shapes[i].lh); build_sized(ui, a, shapes[i].size, shapes[i].lh); build_sized(ui, v, shapes[i].size, shapes[i].lh); }
+        int ch = 0, cw = 0, cols, rows;
+        W(ref, "\x1b[16t"); CHECK_EQ(sscanf(reply(ref), "\x1b[6;%d;%dt", &ch, &cw), 2);   /* the real cell */
+        double cwf = (double)cui_measure_text(ui, CUI_FONT_MONO, shapes[i].size, "0", 1).width * shapes[i].scale;   /* the unrounded cell width */
+        int want = 0;
+        W(a, "\x1b[16t"); CHECK_EQ(sscanf(reply(a), "\x1b[6;20;%dt", &want), 1);
+        double ideal = 20.0 * cwf / ch;
+        CHECK(want >= 6 && want <= 14 && want >= (int)ideal && want <= (int)ideal + 1);   /* round(20 * width / height) */
+        cui_vt_size(a, &cols, &rows);
+        char exp[96]; snprintf(exp, sizeof exp, "\x1b[4;%d;%dt", rows * 20, cols * want);
+        W(a, "\x1b[14t"); CHECK_STR(reply(a), exp);
+        W(v, "\x1b[16t"); CHECK_STR(reply(v), "\x1b[6;20;10t");
+        double off = ((cwf / want) / (ch / 20.0) - 1.0) * 100.0;               /* how much wider than tall a square shows */
+        CHECK(off > -6 && off < 6);
+        printf("  cell %.2fx%d device px (size %.0f, line height %.1f, scale %.1f): W = %d (ideal %.2f), a square shows %+.1f%% wide (at 10: %+.1f%%)\n",
+               cwf, ch, (double)shapes[i].size, shapes[i].lh > 0 ? (double)shapes[i].lh : 1.4, (double)shapes[i].scale, want, ideal, off,
+               ((cwf / 10.0) / (ch / 20.0) - 1.0) * 100.0);
+        (void)cw;
+        /* a picture 80 pixels wide covers ceil(80 / W) cells; the cursor is as without the flag (rows are still 20 high) */
+        W(a, "\x1b[2J\x1b[2;3H"); put_pic(a, 80, 40, 1, true, idx_red);
+        CHECK_EQ(pic_cells(a, 1, want), (80 + want - 1) / want);
+        int x, y; cursor(a, &x, &y); CHECK_EQ(x, 2); CHECK_EQ(y, 3);
+        cui_vt_destroy(ref); cui_vt_destroy(a);
+        cui_destroy(ui);
+    }
+    cui_vt_destroy(v);
+    /* the cell changes between two pictures: an untouched row keeps its W; a new picture in a row scales that row's old
+     * cells to the new W in place, so they stay in their columns */
+    cui_ctx *ui = ctx();
+    v = mk(80, 24, 100, Q | SX | CUI_VT_FEATURE_SIXEL_ASPECT);
+    for (int k = 0; k < 3; k++) build_sized(ui, v, 13, 1.0f);                 /* a wide cell */
+    W(v, "\x1b[16t"); int w1 = 0; sscanf(reply(v), "\x1b[6;20;%dt", &w1);
+    W(v, "\x1b[H"); put_pic(v, 60, 20, 1, false, idx_red);                    /* row 0 */
+    W(v, "\x1b[3;1H"); put_pic(v, 60, 20, 1, false, idx_bars);                /* row 2 */
+    int cells0 = pic_cells(v, 0, w1), cells2 = pic_cells(v, 2, w1);
+    for (int k = 0; k < 3; k++) build_sized(ui, v, 13, 2.0f);                 /* a tall cell */
+    W(v, "\x1b[16t"); int w2 = 0; sscanf(reply(v), "\x1b[6;20;%dt", &w2);
+    CHECK(w2 < w1);
+    CHECK_EQ(pic_cells(v, 2, w1), cells2);
+    CHECK_EQ(PX(v, 2, 0, 5), RGBA(255, 0, 0));
+    W(v, "\x1b[1;40H"); put_pic(v, 20, 20, 1, false, idx_bars);               /* a W2 picture into row 0 */
+    CHECK_EQ(pic_cells(v, 0, w2), cells0 + (20 + w2 - 1) / w2);
+    CHECK_EQ(PX(v, 0, 0, 0), RGBA(255, 0, 0)); CHECK_EQ(PX(v, 0, (cells0 - 1) * w2 + w2 / 2, 0), RGBA(255, 0, 0));
+    CHECK_EQ(PX(v, 0, cells0 * w2 + w2 / 2, 0), 0);
+    cui_vt_destroy(v);
+    /* a picture being read when the cell changes (here without a resize: a one-row view, 8x13 then 8x16 cells) finishes
+     * with the W it started with. (A resize stops a picture being read, as before.) A two-row view keeps its grid. */
+    v = mk(80, 2, 0, Q | SX | CUI_VT_FEATURE_SIXEL_ASPECT);
+    for (int k = 0; k < 3; k++) build_h(ui, v, 13, 1.0f, 46);
+    W(v, "\x1b[16t"); int wa = 0; sscanf(reply(v), "\x1b[6;20;%dt", &wa);
+    size_t n = pic(60, 20, 1, false, idx_red);
+    W(v, "\x1b[H");
+    cui_vt_write(v, g_buf, n / 2);
+    int c1, r1; cui_vt_size(v, &c1, &r1);
+    for (int k = 0; k < 3; k++) build_h(ui, v, 13, 1.2f, 46);
+    int c2, r2; cui_vt_size(v, &c2, &r2);
+    cui_vt_write(v, g_buf + n / 2, n - n / 2);
+    W(v, "\x1b[16t"); int wb = 0; sscanf(reply(v), "\x1b[6;20;%dt", &wb);   /* (asked after the picture: inside it, ESC would end it) */
+    CHECK(wa != wb); CHECK_EQ(c1, c2); CHECK_EQ(r1, r2);
+    CHECK_EQ(pic_cells(v, 0, wa), (60 + wa - 1) / wa);
+    CHECK_EQ(PX(v, 0, 59, 19), RGBA(255, 0, 0)); CHECK_EQ(PX(v, 0, 60, 0), 0);
+    cui_vt_destroy(v);
+    cui_destroy(ui);
+}
+
 /* ---- speed ---- */
 
 static int idx_noise(int x, int y) { return (int)((((uint32_t)x * 2654435761u) ^ ((uint32_t)y * 40503u)) >> 13) % 4; }
@@ -630,6 +717,7 @@ int main(void) {
     test_budget();
     test_hostile();
     test_paint();
+    test_aspect();
     test_speed();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
