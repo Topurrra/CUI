@@ -283,6 +283,16 @@ static inline float cui__shadow_falloff(float z) {
     return cui__shadow_lut[i] + (cui__shadow_lut[i + 1] - cui__shadow_lut[i]) * t;
 }
 
+/* The falloff a shadow has along one axis, q being cui__sd_rrect's qx or qy there and r the
+ * corner radius: as cui__sd_rrect computes the distance when the other axis is not past its
+ * corner (inside + length - r), 0 where the shadow draws nothing. */
+#define CUI__SH_COLS 640   /* widest part of a quad a job draws with column tables (jobs are 512 wide) */
+static inline float cui__shadow_side(float q, float r, float k) {
+    float d = q > 0 ? sqrtf(q * q) - r : (q + 0.0f) - r;
+    float z = d / k;
+    return z > CUI__SHADOW_Z1 ? 0.0f : cui__shadow_falloff(z);
+}
+
 typedef struct { float r, g, b, a; } cui__px;  /* premultiplied */
 
 static float cui__sample_r8(const cui__sw_tex *t, float u, float v) {
@@ -317,6 +327,28 @@ static cui__px cui__sample_rgba(const cui__sw_tex *t, float u, float v) {
         o.a += w[k] * a;
     }
     return o;
+}
+
+/* The texel a sample at (u, v) falls on the center of (within 1/512 of a texel: the bilinear
+ * mix would be that texel within half a step), or NULL. An image drawn at its own size (a
+ * screenshot, an icon at 1:1) samples every pixel this way: one read instead of four. */
+static inline const uint8_t *cui__texel_at(const cui__sw_tex *t, float u, float v) {
+    float x = u * (float)t->w - 0.5f, y = v * (float)t->h - 0.5f;
+    float rx = floorf(x + 0.5f), ry = floorf(y + 0.5f);
+    if (fabsf(x - rx) > 1.0f / 512 || fabsf(y - ry) > 1.0f / 512) return NULL;
+    int ix = (int)rx, iy = (int)ry;
+    ix = CUI_CLAMP(ix, 0, t->w - 1); iy = CUI_CLAMP(iy, 0, t->h - 1);
+    return t->data + ((size_t)iy * (size_t)t->w + (size_t)ix) * 4;
+}
+
+/* A shadow's color over a pixel, in 16 bit fixed point: the same blend as cui__blend within
+ * one step (it rounds the same value, computed to 1/65536 of a step instead of in float). */
+static inline void cui__blend_shadow(uint8_t *p, const uint32_t c8[4], float al) {
+    uint32_t a = (uint32_t)(al * 65536.0f + 0.5f), ia = 65536u - a;
+    p[0] = (uint8_t)((p[0] * ia + c8[0] * a + 32768u) >> 16);
+    p[1] = (uint8_t)((p[1] * ia + c8[1] * a + 32768u) >> 16);
+    p[2] = (uint8_t)((p[2] * ia + c8[2] * a + 32768u) >> 16);
+    p[3] = (uint8_t)((p[3] * ia + c8[3] * a + 32768u) >> 16);
 }
 
 typedef struct {
@@ -493,6 +525,8 @@ static bool cui__sw_quad_ok(const cui_vertex *v0, const cui_vertex *v1, const cu
     return (int)(v0->mode + 0.5f) != CUI_SHADE_DITHER;
 }
 
+static void cui__sw_deep_span(float l0, float q0, float L, int lo, int hi, int *a, int *b);
+
 /* Fast path for axis aligned quads (almost everything CUI draws): no
  * barycentrics, linear local coordinates and early outs for the interior of
  * rounded rectangles. Returns false when the quad does not qualify. */
@@ -516,6 +550,31 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
     bool text_exact = mode == CUI_SHADE_TEXT && tex && fabsf(du * (float)tex->w - 1.0f) < 0.001f && fabsf(dv * (float)tex->h - 1.0f) < 0.001f;
     cui__blend_lut lut;
     lut.ok = false;
+    /* A shadow: outside the corners the distance to the shape is the larger of a column's and a
+     * row's (cui__sd_rrect: d = max(qx, qy) - r inside, qx - r or qy - r beside a side), and the
+     * falloff only drops with distance, so a pixel's falloff is the smaller of its column's and
+     * its row's. The columns' are worked out once here (above and below the center: the corner
+     * radii may differ), the rows' once per row; only the corners take a square root per pixel.
+     * The same arithmetic as the formula, so the same pixels. */
+    float sh_f[2][CUI__SH_COLS], sh_q[2][CUI__SH_COLS], sh_rad[2][2] = { { 0, 0 }, { 0, 0 } }, sh_k = 1;
+    uint8_t sh_side[CUI__SH_COLS];
+    bool sh_cols = mode == CUI_SHADE_SHADOW && x1 - x0 <= CUI__SH_COLS;
+    if (sh_cols) {
+        float m = hw < hh ? hw : hh;
+        const float rr[2][2] = { { v0->r_tl, v0->r_tr }, { v0->r_bl, v0->r_br } };
+        for (int half = 0; half < 2; half++)
+            for (int sd = 0; sd < 2; sd++) sh_rad[half][sd] = rr[half][sd] > m ? m : rr[half][sd];
+        sh_k = (bw > 0.01f ? bw : 0.01f) * 1.41421356f;
+        for (int x = x0; x < x1; x++) {
+            float lx = v0->lx + (((float)x + 0.5f) - qx0);
+            int i = x - x0, sd = lx < 0 ? 0 : 1;
+            sh_side[i] = (uint8_t)sd;
+            for (int half = 0; half < 2; half++) {
+                sh_q[half][i] = fabsf(lx) - hw + sh_rad[half][sd];
+                sh_f[half][i] = cui__shadow_side(sh_q[half][i], sh_rad[half][sd], sh_k);
+            }
+        }
+    }
     for (int y = y0; y < y1; y++) {
         float py = (float)y + 0.5f;
         float ty = (py - qy0) / qh;
@@ -528,6 +587,7 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
         } else {
             cr = v0->color.r / 255.0f; cg = v0->color.g / 255.0f; cb = v0->color.b / 255.0f; ca = v0->color.a / 255.0f;
         }
+        bool plain_tint = cr == 1.0f && cg == 1.0f && cb == 1.0f && ca == 1.0f;
         uint8_t opaque[4];
         opaque[ri] = (uint8_t)(cr * 255.0f + 0.5f); opaque[1] = (uint8_t)(cg * 255.0f + 0.5f);
         opaque[bi] = (uint8_t)(cb * 255.0f + 0.5f); opaque[3] = 255;
@@ -565,15 +625,12 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
                 /* a rounded rectangle: inside its border; a shadow: four blur widths inside the
                  * shape, where erf is exactly -1 in float and the shadow is the plain color */
                 float inset = mode == CUI_SHADE_SHADOW ? 4.0f * 1.41421356f * (bw > 0.01f ? bw : 0.01f) : bw + 0.5f;
-#define CUI__DEEP(xx) (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset - rmax && ay <= hh - inset) || \
-                      (fabsf(v0->lx + (((float)(xx) + 0.5f) - qx0)) <= hw - inset && ay <= hh - inset - rmax)
                 if (ay <= hh - inset) {
-                    int a = x0, b = x1;
-                    while (a < x1 && !(CUI__DEEP(a))) a++;
-                    while (b > a && !(CUI__DEEP(b - 1))) b--;
+                    /* (|lx| <= hw - inset - rmax && ay <= hh - inset) || (|lx| <= hw - inset && ay <= hh - inset - rmax) */
+                    int a, b;
+                    cui__sw_deep_span(v0->lx, qx0, ay <= hh - inset - rmax ? hw - inset : hw - inset - rmax, x0, x1, &a, &b);
                     if (a < b) { sx0 = a; sx1 = b; }
                 }
-#undef CUI__DEEP
             }
             if (sx0 < sx1) {
                 uint8_t *p = row + (size_t)sx0 * 4;
@@ -582,21 +639,56 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
                 else if (ca > 0.0005f) cui__blend_run(p, n, (cui__px){ cr * ca, cg * ca, cb * ca, ca }, bgra, &lut);
             }
         }
-        /* A shadow above or below its shape, between the corners, is as far from the shape all
-         * along the row on each side (in cui__sd_rrect: qx <= 0 < qy, so the distance depends on
-         * qy and the corner radius only): it is worked out at the first such pixel and reused. */
-        float sh_r[2] = { 0, 0 }, sh_qy[2] = { 0, 0 };
-        cui__px sh_o[2];
-        int sh_have[2] = { 0, 0 };   /* 0 not yet, 1 sh_o, 2 nothing to draw */
-        if (mode == CUI_SHADE_SHADOW) {
-            float m = hw < hh ? hw : hh;
-            for (int sd = 0; sd < 2; sd++) {   /* 0: left of the center (lx < 0), 1: right */
-                float rr = sd == 0 ? (ly < 0 ? v0->r_tl : v0->r_bl) : (ly < 0 ? v0->r_tr : v0->r_br);
-                if (rr > m) rr = m;
-                sh_r[sd] = rr;
-                sh_qy[sd] = fabsf(ly) - hh + rr;
+        /* An image drawn at its own size under a plain tint: inside its corners, each pixel of the
+         * row is the next texel (its two ends land on texel centers, and u is linear in x), so
+         * the run is copied, blending only texels that are not opaque. */
+        if (mode == CUI_SHADE_IMAGE && plain_tint && tex && tex->fmt == CUI_TEXTURE_RGBA8 && ay <= hh - 0.5f) {
+            int a, b;
+            cui__sw_deep_span(v0->lx, qx0, ay <= hh - 0.5f - rmax ? hw - 0.5f : hw - 0.5f - rmax, x0, x1, &a, &b);
+            if (a < b) {
+                float vv = v0->v + (py - qy0) * dv;
+                const uint8_t *ta = cui__texel_at(tex, v0->u + (((float)a + 0.5f) - qx0) * du, vv);
+                const uint8_t *tb = cui__texel_at(tex, v0->u + (((float)(b - 1) + 0.5f) - qx0) * du, vv);
+                if (ta && tb && tb - ta == (ptrdiff_t)(b - 1 - a) * 4) {
+                    uint8_t *q = row + (size_t)a * 4;
+                    for (int k = 0, n = b - a; k < n; k++, q += 4, ta += 4) {
+                        if (ta[3] == 255) { q[ri] = ta[0]; q[1] = ta[1]; q[bi] = ta[2]; q[3] = 255; continue; }
+                        float al = ta[3] / 255.0f;
+                        cui__blend(q, (cui__px){ ta[0] / 255.0f * al, ta[1] / 255.0f * al, ta[2] / 255.0f * al, al }, bgra);
+                    }
+                    sx0 = a; sx1 = b;
+                }
             }
         }
+        if (mode == CUI_SHADE_SHADOW && sh_cols) {
+            /* the row's falloff and qy on each side, the columns' from the tables */
+            int half = ly < 0 ? 0 : 1;
+            float frow[2], qyr[2];
+            for (int sd = 0; sd < 2; sd++) {
+                qyr[sd] = fabsf(ly) - hh + sh_rad[half][sd];
+                frow[sd] = cui__shadow_side(qyr[sd], sh_rad[half][sd], sh_k);
+            }
+            const float *fc = sh_f[half], *qc = sh_q[half];
+            uint32_t c8[4];
+            c8[ri] = (uint32_t)(cr * 255.0f + 0.5f); c8[1] = (uint32_t)(cg * 255.0f + 0.5f);
+            c8[bi] = (uint32_t)(cb * 255.0f + 0.5f); c8[3] = 255;
+            for (int x = x0; x < x1; x++) {
+                if (x == sx0) { x = sx1 - 1; continue; }   /* filled above */
+                int i = x - x0, sd = sh_side[i];
+                float qx = qc[i], f;
+                if (qx > 0 && qyr[sd] > 0) {   /* a corner: the one place the distance needs both */
+                    float d = sqrtf(qx * qx + qyr[sd] * qyr[sd]) - sh_rad[half][sd];
+                    float z = d / sh_k;
+                    if (z > CUI__SHADOW_Z1) continue;
+                    f = cui__shadow_falloff(z);
+                } else f = fc[i] < frow[sd] ? fc[i] : frow[sd];
+                float al = ca * f;
+                if (al <= 0.0005f) continue;
+                cui__blend_shadow(row + (size_t)x * 4, c8, al);
+            }
+            continue;
+        }
+        /* (a shadow too wide for the tables: one pixel at a time) */
         for (int x = x0; x < x1; x++) {
             if (x == sx0) { x = sx1 - 1; continue; }   /* filled above */
             float px = (float)x + 0.5f;
@@ -622,26 +714,37 @@ static bool cui__raster_quad(const cui__sw_job *job, const cui_vertex *v0, const
                     o.r = cr * fa + bcr * ba; o.g = cg * fa + bcg * ba; o.b = cb * fa + bcb * ba; o.a = fa + ba;
                 }
             } else if (mode == CUI_SHADE_SHADOW) {
-                int sd = lx < 0 ? 0 : 1;
-                bool same = sh_qy[sd] > 0 && fabsf(lx) - hw + sh_r[sd] <= 0;
-                if (same && sh_have[sd]) {
-                    if (sh_have[sd] == 2) continue;
-                    o = sh_o[sd];
-                } else {
-                    float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
-                    float sigma = bw > 0.01f ? bw : 0.01f;
-                    float z = d / (sigma * 1.41421356f);
-                    if (z > 2.8f) { if (same) sh_have[sd] = 2; continue; }
-                    float al = ca * cui__shadow_falloff(z);
-                    o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
-                    if (same) { sh_o[sd] = o; sh_have[sd] = 1; }
-                }
-            } else {
                 float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
-                float cov = cui__sat(0.5f - d);
-                if (cov <= 0) continue;
+                float sigma = bw > 0.01f ? bw : 0.01f;
+                float z = d / (sigma * 1.41421356f);
+                if (z > CUI__SHADOW_Z1) continue;
+                float al = ca * cui__shadow_falloff(z);
+                o.r = cr * al; o.g = cg * al; o.b = cb * al; o.a = al;
+            } else {
+                /* an image: inside its corners the coverage is 1 without the distance (the test
+                 * a rounded rectangle uses, with no border); a sample on a texel's center reads it
+                 * alone, and an opaque one under a plain tint is that texel's bytes */
+                float ax = fabsf(lx), cov;
+                if ((ax <= hw - 0.5f - rmax && ay <= hh - 0.5f) || (ax <= hw - 0.5f && ay <= hh - 0.5f - rmax)) cov = 1.0f;
+                else {
+                    float d = cui__sd_rrect(lx, ly, hw, hh, v0->r_tl, v0->r_tr, v0->r_br, v0->r_bl);
+                    cov = cui__sat(0.5f - d);
+                    if (cov <= 0) continue;
+                }
                 float u = v0->u + (px - qx0) * du, vv = v0->v + (py - qy0) * dv;
-                cui__px t = tex && tex->fmt == CUI_TEXTURE_RGBA8 ? cui__sample_rgba(tex, u, vv) : (cui__px){ 1, 1, 1, 1 };
+                cui__px t = { 1, 1, 1, 1 };
+                if (tex && tex->fmt == CUI_TEXTURE_RGBA8) {
+                    const uint8_t *tp = cui__texel_at(tex, u, vv);
+                    if (tp && tp[3] == 255 && cov >= 1.0f && plain_tint) {
+                        uint8_t *q = row + (size_t)x * 4;
+                        q[ri] = tp[0]; q[1] = tp[1]; q[bi] = tp[2]; q[3] = 255;
+                        continue;
+                    }
+                    if (tp) {
+                        float a = tp[3] / 255.0f;
+                        t = (cui__px){ tp[0] / 255.0f * a, tp[1] / 255.0f * a, tp[2] / 255.0f * a, a };
+                    } else t = cui__sample_rgba(tex, u, vv);
+                }
                 float k = ca * cov;
                 o.r = t.r * cr * k; o.g = t.g * cg * k; o.b = t.b * cb * k; o.a = t.a * k;
             }
