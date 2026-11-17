@@ -163,6 +163,35 @@ int main(void) {
         cui_app_destroy(app);
     }
 
+#ifdef _WIN32
+    /* a custom title bar has no system frame: desc.x/.y/.has_pos, cui_app_position,
+     * cui_app_set_position and cui_app_placement all name the same corner */
+    app = cui_app_create(&(cui_app_desc){ .title = "CUI window state test", .custom_titlebar = true,
+                                          .width = w, .height = h, .x = 150, .y = 160, .has_pos = true });
+    expect(app != NULL, "custom title bar: window created");
+    if (app) {
+        int px = -1, py = -1;
+        if (reach(app, CUI_WINDOW_NORMAL, "custom title bar: open at x, y")) {
+            expect(cui_app_position(app, &px, &py) && px == 150 && py == 160, "custom title bar: cui_app_position 150,160");
+            expect_size(app, w, h, "custom title bar");
+            expect_placement(app, 150, 160, w, h, CUI_WINDOW_NORMAL, "custom title bar");
+        }
+        cui_app_set_position(app, 230, 210);
+        settle(app, 0.3);
+        expect(cui_app_position(app, &px, &py) && px == 230 && py == 210, "custom title bar: set_position then position 230,210");
+        expect_placement(app, 230, 210, w, h, CUI_WINDOW_NORMAL, "custom title bar moved");
+        cui_app_toggle_maximize(app);
+        if (reach(app, CUI_WINDOW_MAXIMIZED, "custom title bar: toggle to maximized")) {
+            expect(cui_app_is_maximized(app), "custom title bar: cui_app_is_maximized");
+            expect_placement(app, 230, 210, w, h, CUI_WINDOW_MAXIMIZED, "custom title bar maximized");
+            cui_app_toggle_maximize(app);
+            if (reach(app, CUI_WINDOW_NORMAL, "custom title bar: toggle back"))
+                expect_size(app, w, h, "custom title bar restored");
+        }
+        cui_app_destroy(app);
+    }
+#endif
+
     printf("%s: %d failed\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;
 }
