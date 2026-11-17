@@ -129,7 +129,10 @@ bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, floa
     if (width > 0) n->w = CUI_PX(width);
     else if (anchor && !p->no_anchor_w && cui__has_prev_rect(ui, anchor)) n->min_w = cui__prev_rect(ui, anchor).w;
     n->min_w = CUI_MAX(n->min_w, menu ? 180.0f : 0.0f);
-    n->max_h = 420;
+    /* a popup is as tall as its content, up to the window (it used to stop at 420 px and let a long menu
+     * spill its last items outside the panel); past the window it clips rather than draw over the app */
+    n->max_h = CUI_MAX(ui->vh - 16, 120.0f);
+    n->flags |= CUI_NF_CLIP;
     n->opacity = t;
     n->scale = CUI__ENTER_SCALE + (1.0f - CUI__ENTER_SCALE) * t;
     bool up = placement >= CUI_PLACE_TOP_START && placement <= CUI_PLACE_TOP_END;

@@ -130,6 +130,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - The voice orb (`cui_voice_orb`) is deprecated in favor of the voice components. It keeps working, but it has left the gallery and the docs site.
 
 ### Fixed
+- Menus and popovers taller than 420 px no longer draw their last items outside the panel: a popup is now as tall as its content, up to the window, and clips past that.
 
 - The file sidebar highlights one enclosing place or volume, so Home and its drive no longer appear selected together. Double-clicks after an idle interval use the receiving frame's time, fixing missed folder opens in an event-driven app.
 - Disabled flame graphs and timeline editors ignore wheel, pointer and keyboard gestures ([#85](https://github.com/yappologistic/CUI/issues/85)).
