@@ -2282,7 +2282,7 @@ CUI_API void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *qu
  *
  * What a code editor shows for a language server. The list is drawn in a layer above everything, under the caret's
  * line (above it when there is no room), filtered as the user types and sorted best match first (a prefix, then a
- * match at word starts, then any letters in order; the server's order breaks ties). Each row has an icon for its
+ * match at word starts, then any letters in order; within each, the server's order). Each row has an icon for its
  * kind (LSP's CompletionItemKind numbers: 2 method, 3 function, 6 variable, 7 class, 14 keyword...), the label and
  * the detail; the selected item's documentation (markdown) shows beside the list.
  *

@@ -157,19 +157,19 @@ static void test_completion(void) {
     c.filter = "pr";
     c.accepted = -1;
     run(ui, build, &c, 2);
-    /* prefixes first (the same case before), then the rest that has the letters in order */
-    CHECK(c.c.shown == 5 && c.c.selected == 4 && !c.closed);         /* printf */
+    /* prefixes first (the same case before, in the server's order), then the rest that has the letters in order */
+    CHECK(c.c.shown == 5 && c.c.selected == 2 && !c.closed);         /* print_line: before printf in the items */
     key(ui, &c, CUI_KEY_DOWN);
-    CHECK(c.c.selected == 2);                                        /* print_line */
+    CHECK(c.c.selected == 4);                                        /* printf */
     key(ui, &c, CUI_KEY_DOWN);
     CHECK(c.c.selected == 3);                                        /* PrintMode */
     key(ui, &c, CUI_KEY_UP);
     key(ui, &c, CUI_KEY_ENTER);
-    CHECK(c.accepted == 2);
+    CHECK(c.accepted == 4);
     CHECK(!strcmp(c.buf, "int x;\npr\n"));                           /* the editor never saw Enter or the arrows */
     c.accepted = -1;
-    key(ui, &c, CUI_KEY_UP);                                         /* print_line -> printf, the top */
-    CHECK(c.c.selected == 4);
+    key(ui, &c, CUI_KEY_UP);                                         /* printf -> print_line, the top */
+    CHECK(c.c.selected == 2);
     key(ui, &c, CUI_KEY_UP);                                         /* from the top: wraps to the bottom */
     key(ui, &c, CUI_KEY_TAB);
     CHECK(c.accepted == 0);                                          /* sprintf: letters in order, last */
@@ -178,7 +178,7 @@ static void test_completion(void) {
     c.accepted = -1;
     c.filter = "print";                                              /* a new filter: the best match again */
     run(ui, build, &c, 2);
-    CHECK(c.c.shown == 4 && c.c.selected == 4);                      /* printf, print_line, PrintMode, sprintf */
+    CHECK(c.c.shown == 4 && c.c.selected == 2);                      /* print_line, printf, PrintMode, sprintf */
     float row_h = 13.0f + 10.0f, y0 = c.r.caret_y + c.r.caret_h + 2.0f + 4.0f;
     cui_input_mouse_move(ui, c.r.caret_x + 40, y0 + row_h * 2.5f);
     run(ui, build, &c, 1);

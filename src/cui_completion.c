@@ -20,7 +20,7 @@ static int cui__cp_score(const char *label, const char *filter)
 {
     if (!filter || !filter[0]) return 0;
     size_t fl = strlen(filter);
-    if (!_strnicmp(label, filter, fl)) return 3000 + (strncmp(label, filter, fl) == 0 ? 100 : 0) - (int)strlen(label);
+    if (!_strnicmp(label, filter, fl)) return 3000 + (strncmp(label, filter, fl) == 0 ? 100 : 0);   /* among prefix matches the server's order stands (it ranks by relevance) */
     int score = 1000, fi = 0;
     bool word = true;                    /* at the start of a word: the start, after _ or -, a capital after a small letter */
     char prev = 0;
