@@ -248,3 +248,7 @@ endif()
 
 add_executable(cui_bench_log bench_log.c)   # the log view over a big log (1.1 million lines)
 target_link_libraries(cui_bench_log PRIVATE cui::cui)
+
+add_executable(cui_test_completion test_completion.c)
+target_link_libraries(cui_test_completion PRIVATE cui::cui)
+add_test(NAME cui_test_completion COMMAND cui_test_completion)

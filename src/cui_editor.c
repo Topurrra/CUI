@@ -175,6 +175,8 @@ typedef struct {
     cui__ed_job *cjob;          /* the find bar's match count of a big document, counted on another thread, or NULL */
     cui__ed_lci lc[CUI__ED_LC_N];   /* very long lines' column indexes */
     unsigned lc_tick;
+    float hov_mx, hov_my;       /* where the pointer rests over the text, and since when (the result's hover) */
+    double hov_t;
 } cui__ed_state;
 
 /* The piece of a document read last: q[i] is byte i for i in [cs, ce) (q is biased: it points
@@ -3502,6 +3504,26 @@ static void cui__edf_pointer(cui__edf *f) {
     if (f->known) {
         int line = (int)floor(((double)ui->my - y0) / f->lh);
         double col = ((double)ui->mx - f->gx - CUI__ED_GAP + st->sx) / f->cw;
+        bool on_text = f->lr.hovered && !f->over_vbar && !f->over_hbar && ui->mx >= f->gx && line >= 0 && !st->bar_drag;
+        if (on_text) {                                   /* the byte under the pointer, for hover and Ctrl+click */
+            bool aff = false;
+            int pos = E->wrap ? cui__ed_vpick(E, line, col, &aff) : cui__ed_pos(E, line, col);
+            bool in_line = pos < E->len && cui__ed_ch(E, pos) != '\n' && cui__ed_ch(E, pos) != '\r';
+            if (ui->mpressed[0] && (f->mods & (CUI_MOD_CTRL | CUI_MOD_SUPER)) && in_line) {
+                f->res->ctrl_click = true;
+                f->res->ctrl_click_offset = pos;
+            }
+            float dx = ui->mx - st->hov_mx, dy = ui->my - st->hov_my;
+            if (dx * dx + dy * dy > 9.0f || ui->mdown[0]) { st->hov_mx = ui->mx; st->hov_my = ui->my; st->hov_t = ui->time; }
+            else if (in_line && ui->time - st->hov_t >= 0.5) {
+                f->res->hover = true;
+                f->res->hover_offset = pos;
+                f->res->hover_x = ui->mx;
+                f->res->hover_y = ui->my;
+            } else if (in_line) cui__wakeup_after(ui, (float)(0.5 - (ui->time - st->hov_t)) + 0.01f);
+        } else {
+            st->hov_mx = st->hov_my = -1e9f;            /* off the text: the rest starts again */
+        }
         if (f->lr.hovered && ui->mpressed[0]) cui__edf_press(f, line, col);
         if (st->bar_drag && f->lr.active && ui->mdown[0]) cui__edf_bar_drag(f);
         if (st->drag && f->lr.active && ui->mdown[0] && !ui->mpressed[0]) cui__edf_drag_select(f);
@@ -4214,10 +4236,13 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     cui__edf_follow_caret(&f);
     cui__edf_build_lines(&f, &L, json, dark);
     if (f.focused) cui__wakeup_after(ui, 0.53f);
-    if (f.focused && ui->platform.set_text_input_rect) {
+    {
         cui_rect cr = { f.gx + CUI__ED_GAP + (float)((double)f.caret_vcol * f.cw - st->sx),
                         f.br.y + CUI__ED_INSET + (float)((double)(E.wrap ? f.caret_row : f.caret_line) * f.lh - st->sy), 1, f.lh };
-        ui->platform.set_text_input_rect(ui->platform.user, cr);
+        if (f.focused && ui->platform.set_text_input_rect) ui->platform.set_text_input_rect(ui->platform.user, cr);
+        res.caret_x = cr.x;
+        res.caret_y = cr.y;
+        res.caret_h = cr.h;
     }
     if (f.focused && !o->borderless) cui__focus_ring(ui, outer, ui->focus_visible ? 1.0f : 0.0f);
     cui__close(ui);   /* outer */

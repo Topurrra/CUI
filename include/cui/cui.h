@@ -2218,6 +2218,16 @@ typedef struct cui_code_editor_result {
     bool working;              /* work for a big text runs on another thread: colors below an edit far above the view are
                                 * still being found, Replace all is still finding its matches, or the find bar still counts them (it says so).
                                 * The editor asks for frames until it is done; nothing waits for it. */
+    /* For language tools (hover, completion, go to definition), all in window points: */
+    bool hover;                /* the pointer has rested on the text for half a second (and stays there): hover_offset is the
+                                * byte under it, hover_x/y the pointer. Not past the end of a line, not while a button is down. */
+    int hover_offset;
+    float hover_x, hover_y;
+    float caret_x, caret_y, caret_h;   /* the caret's box this frame (it may be scrolled out of the editor's view): where a
+                                * completion list or a signature tip goes. Set whether or not the editor has the focus. */
+    bool ctrl_click;           /* Ctrl (Cmd on macOS) and a click on the text this frame: ctrl_click_offset is the byte clicked
+                                * (go to definition). The click still moves the caret there. */
+    int ctrl_click_offset;
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),
@@ -2268,6 +2278,66 @@ CUI_API void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *qu
 #ifndef __cplusplus
 #define cui_code_editor(ui, id, buf, cap, ...) cui_code_editor_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_code_editor_opts, __VA_ARGS__))
 #endif
+/* ---- Completion list and signature tip ----
+ *
+ * What a code editor shows for a language server. The list is drawn in a layer above everything, under the caret's
+ * line (above it when there is no room), filtered as the user types and sorted best match first (a prefix, then a
+ * match at word starts, then any letters in order; the server's order breaks ties). Each row has an icon for its
+ * kind (LSP's CompletionItemKind numbers: 2 method, 3 function, 6 variable, 7 class, 14 keyword...), the label and
+ * the detail; the selected item's documentation (markdown) shows beside the list.
+ *
+ * Call it every frame the list is open, BEFORE the editor: it takes Up, Down, Page Up, Page Down, Enter, Tab and
+ * Escape, so the editor never sees them, while typed characters still reach the editor (pass what was typed since
+ * the list opened as .filter). x and y are the caret's box (cui_code_editor_result caret_x, caret_y, caret_h as
+ * line_h), so it trails one frame behind the caret, which nobody sees.
+ *
+ *     cui_completion_result c = cui_completion(ui, "complete", items, n, .x = er.caret_x, .y = er.caret_y,
+ *                                              .line_h = er.caret_h, .filter = typed);
+ *     if (c.accepted >= 0) insert(items[c.accepted]);   (Enter, Tab or a click)
+ *     if (c.closed) open = false;                       (Escape, or nothing matches)
+ *     er = cui_code_editor(ui, "code", ...);
+ */
+typedef struct cui_completion_item {
+    const char *label;          /* what is shown and matched */
+    const char *detail;         /* a short muted note at the right: a type, a signature */
+    const char *doc;            /* markdown beside the list while selected; NULL for none */
+    int kind;                   /* LSP CompletionItemKind (1..25); 0 plain text */
+} cui_completion_item;
+typedef struct cui_completion_opts {
+    int _;
+    float x, y, line_h;         /* the caret's box in window points */
+    const char *filter;         /* typed so far: filters and sorts; NULL or "" shows every item */
+    int max_rows;               /* rows in view, default 10 */
+    float width;                /* the list's width, default 380 */
+    float doc_width;            /* the documentation's width, default 340 */
+    float size;                 /* font size, default 13 */
+    bool no_keys;               /* leave the keys alone (the host routes them itself) */
+    bool no_doc;                /* never show the documentation */
+} cui_completion_opts;
+typedef struct cui_completion_result {
+    int accepted;               /* the item chosen this frame (an index into items), or -1 */
+    int selected;               /* the item selected now, or -1 */
+    int shown;                  /* items that pass the filter */
+    bool closed;                /* Escape was pressed, or nothing passes the filter: the host closes the list */
+} cui_completion_result;
+CUI_API cui_completion_result cui_completion_ex(cui_ctx *ui, const char *id, const cui_completion_item *items, int count,
+                                                const cui_completion_opts *opts);
+#define cui_completion(ui, id, items, count, ...) cui_completion_ex((ui), (id), (items), (count), CUI__OPTS(cui_completion_opts, __VA_ARGS__))
+
+/* A signature tip: a call's signature above the caret's line (below it when there is no room), the active parameter
+ * (bytes [active_start, active_end) of label) in the accent color, and its documentation under it. Every frame it
+ * is shown; it takes no keys. */
+typedef struct cui_signature_tip_opts {
+    int _;
+    float x, y, line_h;         /* the caret's box in window points */
+    const char *doc;            /* markdown under the signature; NULL for none */
+    float width;                /* at most, default 520 */
+    float size;                 /* font size, default 13 */
+} cui_signature_tip_opts;
+CUI_API void cui_signature_tip_ex(cui_ctx *ui, const char *id, const char *label, int active_start, int active_end,
+                                  const cui_signature_tip_opts *opts);
+#define cui_signature_tip(ui, id, label, a, b, ...) cui_signature_tip_ex((ui), (id), (label), (a), (b), CUI__OPTS(cui_signature_tip_opts, __VA_ARGS__))
+
 /* ---- Diff viewer ---- */
 
 /* Diff viewer: compares two versions of a text line by line, side by side or
