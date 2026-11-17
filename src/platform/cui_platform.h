@@ -41,6 +41,7 @@ struct cui_app {
     const char *screenshot_path;  /* CUI_SCREENSHOT: save a PNG and quit */
     int screenshot_frames;
     int frames;
+    cui_window_placement placement;   /* the copy desc.placement points to, when one was given */
 };
 
 /* Implemented by each backend. */
@@ -67,11 +68,13 @@ void cui__plat_wait(cui_app *app, double timeout);   /* < 0 waits for the next e
 void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w, int *fb_h);
 void cui__plat_set_title(cui_app *app, const char *title);
 void cui__plat_set_size(cui_app *app, int w, int h);
-void cui__plat_set_position(cui_app *app, int x, int y);   /* the outer frame's top left, screen coordinates */
-bool cui__plat_position(cui_app *app, int *x, int *y);     /* false where the backend cannot tell */
+/* the top left of the content now, in the coordinates of cui_window_placement (a minimized window:
+ * where it comes back); false where the backend cannot tell */
+bool cui__plat_position(cui_app *app, int *x, int *y);
 void cui__plat_show(cui_app *app);
 void *cui__plat_native(cui_app *app);
-/* window controls: 0 minimize, 1 toggle maximize, 2 start a drag, 3 is maximized, 4 has a custom title bar */
+/* custom title bar controls: 2 start a drag, 4 has a custom title bar (0, 1 and 3 are no longer used:
+ * cui__plat_minimize, cui__plat_maximize, cui__plat_restore and cui__plat_window_state do those) */
 bool cui__plat_window_op(cui_app *app, int op);
 const char *cui__plat_name(void);
 double cui__plat_now(void);
@@ -83,5 +86,16 @@ bool cui__plat_open_url(const char *url);
 void cui__app_render(cui_app *app);                   /* end frame (if open), render, present */
 void cui__app_live_frame(cui_app *app);               /* run one frame from inside a resize loop */
 void cui__app_set_clipboard_cache(cui_app *app, const char *utf8);
+
+void cui__plat_maximize(cui_app *app);
+void cui__plat_minimize(cui_app *app);
+void cui__plat_restore(cui_app *app);
+cui_window_state cui__plat_window_state(cui_app *app);
+void cui__plat_set_position(cui_app *app, int x, int y);   /* the top left of the content, as cui_app_set_position */
+/* Fills in the normal size and place, and the state: maximized also for a minimized window that
+ * comes back maximized. desc.placement, when set (cui_app_create also makes one from x, y, has_pos
+ * and start_maximized), has already set desc.width and desc.height;
+ * cui__plat_init places the window and cui__plat_show opens it maximized. */
+void cui__plat_placement(cui_app *app, cui_window_placement *out);
 
 #endif

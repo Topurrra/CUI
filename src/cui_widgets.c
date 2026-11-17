@@ -1148,11 +1148,13 @@ void cui_image_ex(cui_ctx *ui, cui_texture tex, const cui_image_opts *o) {
     n->paint_data = p;
 }
 
-typedef struct { cui_paint_fn fn; void *user; } cui__canvas_paint;
+typedef struct { cui_paint_fn fn; void *user; bool disabled; } cui__canvas_paint;
 static void cui__paint_canvas(cui_ctx *ui, cui_node *n, void *data) {
     cui__canvas_paint *p = data;
     cui_push_clip(ui, n->rect);
+    if (p->disabled) ui->disabled_depth++;   /* the paint callback sees the scope it was built in */
     p->fn(ui, n->rect, p->user);
+    if (p->disabled) ui->disabled_depth--;
     cui_pop_clip(ui);
 }
 
@@ -1169,6 +1171,7 @@ cui_canvas_result cui_canvas(cui_ctx *ui, const char *id_str, cui_size w, cui_si
     if (paint) {
         cui__canvas_paint *p = cui__frame_alloc(ui, sizeof *p);
         p->fn = paint;
+        p->disabled = cui_is_disabled(ui);
         if (user && user_size) { p->user = cui__frame_alloc(ui, user_size); memcpy(p->user, user, user_size); }
         else p->user = (void *)user;
         ui->nodes[i].paint = cui__paint_canvas;

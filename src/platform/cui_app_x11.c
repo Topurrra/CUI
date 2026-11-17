@@ -1,6 +1,6 @@
 /* X11 backend (Linux, BSD). Uses Xlib for windows and input, XIM for text
- * input, GLX (loaded at runtime) for OpenGL and XPutImage for the software
- * renderer. Links only against libX11. */
+ * input with the candidate window at the caret, GLX (loaded at runtime) for
+ * OpenGL and XPutImage for the software renderer. Links only against libX11. */
 #include "cui_platform.h"
 
 #include <X11/Xlib.h>
@@ -59,7 +59,14 @@ typedef struct {
     int depth;
     XIM im;
     XIC ic;
+    XFontSet ic_fontset;       /* core font set; XIMPreeditPosition needs one for the preedit */
+    XVaNestedList ime_attrs;   /* XNSpotLocation (+ XNFontSet) handed to the IC, updated in place */
+    XPoint ime_spot;           /* caret, in window pixels */
+    bool ime_spot_ok;          /* the IC takes a spot, so the IME opens at the caret */
+    bool ime_spot_set;
+    unsigned long event_mask;
     Atom wm_delete, wm_protocols, net_wm_name, utf8_string, clipboard, targets, cui_sel, net_wm_icon_name;
+    Atom wm_state, net_wm_state, net_wm_maximized_horz, net_wm_maximized_vert, net_wm_hidden, net_active_window;
     Cursor cursors[CUI_CURSOR_COUNT];
     cui_cursor current_cursor;
     int width, height;     /* pixels */
@@ -79,6 +86,10 @@ typedef struct {
     char *clip_owned;
     char *clip_read;
     bool mapped;
+    /* X11 keeps no normal size and place for a maximized window: noted while it is normal */
+    int normal_x, normal_y, normal_w, normal_h;   /* content origin on the root window, size in pixels */
+    bool normal_pos_known;
+    bool geometry_changed;                        /* a ConfigureNotify came: note them after the batch */
     /* drag and drop (XDND) */
     Atom xdnd_aware, xdnd_enter, xdnd_position, xdnd_status, xdnd_leave, xdnd_drop, xdnd_finished,
          xdnd_selection, xdnd_action_copy, uri_list, cui_xdnd;
@@ -130,6 +141,7 @@ static float cui__x11_dpi_scale(Display *dpy) {
 static const char *cui__x11_get_clip(void *user);
 static void cui__x11_set_clip(void *user, const char *utf8);
 static void cui__x11_set_cursor(void *user, cui_cursor c);
+static void cui__x11_text_input_rect(void *user, cui_rect caret);
 
 static bool cui__x11_load_glx(cui__x11 *x) {
     if (!cui__x11_libgl) cui__x11_libgl = dlopen("libGL.so.1", RTLD_NOW | RTLD_GLOBAL);
@@ -142,6 +154,59 @@ static bool cui__x11_load_glx(cui__x11 *x) {
     x->SwapBuffers = (PFN_glXSwapBuffers)dlsym(x->libgl, "glXSwapBuffers");
     x->DestroyContext = (PFN_glXDestroyContext)dlsym(x->libgl, "glXDestroyContext");
     return x->GetProcAddress && x->MakeCurrent && x->SwapBuffers && x->DestroyContext;
+}
+
+/* Input styles to ask for, best first. XIMPreeditPosition is the only one that
+ * gives the input method a spot (XNSpotLocation) to open its candidate list and
+ * its preedit at; XIMPreeditNothing leaves it guessing. A spot needs an
+ * XFontSet, which XIM uses to draw the preedit: CUI draws its own text, so a
+ * font set of the server's default font is enough. Status is never drawn by
+ * CUI. The best style without a spot comes back through `fallback`; the return
+ * value is 0 when the input method lists no style at all. */
+static unsigned long cui__x11_style(XIM im, bool have_fontset, unsigned long *fallback) {
+    unsigned long want[4];
+    int count = 0;
+    if (have_fontset) {
+        want[count++] = XIMPreeditPosition | XIMStatusNothing;
+        want[count++] = XIMPreeditPosition | XIMStatusNone;
+    }
+    want[count++] = XIMPreeditNothing | XIMStatusNothing;
+    want[count++] = XIMPreeditNothing | XIMStatusNone;
+
+    unsigned long style = 0, plain = 0;
+    XIMStyles *styles = NULL;
+    if (XGetIMValues(im, XNQueryInputStyle, &styles, NULL) != NULL || !styles) return 0;
+    for (int w = 0; w < count && !style; w++)
+        for (int i = 0; i < styles->count_styles && !style; i++)
+            if (styles->supported_styles[i] == want[w]) style = want[w];
+    for (int w = 0; w < count && !plain; w++) {
+        if (want[w] & XIMPreeditPosition) continue;
+        for (int i = 0; i < styles->count_styles && !plain; i++)
+            if (styles->supported_styles[i] == want[w]) plain = want[w];
+    }
+    XFree(styles);
+    *fallback = plain;
+    return style;
+}
+
+/* An XIC for the text fields. With a spot the input method is told where the
+ * caret is whenever it moves (see set_text_input_rect below), so the candidate
+ * window opens there instead of at the pointer. */
+static XIC cui__x11_create_ic(cui__x11 *x) {
+    unsigned long plain = 0;
+    unsigned long style = cui__x11_style(x->im, x->ic_fontset != NULL, &plain);
+    if (style & XIMPreeditPosition) {
+        x->ime_attrs = XVaCreateNestedList(0, XNSpotLocation, &x->ime_spot, XNFontSet, x->ic_fontset, NULL);
+        XIC ic = XCreateIC(x->im, XNInputStyle, style, XNClientWindow, x->win, XNFocusWindow, x->win,
+                           XNPreeditAttributes, x->ime_attrs, NULL);
+        if (ic) { x->ime_spot_ok = true; return ic; }
+        /* the input method offered a spot but would not create the IC: old style */
+        XFree(x->ime_attrs);
+        x->ime_attrs = NULL;
+        style = plain;
+    }
+    if (!style) style = XIMPreeditNothing | XIMStatusNothing;   /* the input method is silent; try the old default */
+    return XCreateIC(x->im, XNInputStyle, style, XNClientWindow, x->win, XNFocusWindow, x->win, NULL);
 }
 
 bool cui__plat_init(cui_app *app) {
@@ -189,10 +254,20 @@ bool cui__plat_init(cui_app *app) {
     swa.background_pixel = ((unsigned long)bg.r << 16) | ((unsigned long)bg.g << 8) | bg.b;
     swa.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | EnterWindowMask | LeaveWindowMask | StructureNotifyMask | FocusChangeMask;
+    x->event_mask = swa.event_mask;
     x->width = (int)(app->desc.width * x->scale);
     x->height = (int)(app->desc.height * x->scale);
-    x->win = XCreateWindow(x->dpy, root, 0, 0, (unsigned)x->width, (unsigned)x->height, 0, x->depth, InputOutput, x->visual,
-                           CWColormap | CWBorderPixel | CWBackPixel | CWEventMask, &swa);
+    x->normal_w = x->width;
+    x->normal_h = x->height;
+    const cui_window_placement *pl = app->desc.placement;
+    if (pl && pl->has_position && pl->y >= 0 && pl->y < DisplayHeight(x->dpy, x->screen) &&
+        pl->x < DisplayWidth(x->dpy, x->screen) && pl->x + x->width > 0) {
+        x->normal_x = pl->x;   /* on the screen: a place on a monitor that was unplugged is left to the window manager */
+        x->normal_y = pl->y;
+        x->normal_pos_known = true;
+    }
+    x->win = XCreateWindow(x->dpy, root, x->normal_x, x->normal_y, (unsigned)x->width, (unsigned)x->height, 0, x->depth, InputOutput,
+                           x->visual, CWColormap | CWBorderPixel | CWBackPixel | CWEventMask, &swa);
     if (!x->win) { XCloseDisplay(x->dpy); free(x); app->plat = NULL; return false; }
     x->wm_protocols = XInternAtom(x->dpy, "WM_PROTOCOLS", False);
     x->wm_delete = XInternAtom(x->dpy, "WM_DELETE_WINDOW", False);
@@ -202,6 +277,12 @@ bool cui__plat_init(cui_app *app) {
     x->clipboard = XInternAtom(x->dpy, "CLIPBOARD", False);
     x->targets = XInternAtom(x->dpy, "TARGETS", False);
     x->cui_sel = XInternAtom(x->dpy, "CUI_SELECTION", False);
+    x->wm_state = XInternAtom(x->dpy, "WM_STATE", False);
+    x->net_wm_state = XInternAtom(x->dpy, "_NET_WM_STATE", False);
+    x->net_wm_maximized_horz = XInternAtom(x->dpy, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+    x->net_wm_maximized_vert = XInternAtom(x->dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    x->net_wm_hidden = XInternAtom(x->dpy, "_NET_WM_STATE_HIDDEN", False);
+    x->net_active_window = XInternAtom(x->dpy, "_NET_ACTIVE_WINDOW", False);
     XSetWMProtocols(x->dpy, x->win, &x->wm_delete, 1);
     /* accept files dragged from file managers (XDND version 5) */
     x->xdnd_aware = XInternAtom(x->dpy, "XdndAware", False);
@@ -221,7 +302,14 @@ bool cui__plat_init(cui_app *app) {
     }
     XSizeHints *hints = XAllocSizeHints();
     if (hints) {
-        hints->flags = PMinSize;
+        /* static gravity: positions name the content's corner, not the window manager's frame */
+        hints->flags = PMinSize | PWinGravity;
+        hints->win_gravity = StaticGravity;
+        if (x->normal_pos_known) {
+            hints->flags |= USPosition;
+            hints->x = x->normal_x;
+            hints->y = x->normal_y;
+        }
         hints->min_width = (int)(app->desc.min_width * x->scale);
         hints->min_height = (int)(app->desc.min_height * x->scale);
         if (app->desc.fixed_size) {
@@ -246,7 +334,20 @@ bool cui__plat_init(cui_app *app) {
     XSetLocaleModifiers("");
     x->im = XOpenIM(x->dpy, NULL, NULL, NULL);
     if (!x->im) { XSetLocaleModifiers("@im=none"); x->im = XOpenIM(x->dpy, NULL, NULL, NULL); }
-    if (x->im) x->ic = XCreateIC(x->im, XNInputStyle, XIMPreeditNothing | XIMStatusNothing, XNClientWindow, x->win, XNFocusWindow, x->win, NULL);
+    if (x->im) {
+        char **missing = NULL;
+        int missing_count = 0;
+        char *missing_default = NULL;
+        x->ic_fontset = XCreateFontSet(x->dpy, "-*-*-*-*-*-*-*-*-*-*-*-*-*", &missing, &missing_count, &missing_default);
+        if (missing) XFreeStringList(missing);
+        x->ic = cui__x11_create_ic(x);
+        if (x->ic) {
+            /* events the input method wants while it composes, on top of ours */
+            unsigned long filter = 0;
+            if (XGetICValues(x->ic, XNFilterEvents, &filter, NULL) == NULL && filter)
+                XSelectInput(x->dpy, x->win, x->event_mask | filter);
+        }
+    }
     unsigned int shapes[CUI_CURSOR_COUNT] = { XC_left_ptr, XC_hand2, XC_xterm, XC_sb_h_double_arrow, XC_sb_v_double_arrow, XC_fleur, XC_X_cursor };
     for (int i = 0; i < CUI_CURSOR_COUNT; i++) x->cursors[i] = XCreateFontCursor(x->dpy, shapes[i]);
     x->gc = XCreateGC(x->dpy, x->win, 0, NULL);
@@ -256,12 +357,32 @@ bool cui__plat_init(cui_app *app) {
     pi.get_clipboard = cui__x11_get_clip;
     pi.set_clipboard = cui__x11_set_clip;
     pi.set_cursor = cui__x11_set_cursor;
+    pi.set_text_input_rect = cui__x11_text_input_rect;
     cui_set_platform(app->ui, &pi);
     return true;
 }
 
+/* True while an EWMH window manager runs: it names its check window on the root. */
+static bool cui__x11_has_ewmh(cui__x11 *x) {
+    Atom check = XInternAtom(x->dpy, "_NET_SUPPORTING_WM_CHECK", False), type;
+    int format;
+    unsigned long count, after;
+    unsigned char *data = NULL;
+    bool found = XGetWindowProperty(x->dpy, RootWindow(x->dpy, x->screen), check, 0, 1, False, XA_WINDOW, &type, &format,
+                                    &count, &after, &data) == Success && data && count == 1;
+    if (data) XFree(data);
+    return found;
+}
+
 void cui__plat_show(cui_app *app) {
     cui__x11 *x = cui__x(app);
+    const cui_window_placement *pl = app->desc.placement;
+    if (pl && pl->state == CUI_WINDOW_MAXIMIZED && cui__x11_has_ewmh(x)) {
+        /* EWMH: a window that is not mapped yet asks for its state with the property. Without a
+         * window manager to carry it out, the property would only claim a maximized window. */
+        Atom maximized[2] = { x->net_wm_maximized_horz, x->net_wm_maximized_vert };
+        XChangeProperty(x->dpy, x->win, x->net_wm_state, XA_ATOM, 32, PropModeReplace, (unsigned char *)maximized, 2);
+    }
     XMapWindow(x->dpy, x->win);
     XFlush(x->dpy);
     x->mapped = true;
@@ -272,8 +393,10 @@ void cui__plat_shutdown(cui_app *app) {
     if (!x) return;
     if (x->ctx) { x->MakeCurrent(x->dpy, None, NULL); x->DestroyContext(x->dpy, x->ctx); }
     if (x->image) { x->image->data = NULL; XDestroyImage(x->image); }
+    if (x->ime_attrs) XFree(x->ime_attrs);
     if (x->ic) XDestroyIC(x->ic);
     if (x->im) XCloseIM(x->im);
+    if (x->ic_fontset) XFreeFontSet(x->dpy, x->ic_fontset);
     for (int i = 0; i < CUI_CURSOR_COUNT; i++) if (x->cursors[i]) XFreeCursor(x->dpy, x->cursors[i]);
     if (x->gc) XFreeGC(x->dpy, x->gc);
     XDestroyWindow(x->dpy, x->win);
@@ -378,8 +501,6 @@ void cui__plat_set_title(cui_app *app, const char *title) {
 }
 
 /* window positions are not implemented here yet (cui_app_position returns false) */
-void cui__plat_set_position(cui_app *app, int x, int y) { (void)app; (void)x; (void)y; }
-bool cui__plat_position(cui_app *app, int *x, int *y) { (void)app; (void)x; (void)y; return false; }
 
 void cui__plat_set_size(cui_app *app, int w, int h) {
     cui__x11 *x = cui__x(app);
@@ -390,6 +511,12 @@ void cui__plat_set_size(cui_app *app, int w, int h) {
 void *cui__plat_native(cui_app *app) { return (void *)(uintptr_t)cui__x(app)->win; }
 bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
+/* Where the content's top-left corner is on the root window. */
+static void cui__x11_content_origin(cui__x11 *x, int *px, int *py) {
+    Window child;
+    if (!XTranslateCoordinates(x->dpy, x->win, RootWindow(x->dpy, x->screen), 0, 0, px, py, &child)) *px = *py = 0;
+}
+
 static void cui__x11_set_cursor(void *user, cui_cursor c) {
     cui_app *app = user;
     cui__x11 *x = cui__x(app);
@@ -397,6 +524,24 @@ static void cui__x11_set_cursor(void *user, cui_cursor c) {
     x->current_cursor = c;
     XDefineCursor(x->dpy, x->win, x->cursors[c]);
     XFlush(x->dpy);
+}
+
+/* CUI calls this every frame a text field has focus, with the caret in window
+ * points; the input method hears about it only when the caret moved. XIM takes
+ * the spot in window pixels, as xterm and the other XIM clients send it, and
+ * opens the candidate list under it. */
+static void cui__x11_text_input_rect(void *user, cui_rect caret) {
+    cui_app *app = user;
+    cui__x11 *x = cui__x(app);
+    if (!x || !x->ic || !x->ime_spot_ok) return;
+    float s = x->scale;
+    XPoint spot;
+    spot.x = (short)(caret.x * s + 0.5f);
+    spot.y = (short)((caret.y + caret.h) * s + 0.5f);   /* bottom of the line */
+    if (x->ime_spot_set && spot.x == x->ime_spot.x && spot.y == x->ime_spot.y) return;
+    x->ime_spot = spot;
+    x->ime_spot_set = true;
+    XSetICValues(x->ic, XNPreeditAttributes, x->ime_attrs, NULL);
 }
 
 static void cui__x11_set_clip(void *user, const char *utf8) {
@@ -632,6 +777,7 @@ static void cui__x11_event(cui_app *app, XEvent *ev) {
         if (ev->xselection.property == x->cui_xdnd || (ev->xselection.selection == x->xdnd_selection)) cui__x11_xdnd_selection(app, &ev->xselection);
         break;
     case ConfigureNotify:
+        x->geometry_changed = true;
         if (ev->xconfigure.width != x->width || ev->xconfigure.height != x->height) {
             x->width = ev->xconfigure.width;
             x->height = ev->xconfigure.height;
@@ -735,6 +881,139 @@ void cui__plat_wait(cui_app *app, double timeout) {
         XNextEvent(x->dpy, &ev);
         cui__x11_event(app, &ev);
     }
+    /* after the whole batch, which also carries a state change that came with the move */
+    if (x->geometry_changed) {
+        x->geometry_changed = false;
+        if (x->mapped && cui__plat_window_state(app) == CUI_WINDOW_NORMAL) {
+            int px, py;
+            cui__x11_content_origin(x, &px, &py);
+            /* another client can maximize the window between the two queries: keep only a place
+             * read while the window stayed normal, and only with the size it had then */
+            if (cui__plat_window_state(app) == CUI_WINDOW_NORMAL && !XPending(x->dpy)) {
+                x->normal_x = px;
+                x->normal_y = py;
+                x->normal_pos_known = true;
+                x->normal_w = x->width;
+                x->normal_h = x->height;
+            } else {
+                x->geometry_changed = true;   /* try again after the next batch */
+            }
+        }
+    }
+}
+
+/* Asks the window manager to add (1) or remove (0) two _NET_WM_STATE properties. */
+static void cui__x11_send_state(cui__x11 *x, long action, Atom a, Atom b) {
+    XEvent e;
+    memset(&e, 0, sizeof e);
+    e.xclient.type = ClientMessage;
+    e.xclient.window = x->win;
+    e.xclient.message_type = x->net_wm_state;
+    e.xclient.format = 32;
+    e.xclient.data.l[0] = action;
+    e.xclient.data.l[1] = (long)a;
+    e.xclient.data.l[2] = (long)b;
+    e.xclient.data.l[3] = 1; /* source: application */
+    XSendEvent(x->dpy, DefaultRootWindow(x->dpy), False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
+    XFlush(x->dpy);
+}
+
+void cui__plat_maximize(cui_app *app) {
+    cui__x11 *x = cui__x(app);
+    if (x && x->dpy && x->win) cui__x11_send_state(x, 1, x->net_wm_maximized_horz, x->net_wm_maximized_vert);
+}
+
+void cui__plat_minimize(cui_app *app) {
+    cui__x11 *x = cui__x(app);
+    XIconifyWindow(x->dpy, x->win, x->screen);
+    XFlush(x->dpy);
+}
+
+void cui__plat_restore(cui_app *app) {
+    cui__x11 *x = cui__x(app);
+    cui_window_state state = cui__plat_window_state(app);
+    if (state == CUI_WINDOW_MAXIMIZED) {
+        cui__x11_send_state(x, 0, x->net_wm_maximized_horz, x->net_wm_maximized_vert);
+    } else if (state == CUI_WINDOW_MINIMIZED) {
+        /* ICCCM: mapping an iconic window makes it normal again; EWMH: activating raises it */
+        XMapWindow(x->dpy, x->win);
+        XEvent e;
+        memset(&e, 0, sizeof e);
+        e.xclient.type = ClientMessage;
+        e.xclient.window = x->win;
+        e.xclient.message_type = x->net_active_window;
+        e.xclient.format = 32;
+        e.xclient.data.l[0] = 1; /* source: application */
+        XSendEvent(x->dpy, DefaultRootWindow(x->dpy), False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
+        XFlush(x->dpy);
+    }
+}
+
+/* Reads _NET_WM_STATE and WM_STATE. A minimized window keeps its maximized properties. */
+static void cui__x11_read_state(cui__x11 *x, bool *maximized, bool *minimized) {
+    bool horz = false, vert = false, hidden = false;
+    Atom type;
+    int format;
+    unsigned long count, after;
+    unsigned char *data = NULL;
+    if (XGetWindowProperty(x->dpy, x->win, x->net_wm_state, 0, 64, False, XA_ATOM, &type, &format, &count, &after, &data) == Success &&
+        data && format == 32) {
+        const Atom *atoms = (const Atom *)data;   /* format 32 arrives as an array of longs */
+        for (unsigned long i = 0; i < count; i++) {
+            if (atoms[i] == x->net_wm_maximized_horz) horz = true;
+            if (atoms[i] == x->net_wm_maximized_vert) vert = true;
+            if (atoms[i] == x->net_wm_hidden) hidden = true;
+        }
+    }
+    if (data) XFree(data);
+    /* ICCCM WM_STATE, for window managers that minimize without _NET_WM_STATE_HIDDEN */
+    data = NULL;
+    if (XGetWindowProperty(x->dpy, x->win, x->wm_state, 0, 2, False, x->wm_state, &type, &format, &count, &after, &data) == Success &&
+        data && format == 32 && count >= 1 && ((const long *)data)[0] == IconicState)
+        hidden = true;
+    if (data) XFree(data);
+    *maximized = horz && vert;
+    *minimized = hidden;
+}
+
+cui_window_state cui__plat_window_state(cui_app *app) {
+    bool maximized, minimized;
+    cui__x11_read_state(cui__x(app), &maximized, &minimized);
+    return minimized ? CUI_WINDOW_MINIMIZED : maximized ? CUI_WINDOW_MAXIMIZED : CUI_WINDOW_NORMAL;
+}
+
+void cui__plat_set_position(cui_app *app, int px, int py) {
+    cui__x11 *x = cui__x(app);
+    XMoveWindow(x->dpy, x->win, px, py);   /* static gravity: the content's corner */
+    XFlush(x->dpy);
+}
+
+bool cui__plat_position(cui_app *app, int *px, int *py) {
+    cui__x11 *x = cui__x(app);
+    bool maximized, minimized;
+    cui__x11_read_state(x, &maximized, &minimized);
+    if (minimized) {   /* where it comes back */
+        if (!x->normal_pos_known) return false;
+        *px = x->normal_x;
+        *py = x->normal_y;
+        return true;
+    }
+    cui__x11_content_origin(x, px, py);
+    return true;
+}
+
+void cui__plat_placement(cui_app *app, cui_window_placement *out) {
+    cui__x11 *x = cui__x(app);
+    /* the bounds noted after the last event batch: a live read can catch the window manager
+     * between placing the frame and reporting a new state */
+    bool maximized, minimized;
+    cui__x11_read_state(x, &maximized, &minimized);
+    out->x = x->normal_x;
+    out->y = x->normal_y;
+    out->width = (int)((float)x->normal_w / x->scale + 0.5f);
+    out->height = (int)((float)x->normal_h / x->scale + 0.5f);
+    out->has_position = x->normal_pos_known;
+    out->state = maximized ? CUI_WINDOW_MAXIMIZED : CUI_WINDOW_NORMAL;
 }
 
 /* OpenGL is set up on the app's thread before the first frame (see cui_app_win32.c for the other way) */

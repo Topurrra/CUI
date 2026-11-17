@@ -75,6 +75,32 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     if (d->height <= 0) d->height = 720;
     if (d->min_width <= 0) d->min_width = 360;
     if (d->min_height <= 0) d->min_height = 280;
+    if (d->placement) {
+        /* backends read the size from width and height, and only a maximized state at opening */
+        app->placement = *d->placement;
+        d->placement = &app->placement;
+        cui_window_placement *p = &app->placement;
+        if (p->width > 0) d->width = p->width;
+        if (p->height > 0) d->height = p->height;
+        if (d->width < d->min_width) d->width = d->min_width;
+        if (d->height < d->min_height) d->height = d->min_height;
+        p->width = d->width;
+        p->height = d->height;
+        if (p->state != CUI_WINDOW_MAXIMIZED) p->state = CUI_WINDOW_NORMAL;
+    } else if (d->has_pos || d->start_maximized) {
+        /* x, y, has_pos and start_maximized are a placement at width x height, so every backend
+         * opens a window in place or maximized the one way */
+        cui_window_placement *p = &app->placement;
+        p->width = d->width;
+        p->height = d->height;
+        d->placement = p;
+    }
+    if (d->placement) {
+        cui_window_placement *p = &app->placement;
+        if (d->has_pos && !p->has_position) { p->x = d->x; p->y = d->y; p->has_position = true; }
+        if (d->start_maximized) p->state = CUI_WINDOW_MAXIMIZED;
+        if (d->fixed_size) p->state = CUI_WINDOW_NORMAL;
+    }
     cui_theme_mode mode = d->theme;
     if (d->follow_system_theme) {
         int dark = cui__plat_system_dark();
@@ -186,9 +212,6 @@ bool cui_app_is_software(cui_app *app) { app = cui__app_or_current(app); return 
 void *cui_app_native_window(cui_app *app) { app = cui__app_or_current(app); return app ? cui__plat_native(app) : NULL; }
 const char *cui_app_backend(cui_app *app) { (void)app; return cui__plat_name(); }
 bool cui_app_has_custom_titlebar(cui_app *app) { app = cui__app_or_current(app); return app && cui__plat_window_op(app, 4); }
-void cui_app_minimize(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_window_op(app, 0); }
-void cui_app_toggle_maximize(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_window_op(app, 1); }
-bool cui_app_is_maximized(cui_app *app) { app = cui__app_or_current(app); return app && cui__plat_window_op(app, 3); }
 void cui_app_drag_window(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_window_op(app, 2); }
 
 void cui_app_set_title(cui_app *app, const char *title) {
@@ -199,7 +222,6 @@ void cui_app_set_title(cui_app *app, const char *title) {
 }
 
 void cui_app_set_size(cui_app *app, int w, int h) { app = cui__app_or_current(app); if (app) cui__plat_set_size(app, w, h); }
-void cui_app_set_position(cui_app *app, int x, int y) { app = cui__app_or_current(app); if (app) cui__plat_set_position(app, x, y); }
 bool cui_app_position(cui_app *app, int *x, int *y) {
     int px = 0, py = 0;
     app = cui__app_or_current(app);
@@ -513,3 +535,35 @@ int cui_app_file_dialog_multi(cui_app *app, const cui_file_dialog_opts *opts, ch
 
 bool cui_app_open_url(const char *url) { return url && *url && cui__plat_open_url(url); }
 
+void cui_app_maximize(cui_app *app) {
+    app = cui__app_or_current(app);
+    /* a fixed-size window has no maximized state: on Win32 its borders are gone, and other
+     * backends would still grow it */
+    if (app && !app->desc.fixed_size) cui__plat_maximize(app);
+}
+
+void cui_app_minimize(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_minimize(app); }
+void cui_app_restore(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_restore(app); }
+void cui_app_set_position(cui_app *app, int x, int y) { app = cui__app_or_current(app); if (app) cui__plat_set_position(app, x, y); }
+
+cui_window_state cui_app_window_state(cui_app *app) {
+    app = cui__app_or_current(app);
+    return app ? cui__plat_window_state(app) : CUI_WINDOW_NORMAL;
+}
+
+bool cui_app_placement(cui_app *app, cui_window_placement *out) {
+    app = cui__app_or_current(app);
+    if (!app || !out) return false;
+    memset(out, 0, sizeof *out);
+    cui__plat_placement(app, out);
+    return true;
+}
+
+/* the custom title bar's controls, on top of the calls above */
+bool cui_app_is_maximized(cui_app *app) { return cui_app_window_state(app) == CUI_WINDOW_MAXIMIZED; }
+void cui_app_toggle_maximize(cui_app *app) {
+    app = cui__app_or_current(app);
+    if (!app) return;
+    if (cui__plat_window_state(app) == CUI_WINDOW_MAXIMIZED) cui__plat_restore(app);
+    else cui_app_maximize(app);
+}

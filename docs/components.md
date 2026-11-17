@@ -436,7 +436,13 @@ cui_dialog(ui, "Edit profile", &open, .description = "Changes are visible to you
 }
 ```
 
-Modal: the scrim blocks everything behind it. Esc, the close button or a click on the scrim close it, unless `persistent`. Options: `description`, `width` (440), `no_close_button`, `persistent`. Opens with a fade and a scale from 0.96, closes faster than it opens.
+Modal: the scrim blocks everything behind it. Esc, the close button or a click on the scrim close it, unless `persistent`. Options: `description`, `width` (440), `no_close_button`, `persistent`, `draggable`, `resizable`. Opens with a fade and a scale from 0.96, closes faster than it opens.
+
+`draggable` lets the user move the dialog by its header, and `resizable` lets them resize it by its edges and corners. Both keep the dialog inside the window; a resized dialog stops at 240 by 120 points and clips its content when that no longer fits. A grab that ends outside the panel is not a click on the scrim, so the dialog stays open. The position and size belong to the dialog, not to your code: it opens centred at its own size every time. The corners use the horizontal resize cursor, since CUI has no diagonal one. Moving and resizing take the pointer; the keyboard does not move or resize a dialog.
+
+```c
+cui_dialog(ui, "Edit profile", &open, .draggable = true, .resizable = true) { /* ... */ }
+```
 
 Escape first clears a text selection or leaves the focused editor. Once focus leaves the editor, the next Escape can close the dialog.
 
@@ -659,7 +665,7 @@ cui_table(ui, "orders", cols, 3, .sort = &sort, .selectable = true, .height = CU
 
 Cells hold any components. Clicking a sortable header updates `sort` (column and direction); you sort your data. With `height` the body scrolls under a fixed header. When the container is narrower than the fixed columns plus 96 points for each flexible one, the table scrolls sideways instead of squeezing cells. Options: `sort`, `height`, `striped`, `compact`, `selectable`.
 
-Keyboard: Tab reaches the headers of sortable columns, and Enter or Space sorts by the focused one. Rows are selected with the pointer; for arrow keys through rows use the [data grid](#data-grid-and-filter-bar).
+Keyboard: Tab reaches sortable headers and selectable rows, with a ring on the focused item. Enter or Space sorts by the focused header. For arrow keys through rows use the [data grid](components-more.md#data-grid-and-filter-bar).
 
 ## List and tree
 

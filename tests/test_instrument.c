@@ -123,6 +123,15 @@ static void test_dot_chart(void) {
     move(ui, build_dots, &c, 2, 2);
     CHECK_EQ(c.r.hovered, -1);
     key(ui, build_dots, &c, CUI_KEY_TAB, 0);
+    int clicks_before_keyboard = c.clicks;
+    key(ui, build_dots, &c, CUI_KEY_ENTER, 0);
+    CHECK_EQ(c.clicks, clicks_before_keyboard + 1);
+    CHECK_EQ(c.r.hovered, 24);
+    CHECK_NEAR(c.r.x, 18.0, 1e-9);
+    CHECK_NEAR(c.r.value, 34, 1e-4);
+    run(ui, build_dots, &c, 1);
+    CHECK_EQ(c.r.hovered, 24);                    /* keep the activated sample visible */
+    CHECK_EQ(c.clicks, clicks_before_keyboard + 1);
     key(ui, build_dots, &c, CUI_KEY_RIGHT, 0);
     CHECK_EQ(c.r.hovered, 25);                    /* from the middle, one to the right */
     key(ui, build_dots, &c, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
@@ -140,6 +149,10 @@ static void test_dot_chart(void) {
     CHECK_NEAR(c.last_click, 6, 1e-9);            /* Enter clicks at the cursor */
     key(ui, build_dots, &c, CUI_KEY_ESCAPE, 0);
     CHECK_EQ(c.r.hovered, -1);
+    key(ui, build_dots, &c, CUI_KEY_SPACE, 0);
+    CHECK(c.r.clicked);
+    run(ui, build_dots, &c, 1);
+    CHECK_EQ(c.r.hovered, 24);
     /* bad values count as zero; NaN and infinity do not spoil the scale */
     c.a[10] = NAN; c.a[11] = -50; c.a[12] = INFINITY;
     c.o.min = c.o.max = 0;
@@ -453,6 +466,146 @@ static void test_event_track(void) {
     cui_end_frame(ui);
     CHECK_EQ(n, 0);
     CHECK_EQ(r.selected, -1);
+    cui_destroy(ui);
+}
+
+/* ------------------------------------------------------------------------ */
+/* label functions: the app writes the axis labels and the readout          */
+
+enum { LBL_PRINTF, LBL_EMPTY, LBL_FILL, LBL_CUT, LBL_WIDE };
+typedef struct { int mode, calls; double xs[64]; int nxs; size_t cap; void *user; const char *fmt; } lbl_log;
+
+/* records what the component passes and writes the text the mode asks for */
+static void lbl_write(void *user, double x, char *out, size_t capacity) {
+    lbl_log *l = user;
+    l->calls++; l->cap = capacity; l->user = user;
+    if (l->nxs < 64) l->xs[l->nxs++] = x;
+    if (l->mode == LBL_PRINTF) snprintf(out, capacity, l->fmt, x);
+    else if (l->mode == LBL_FILL) memset(out, 'M', capacity);   /* no terminating zero */
+    else if (l->mode == LBL_CUT) {
+        char s[200];
+        memset(s, 'M', sizeof s - 1); s[sizeof s - 1] = 0;
+        snprintf(out, capacity, "%s", s);
+    } else if (l->mode == LBL_WIDE) snprintf(out, capacity, "WW%gWW", x);
+}
+
+typedef struct {
+    float v[12];
+    double t[4]; int n, sel;
+    cui_dot_chart_opts o;
+    cui_event_track_opts e;
+    cui_dot_chart_result r;
+} lbl_case;
+static void build_lbl(cui_ctx *ui, void *u) {
+    lbl_case *c = u;
+    cui_dot_series s[1] = { { c->v, "spent", false } };
+    c->r = cui_dot_chart_ex(ui, "dots", s, 1, 12, &c->o);
+    c->e.selected = &c->sel;
+    cui_event_track_ex(ui, "track", c->t, &c->n, 4, 1, 12, &c->e);
+}
+
+/* the renderer redraws only the tiles that changed when it draws into the buffer it drew
+ * last, so every image here stays allocated until the end: each one is drawn whole */
+static image g_lbl_img[16];
+static int g_lbl_nimg;
+static image lbl_render(cui_ctx *ui) {
+    image im = render(ui);
+    if (g_lbl_nimg < 16) g_lbl_img[g_lbl_nimg++] = im;
+    return im;
+}
+static bool lbl_same(image a, image b) {
+    return a.w == b.w && a.h == b.h && memcmp(a.px, b.px, (size_t)a.w * a.h * 4) == 0;
+}
+/* pixels in a box that stand out from its top left pixel */
+static int lbl_ink(image im, cui_rect b) {
+    int bg = lum(im, (int)b.x, (int)b.y), n = 0;
+    for (int y = (int)b.y; y < (int)(b.y + b.h); y++)
+        for (int x = (int)b.x; x < (int)(b.x + b.w); x++) n += abs(lum(im, x, y) - bg) > 40;
+    return n;
+}
+
+static void test_label_functions(void) {
+    printf("label functions: axis labels and readout written by the app, user pointers, capacity, unchanged without\n");
+    cui_ctx *ui = new_ctx(560, 400, false);
+    static lbl_case c;
+    static lbl_log xl, vl, el;
+    memset(&c, 0, sizeof c);
+    for (int i = 0; i < 12; i++) c.v[i] = (float)(100 + i * 37) + 0.4f;
+    c.t[0] = 3; c.t[1] = 8; c.n = 2; c.sel = 1;
+    c.o = (cui_dot_chart_opts){ ._ = 0, .height = 200, .x_min = 1, .x_max = 12, .x_step = 1, .min = 0, .max = 600, .unit = "EUR" };
+    run(ui, build_lbl, &c, 3);
+    cui_rect R = cui_get_rect(ui, cui_make_id(ui, "dots")), T = cui_get_rect(ui, cui_make_id(ui, "track"));
+    float pw = R.w - 34, ph = R.h - 18;
+    cui_rect axis = { R.x, R.y + ph + 2, R.w, 16 }, taxis = { T.x, T.y + 34, T.w, T.h - 34 };
+    image plain = lbl_render(ui);
+    CHECK(lbl_ink(plain, axis) > 50);
+    CHECK(lbl_ink(plain, taxis) > 20);
+
+    /* functions that write what the defaults write draw the same frame: their text is what is drawn */
+    memset(&xl, 0, sizeof xl); memset(&vl, 0, sizeof vl); memset(&el, 0, sizeof el);
+    xl.fmt = el.fmt = "%g"; vl.fmt = "%.0f";
+    c.o.x_label = lbl_write; c.o.x_label_user = &xl;
+    c.o.value_label = lbl_write; c.o.value_label_user = &vl;
+    c.e.label = lbl_write; c.e.label_user = &el;
+    run(ui, build_lbl, &c, 1);
+    CHECK(lbl_same(plain, lbl_render(ui)));
+    /* the x labels: one call a label, 1 to 12, with its own user pointer and the buffer's size */
+    CHECK_EQ(xl.calls, 12);
+    for (int k = 0; k < 12 && k < xl.nxs; k++) CHECK_NEAR(xl.xs[k], k + 1, 1e-9);
+    CHECK(xl.user == &xl);
+    CHECK(xl.cap >= 64);
+    CHECK_EQ(vl.calls, 0);                 /* no readout without a cursor */
+    /* the track: its axis labels and the selected event's time */
+    CHECK(el.user == &el);
+    CHECK(el.cap >= 64);
+    CHECK(el.calls >= 4);
+    {
+        bool sel_time = false;
+        for (int k = 0; k < el.nxs; k++) sel_time |= el.xs[k] == 8;
+        CHECK(sel_time);
+    }
+
+    /* empty labels leave the chart's axis blank and the track's nearly so; other text shows */
+    xl.mode = el.mode = LBL_EMPTY;
+    run(ui, build_lbl, &c, 1);
+    image blank = lbl_render(ui);
+    CHECK_EQ(lbl_ink(blank, axis), 0);
+    CHECK(lbl_ink(blank, taxis) < lbl_ink(plain, taxis) / 2);
+    xl.mode = el.mode = LBL_WIDE;
+    run(ui, build_lbl, &c, 1);
+    CHECK(!lbl_same(plain, lbl_render(ui)));
+
+    /* the readout: its x and its value from the functions, the unit still after the value */
+    xl.mode = el.mode = LBL_PRINTF;
+    c.o.x_label = NULL; c.o.value_label = NULL;
+    move(ui, build_lbl, &c, R.x + pw * 5 / 11.0f, R.y + ph * 0.5f);
+    CHECK_EQ(c.r.hovered, 5);
+    image ro_plain = lbl_render(ui);
+    CHECK(!lbl_same(plain, ro_plain));
+    c.o.x_label = lbl_write; c.o.value_label = lbl_write;
+    xl.nxs = vl.nxs = 0; xl.calls = vl.calls = 0;
+    run(ui, build_lbl, &c, 1);
+    CHECK(lbl_same(ro_plain, lbl_render(ui)));
+    CHECK_EQ(vl.calls, 1);
+    CHECK(vl.user == &vl);
+    CHECK_NEAR(vl.xs[0], c.r.value, 1e-3);
+    CHECK_EQ(xl.calls, 13);                /* twelve labels, then the readout's x */
+    CHECK_NEAR(xl.xs[12], c.r.x, 1e-9);
+    vl.mode = LBL_WIDE;
+    run(ui, build_lbl, &c, 1);
+    CHECK(!lbl_same(ro_plain, lbl_render(ui)));
+
+    /* capacity: text that fills the whole buffer without a terminating zero is cut where
+     * snprintf cuts it, one byte short */
+    vl.mode = LBL_FILL;
+    run(ui, build_lbl, &c, 1);
+    image fill = lbl_render(ui);
+    vl.mode = LBL_CUT;
+    run(ui, build_lbl, &c, 1);
+    CHECK(lbl_same(fill, lbl_render(ui)));
+    CHECK(!lbl_same(fill, ro_plain));
+    for (int k = 0; k < g_lbl_nimg; k++) free(g_lbl_img[k].px);
+    g_lbl_nimg = 0;
     cui_destroy(ui);
 }
 
@@ -771,6 +924,7 @@ int main(int argc, char **argv) {
     test_dot_pixels();
     test_annotations();
     test_event_track();
+    test_label_functions();
     test_alignment();
     test_readout();
     test_dot_display();

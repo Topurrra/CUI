@@ -9,14 +9,34 @@
 #define CUI__INS_AXIS_H   18.0f    /* the row of x labels under a dot chart */
 #define CUI__EV_DOT_Y     12.0f    /* the event dots' center, from the top of the track */
 #define CUI__EV_REACH     11.0f    /* how far from a dot a press still takes it */
+#define CUI__INS_LABEL_CAP 64      /* the buffer an app's label function writes into */
 
 /* ======================================================================== */
 /* The axis                                                                 */
 /* ======================================================================== */
 
-/* hours as a time of day, "12:15"; whole hours alone as "12" when `short_hours` */
-static const char *cui__ins_label(cui_ctx *ui, cui_axis_units units, const char *fmt, double x, bool short_hours) {
-    if (units == CUI_AXIS_HOURS) {
+typedef struct {
+    double x0, x1, step;
+    cui_axis_units units;
+    const char *fmt;
+    cui_axis_label_fn label;   /* the app's own labels, in place of units and fmt */
+    void *user;
+} cui__ins_axis;
+
+/* the text an app's label function writes, cut to the buffer it was given */
+static const char *cui__ins_call(cui_ctx *ui, cui_axis_label_fn fn, void *user, double v) {
+    char *out = cui__frame_alloc(ui, CUI__INS_LABEL_CAP);
+    out[0] = 0;
+    fn(user, v, out, CUI__INS_LABEL_CAP);
+    out[CUI__INS_LABEL_CAP - 1] = 0;
+    return out;
+}
+
+/* an axis label: the app's function when it gave one, else hours as a time of day, "12:15"
+ * (whole hours alone as "12" when `short_hours`), else the format */
+static const char *cui__ins_label(cui_ctx *ui, const cui__ins_axis *a, double x, bool short_hours) {
+    if (a->label) return cui__ins_call(ui, a->label, a->user, fabs(x) < 1e-9 ? 0 : x);
+    if (a->units == CUI_AXIS_HOURS) {
         long m = lround(x * 60.0);
         long day = 24 * 60;
         m = ((m % day) + day) % day;
@@ -24,7 +44,7 @@ static const char *cui__ins_label(cui_ctx *ui, cui_axis_units units, const char 
         return cui__frame_printf(ui, "%02ld:%02ld", m / 60, m % 60);
     }
     if (fabs(x) < 1e-9) x = 0;   /* never "-0" */
-    return cui__frame_printf(ui, fmt && *fmt ? fmt : "%g", x);
+    return cui__frame_printf(ui, a->fmt && *a->fmt ? a->fmt : "%g", x);
 }
 
 /* label spacing: the smallest "nice" step whose labels sit at least `min_px` apart */
@@ -41,12 +61,6 @@ static double cui__ins_step(cui_axis_units units, double span, float width, floa
     return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
 }
 
-typedef struct {
-    double x0, x1, step;
-    cui_axis_units units;
-    const char *fmt;
-} cui__ins_axis;
-
 /* labels under a span of pixels, each centered on its value and kept inside `clip`;
  * one that would crowd the previous label is left out */
 static void cui__ins_draw_axis(cui_ctx *ui, const cui__ins_axis *a, float px, float pw, float y, cui_rect clip, bool ticks) {
@@ -59,7 +73,7 @@ static void cui__ins_draw_axis(cui_ctx *ui, const cui__ins_axis *a, float px, fl
     for (double v = first; v <= a->x1 + step * 1e-6; v += step) {
         float x = px + (float)((v - a->x0) / (a->x1 - a->x0)) * pw;
         if (ticks) cui_draw_rect(ui, (cui_rect){ floorf(x), y - 6, 1, 3 }, CUI_CORNERS(0), CUI_C(ui, BORDER_STRONG));
-        const char *lbl = cui__ins_label(ui, a->units, a->fmt, v, true);
+        const char *lbl = cui__ins_label(ui, a, v, true);
         float lw = cui__text_width(ui, CUI_FONT_MONO, fs, lbl, -1, true);
         float lx = CUI_CLAMP(x - lw * 0.5f, clip.x, clip.x + clip.w - lw);
         if (lx < last_end + 6) continue;
@@ -192,6 +206,7 @@ typedef struct {
     double x0, x1; float lo, hi, pitch, head;
     cui__ins_axis axis;
     const char *fmt, *unit;
+    cui_axis_label_fn value_label; void *value_user;
     bool grid, axis_on, readout;
     int cursor; float intro, focus;
     cui_chart_annotation *ann; int nann;
@@ -289,8 +304,9 @@ static void cui__paint_dot_chart(cui_ctx *ui, cui_node *nd, void *data) {
         float py = plot.y + plot.h - cui__clampf((v - p->lo) / range, 0, 1) * plot.h;
         cui_draw_circle(ui, (cui_vec2){ px, py }, 3.5f, fg);
         float fs = cui__fs(ui, ui->theme.text_xs), lh = cui__font_line_height(ui, CUI_FONT_MONO, fs);
-        const char *val = cui__frame_printf(ui, p->fmt && *p->fmt ? p->fmt : "%.0f", (double)v);
-        const char *lbl = cui__frame_printf(ui, "%s \xc2\xb7 %s%s%s", cui__ins_label(ui, p->axis.units, p->axis.fmt, xv, false), val,
+        const char *val = p->value_label ? cui__ins_call(ui, p->value_label, p->value_user, (double)v)
+                                         : cui__frame_printf(ui, p->fmt && *p->fmt ? p->fmt : "%.0f", (double)v);
+        const char *lbl = cui__frame_printf(ui, "%s \xc2\xb7 %s%s%s", cui__ins_label(ui, &p->axis, xv, false), val,
                                             p->unit && *p->unit ? " " : "", p->unit ? p->unit : "");
         float lw = cui__text_width(ui, CUI_FONT_MONO, fs, lbl, -1, true);
         float lx = px + 9 + lw <= r.x + r.w ? px + 9 : px - 9 - lw;
@@ -302,6 +318,7 @@ static void cui__paint_dot_chart(cui_ctx *ui, cui_node *nd, void *data) {
     if (p->focus > 0.01f) cui__draw_focus_ring(ui, (cui_rect){ plot.x - 4, plot.y - 4, plot.w + 8, plot.h + 8 }, CUI_CORNERS(6), p->focus);
 }
 
+/** Draw a dot chart and report activation at the current sample or pointer position. */
 cui_dot_chart_result cui_dot_chart_ex(cui_ctx *ui, const char *id_str, const cui_dot_series *series, int series_count, int count, const cui_dot_chart_opts *o) {
     cui_dot_chart_opts d;
     memset(&d, 0, sizeof d);
@@ -344,6 +361,10 @@ cui_dot_chart_result cui_dot_chart_ex(cui_ctx *ui, const char *id_str, const cui
             cursor = (int)lround(t * (count - 1));
             st->keyed = false;
         } else if (st->keyed) cursor = CUI_CLAMP(st->cursor, 0, count - 1);
+        if (r.keyboard_activate && cursor < 0) {
+            st->keyed = true;
+            st->cursor = cursor = count / 2;
+        }
     }
     /* copies of the data, for the paint callback, and the value range */
     cui__dm_paint *p = cui__frame_alloc(ui, sizeof *p);
@@ -364,7 +385,9 @@ cui_dot_chart_result cui_dot_chart_ex(cui_ctx *ui, const char *id_str, const cui
     p->x0 = x0; p->x1 = x1; p->pitch = pitch; p->head = head;
     p->axis.x0 = x0; p->axis.x1 = x1; p->axis.step = o->x_step; p->axis.units = o->x_units;
     p->axis.fmt = o->x_format ? cui__frame_strdup(ui, o->x_format, -1) : NULL;
+    p->axis.label = o->x_label; p->axis.user = o->x_label_user;
     p->fmt = o->format ? cui__frame_strdup(ui, o->format, -1) : NULL;
+    p->value_label = o->value_label; p->value_user = o->value_label_user;
     p->unit = o->unit ? cui__frame_strdup(ui, o->unit, -1) : NULL;
     p->grid = !o->no_grid; p->axis_on = axis_on; p->readout = !o->no_readout;
     p->cursor = cursor; p->intro = st->intro.x; p->focus = st->focus;
@@ -454,7 +477,7 @@ static void cui__paint_event_track(cui_ctx *ui, cui_node *nd, void *data) {
         cui_draw_circle(ui, (cui_vec2){ x, y }, rad, c);
         if (on && p->focus > 0.01f) cui__draw_focus_ring(ui, (cui_rect){ x - 8, y - 8, 16, 16 }, CUI_CORNERS(8), p->focus);
         if (i == label) {
-            const char *lbl = cui__ins_label(ui, p->axis.units, p->axis.fmt, p->t[i], false);
+            const char *lbl = cui__ins_label(ui, &p->axis, p->t[i], false);
             float lw = cui__text_width(ui, CUI_FONT_MONO, fs, lbl, -1, true);
             float lx = CUI_CLAMP(x - lw * 0.5f, r.x, r.x + r.w - lw);
             cui_color lc = on ? em : CUI_C(ui, FOREGROUND);
@@ -578,6 +601,7 @@ cui_event_track_result cui_event_track_ex(cui_ctx *ui, const char *id_str, doubl
     p->hover = st->drag < 0 ? near_i : -1;
     p->axis.x0 = lo; p->axis.x1 = hi; p->axis.step = o->label_step; p->axis.units = o->units;
     p->axis.fmt = o->format ? cui__frame_strdup(ui, o->format, -1) : NULL;
+    p->axis.label = o->label; p->axis.user = o->label_user;
     p->axis_on = !o->no_axis;
     p->focus = st->focus;
     int nd = cui__node_new(ui, id);

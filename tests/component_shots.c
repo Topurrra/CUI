@@ -1376,6 +1376,11 @@ static void scene_code_editor_wrap(cui_ctx *ui, int f) {
 static void body_code_editor_wrap(cui_ctx *ui) {
     cui_code_editor(ui, "editor-wrap", edw_src, sizeof edw_src, .lang = "c", .height = 250, .wrap = true);
 }
+/* Plain text keeps indentation visible without syntax highlighting. */
+SCENE(code_editor_text) {
+    static char text[] = "build:\n\tcc -o app main.c\n\nnotes:\n    spaces work too\n\t\ttwo tab stops\n";
+    cui_code_editor(ui, "plain-editor", text, sizeof text, .lang = "text", .read_only = true, .height = 220);
+}
 /* ---- tool panels ---- */
 SCENE(inspector) {
     static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 }, scale[3] = { 1, 1, 1 };
@@ -4897,10 +4902,15 @@ static void scene_canvas_controls(cui_ctx *ui, int f) {
 }
 
 /* a picture made here: a sky, a low sun and soft hills */
+/* the texture belongs to one context, so it lives in that context's state store, freed with it;
+ * a cache keyed by the context's address could hand a new context at the same address a
+ * texture from one already destroyed */
+typedef struct { cui_texture tex; } shots_result_pic;
+static void shots_result_pic_free(cui_ctx *ui, void *data) { shots_result_pic *t = data; if (t->tex) cui_image_destroy(ui, t->tex); }
 static cui_texture cb_result_image(cui_ctx *ui) {
-    static cui_ctx *made_for;
-    static cui_texture tex;
-    if (made_for == ui && tex) return tex;
+    const cui_id pic_id = 0x5E5017A6u;   /* a fixed id: the picture is shared by every page that shows it */
+    shots_result_pic *held = cui_state(ui, pic_id, sizeof *held);
+    if (held->tex) return held->tex;
     enum { W = 288, H = 360 };
     static unsigned char px[W * H * 4];
     for (int y = 0; y < H; y++)
@@ -4925,9 +4935,9 @@ static cui_texture cb_result_image(cui_ctx *ui) {
             unsigned char *p = &px[(y * W + x) * 4];
             p[0] = (unsigned char)acc[0]; p[1] = (unsigned char)acc[1]; p[2] = (unsigned char)acc[2]; p[3] = 255;
         }
-    tex = cui_image_create(ui, W, H, px);
-    made_for = ui;
-    return tex;
+    held->tex = cui_image_create(ui, W, H, px);
+    cui_state_on_free(ui, pic_id, shots_result_pic_free);
+    return held->tex;
 }
 /* a picture, a secret and a spoiler; the key is shown, the others covered */
 static bool veil_photo, veil_key = true, veil_spoiler;
@@ -5060,6 +5070,7 @@ int main(int argc, char **argv) {
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true }, { "mermaid-back", scene_mermaid_back, 920, 1000, true }, { "mermaid-narrow", scene_mermaid_narrow, 420, 760, true }, { "mermaid-expand", scene_mermaid_expand, 420, 760, true }, { "mermaid-expand-wide", scene_mermaid_expand_wide, 1000, 600, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
+        { "code-editor-text", scene_code_editor_text, 620, 264, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
         { "markdown-select-all", scene_markdown_select_all, 560, 340, true },

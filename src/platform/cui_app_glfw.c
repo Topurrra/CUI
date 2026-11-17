@@ -7,6 +7,13 @@ typedef struct {
     GLFWwindow *win;
     GLFWcursor *cursors[CUI_CURSOR_COUNT];
     cui_cursor cursor;
+    /* GLFW keeps no normal size and place for a maximized window: noted while it is normal,
+     * the place in screen coordinates and the size in points */
+    int normal_x, normal_y, normal_w, normal_h;
+    bool normal_pos_known;
+    bool geometry_changed;   /* moved or resized: note them after the batch */
+    bool was_maximized;      /* the state before a minimize */
+    bool maximize_after_frame;   /* opening maximized: once the first frame is shown */
 } cui__glfw;
 
 static cui__glfw *cui__g(cui_app *app) { return app->plat; }
@@ -102,6 +109,55 @@ static void cb_char(GLFWwindow *w, unsigned int cp) {
 static void cb_focus(GLFWwindow *w, int f) { cui_input_focus(cui__glfw_app(w)->ui, f != 0); }
 static void cb_close(GLFWwindow *w) { cui__glfw_app(w)->running = false; }
 static void cb_refresh(GLFWwindow *w) { cui_request_redraw(cui__glfw_app(w)->ui); }
+static void cb_geometry(GLFWwindow *w, int a, int b) { (void)a; (void)b; cui__g(cui__glfw_app(w))->geometry_changed = true; }
+
+/* Wayland tells a window nothing about where it is and lets it choose nothing. */
+static bool cui__glfw_positions(void) {
+#if GLFW_VERSION_MAJOR > 3 || GLFW_VERSION_MINOR >= 4
+    return glfwGetPlatform() != GLFW_PLATFORM_WAYLAND;
+#else
+    return true;
+#endif
+}
+
+/* Notes the window's place where the platform reports it. GLFW 3.3 cannot tell Wayland
+ * apart, so a failed query is taken as no place. */
+static void cui__glfw_note_position(cui__glfw *g) {
+    if (!cui__glfw_positions()) return;
+    int x = 0, y = 0;
+    glfwGetError(NULL);
+    glfwGetWindowPos(g->win, &x, &y);
+    if (glfwGetError(NULL) != GLFW_NO_ERROR) return;
+    g->normal_x = x;
+    g->normal_y = y;
+    g->normal_pos_known = true;
+}
+
+/* Notes the window's size in points, as cui_app_size reports it. Screen coordinates are
+ * pixels on Windows and X11 but points on macOS and Wayland; the framebuffer tells which,
+ * on the monitor the window is on now. */
+static void cui__glfw_note_size(cui__glfw *g) {
+    int ww, wh, fw, fh;
+    float s = 1;
+    glfwGetWindowSize(g->win, &ww, &wh);
+    glfwGetFramebufferSize(g->win, &fw, &fh);
+    cui__glfw_scale(g->win, &s);
+    float points = ww > 0 && fw > 0 && s > 0 ? (float)fw / (float)ww / s : 1.0f;
+    g->normal_w = (int)((float)ww * points + 0.5f);
+    g->normal_h = (int)((float)wh * points + 0.5f);
+}
+
+/* True when the top edge of a window at x, y of width w is in a monitor's work area. */
+static bool cui__glfw_on_screen(int x, int y, int w) {
+    int count = 0;
+    GLFWmonitor **monitors = glfwGetMonitors(&count);
+    for (int i = 0; i < count; i++) {
+        int mx, my, mw, mh;
+        glfwGetMonitorWorkarea(monitors[i], &mx, &my, &mw, &mh);
+        if (x < mx + mw && x + w > mx && y >= my && y < my + mh) return true;
+    }
+    return false;
+}
 static void cb_drop(GLFWwindow *w, int count, const char **paths) {
     double x = 0, y = 0;
     glfwGetCursorPos(w, &x, &y);
@@ -124,6 +180,7 @@ bool cui__plat_init(cui_app *app) {
     glfwWindowHint(GLFW_RESIZABLE, app->desc.fixed_size ? GLFW_FALSE : GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+    const cui_window_placement *pl = app->desc.placement;
     if (app->desc.app_id) {   /* WM_CLASS on X11, app_id on Wayland; other systems ignore these */
         glfwWindowHintString(GLFW_X11_CLASS_NAME, app->desc.app_id);
         glfwWindowHintString(GLFW_X11_INSTANCE_NAME, app->desc.app_id);
@@ -145,6 +202,21 @@ bool cui__plat_init(cui_app *app) {
     glfwSetWindowCloseCallback(g->win, cb_close);
     glfwSetWindowRefreshCallback(g->win, cb_refresh);
     glfwSetDropCallback(g->win, cb_drop);
+    glfwSetWindowPosCallback(g->win, cb_geometry);
+    glfwSetWindowSizeCallback(g->win, cb_geometry);
+    g->normal_w = app->desc.width;
+    g->normal_h = app->desc.height;
+    int screen_w, screen_h;   /* the size in screen coordinates, the units of a saved place */
+    glfwGetWindowSize(g->win, &screen_w, &screen_h);
+    if (pl && pl->has_position && cui__glfw_positions() && cui__glfw_on_screen(pl->x, pl->y, screen_w)) {
+        glfwGetError(NULL);
+        glfwSetWindowPos(g->win, pl->x, pl->y);   /* still hidden: it opens there */
+        if (glfwGetError(NULL) == GLFW_NO_ERROR) {
+            g->normal_x = pl->x;
+            g->normal_y = pl->y;
+            g->normal_pos_known = true;
+        }
+    }
     int shapes[CUI_CURSOR_COUNT] = { GLFW_ARROW_CURSOR, GLFW_HAND_CURSOR, GLFW_IBEAM_CURSOR, GLFW_HRESIZE_CURSOR,
                                      GLFW_VRESIZE_CURSOR, GLFW_ARROW_CURSOR, GLFW_ARROW_CURSOR };
     for (int i = 0; i < CUI_CURSOR_COUNT; i++) g->cursors[i] = glfwCreateStandardCursor(shapes[i]);
@@ -159,8 +231,13 @@ bool cui__plat_init(cui_app *app) {
 }
 
 void cui__plat_show(cui_app *app) {
-    glfwShowWindow(cui__g(app)->win);
-    if (app->desc.start_maximized) glfwMaximizeWindow(cui__g(app)->win);
+    cui__glfw *g = cui__g(app);
+    glfwShowWindow(g->win);
+    /* maximized after one frame at the normal size: a Wayland compositor (KWin) keeps a size to
+     * restore to only for a window that showed a picture at it, and GLFW_MAXIMIZED at creation
+     * or a maximize before the first frame leaves the maximized size after a restore */
+    const cui_window_placement *pl = app->desc.placement;
+    g->maximize_after_frame = pl && pl->state == CUI_WINDOW_MAXIMIZED;
 }
 
 void cui__plat_shutdown(cui_app *app) {
@@ -180,7 +257,20 @@ bool cui__plat_gl_create(cui_app *app, bool vsync) {
 }
 
 void *cui__plat_gl_proc(const char *name) { return (void *)glfwGetProcAddress(name); }
-void cui__plat_gl_swap(cui_app *app) { glfwSwapBuffers(cui__g(app)->win); }
+void cui__plat_gl_swap(cui_app *app) {
+    cui__glfw *g = cui__g(app);
+    glfwSwapBuffers(g->win);
+    if (g->maximize_after_frame) {
+        g->maximize_after_frame = false;
+        /* not when the app maximized the window itself before this frame (cui_app_maximize right
+         * after cui_app_create): the size then is the maximized one */
+        if (cui__plat_window_state(app) == CUI_WINDOW_NORMAL) {
+            if (!g->normal_pos_known) cui__glfw_note_position(g);   /* the place the system chose */
+            cui__glfw_note_size(g);   /* and the size, which the window system may have changed */
+        }
+        glfwMaximizeWindow(g->win);
+    }
+}
 
 void cui__plat_present(cui_app *app, const void *bgra, int w, int h, int stride) {
     /* GLFW windows always have a GL context; the software path is not used */
@@ -202,16 +292,22 @@ void cui__plat_metrics(cui_app *app, float *w, float *h, float *scale, int *fb_w
 
 void cui__plat_set_title(cui_app *app, const char *title) { glfwSetWindowTitle(cui__g(app)->win, title); }
 void cui__plat_set_size(cui_app *app, int w, int h) { glfwSetWindowSize(cui__g(app)->win, w, h); }
-void cui__plat_set_position(cui_app *app, int x, int y) { glfwSetWindowPos(cui__g(app)->win, x, y); }
-bool cui__plat_position(cui_app *app, int *x, int *y) { glfwGetWindowPos(cui__g(app)->win, x, y); return true; }
 void *cui__plat_native(cui_app *app) { return cui__g(app)->win; }
 bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
 void cui__plat_wait(cui_app *app, double timeout) {
-    (void)app;
     if (timeout < 0) glfwWaitEvents();
     else if (timeout > 0) glfwWaitEventsTimeout(timeout);
     else glfwPollEvents();
+    /* after the whole batch, so a state change that came with a resize is already seen */
+    cui__glfw *g = cui__g(app);
+    cui_window_state state = cui__plat_window_state(app);
+    if (state != CUI_WINDOW_MINIMIZED) g->was_maximized = state == CUI_WINDOW_MAXIMIZED;
+    if (g->geometry_changed && state == CUI_WINDOW_NORMAL && glfwGetWindowAttrib(g->win, GLFW_VISIBLE)) {
+        g->geometry_changed = false;
+        cui__glfw_note_size(g);
+        cui__glfw_note_position(g);
+    }
 }
 
 bool cui__plat_present_part(cui_app *app, const void *bgra, int w, int h, int stride, int x, int y, int pw, int ph) {
@@ -231,3 +327,45 @@ void cui__plat_gl_release(cui_app *app) { (void)app; }   /* not used: these keep
 /* OpenGL is set up on the app's thread before the first frame (see cui_app_win32.c for the other way) */
 bool cui__plat_gl_begin_async(cui_app *app) { (void)app; return false; }
 bool cui__plat_gl_end_async(cui_app *app, bool wait, bool vsync, cui_gl_renderer **out) { (void)app; (void)wait; (void)vsync; *out = NULL; return true; }
+void cui__plat_maximize(cui_app *app) {
+    cui__glfw *g = cui__g(app);
+    if (g && g->win) glfwMaximizeWindow(g->win);
+}
+
+void cui__plat_minimize(cui_app *app) { glfwIconifyWindow(cui__g(app)->win); }
+void cui__plat_restore(cui_app *app) { glfwRestoreWindow(cui__g(app)->win); }
+
+cui_window_state cui__plat_window_state(cui_app *app) {
+    GLFWwindow *win = cui__g(app)->win;
+    return glfwGetWindowAttrib(win, GLFW_ICONIFIED) ? CUI_WINDOW_MINIMIZED
+         : glfwGetWindowAttrib(win, GLFW_MAXIMIZED) ? CUI_WINDOW_MAXIMIZED : CUI_WINDOW_NORMAL;
+}
+
+void cui__plat_set_position(cui_app *app, int x, int y) {
+    if (cui__glfw_positions()) glfwSetWindowPos(cui__g(app)->win, x, y);
+}
+
+bool cui__plat_position(cui_app *app, int *x, int *y) {
+    cui__glfw *g = cui__g(app);
+    if (!cui__glfw_positions()) return false;   /* Wayland: a window does not know its place */
+    if (glfwGetWindowAttrib(g->win, GLFW_ICONIFIED)) {   /* where it comes back */
+        if (!g->normal_pos_known) return false;
+        *x = g->normal_x;
+        *y = g->normal_y;
+        return true;
+    }
+    glfwGetWindowPos(g->win, x, y);
+    return true;
+}
+
+void cui__plat_placement(cui_app *app, cui_window_placement *out) {
+    cui__glfw *g = cui__g(app);
+    out->x = g->normal_x;
+    out->y = g->normal_y;
+    out->width = g->normal_w;
+    out->height = g->normal_h;
+    out->has_position = g->normal_pos_known;
+    cui_window_state state = cui__plat_window_state(app);
+    bool maximized = state == CUI_WINDOW_MAXIMIZED || (state == CUI_WINDOW_MINIMIZED && g->was_maximized);
+    out->state = maximized ? CUI_WINDOW_MAXIMIZED : CUI_WINDOW_NORMAL;
+}

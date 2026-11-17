@@ -498,17 +498,41 @@ void cui_input_mouse_move(cui_ctx *ui, float x, float y) {
 
 void cui_input_mouse_leave(cui_ctx *ui) { ui->mouse_inside = false; ui->mx = -1e6f; ui->my = -1e6f; cui__poke(ui); }
 
+/** Classify pending presses against the current frame's clock, including batched clicks. */
+static void cui__flush_clicks(cui_ctx *ui) {
+    if (!ui->pending_clicks.count) return;
+    float dx = ui->pending_clicks.first_x - ui->last_click_x;
+    float dy = ui->pending_clicks.first_y - ui->last_click_y;
+    if (!ui->pending_clicks.restarted && ui->time - ui->last_click_time < 0.4 && dx * dx + dy * dy < 25)
+        ui->click_count += ui->pending_clicks.count;
+    else ui->click_count = ui->pending_clicks.count;
+    ui->last_click_time = ui->time;
+    ui->last_click_x = ui->pending_clicks.last_x;
+    ui->last_click_y = ui->pending_clicks.last_y;
+    ui->pending_clicks.count = 0;
+    ui->pending_clicks.restarted = false;
+}
+
 void cui_input_mouse_button(cui_ctx *ui, cui_mouse_button b, bool down) {
     if ((int)b < 0 || (int)b > 2) return;
     cui__poke(ui);
     if (down && !ui->mdown[b]) {
         ui->mpressed[b] = true;
         if (b == CUI_MOUSE_LEFT) {
-            double t = ui->time;
-            float dx = ui->mx - ui->last_click_x, dy = ui->my - ui->last_click_y;
-            if (t - ui->last_click_time < 0.4 && dx * dx + dy * dy < 25) ui->click_count++;
-            else ui->click_count = 1;
-            ui->last_click_time = t; ui->last_click_x = ui->mx; ui->last_click_y = ui->my;
+            if (!ui->pending_clicks.count) {
+                ui->pending_clicks.first_x = ui->mx;
+                ui->pending_clicks.first_y = ui->my;
+            } else {
+                float dx = ui->mx - ui->pending_clicks.last_x, dy = ui->my - ui->pending_clicks.last_y;
+                if (dx * dx + dy * dy >= 25) {
+                    ui->pending_clicks.count = 0;
+                    ui->pending_clicks.restarted = true;
+                }
+            }
+            ui->pending_clicks.count++;
+            ui->pending_clicks.last_x = ui->mx;
+            ui->pending_clicks.last_y = ui->my;
+            if (ui->in_frame) cui__flush_clicks(ui);
         }
     }
     if (!down && ui->mdown[b]) ui->mreleased[b] = true;
@@ -597,6 +621,15 @@ bool cui_shortcut(cui_ctx *ui, int mods, cui_key key) {
 cui_vec2 cui_mouse_pos(cui_ctx *ui) { cui_vec2 v = { ui->mx, ui->my }; return v; }
 bool cui_mouse_down(cui_ctx *ui, cui_mouse_button b) { return (int)b >= 0 && (int)b < 3 && ui->mdown[b]; }
 bool cui_mouse_clicked(cui_ctx *ui, cui_mouse_button b) { return (int)b >= 0 && (int)b < 3 && ui->mpressed[b]; }
+
+bool cui_wheel_take(cui_ctx *ui, cui_id id, cui_vec2 *delta) {
+    /* a disabled canvas takes nothing, also on the frame it turns disabled, when the wheel was
+     * aimed by the previous frame's region */
+    if (!id || cui_is_disabled(ui) || ui->scroll_target != id || (ui->scroll_dx == 0 && ui->scroll_dy == 0)) return false;
+    if (delta) { delta->x = ui->scroll_dx; delta->y = ui->scroll_dy; }
+    ui->scroll_dx = ui->scroll_dy = 0;   /* consumed */
+    return true;
+}
 bool cui_wants_keyboard(cui_ctx *ui) { return ui->edit != NULL; }
 bool cui_wants_mouse(cui_ctx *ui) { return ui->hot != 0 || ui->active != 0; }
 
@@ -796,6 +829,7 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
     ui->in_frame = true;
     ui->dt = CUI_MIN(dt, 0.25f);
     ui->time += dt;
+    cui__flush_clicks(ui);
     ui->frame++;
     ui->animating = false;
     ui->wakeup = -1;

@@ -709,11 +709,12 @@ typedef struct {
     float pos;
     int rows;
     float row_h;
-    bool loop, join_l, join_r;
+    bool loop, join_l, join_r, focus_visible;
     cui_color band, fg, dim;
     float font_size;
 } cui__wheel_paint;
 
+/** Draw the wheel content and its keyboard focus ring together. */
 static void cui__paint_wheel(cui_ctx *ui, cui_node *n, void *data) {
     cui__wheel_paint *p = data;
     cui_rect r = n->rect;
@@ -747,9 +748,10 @@ static void cui__paint_wheel(cui_ctx *ui, cui_node *n, void *data) {
         cui__draw_text_line(ui, CUI_FONT_BODY, p->font_size, r.x + (r.w - w) * 0.5f, y - lh * 0.5f, c, s, len, true);
     }
     cui_pop_clip(ui);
+    cui__draw_focus_ring(ui, r, n->radius, p->focus_visible ? 1.0f : 0.0f);
 }
 
-/** Build a wheel picker and apply input routed to its drum. */
+/** Build a wheel picker, apply input routed to its drum, and draw its focus ring with its rows. */
 bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *items, int count, int *index, const cui_wheel_opts *o) {
     cui_wheel_opts d;
     memset(&d, 0, sizeof d);
@@ -835,6 +837,7 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
     cui__wheel_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->items = items; p->count = count; p->pos = st->pos.x; p->rows = rows; p->row_h = row_h; p->loop = o->loop;
     p->join_l = o->join_left; p->join_r = o->join_right;
+    p->focus_visible = r.focus_visible;
     p->band = CUI_C(ui, ACTIVE);
     p->fg = CUI_C(ui, FOREGROUND);
     p->dim = CUI_C(ui, TEXT_MUTED);
@@ -845,7 +848,6 @@ bool cui_wheel_picker_ex(cui_ctx *ui, const char *id_str, const char *const *ite
     }
     n->paint = cui__paint_wheel;
     n->paint_data = p;
-    cui__focus_ring(ui, node, r.focus_visible ? 1.0f : 0.0f);
     ui->last_id = id;
     return *index != old;
 }
@@ -1017,8 +1019,10 @@ typedef struct {
     int major;
     const char *format;
     cui_color tick, major_c, label, marker;
+    bool focus_visible;
 } cui__ruler_paint;
 
+/** Draw the scale and marker before adding the keyboard focus ring. */
 static void cui__paint_ruler(cui_ctx *ui, cui_node *n, void *data) {
     cui__ruler_paint *p = data;
     cui_rect r = n->rect;
@@ -1049,9 +1053,10 @@ static void cui__paint_ruler(cui_ctx *ui, cui_node *n, void *data) {
     cui_draw_rect(ui, (cui_rect){ cx - 1, r.y + 2, 2, 28 }, CUI_CORNERS(1), p->marker);
     cui_vec2 tri[3] = { { cx - 5, r.y }, { cx + 5, r.y }, { cx, r.y + 6 } };
     cui_draw_polygon(ui, tri, 3, p->marker);
+    cui__draw_focus_ring(ui, r, n->radius, p->focus_visible ? 1.0f : 0.0f);
 }
 
-/** Build a ruler slider, taking vertical wheel input before the enclosing view. */
+/** Build a ruler slider: it takes vertical wheel input before the enclosing view and keeps every rounded value in range. */
 bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min, float max, const cui_ruler_opts *o) {
     cui_ruler_opts d;
     memset(&d, 0, sizeof d);
@@ -1091,7 +1096,7 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
     if (r.hovered && (ui->scroll_dx != 0 || wheel != 0) && !st->dragging) {
         float dv = (wheel != 0 ? -wheel : -ui->scroll_dx) * step;
         *value = cui__clampf(*value + (dv > 0 ? CUI_MAX(dv, step) : CUI_MIN(dv, -step)), min, max);
-        *value = roundf((*value - min) / step) * step + min;
+        *value = cui__clampf(roundf((*value - min) / step) * step + min, min, max);
         target = *value;
         if (wheel == 0) ui->scroll_dx = 0;
     }
@@ -1137,9 +1142,9 @@ bool cui_ruler_slider_ex(cui_ctx *ui, const char *label, float *value, float min
     p->major_c = CUI_C(ui, TEXT_SECONDARY);
     p->label = CUI_C(ui, TEXT_MUTED);
     p->marker = cui__emphasis(ui);
+    p->focus_visible = r.focus_visible;
     ui->nodes[tape].paint = cui__paint_ruler;
     ui->nodes[tape].paint_data = p;
-    cui__focus_ring(ui, tape, r.focus_visible ? 1.0f : 0.0f);
     cui__close(ui);
     ui->last_id = rid;
     return *value != old;

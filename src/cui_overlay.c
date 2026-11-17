@@ -701,14 +701,113 @@ static void cui__tooltip_render(cui_ctx *ui) {
 /* Dialogs and sheets                                                       */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { cui_spring t; uint64_t opened; bool was_open; int z; } cui__modal_state;
+/* A dialog the user may move and resize keeps its offset from the centre and
+ * its size here; grab is what the pointer is holding (CUI__GRAB_*) and the
+ * rest is where the grab began. */
+typedef struct {
+    cui_spring t; uint64_t opened; bool was_open; int z;
+    float dx, dy, w, h;
+    int grab;
+    float gx, gy, x0, y0, w0, h0;
+} cui__modal_state;
+
+enum { CUI__GRAB_LEFT = 1, CUI__GRAB_RIGHT = 2, CUI__GRAB_TOP = 4, CUI__GRAB_BOTTOM = 8, CUI__GRAB_MOVE = 16 };
+enum { CUI__GRIP_DRAG = 1, CUI__GRIP_RESIZE = 2 };
+
+#define CUI__DIALOG_MIN_W 240.0f
+#define CUI__DIALOG_MIN_H 120.0f
+#define CUI__DIALOG_EDGE_IN 6.0f     /* grab zone inside the border */
+#define CUI__DIALOG_EDGE_OUT 3.0f    /* and outside it */
+
+/* Which edges of r the point is on (CUI__GRAB_* bits), 0 when it is not near the border. */
+static int cui__dialog_edges(cui_rect r, float x, float y) {
+    if (x < r.x - CUI__DIALOG_EDGE_OUT || x > r.x + r.w + CUI__DIALOG_EDGE_OUT ||
+        y < r.y - CUI__DIALOG_EDGE_OUT || y > r.y + r.h + CUI__DIALOG_EDGE_OUT) return 0;
+    int e = 0;
+    if (x < r.x + CUI__DIALOG_EDGE_IN) e |= CUI__GRAB_LEFT;
+    else if (x > r.x + r.w - CUI__DIALOG_EDGE_IN) e |= CUI__GRAB_RIGHT;
+    if (y < r.y + CUI__DIALOG_EDGE_IN) e |= CUI__GRAB_TOP;
+    else if (y > r.y + r.h - CUI__DIALOG_EDGE_IN) e |= CUI__GRAB_BOTTOM;
+    return e;
+}
+
+/* While a grab is held, turn the pointer's travel into a new offset and size. */
+static void cui__dialog_follow(cui_ctx *ui, cui__modal_state *st) {
+    float ddx = ui->mx - st->gx, ddy = ui->my - st->gy;
+    if (st->grab & CUI__GRAB_MOVE) { st->dx = st->x0 + ddx; st->dy = st->y0 + ddy; return; }
+    /* the panel is centred, so moving one edge by d moves the centre by d / 2 */
+    if (st->grab & (CUI__GRAB_LEFT | CUI__GRAB_RIGHT)) {
+        float sign = (st->grab & CUI__GRAB_RIGHT) ? 1.0f : -1.0f;
+        st->w = cui__clampf(st->w0 + sign * ddx, CUI_MIN(CUI__DIALOG_MIN_W, ui->vw - 32), ui->vw - 32);
+        st->dx = st->x0 + sign * (st->w - st->w0) * 0.5f;
+    }
+    if (st->grab & (CUI__GRAB_TOP | CUI__GRAB_BOTTOM)) {
+        float sign = (st->grab & CUI__GRAB_BOTTOM) ? 1.0f : -1.0f;
+        st->h = cui__clampf(st->h0 + sign * ddy, CUI__DIALOG_MIN_H, CUI_MAX(CUI__DIALOG_MIN_H, ui->vh - 48));
+        st->dy = st->y0 + sign * (st->h - st->h0) * 0.5f;
+    }
+}
+
+/* Input for a dialog that can be moved or resized, read against last frame's
+ * rectangle like every other control. It runs before the scrim reads the
+ * pointer: a grab holds ui->active, so letting go outside the panel is not a
+ * click on the scrim. */
+static void cui__dialog_grip(cui_ctx *ui, cui__modal_state *st, cui_id id, cui_id scrim, int grip) {
+    cui_id head = id ^ 0xD2A6u, edge = id ^ 0x6A1Fu;
+    cui_rect pr = cui__prev_rect(ui, id ^ 0x9A4Eu);
+    bool settled = st->t.x > 0.99f && pr.w > 0;
+    int zone = 0;
+    if ((grip & CUI__GRIP_RESIZE) && settled && (ui->active == 0 || ui->active == edge)) {
+        cui_rect r = { pr.x + st->dx, pr.y + st->dy, pr.w, pr.h };
+        zone = cui__dialog_edges(r, ui->mx, ui->my);
+        /* a control on the border (the close button) wins */
+        if (zone && ui->hot && ui->hot != scrim && ui->hot != head) zone = 0;
+    }
+    if (zone && ui->mpressed[CUI_MOUSE_LEFT] && ui->active == 0) {
+        ui->active = edge;
+        st->grab = zone;
+        st->gx = ui->mx; st->gy = ui->my; st->x0 = st->dx; st->y0 = st->dy;
+        st->w0 = st->w > 0 ? st->w : pr.w;
+        st->h0 = st->h > 0 ? st->h : pr.h;
+        if (!(st->w > 0)) st->w = st->w0;
+        if (!(st->h > 0)) st->h = st->h0;
+    }
+    if (grip & CUI__GRIP_DRAG) {
+        cui_interact hr = cui__interact(ui, head, CUI_IF_DRAG);
+        if (hr.hovered || hr.active) cui__set_cursor(ui, CUI_CURSOR_MOVE);
+        if (hr.active && hr.pressed && !st->grab) {
+            st->grab = CUI__GRAB_MOVE;
+            st->gx = ui->mx; st->gy = ui->my; st->x0 = st->dx; st->y0 = st->dy;
+        }
+    }
+    bool held = (ui->active == edge || ui->active == head) && ui->mdown[CUI_MOUSE_LEFT];
+    if (!held) {
+        st->grab = 0;
+        if (ui->active == edge) ui->active = 0;   /* the edge id has no control to clear it */
+    }
+    if (st->grab) cui__dialog_follow(ui, st);
+    if (zone || (st->grab && !(st->grab & CUI__GRAB_MOVE))) {
+        int g = st->grab ? st->grab : zone;
+        cui__set_cursor(ui, (g & (CUI__GRAB_LEFT | CUI__GRAB_RIGHT)) ? CUI_CURSOR_RESIZE_EW : CUI_CURSOR_RESIZE_NS);
+    }
+    /* keep the stored width inside the window, even after the window shrinks */
+    if (st->w > 0) st->w = cui__clampf(st->w, CUI_MIN(CUI__DIALOG_MIN_W, ui->vw - 32), ui->vw - 32);
+    /* keep the panel inside the window */
+    float sw = st->w > 0 ? st->w : pr.w, sh = st->h > 0 ? st->h : pr.h;
+    float mx = CUI_MAX(0, (ui->vw - sw) * 0.5f), my = CUI_MAX(0, (ui->vh - sh) * 0.5f);
+    st->dx = cui__clampf(st->dx, -mx, mx);
+    st->dy = cui__clampf(st->dy, -my, my);
+}
 
 
 static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *open, const char *description, float width,
-                             bool persistent, bool close_button, int kind, cui_side side) {
+                             bool persistent, bool close_button, int kind, cui_side side, int grip) {
     cui__modal_state *st = cui_state(ui, id, sizeof *st);
     bool is_open = open && *open;
-    if (is_open && !st->was_open) { st->opened = ui->frame; st->z = 1000 + ++ui->layer_seq; }
+    if (is_open && !st->was_open) {
+        st->opened = ui->frame; st->z = 1000 + ++ui->layer_seq;
+        st->dx = st->dy = st->w = st->h = 0; st->grab = 0;   /* a dialog opens centred at its own size */
+    }
     st->was_open = is_open;
     float target = is_open ? 1.0f : 0.0f;
     if (is_open) {
@@ -734,6 +833,7 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
         /* move keyboard focus into the dialog when it opens */
         if (st->opened == ui->frame && ui->focus_visible) ui->focus = 0;
     }
+    if (is_open && kind == 0 && grip) cui__dialog_grip(ui, st, id, scrim_id, grip);
     cui__interact(ui, scrim_id, 0);
     int root = cui__float_begin(ui, id, z, 0, CUI__PLACE_FULL, 0);
     cui_node *rn = &ui->nodes[root];
@@ -761,11 +861,13 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
     pn->gap = 16;
     pn->flags |= CUI_NF_HIT_OPAQUE;
     if (kind == 0) {
-        pn->w = CUI_PX(CUI_MIN(width, ui->vw - 32));
+        pn->w = CUI_PX(st->w > 0 ? st->w : CUI_MIN(width, ui->vw - 32));
         pn->max_h = ui->vh - 48;
+        if (st->h > 0) { pn->h = CUI_PX(st->h); pn->flags |= CUI_NF_CLIP; }
         pn->opacity = t;
         pn->scale = CUI__ENTER_SCALE + (1.0f - CUI__ENTER_SCALE) * t;
-        pn->ty = (1 - t) * 10;
+        pn->tx = st->dx;
+        pn->ty = (1 - t) * 10 + st->dy;
     } else {
         bool horiz = side == CUI_SIDE_LEFT || side == CUI_SIDE_RIGHT;
         if (horiz) { pn->w = CUI_PX(CUI_MIN(width, ui->vw - 16)); pn->h = CUI_PX(ui->vh - 16); }
@@ -786,7 +888,8 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
     if (ui->dialog_depth < 8) ui->dialog_stack[ui->dialog_depth++] = id;
     cui_push_id_int(ui, (int)id);
     /* header */
-    int head = cui__node_new(ui, 0);
+    int head = cui__node_new(ui, (kind == 0 && (grip & CUI__GRIP_DRAG)) ? id ^ 0xD2A6u : 0);
+    if (kind == 0 && (grip & CUI__GRIP_DRAG)) cui__mark_interactive(ui, head, 0);
     ui->nodes[head].dir = CUI_ROW; ui->nodes[head].align = CUI_ALIGN_START; ui->nodes[head].gap = 12;
     cui__open(ui, head);
     int hc = cui__node_new(ui, 0);
@@ -837,12 +940,21 @@ bool cui_dialog_begin(cui_ctx *ui, const char *title, bool *open, const cui_dial
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     cui_id id = cui_make_id(ui, title) ^ 0xD1A106u;
-    return cui__modal_begin(ui, id, title, open, o->description, o->width > 0 ? o->width : 440, o->persistent, !o->no_close_button, 0, CUI_SIDE_RIGHT);
+    return cui__modal_begin(ui, id, title, open, o->description, o->width > 0 ? o->width : 440, o->persistent, !o->no_close_button, 0, CUI_SIDE_RIGHT,
+                             (o->draggable ? CUI__GRIP_DRAG : 0) | (o->resizable ? CUI__GRIP_RESIZE : 0));
 }
 
 void cui_dialog_end(cui_ctx *ui) { cui__modal_end(ui, 0); }
 
 void cui_dialog_footer_begin(cui_ctx *ui) {
+    /* a dialog resized taller than its content keeps the footer at the bottom edge */
+    if (ui->dialog_depth > 0) {
+        cui__modal_state *st = cui_state(ui, ui->dialog_stack[ui->dialog_depth - 1], sizeof *st);
+        if (st->h > 0) {
+            int fill = cui__node_new(ui, 0);
+            ui->nodes[fill].h = CUI_FILL;
+        }
+    }
     int row = cui__node_new(ui, 0);
     cui_node *n = &ui->nodes[row];
     n->dir = CUI_ROW; n->gap = 8; n->justify = CUI_JUSTIFY_END;
@@ -857,7 +969,7 @@ bool cui_sheet_begin(cui_ctx *ui, const char *title, bool *open, const cui_sheet
     memset(&d, 0, sizeof d);
     if (!o) o = &d;
     cui_id id = cui_make_id(ui, title) ^ 0x5EE7u;
-    return cui__modal_begin(ui, id, title, open, o->description, o->size > 0 ? o->size : 400, false, true, 1, o->side);
+    return cui__modal_begin(ui, id, title, open, o->description, o->size > 0 ? o->size : 400, false, true, 1, o->side, 0);
 }
 
 void cui_sheet_end(cui_ctx *ui) { cui__modal_end(ui, 1); }
@@ -1368,6 +1480,7 @@ bool cui_calendar(cui_ctx *ui, const char *id_str, cui_date *value) {
     return b.changed;
 }
 
+/** Draw the date trigger with a focus ring when reached by keyboard. */
 bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const cui_date_opts *o) {
     cui_date_opts d;
     memset(&d, 0, sizeof d);
@@ -1411,6 +1524,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
     ui->nodes[t].w = CUI_FILL;
     cui__close(ui);
     if (col >= 0) cui__close(ui);
+    cui__focus_ring(ui, i, r.focus_visible ? 1.0f : 0.0f);
     ui->last_id = id;
     bool changed = false;
     if (cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_START, 0, 12, 0, false)) {
@@ -1424,7 +1538,7 @@ bool cui_date_picker_ex(cui_ctx *ui, const char *id_str, cui_date *value, const 
 /* Color picker                                                             */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { float h, s, v; bool init; char hex[16]; } cui__color_state;
+typedef struct { float h, s, v; bool init; cui_color last; char hex[16]; } cui__color_state;
 
 static void cui__rgb_to_hsv(cui_color c, float *h, float *s, float *v) {
     float r = c.r / 255.0f, g = c.g / 255.0f, b = c.b / 255.0f;
@@ -1496,17 +1610,22 @@ void cui__color_picker_open(cui_ctx *ui, cui_id id, cui_color value) {
     cui__color_state *st = cui_state(ui, id, sizeof *st);
     cui__rgb_to_hsv(value, &st->h, &st->s, &st->v);
     st->init = true;
+    st->last = value;
     cui__popup_set(ui, id ^ 0xC010Eu, true);
     cui_popup *p = cui__popup_get(ui, id ^ 0xC010Eu, false);
     if (p) p->at_mouse = false;
 }
 
+/** Draw the color trigger and reconcile its HSV controls with the caller's RGB. */
 bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
     cui_id id = cui_make_id(ui, id_str);
     cui_id pid = id ^ 0xC010Eu;
     cui__color_state *st = cui_state(ui, id, sizeof *st);
     cui_color old = *value;
-    if (!st->init) { cui__rgb_to_hsv(*value, &st->h, &st->s, &st->v); st->init = true; }
+    if (!st->init || old.r != st->last.r || old.g != st->last.g || old.b != st->last.b) {
+        cui__rgb_to_hsv(old, &st->h, &st->s, &st->v);
+        st->init = true;
+    }
     cui_popup *p = cui__popup_get(ui, pid, true);
     cui_interact r = cui__interact(ui, id, CUI_IF_FOCUSABLE);
     if (r.clicked && p) {
@@ -1537,6 +1656,7 @@ bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
                            cui__fs(ui, ui->theme.text_body), CUI_C(ui, FOREGROUND), false);
     ui->nodes[t].line_height = 1.3f;
     cui__close(ui);
+    cui__focus_ring(ui, i, r.focus_visible ? 1.0f : 0.0f);
     ui->last_id = id;
     if (cui__popup_begin(ui, pid, id, CUI_PLACE_BOTTOM_START, 240, 12, 12, false)) {
         cui_id svid = cui_make_id(ui, "#sv"), hid = cui_make_id(ui, "#hue");
@@ -1548,7 +1668,10 @@ bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
             st->v = 1 - cui__clampf((ui->my - svr.y) / svr.h, 0, 1);
         }
         if (hr.active && ui->mdown[0] && hrr.w > 0) st->h = cui__clampf((ui->mx - hrr.x) / hrr.w, 0, 0.9999f) * 360.0f;
-        if ((sr.active || hr.active) && ui->mdown[0]) *value = cui__hsv(st->h, st->s, st->v);
+        if ((sr.active || hr.active) && ui->mdown[0]) {
+            *value = cui__hsv(st->h, st->s, st->v);
+            value->a = old.a;
+        }
         int svn = cui__leaf(ui, svid, CUI_FILL, CUI_PX(150));
         cui__mark_interactive(ui, svn, 0);
         cui__sv_paint *sp = cui__frame_alloc(ui, sizeof *sp);
@@ -1577,11 +1700,12 @@ bool cui_color_picker(cui_ctx *ui, const char *id_str, cui_color *value) {
             if (same) { ui->nodes[c].border = 2; ui->nodes[c].border_color = CUI_C(ui, SURFACE_RAISED); ui->nodes[c].elevation = CUI_ELEVATION_RESTING; }
             cui__mark_interactive(ui, c, 0);
             if (cr.hovered) cui__set_cursor(ui, CUI_CURSOR_HAND);
-            if (cr.clicked) { *value = pc; cui__rgb_to_hsv(pc, &st->h, &st->s, &st->v); }
+            if (cr.clicked) { pc.a = old.a; *value = pc; cui__rgb_to_hsv(pc, &st->h, &st->s, &st->v); }
         }
         cui__close(ui);
         cui__popup_end(ui);
     }
+    st->last = *value;
     return memcmp(&old, value, sizeof old) != 0;
 }
 
@@ -1612,6 +1736,7 @@ static int cui__fuzzy(const char *text, const char *q) {
     return score;
 }
 
+/** Keep the exit transition visible without accepting commands from it. */
 int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int count) {
     cui_id id = cui_make_id(ui, "#command-palette");
     cui__palette_state *st = cui_state(ui, id, sizeof *st);
@@ -1628,6 +1753,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
         if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) { *open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
         if (ui->mreleased[0] && ui->hot == scrim_id && ui->active == scrim_id) *open = false;
     }
+    is_open = open && *open && !cui_is_disabled(ui);
     cui__interact(ui, scrim_id, 0);
     if (is_open) { ui->modal_layer = id; ui->modal_z = 0x7FFF0000; }
     int root = cui__float_begin(ui, id, 0x7FFF0000, 0, CUI__PLACE_FULL, 0);
@@ -1683,7 +1809,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
             order[b + 1] = o2; scores[b + 1] = s2;
         }
     }
-    if (n > 0) {
+    if (is_open && n > 0) {
         if (cui_key_pressed(ui, CUI_KEY_DOWN)) st->highlight = (st->highlight + 1) % n;
         if (cui_key_pressed(ui, CUI_KEY_UP)) st->highlight = (st->highlight + n - 1) % n;
         if (st->highlight >= n) st->highlight = n - 1;
@@ -1726,7 +1852,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
         ui->nodes[tt].w = CUI_FILL;
         if (c->shortcut) cui_kbd(ui, c->shortcut);
         cui__close(ui);
-        if (hl && cui__has_prev_rect(ui, cid)) {
+        if (is_open && hl && cui__has_prev_rect(ui, cid)) {
             /* keep the highlighted row visible */
             cui_scroll_state *ss = cui_state(ui, list_id, sizeof *ss);
             cui_rect rr = cui__prev_rect(ui, cid), lr = cui__prev_rect(ui, list_id);
@@ -1735,7 +1861,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
                 if (rr.y < lr.y) ss->ty -= lr.y - rr.y + 6;
             }
         }
-        if (r.clicked || (hl && cui_key_pressed(ui, CUI_KEY_ENTER))) chosen = order[j];
+        if (is_open && (r.clicked || (hl && cui_key_pressed(ui, CUI_KEY_ENTER)))) chosen = order[j];
     }
     if (n == 0) {
         int e = cui__node_new(ui, 0);

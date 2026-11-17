@@ -167,10 +167,39 @@ static const cui_query_field qb_fields[] = {
     { "Status", CUI_QUERY_CHOICE, qb_status, 3 }, { "Assignee", CUI_QUERY_TEXT }, { "Priority", CUI_QUERY_NUMBER }, { "Has PR", CUI_QUERY_BOOL },
 };
 
-typedef struct { cui_query_node nodes[16]; int n; bool changed; cui_size w; } qb_ctx;
+typedef struct { cui_query_node nodes[16]; int n; bool changed, read_only, disabled; cui_size w; } qb_ctx;
+/** Build the same query in editable, read-only and disabled modes. */
 static void build_qb(cui_ctx *ui, void *u) {
     qb_ctx *c = u;
-    c->changed = cui_query_builder(ui, "filter", qb_fields, 4, c->nodes, &c->n, 16);
+    cui_push_disabled(ui, c->disabled);
+    c->changed = cui_query_builder(ui, "filter", qb_fields, 4, c->nodes, &c->n, 16, .read_only = c->read_only);
+    cui_pop_disabled(ui);
+}
+
+/** Rendering a read-only query does not initialize or normalize caller storage. */
+static void test_query_read_only(void) {
+    printf("query builder: read-only preserves caller rules\n");
+    cui_ctx *ui = new_ctx(800, 600);
+    qb_ctx empty = { .read_only = true };
+    run(ui, build_qb, &empty, 1);
+    CHECK(empty.n == 0 && !empty.nodes[0].group && !empty.changed);
+    qb_ctx rules = { .nodes = {{ .group = true }, { .depth = 1 }}, .n = 2, .read_only = true };
+    run(ui, build_qb, &rules, 1);
+    CHECK(rules.n == 2 && rules.nodes[1].value[0] == '\0' && !rules.changed);
+    empty.read_only = false;
+    run(ui, build_qb, &empty, 1);
+    CHECK(empty.n == 1 && empty.nodes[0].group && empty.changed);
+    /* disabled: the rules stay as given, and the layout is the editable one */
+    qb_ctx on = { .nodes = {{ .group = true }, { .depth = 1 }}, .n = 2 };
+    qb_ctx off = { .nodes = {{ .group = true }, { .depth = 1 }}, .n = 2, .disabled = true };
+    run(ui, build_qb, &on, 2);
+    cui_rect on_r = cui_get_rect(ui, cui_make_id(ui, "filter"));
+    run(ui, build_qb, &off, 2);
+    cui_rect off_r = cui_get_rect(ui, cui_make_id(ui, "filter"));
+    CHECK(off.n == 2 && off.nodes[1].value[0] == '\0' && !off.changed);
+    CHECK(on.nodes[1].value[0] != '\0');
+    CHECK(on_r.h > 0 && off_r.h == on_r.h);
+    cui_destroy(ui);
 }
 
 static void test_query(void) {
@@ -604,11 +633,13 @@ typedef struct {
     cui_trace_span *s; int n;
     cui_trace_view view;
     int sel;
+    const cui_trace_link *links; int nl;
 } tr_ctx;
 static void build_tr(cui_ctx *ui, void *u) {
     tr_ctx *c = u;
     static const cui_trace_marker marks[] = { { "vsync", 0.0, CUI_TONE_NEUTRAL }, { "GC", 0.012, CUI_TONE_WARNING } };
-    c->r = cui_trace_view(ui, "trace", c->tracks, 3, c->s, c->n, &c->view, &c->sel, .markers = marks, .marker_count = 2, .height = 300);
+    c->r = cui_trace_view(ui, "trace", c->tracks, 3, c->s, c->n, &c->view, &c->sel, .markers = marks, .marker_count = 2, .height = 300,
+                          .links = c->links, .link_count = c->nl);
 }
 static void test_trace(void) {
     printf("trace viewer: sort, fit, hover, click, tree keys, fold a lane, zoom, pan, measure, 200k spans\n");
@@ -648,16 +679,25 @@ static void test_trace(void) {
     run(ui, build_tr, &c, 2);
     CHECK(fabs(c.view.end - c.view.start - 0.018) < 1e-9);
     /* Shift+drag measures */
+    double mark0 = c.view.mark_start, mark1 = c.view.mark_end;
     cui_input_mouse_move(ui, r.x + r.w * 0.4f, y); run(ui, build_tr, &c, 1);
     cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_SHIFT);
     cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); run(ui, build_tr, &c, 1);
-    for (int k = 1; k <= 4; k++) { cui_input_mouse_move(ui, r.x + r.w * (0.4f + 0.05f * k), y); run(ui, build_tr, &c, 1); }
+    for (int k = 1; k <= 4; k++) {
+        cui_input_mouse_move(ui, r.x + r.w * (0.4f + 0.05f * k), y);
+        run(ui, build_tr, &c, 1);
+        CHECK(c.view.mark_start != mark0 || c.view.mark_end != mark1);
+        CHECK(c.r.view_changed);
+        mark0 = c.view.mark_start; mark1 = c.view.mark_end;
+    }
     cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); run(ui, build_tr, &c, 1);
+    CHECK(!c.r.view_changed);
     cui_input_key(ui, CUI_KEY_NONE, false, 0);
     CHECK(c.view.mark_end > c.view.mark_start);
     CHECK(fabs(c.view.end - c.view.start - 0.018) < 1e-9);   /* measuring does not pan */
     key(ui, build_tr, &c, CUI_KEY_ESCAPE, 0);
     CHECK(!(c.view.mark_end > c.view.mark_start));
+    CHECK(c.r.view_changed);
     /* a plain drag pans */
     cui_input_scroll(ui, 0, 4); run(ui, build_tr, &c, 1);
     double s0 = c.view.start;
@@ -692,6 +732,300 @@ static void test_trace(void) {
     c.s = NULL; c.n = 0;
     run(ui, build_tr, &c, 2);
     CHECK(c.sel == -1);
+    cui_destroy(ui);
+}
+
+/** A trace that moves down, with links: they are drawn where its spans are on the frame it
+ * moves, as is what cui_trace_span_rect says; and a link to a span outside the lanes is skipped. */
+typedef struct { float pad; tr_ctx tr; const cui_trace_span *ask; cui_rect asked; } trm_ctx;
+static void build_trm(cui_ctx *ui, void *u) {
+    trm_ctx *m = u;
+    cui_box(ui, .height = CUI_PX(m->pad)) {}
+    build_tr(ui, &m->tr);
+    if (m->ask) m->asked = cui_trace_span_rect(ui, cui_last_id(ui), m->ask);   /* right after the call */
+}
+static int trm_vertices(cui_ctx *ui, cui_vec2 *out, int cap) {
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    int n = dd->vertex_count < cap ? dd->vertex_count : cap;
+    for (int i = 0; i < n; i++) out[i] = (cui_vec2){ dd->vertices[i].x, dd->vertices[i].y };
+    return dd->vertex_count;
+}
+static void test_trace_links_move(void) {
+    printf("trace viewer links: a trace that moves, a span outside the lanes\n");
+    static cui_trace_span sp[] = {
+        { "Frame", 0.000, 0.016, 0, 0 }, { "Update", 0.001, 0.009, 0, 1 }, { "Physics", 0.002, 0.005, 0, 2 },
+        { "Submit", 0.016, 0.018, 1, 0 }, { "Decode", 0.003, 0.010, 2, 0 },
+    };
+    cui_trace_sort(sp, 5);
+    static const cui_trace_link links[] = { { 2, 3, CUI_TONE_NEUTRAL, 0, false }, { 1, 4, CUI_TONE_WARNING, 2, true } };
+    enum { CAP = 40000 };
+    cui_vec2 *moved = malloc(sizeof *moved * CAP), *steady = malloc(sizeof *steady * CAP);
+    cui_id id = 0;
+    for (int with = 0; with < 2; with++) {   /* without links first: the comparison itself holds */
+        trm_ctx m;
+        memset(&m, 0, sizeof m);
+        m.tr.tracks[0].name = "Main"; m.tr.tracks[1].name = "Render"; m.tr.tracks[2].name = "Worker";
+        m.tr.s = sp; m.tr.n = 5; m.tr.sel = -1; m.tr.links = with ? links : NULL; m.tr.nl = with ? 2 : 0;
+        cui_ctx *ui = new_ctx(900, 600);
+        run(ui, build_trm, &m, 3);
+        id = cui_make_id(ui, "trace");
+        cui_rect before = cui_trace_span_rect(ui, id, &sp[3]);
+        m.pad = 60;                           /* the layout moves the trace 60 points down */
+        m.ask = &sp[3];
+        run(ui, build_trm, &m, 1);
+        m.ask = NULL;
+        cui_rect after = cui_trace_span_rect(ui, id, &sp[3]);
+        CHECK(fabsf(m.asked.y - before.y) < 0.01f);   /* asked during the build: not laid out yet, the previous rectangle */
+        int nm = trm_vertices(ui, moved, CAP);
+        run(ui, build_trm, &m, 1);            /* the next frame, already in place */
+        int ns = trm_vertices(ui, steady, CAP);
+        bool same = nm == ns && nm <= CAP;
+        for (int i = 0; same && i < nm; i++) same = fabsf(moved[i].x - steady[i].x) < 0.01f && fabsf(moved[i].y - steady[i].y) < 0.01f;
+        CHECK(same);                          /* the frame it moves draws what the next one does */
+        CHECK(fabsf(after.y - before.y - 60) < 0.01f);   /* where this frame drew the span */
+        cui_destroy(ui);
+    }
+    /* the first frame: its links are drawn, and its span rects are known once it is drawn */
+    int first_frame_vertices[2];
+    for (int with = 0; with < 2; with++) {
+        trm_ctx m;
+        memset(&m, 0, sizeof m);
+        m.tr.tracks[0].name = "Main"; m.tr.tracks[1].name = "Render"; m.tr.tracks[2].name = "Worker";
+        m.tr.s = sp; m.tr.n = 5; m.tr.sel = -1; m.tr.view.start = 0; m.tr.view.end = 0.018;
+        m.tr.links = with ? links : NULL; m.tr.nl = with ? 2 : 0;
+        cui_ctx *ui = new_ctx(900, 600);
+        run(ui, build_trm, &m, 1);
+        first_frame_vertices[with] = cui_get_draw_data(ui)->vertex_count;
+        cui_destroy(ui);
+    }
+    CHECK(first_frame_vertices[1] > first_frame_vertices[0] + 40);
+    {
+        trm_ctx m;
+        memset(&m, 0, sizeof m);
+        m.tr.tracks[0].name = "Main"; m.tr.tracks[1].name = "Render"; m.tr.tracks[2].name = "Worker";
+        m.tr.s = sp; m.tr.n = 5; m.tr.sel = -1; m.tr.view.start = 0; m.tr.view.end = 0.018;
+        cui_ctx *ui = new_ctx(900, 600);
+        run(ui, build_trm, &m, 1);
+        CHECK(cui_trace_span_rect(ui, cui_make_id(ui, "trace"), &sp[3]).w > 0);
+        cui_destroy(ui);
+    }
+    /* a span in a lane that does not exist sorts first and is not drawn; a link to it is skipped */
+    static cui_trace_span outside[] = { { "Nowhere", 0.001, 0.004, -1, 0 }, { "Main", 0.005, 0.009, 0, 0 } };
+    static const cui_trace_link to_outside[] = { { 0, 1, CUI_TONE_NEUTRAL, 0, false } };
+    tr_ctx c;
+    memset(&c, 0, sizeof c);
+    c.tracks[0].name = "Main"; c.tracks[1].name = "Render"; c.tracks[2].name = "Worker";
+    c.s = outside; c.n = 2; c.sel = -1;
+    cui_ctx *ui = new_ctx(900, 500);
+    run(ui, build_tr, &c, 3);
+    int without = cui_get_draw_data(ui)->vertex_count;
+    c.links = to_outside; c.nl = 1;
+    run(ui, build_tr, &c, 2);
+    CHECK(cui_get_draw_data(ui)->vertex_count == without);
+    cui_destroy(ui);
+    free(moved); free(steady);
+}
+
+static void test_trace_links(void) {
+    printf("trace viewer links: drawn across lanes, span rects, the hovered link, a folded lane\n");
+    static cui_trace_span sp[] = {
+        { "Frame", 0.000, 0.016, 0, 0 }, { "Update", 0.001, 0.009, 0, 1 }, { "Physics", 0.002, 0.005, 0, 2 },
+        { "Submit", 0.016, 0.018, 1, 0 }, { "Decode", 0.003, 0.010, 2, 0 },
+    };
+    cui_trace_sort(sp, 5);
+    /* sorted: Frame 0, Update 1, Physics 2, Submit 3, Decode 4 */
+    static const cui_trace_link links[] = {
+        { 2, 3, CUI_TONE_NEUTRAL, 0, false },   /* Physics -> Submit, forward across lanes */
+        { 1, 4, CUI_TONE_WARNING, 2, true },    /* Update -> Decode, backwards in time, dashed */
+        { 7, 1, CUI_TONE_NEUTRAL, 0, false },   /* out of range: ignored */
+    };
+    tr_ctx c;
+    memset(&c, 0, sizeof c);
+    c.tracks[0].name = "Main"; c.tracks[1].name = "Render"; c.tracks[2].name = "Worker";
+    c.s = sp; c.n = 5; c.sel = -1; c.links = links; c.nl = 3;
+    cui_ctx *ui = new_ctx(900, 500);
+    run(ui, build_tr, &c, 3);
+    /* the two valid links are drawn: the same frame without them has fewer vertices */
+    int with_links = cui_get_draw_data(ui)->vertex_count;
+    c.nl = 0;
+    run(ui, build_tr, &c, 1);
+    int without = cui_get_draw_data(ui)->vertex_count;
+    c.nl = 3;
+    run(ui, build_tr, &c, 1);
+    CHECK(with_links > without + 40);
+    cui_id id = cui_make_id(ui, "trace");
+    cui_rect ra = cui_trace_span_rect(ui, id, &sp[2]), rb = cui_trace_span_rect(ui, id, &sp[3]);
+    CHECK(ra.w > 0 && rb.w > 0 && rb.y > ra.y && rb.x > ra.x + ra.w);
+    CHECK(cui_trace_span_rect(ui, id, NULL).w == 0);
+    /* a cubic with level tangents passes the midpoint of its ends at t = 1/2 */
+    float mx = (ra.x + ra.w + rb.x) * 0.5f, my = (ra.y + rb.y) * 0.5f + (ra.h) * 0.5f;
+    move(ui, build_tr, &c, mx, my);
+    CHECK(c.r.hovered == -1 && c.r.hovered_link == 0);
+    move(ui, build_tr, &c, mx, my + 40);
+    CHECK(c.r.hovered_link == -1);
+    /* zoomed to 10-17 ms: Physics (ends at 5 ms) is out of view, Submit (from 16 ms) in view. The
+     * Physics -> Submit link spans 5-16 ms, so it crosses the view's left edge: it is drawn (more
+     * vertices than without links) and its visible end, level into Submit, is hovered. Update ->
+     * Decode spans 3-9 ms and misses the view. */
+    c.view.start = 0.010; c.view.end = 0.017;
+    run(ui, build_tr, &c, 2);
+    CHECK(c.view.start == 0.010 && c.view.end == 0.017);
+    CHECK(cui_trace_span_rect(ui, id, &sp[2]).w == 0 && cui_trace_span_rect(ui, id, &sp[3]).w > 0);
+    int zoomed_with = cui_get_draw_data(ui)->vertex_count;
+    c.nl = 0;
+    run(ui, build_tr, &c, 1);
+    int zoomed_without = cui_get_draw_data(ui)->vertex_count;
+    c.nl = 3;
+    run(ui, build_tr, &c, 1);
+    CHECK(zoomed_with > zoomed_without + 20);
+    cui_rect zs = cui_trace_span_rect(ui, id, &sp[3]);
+    move(ui, build_tr, &c, zs.x - 6, zs.y + zs.h * 0.5f);
+    CHECK(c.r.hovered == -1 && c.r.hovered_link == 0);
+    /* a span that ends a hair before the view starts is not drawn, so it has no rect, although
+     * its end falls inside the plot's padding */
+    c.view.start = 0.0090005; c.view.end = 0.017;
+    run(ui, build_tr, &c, 2);
+    CHECK(c.view.start == 0.0090005);
+    CHECK(cui_trace_span_rect(ui, id, &sp[1]).w == 0 && cui_trace_span_rect(ui, id, &sp[3]).w > 0);
+    c.view.start = c.view.end = 0;
+    /* a folded lane: its links meet the top row, its deeper spans have no rect */
+    c.tracks[0].collapsed = true;
+    run(ui, build_tr, &c, 2);
+    CHECK(cui_trace_span_rect(ui, id, &sp[2]).w == 0 && cui_trace_span_rect(ui, id, &sp[0]).w > 0);
+    c.tracks[0].collapsed = false;
+    /* many links: those whose time range misses the view cost only their range check */
+    int n = 200000;
+    cui_trace_link *many = malloc(sizeof *many * (size_t)n);
+    /* a late span stretches the capture to ten seconds; the links stay among the first three spans */
+    static cui_trace_span late_spans[] = {
+        { "Frame", 0.000, 0.016, 0, 0 }, { "Update", 0.001, 0.009, 0, 1 }, { "Physics", 0.002, 0.005, 0, 2 },
+        { "Submit", 0.016, 0.018, 1, 0 }, { "Late", 10.0, 10.01, 1, 0 },
+    };
+    cui_trace_sort(late_spans, 5);
+    for (int i = 0; i < n; i++) many[i] = (cui_trace_link){ i % 3, (i + 1) % 3, CUI_TONE_NEUTRAL, 0, (i & 1) != 0 };
+    c.s = late_spans; c.links = many; c.nl = n;
+    c.view.start = 9.99; c.view.end = 10.02;   /* only Late is in view; every link lies before it */
+    run(ui, build_tr, &c, 1);
+    CHECK(c.view.start > 9.9 && cui_trace_span_rect(ui, id, &late_spans[0]).w == 0);
+    clock_t c0 = clock();
+    run(ui, build_tr, &c, 10);
+    double ms = (double)(clock() - c0) / CLOCKS_PER_SEC * 1000 / 10;
+    printf("  200k links out of view: %.2f ms a frame\n", ms);
+    CHECK(ms < 20);
+    /* and two thousand links all in view, each drawn as a curve */
+    c.s = sp;
+    for (int i = 0; i < 2000; i++) many[i] = (cui_trace_link){ i % 5, (i + 1) % 5, CUI_TONE_NEUTRAL, 0, (i & 1) != 0 };
+    c.view.start = c.view.end = 0;
+    c.nl = 2000;
+    run(ui, build_tr, &c, 1);
+    c0 = clock();
+    run(ui, build_tr, &c, 10);
+    ms = (double)(clock() - c0) / CLOCKS_PER_SEC * 1000 / 10;
+    printf("  2k links in view: %.2f ms a frame\n", ms);
+    CHECK(ms < 120);
+    free(many);
+    c.links = NULL; c.nl = 0;
+    run(ui, build_tr, &c, 1);
+    cui_destroy(ui);
+}
+
+/* the time ruler shared by the flame graph, trace viewer and waterfall: long
+ * ranges step in minutes, hours and days and say so */
+double cui__fl_step(double raw);
+const char *cui__fl_dur(cui_ctx *ui, double s);
+const char *cui__fl_tick(cui_ctx *ui, double t, double step);
+double cui__fl_ruler_step(cui_ctx *ui, float pw, double t0, double t1, double origin);
+float cui__fl_tick_x(float px0, double k, double t0, double origin, double q, double step);
+float cui__text_width(cui_ctx *ui, cui_font font, float size, const char *text, int len, bool tabular);
+static void test_time_ruler(void) {
+    printf("time ruler: steps and units past a minute (hours-long and days-long traces)\n");
+    CHECK(cui__fl_step(0.0007) == 0.001 && cui__fl_step(3) == 5 && cui__fl_step(20) == 20);   /* 1, 2, 5 as before */
+    CHECK(cui__fl_step(21) == 30 && cui__fl_step(31) == 60 && cui__fl_step(61) == 120);
+    CHECK(cui__fl_step(700) == 900 && cui__fl_step(2000) == 3600 && cui__fl_step(4000) == 7200);
+    CHECK(cui__fl_step(9000) == 10800 && cui__fl_step(50000) == 86400);
+    CHECK(cui__fl_step(2 * 86400) == 2 * 86400 && cui__fl_step(3 * 86400) == 5 * 86400);
+    cui_ctx *ui = new_ctx(900, 500);
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    CHECK_STR(cui__fl_dur(ui, 0.0124), "12.4 ms");
+    CHECK_STR(cui__fl_dur(ui, 42), "42.0 s");
+    CHECK_STR(cui__fl_dur(ui, 90), "1.50 min");
+    CHECK_STR(cui__fl_dur(ui, 5400), "1.50 h");
+    CHECK_STR(cui__fl_dur(ui, 33 * 86400.0), "33.0 d");
+    CHECK_STR(cui__fl_tick(ui, 0.25, 0.05), "250 ms");             /* short steps: one unit, as before */
+    CHECK_STR(cui__fl_tick(ui, 1.5, 0.5), "1.5 s");
+    CHECK_STR(cui__fl_tick(ui, 45, 5), "45 s");
+    CHECK_STR(cui__fl_tick(ui, 70, 10), "1 min 10 s");             /* whole-second steps read as a clock past a minute */
+    CHECK_STR(cui__fl_tick(ui, 290, 10), "4 min 50 s");
+    CHECK_STR(cui__fl_tick(ui, 300, 10), "5 min");
+    CHECK_STR(cui__fl_tick(ui, 5400, 1800), "1 h 30 min");
+    CHECK_STR(cui__fl_tick(ui, 33 * 86400.0 + 37800, 1800), "33 d 10 h 30 min");
+    CHECK_STR(cui__fl_tick(ui, 3 * 86400.0, 86400), "3 d");
+    CHECK_STR(cui__fl_tick(ui, 0, 3600), "0 h");
+    CHECK_STR(cui__fl_tick(ui, -90, 30), "-1 min 30 s");
+    cui_end_frame(ui);
+    /* a trace three days long fits, zooms and pans like a short one */
+    static cui_trace_span sp[] = { { "Deploy", 0, 3 * 86400.0, 0, 0 }, { "Build", 3600, 7200, 0, 1 }, { "Test", 90000, 90060, 1, 0 } };
+    tr_ctx c;
+    memset(&c, 0, sizeof c);
+    c.tracks[0].name = "CI"; c.tracks[1].name = "QA"; c.tracks[2].name = "Idle";
+    c.s = sp; c.n = 3; c.sel = -1;
+    run(ui, build_tr, &c, 3);
+    CHECK(c.view.start == 0 && fabs(c.view.end - 3 * 86400.0) < 1e-6);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "trace"));
+    float x, y;
+    CHECK(find(ui, build_tr, &c, r, &c.r.hovered, 1, &x, &y));   /* Build */
+    cui_input_scroll(ui, 0, 4);
+    run(ui, build_tr, &c, 1);
+    CHECK(c.view.end - c.view.start < 3 * 86400.0 * 0.7);
+
+    /* every label in view fits before the next tick, also where a long label ("1 d 23 h 50 min")
+     * comes before a short one ("2 d"): windows around minute, hour and day rollovers */
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    const float fs = cui_theme_get(ui)->text_xs * cui_theme_get(ui)->font_scale;
+    static const double around[] = { 60, 3600, 36000, 86400, 172800, 33 * 86400.0 + 37800 };
+    static const double spans[] = { 90, 600, 1020, 3000, 20000, 200000 };
+    static const float widths[] = { 360, 480, 650, 900, 1400 };
+    int windows = 0, tight = 0;
+    for (int a = 0; a < 6; a++) for (int s = 0; s < 6; s++) for (int w = 0; w < 5; w++) {
+        double t0 = around[a] - spans[s] * 0.93, t1 = t0 + spans[s];
+        double step = cui__fl_ruler_step(ui, widths[w], t0, t1, 0);
+        float k = (float)(widths[w] / spans[s]);
+        for (double q = ceil(t0 / step - 1e-9); q <= floor(t1 / step + 1e-9); q += 1) {
+            const char *lbl = cui__fl_tick(ui, q * step, step);
+            float lw = cui__text_width(ui, CUI_FONT_BODY, fs, lbl, -1, true);
+            if ((float)(step * k) < lw + 16) {
+                if (!tight++) printf("  too tight: %.0f..%.0f s in %.0f pt, step %g s: \"%s\" is %.1f pt, ticks %.1f pt apart\n",
+                                     t0, t1, widths[w], step, lbl, lw, step * k);
+            }
+        }
+        windows++;
+    }
+    CHECK(windows == 180 && tight == 0);
+    CHECK(cui__fl_ruler_step(ui, 650, 171900, 172920, 0) >= 300);   /* "1 d 23 h 50 min" does not fit 2 min apart */
+    /* zoomed to 1e-8 s, 2e7 s after the origin: the tick indices pass 2^53, where adding 1 to a
+     * double no longer moves it; the step ends up coarse enough that neighbouring ticks differ */
+    CHECK(2e7 / cui__fl_ruler_step(ui, 733, 2e7, 2e7 + 1.1e-8, 0) < 4.5e15);
+    /* 0.25 us on 400 points, 2e7 s after an origin 1.8e9 s from zero: the ticks are 1e-7 s, 160
+     * points, apart, also where origin + t would round that step away (it gave both ticks one x);
+     * 2e7 s from the origin a double still carries the step to within a few percent */
+    {
+        double o = 1.8e9, t0 = o + 2e7, k = 400 / 2.5e-7, step = cui__fl_ruler_step(ui, 400, t0, t0 + 2.5e-7, o);
+        double q = ceil((t0 - o) / step - 1e-9);
+        float x0 = cui__fl_tick_x(0, k, t0, o, q, step), x1 = cui__fl_tick_x(0, k, t0, o, q + 1, step);
+        CHECK(fabs((x1 - x0) - step * k) < 0.05 * step * k);
+    }
+    cui_end_frame(ui);
+    /* the same in a trace view, whose first frame paints the view as given: it must return */
+    static cui_trace_track deep_tracks[1] = { { "Lane" } };
+    static cui_trace_span deep_spans[2] = { { "Start", 0, 1, 0, 0 }, { "Late", 2e7, 2e7 + 1, 0, 0 } };
+    cui_trace_view deep = { 2e7, 2e7 + 1e-8, 0 };
+    int deep_sel = -1;
+    for (int i = 0; i < 3; i++) {
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        cui_trace_view(ui, "deep zoom", deep_tracks, 1, deep_spans, 2, &deep, &deep_sel, .height = 300);
+        cui_end_frame(ui);
+    }
+    CHECK(deep.end > deep.start);
     cui_destroy(ui);
 }
 
@@ -1069,11 +1403,38 @@ static void test_uptime(void) {
 }
 
 static float th_a[48], th_b[48];
-typedef struct { double s0, s1; cui_time_histogram_result r; } th_ctx;
+typedef struct { double s0, s1; cui_time_histogram_result r; bool disabled; } th_ctx;
+/** Build the histogram with the current enabled state. */
 static void build_th(cui_ctx *ui, void *u) {
     th_ctx *c = u;
     const cui_histogram_series se[] = { { "info", th_a, CUI_TONE_INFO }, { "error", th_b, CUI_TONE_DANGER } };
+    cui_push_disabled(ui, c->disabled);
     c->r = cui_time_histogram(ui, "hist", 1794240000, 600, 48, se, 2, &c->s0, &c->s1, .utc = true);
+    cui_pop_disabled(ui);
+}
+
+/** Disabling during a drag cancels it even if the widget becomes enabled again. */
+static void test_histogram_disable(void) {
+    printf("time histogram: disabling cancels a drag\n");
+    cui_ctx *ui = new_ctx(800, 400);
+    th_ctx c = {0};
+    run(ui, build_th, &c, 3);
+    cui_rect r = cui_get_rect(ui, cui_make_id(ui, "hist"));
+    move(ui, build_th, &c, r.x + r.w * 0.3f, r.y + 40);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_th, &c, 1);
+    move(ui, build_th, &c, r.x + r.w * 0.5f, r.y + 40);
+    CHECK(c.r.selection_changed && c.s1 > c.s0);
+    double lo = c.s0, hi = c.s1;
+    c.disabled = true;
+    move(ui, build_th, &c, r.x + r.w * 0.7f, r.y + 40);
+    CHECK(!c.r.selection_changed && c.s0 == lo && c.s1 == hi);
+    c.disabled = false;
+    move(ui, build_th, &c, r.x + r.w * 0.8f, r.y + 40);
+    CHECK(!c.r.selection_changed && c.s0 == lo && c.s1 == hi);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_th, &c, 1);
+    cui_destroy(ui);
 }
 static void test_histogram(void) {
     printf("time histogram: hover, drag selects whole buckets, click clears\n");
@@ -1321,6 +1682,7 @@ int main(void) {
     test_cron();
     test_schedule();
     test_query();
+    test_query_read_only();
     test_kv();
     test_problems();
     test_pipeline();
@@ -1329,6 +1691,9 @@ int main(void) {
     test_graph();
     test_waterfall();
     test_trace();
+    test_trace_links();
+    test_trace_links_move();
+    test_time_ruler();
     test_random();
     test_regex();
     test_regex_noncapture();
@@ -1340,6 +1705,7 @@ int main(void) {
     test_uptime();
     test_histogram();
     test_histogram_far_time();
+    test_histogram_disable();
     test_coverage();
     test_blame();
     test_blame_no_commits();

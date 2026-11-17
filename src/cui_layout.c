@@ -1127,6 +1127,10 @@ void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r) {
     cui__add_hit(ui, id, cui__rect_intersect(r, cp), CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y);
 }
 
+void cui_wheel_region(cui_ctx *ui, cui_id id, cui_rect rect) {
+    if (!cui_is_disabled(ui)) cui__paint_wheel_hit(ui, id, rect);   /* a disabled canvas leaves the wheel to the page */
+}
+
 void cui__paint(cui_ctx *ui) {
     if (ui->node_count == 0) return;
     cui_rect full = { 0, 0, ui->vw, ui->vh };

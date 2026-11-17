@@ -1765,10 +1765,15 @@ static void page_creative(cui_ctx *ui) {
 /* ---- canvas and bars ------------------------------------------------------- */
 
 /* a picture for the result card, made here: a sky, a low sun and soft hills */
+/* the texture belongs to one context, so it lives in that context's state store, freed with it;
+ * a cache keyed by the context's address could hand a new context at the same address a
+ * texture from one already destroyed */
+typedef struct { cui_texture tex; } gallery_canvas_pic;
+static void gallery_canvas_pic_free(cui_ctx *ui, void *data) { gallery_canvas_pic *t = data; if (t->tex) cui_image_destroy(ui, t->tex); }
 static cui_texture canvas_picture(cui_ctx *ui) {
-    static cui_ctx *made_for;
-    static cui_texture tex;
-    if (made_for == ui && tex) return tex;
+    const cui_id pic_id = 0xCA9A5B1Cu;   /* a fixed id: the picture is shared by every page that shows it */
+    gallery_canvas_pic *held = cui_state(ui, pic_id, sizeof *held);
+    if (held->tex) return held->tex;
     enum { W = 288, H = 360 };
     static unsigned char px[W * H * 4];
     static const float hills[3][4] = { { 0.18f, 1.04f, 0.54f, 0.26f }, { 0.92f, 1.08f, 0.53f, 0.26f }, { 0.5f, 1.18f, 0.64f, 0.28f } };
@@ -1794,9 +1799,9 @@ static cui_texture canvas_picture(cui_ctx *ui) {
             unsigned char *p = &px[(y * W + x) * 4];
             p[0] = (unsigned char)acc[0]; p[1] = (unsigned char)acc[1]; p[2] = (unsigned char)acc[2]; p[3] = 255;
         }
-    tex = cui_image_create(ui, W, H, px);
-    made_for = ui;
-    return tex;
+    held->tex = cui_image_create(ui, W, H, px);
+    cui_state_on_free(ui, pic_id, gallery_canvas_pic_free);
+    return held->tex;
 }
 
 static void page_canvas(cui_ctx *ui) {

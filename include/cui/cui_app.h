@@ -43,6 +43,27 @@ typedef enum cui_renderer_kind {
     CUI_RENDERER_SOFTWARE
 } cui_renderer_kind;
 
+/* How the window is shown. */
+typedef enum cui_window_state {
+    CUI_WINDOW_NORMAL = 0,
+    CUI_WINDOW_MAXIMIZED,
+    CUI_WINDOW_MINIMIZED
+} cui_window_state;
+
+/* Where the window is when it is neither maximized nor minimized, and whether it is maximized:
+ * what an app saves when it closes (cui_app_placement) and hands back as cui_app_desc.placement
+ * to open where it was. x and y are the top-left corner of the window's content in desktop
+ * coordinates, y growing down: pixels on Windows and X11, points on macOS. Keep them only to
+ * pass back. width and height are logical points, the units of cui_app_size. state is
+ * CUI_WINDOW_NORMAL or CUI_WINDOW_MAXIMIZED; for a minimized window it is the state it comes
+ * back in, so a window closed from the taskbar reopens as it was. */
+typedef struct cui_window_placement {
+    int x, y;
+    int width, height;
+    cui_window_state state;
+    bool has_position;   /* false: the system picks the place (Wayland tells a window nothing about it) */
+} cui_window_placement;
+
 typedef struct cui_app_desc {
     const char *title;          /* default "CUI" */
     int width, height;          /* logical size, default 1080 x 720 */
@@ -83,19 +104,29 @@ typedef struct cui_app_desc {
      * custom_titlebar or off Windows. */
     int (*hit_test)(void *user, float x, float y);
     void *hit_test_user;        /* passed to hit_test */
-    /* Open the window maximized. A shortcut set to start minimized or maximized still wins on
-     * Windows. Unset: today's behavior, a normal window at width x height. */
+    /* Open the window maximized, as a placement with state CUI_WINDOW_MAXIMIZED does (it is
+     * that, without the size and place). A shortcut set to start minimized or maximized still
+     * wins on Windows, and a fixed-size window is not maximized. Unset: a normal window at
+     * width x height, unless placement says maximized. */
     bool start_maximized;
     /* Windows: take files dragged from Explorer through OLE drag and drop instead of WM_DROPFILES, which also
      * reports them while they are over the window (cui_file_drag_active, cui_input_file_hover) so a tree or
      * dropzone can highlight its target. Falls back to WM_DROPFILES when OLE cannot start. Ignored elsewhere. */
     bool file_hover;
-    /* Windows: where the window's top left corner (its outer frame) is created, in screen coordinates
-     * (the system's virtual screen, as cui_app_position reports: device pixels on Windows), so a window
-     * opens in place without a flash at the default spot. Used only when has_pos is set. The other backends
-     * ignore it for now. */
+    /* Where the top-left corner of the window's content is created, in the desktop coordinates of
+     * cui_window_placement (as cui_app_position reports them), so a window opens in place without a
+     * flash at the default spot. Used only when has_pos is set, and only without placement (whose
+     * place comes first when it has one). It is a placement with this place and width x height: a
+     * place on no screen is left to the system. With custom_titlebar on Windows the content is the
+     * whole window, so this is also its outer corner. */
     int x, y;
     bool has_pos;
+    /* Where to open, for an app that reopens where it was closed: the size and place from
+     * cui_app_placement, and whether the window was maximized. Its size replaces width and
+     * height. A place that is on no screen is left to the system, and a fixed-size window is
+     * not maximized. Copied when the window is created.
+     * Default: none, the system picks the place. */
+    const cui_window_placement *placement;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */
@@ -146,13 +177,16 @@ CUI_API cui_ctx *cui_app_ui(cui_app *app);
  * supported), whatever cui_app_desc.renderer says. Ask for it explicitly with CUI_RENDERER_SOFTWARE to
  * avoid the message an explicit CUI_RENDERER_OPENGL prints. Threads of their own, each with its own
  * apps, work as before.
- * The windows' positions: cui_app_set_position moves one, cui_app_position reads it (the outer frame's top
- * left, in screen coordinates, device pixels on Windows). Both work on Windows; the other backends do
- * nothing yet and cui_app_position returns false there. */
+ * The windows' positions: cui_app_desc.x, .y and .has_pos create one in place, cui_app_set_position
+ * moves one and cui_app_position reads it, all in the same frame: the top-left corner of the content
+ * in the desktop coordinates of cui_window_placement. */
 CUI_API bool cui_app_frame_poll(cui_app *app);
 CUI_API bool cui_app_pending(cui_app *app);
 CUI_API void cui_app_wait(cui_app *const *apps, int n);
-CUI_API void cui_app_set_position(cui_app *app, int x, int y);
+/* Where the top-left corner of the window's content is now, in the desktop coordinates of
+ * cui_window_placement, so cui_app_set_position(app, x, y) with what it reads leaves a normal
+ * window where it is. A maximized window reports where its content is; a minimized one where
+ * it comes back. Returns false, and 0, 0, where windows cannot tell their place (Wayland). */
 CUI_API bool cui_app_position(cui_app *app, int *x, int *y);
 
 /* Creates the app, calls frame() until the window closes, destroys it. */
@@ -166,6 +200,30 @@ CUI_API void cui_app_set_title(cui_app *app, const char *title);
 /* The window's size in logical points (the same units as cui_app_desc.width). */
 CUI_API void cui_app_set_size(cui_app *app, int width, int height);
 CUI_API cui_vec2 cui_app_size(cui_app *app);
+/* Maximizes the window on its display, as the title bar's maximize button does. NULL means the
+ * running app, so a cui_app_run callback can call it on its first frame; with the loop form it is
+ * fine right after cui_app_create. Nothing happens for a fixed-size window or where the window
+ * manager does not support it (an X11 window manager without EWMH). */
+CUI_API void cui_app_maximize(cui_app *app);
+/* Minimizes the window to the taskbar or the dock. Nothing happens where the window manager
+ * does not support it. */
+CUI_API void cui_app_minimize(cui_app *app);
+/* Undoes a maximize or a minimize: a maximized window gets its normal size and place back, a
+ * minimized one comes back as it was before, maximized or not. */
+CUI_API void cui_app_restore(cui_app *app);
+/* Normal, maximized or minimized, as the system reports it now. On X11 the window manager
+ * carries out what cui_app_maximize, cui_app_minimize and cui_app_restore ask for, so the new
+ * state can take a few frames to show here. */
+CUI_API cui_window_state cui_app_window_state(cui_app *app);
+/* Moves the window so the top-left corner of its content is at x, y, in the desktop
+ * coordinates of cui_window_placement. Meant for a normal window: on Windows a maximized or
+ * minimized one takes the new place when it is restored; elsewhere the window manager decides.
+ * Nothing happens where windows cannot place themselves (Wayland). */
+CUI_API void cui_app_set_position(cui_app *app, int x, int y);
+/* Writes the window's normal size and place, and whether it is or comes back maximized, to
+ * out, also while it is maximized or minimized, so an app can save them when it closes.
+ * Returns false when there is no app. */
+CUI_API bool cui_app_placement(cui_app *app, cui_window_placement *out);
 /* Starts or stops following the OS light/dark setting, as cui_app_desc.follow_system_theme
  * does at creation, for a theme switcher with Light, Dark and System. Starting applies the
  * OS setting at once, where the platform reports one. Stopping keeps the current theme, so
@@ -179,9 +237,11 @@ CUI_API void *cui_app_native_window(cui_app *app);
 /* Name of the active backend: "win32", "cocoa", "x11", "sdl2", "glfw". */
 CUI_API const char *cui_app_backend(cui_app *app);
 
-/* Window controls, for an app that draws its own title bar (cui_app_desc.custom_titlebar). */
+/* Window controls, for an app that draws its own title bar (cui_app_desc.custom_titlebar), with
+ * cui_app_minimize above. cui_app_toggle_maximize restores a maximized window and maximizes any
+ * other (cui_app_restore or cui_app_maximize); cui_app_is_maximized is cui_app_window_state ==
+ * CUI_WINDOW_MAXIMIZED. Both work on every backend. */
 CUI_API bool cui_app_has_custom_titlebar(cui_app *app);   /* the option took effect on this platform */
-CUI_API void cui_app_minimize(cui_app *app);
 CUI_API void cui_app_toggle_maximize(cui_app *app);
 CUI_API bool cui_app_is_maximized(cui_app *app);
 /* Starts moving the window with the mouse, as the system title bar does (with snapping).

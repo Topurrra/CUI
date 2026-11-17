@@ -632,6 +632,11 @@ struct cui_ctx {
     int click_count;
     double last_click_time;
     float last_click_x, last_click_y;
+    struct {
+        int count;
+        bool restarted;
+        float first_x, first_y, last_x, last_y;
+    } pending_clicks;               /* input collected before the frame clock advances */
     float scroll_dx, scroll_dy;
     bool kdown[CUI_KEY_COUNT];
     uint8_t kpressed[CUI_KEY_COUNT];
@@ -828,6 +833,17 @@ void cui__paint_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n, c
 cui_chart_annotation *cui__copy_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n);
 /* a dashed hairline from x0 to x1 at y: `dash` points drawn every `period` (cui_instrument.c) */
 void cui__draw_hdash(cui_ctx *ui, float x0, float x1, float y, float dash, float period, cui_color c);
+/* Time rulers (flame graph, trace view, waterfall), shared by the three views
+ * in cui_flame.c and checked by the tests: cui__fl_step gives the tick step for
+ * at least `raw` seconds, cui__fl_tick the label of a tick `step` apart
+ * ("4 min 50 s"), cui__fl_dur a duration in its unit ("12.4 ms", "1.50 min"),
+ * cui__fl_ruler_step the step a ruler `pw` points wide uses for t0..t1, wide
+ * enough for every label in view, and cui__fl_tick_x where tick q is drawn. */
+double cui__fl_step(double raw);
+double cui__fl_ruler_step(cui_ctx *ui, float pw, double t0, double t1, double origin);
+float cui__fl_tick_x(float px0, double k, double t0, double origin, double q, double step);
+const char *cui__fl_tick(cui_ctx *ui, double t, double step);
+const char *cui__fl_dur(cui_ctx *ui, double s);
 void cui__scroll_end_ex(cui_ctx *ui);
 
 /* ---- cell grid (cui_cellgrid.c): the parts that are pure functions, so the tests can call them ---- */

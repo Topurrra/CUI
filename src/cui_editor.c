@@ -3012,7 +3012,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             col = cui__ed_adv(s, a, b, p->tab, col);
             pos = b;
             if (ca >= p->vc1) break;
-            if (toks[t].kind == 0 && (s[a] == ' ' || s[a] == '\t')) continue;   /* white space */
+            /* A plain-text token may start with whitespace and still contain text. */
             cui__ed_run(ui, p, s, a, b, ca, x0, y + ty, p->colors[toks[t].kind]);
         }
         /* a block comment opened past the columns in view still carries on (a long line's: the line states say) */

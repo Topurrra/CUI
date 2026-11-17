@@ -43,6 +43,9 @@ cui_app_destroy(app);
 | `theme`, `accent` | The theme and accent to start with. |
 | `follow_system_theme` | Use the system's light or dark setting where the platform reports it. `cui_app_follow_system_theme` turns it on or off while the app runs. |
 | `app_id` | Linux: the name of the app's `.desktop` file without ".desktop", such as "org.example.Notes", so the desktop shows the app's name and icon for the window. See [Your app's name and icon on Linux](getting-started.md#your-apps-name-and-icon-on-linux). |
+| `placement` | Where to open: a placement saved with `cui_app_placement`, so the window reopens with the size, place and maximized state it had. See [Reopen where it was](#reopen-where-it-was). |
+| `start_maximized` | Open maximized: a placement with the maximized state, without a size or place. A Windows shortcut set to minimized or maximized still wins, and a `fixed_size` window is not maximized. |
+| `x`, `y`, `has_pos` | With `has_pos`, open with the top-left corner of the content at `x`, `y`, in the coordinates of a placement and of `cui_app_position`. It is a placement with that place and `width` by `height`, so a place on no monitor is left to the system; a `placement` with a place comes first. |
 
 ## The window
 
@@ -54,6 +57,35 @@ if (cui_button(ui, "Quit")) cui_app_quit(NULL);
 ```
 
 `NULL` means the app that is running, which is how a `cui_app_run` callback reaches its window. With the loop form you can pass your `cui_app *` instead. `cui_app_quit` ends the loop after the current frame.
+
+`cui_app_maximize` maximizes the window, as its maximize button does. To open maximized, call it right after `cui_app_create`, or once on the first frame of a `cui_app_run` callback. It does nothing for a `fixed_size` window, or on Linux under a window manager that does not support it.
+
+```c
+static bool started;
+if (!started) { cui_app_maximize(NULL); started = true; }
+```
+
+`cui_app_minimize` minimizes the window and `cui_app_restore` undoes a maximize or a minimize: a minimized window comes back as it was, maximized or not. `cui_app_window_state` says whether the window is normal, maximized or minimized, and `cui_app_set_position` moves it (`cui_app_position` reads where it is). `cui_app_toggle_maximize` and `cui_app_is_maximized`, made for a title bar the app draws itself, are short for these. On Linux the window manager carries these out in its own time, so a change can take a few frames to show, and a window manager without the support ignores it.
+
+```c
+if (cui_button(ui, "Minimize")) cui_app_minimize(NULL);
+if (cui_app_window_state(NULL) == CUI_WINDOW_MAXIMIZED && cui_button(ui, "Restore")) cui_app_restore(NULL);
+```
+
+### Reopen where it was
+
+Save `cui_app_placement` before the window closes and hand it back as `cui_app_desc.placement`. The window then opens with the size and place it had, and maximized if it was:
+
+```c
+/* when the app closes, before cui_app_destroy: keep this in the app's settings */
+cui_window_placement saved;
+cui_app_placement(app, &saved);
+
+/* when it starts again */
+cui_app *next = cui_app_create(&(cui_app_desc){ .title = "Notes", .placement = &saved });
+```
+
+A placement holds the size and place the window has when it is neither maximized nor minimized, and whether it is maximized, so a window closed maximized reopens maximized and restores to its normal size. For a minimized window it holds the state the window comes back in: one closed from the taskbar reopens maximized if it was minimized from maximized. The size is in points; the position is the top-left corner of the window's content in desktop coordinates (pixels on Windows and X11, points on macOS), only to be passed back. A place on a monitor that is no longer there is left to the system. Wayland lets a window neither read nor choose its place: there `has_position` is false and the compositor places the window.
 
 `cui_app_native_window` returns the system's handle (an `HWND`, an `NSWindow *`, an X11 `Window`, an `SDL_Window *` or a `GLFWwindow *`) for the things CUI does not wrap, such as a window icon or a system tray entry. `cui_app_backend` names the backend in use.
 
@@ -89,7 +121,7 @@ while (apps[0] && apps[1]) {
 }
 ```
 
-`cui_app_frame_poll` presents the window's last frame, takes in the thread's pending messages and begins a frame, without waiting; it returns false once the window is closed. `cui_app_pending` says whether a window needs a frame, so an idle one is not drawn when another wakes the loop. `cui_app_wait` blocks (`MsgWaitForMultipleObjects` on Windows, no polling) until input, a wake up or a timer on any window of the list, and paces animation to the display, so idle windows use no CPU. A NULL app in calls such as `cui_app_quit(NULL)` or a file dialog means the window polled last. Windows after the first on a thread use the software renderer, which redraws only what changed (one GL context per thread). Place windows with `cui_app_desc.x`, `.y` and `.has_pos` (created in place) and `cui_app_set_position` / `cui_app_position` (Windows, GLFW and SDL2; X11 and macOS do nothing yet). See [`examples/two_windows.c`](../examples/two_windows.c).
+`cui_app_frame_poll` presents the window's last frame, takes in the thread's pending messages and begins a frame, without waiting; it returns false once the window is closed. `cui_app_pending` says whether a window needs a frame, so an idle one is not drawn when another wakes the loop. `cui_app_wait` blocks (`MsgWaitForMultipleObjects` on Windows, no polling) until input, a wake up or a timer on any window of the list, and paces animation to the display, so idle windows use no CPU. A NULL app in calls such as `cui_app_quit(NULL)` or a file dialog means the window polled last. Windows after the first on a thread use the software renderer, which redraws only what changed (one GL context per thread). Place windows with `cui_app_desc.x`, `.y` and `.has_pos` (created in place), `cui_app_set_position` and `cui_app_position`, all in the coordinates of a placement: the top-left corner of the content (on Wayland a window can neither read nor choose its place). See [`examples/two_windows.c`](../examples/two_windows.c).
 
 ## Other threads
 

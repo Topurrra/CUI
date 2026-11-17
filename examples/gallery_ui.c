@@ -759,7 +759,7 @@ static void page_charts(cui_ctx *ui, gallery *g) {
 }
 
 static void dialogs(cui_ctx *ui, gallery *g) {
-    cui_dialog(ui, "Edit profile", &g->dialog_open, .description = "Changes are visible to your team.") {
+    cui_dialog(ui, "Edit profile", &g->dialog_open, .description = "Changes are visible to your team.", .draggable = true, .resizable = true) {
         cui_input(ui, "dlg-name", g->name, sizeof g->name, .label = "Name");
         cui_input(ui, "dlg-email", g->email, sizeof g->email, .label = "Email", .icon = CUI_ICON_MAIL);
         cui_switch(ui, "Public profile", &g->wifi);
