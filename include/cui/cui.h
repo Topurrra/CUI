@@ -2164,6 +2164,15 @@ typedef struct cui_text_mark { int start, end; int color; int tone; int style; }
  * for a deletion at the end). Lines are 0 based. See cui_code_editor_opts.line_marks. */
 enum { CUI_LINE_ADDED = 1, CUI_LINE_MODIFIED, CUI_LINE_DELETED };
 typedef struct cui_line_mark { int first_line, line_count, kind; } cui_line_mark;
+/* A glyph in the code editor's glyph lane (`glyph_lane`), left of the line numbers: a debugger's breakpoints. */
+enum {
+    CUI_GLYPH_BREAKPOINT = 1,      /* a filled red dot */
+    CUI_GLYPH_BREAKPOINT_DISABLED, /* a grey dot */
+    CUI_GLYPH_BREAKPOINT_CONDITION,/* a red dot with a bar: it has a condition or a hit count */
+    CUI_GLYPH_BREAKPOINT_LOG,      /* a red diamond: a logpoint */
+    CUI_GLYPH_BREAKPOINT_UNVERIFIED/* a faint red dot: set, not (yet) bound by the debugger */
+};
+typedef struct cui_gutter_glyph { int line; int kind; } cui_gutter_glyph;   /* line: 1 based */
 typedef struct cui_code_editor_opts {
     int _;
     const char *lang;          /* as cui_code_block: "c", "cpp", "js", "ts", "python", "rust", "go", "json", "shell", "sql", "markdown", "yaml", "toml", "ini", "xml", "html", "css", "powershell", "csharp", "java", "batch" (aliases as there); "text" for none */
@@ -2195,6 +2204,13 @@ typedef struct cui_code_editor_opts {
                                 * O(lines in view) (a binary search finds the first range in view). With wrap a mark spans
                                 * the rows of its lines. A press on a mark reports it in the result and does not select the line. */
     int line_mark_count;       /* number of `line_marks` */
+    bool glyph_lane;           /* a lane for glyphs left of the line numbers (the gutter grows by it): `glyphs` are drawn there, a
+                                * faint breakpoint follows the pointer over it, and a press in it on any line is reported in the
+                                * result (gutter_clicked) instead of selecting the line. Off: none of this, nothing changes. */
+    const cui_gutter_glyph *glyphs;   /* in the lane: sorted by line, at most one per line (NULL, 0: none). The caller owns them for the frame. */
+    int glyph_count;
+    int exec_line;             /* 1 based: the line a paused program stands on, tinted across the editor, with an arrow in the
+                                * lane when there is one (0: none) */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
@@ -2228,6 +2244,9 @@ typedef struct cui_code_editor_result {
     bool ctrl_click;           /* Ctrl (Cmd on macOS) and a click on the text this frame: ctrl_click_offset is the byte clicked
                                 * (go to definition). The click still moves the caret there. */
     int ctrl_click_offset;
+    bool gutter_clicked;       /* a press in the glyph lane (`glyph_lane`) this frame: gutter_line is the line, 1 based; */
+    bool gutter_right;         /* with it: the right button (a menu for the breakpoint), else the left */
+    int gutter_line;
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),

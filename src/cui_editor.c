@@ -34,6 +34,8 @@
 #define CUI__ED_BAR   12.0f     /* scrollbar zones along the right and bottom edges */
 #define CUI__ED_INSET 6.0f      /* above the first line and below the last */
 #define CUI__ED_GAP   8.0f      /* between the gutter and the code */
+#define CUI__ED_LANE_X 10.0f    /* the glyph lane: after the change marks, this far from the left */
+#define CUI__ED_LANE  16.0f     /* and this wide */
 
 /* Big texts: nothing below reads the whole text in a frame where nothing changed. The line
  * index, the wrap counts and the line states are kept across frames, and each edit patches
@@ -2714,6 +2716,10 @@ typedef struct {
     cui_color mark_colors[7];
     cui_color tone_tint[9], tone_line[9];   /* marks with a tone: the box, and the full color of a line */
     const cui_line_mark *gm; int gm_n; cui_color gm_col[3];   /* the gutter change marks, and their colors: added, modified, deleted */
+    bool lane;                  /* the glyph lane */
+    const cui_gutter_glyph *gg; int gg_n;   /* its glyphs */
+    int exec_line, lane_hover;  /* 0 based, -1 none: the paused line, and the line the pointer is over in the lane */
+    cui_color gl_red, gl_grey, gl_exec, exec_tint, gl_bg;   /* gl_bg: the editor's surface (a ring's hole) */
     const char *placeholder;
     float size, lh, cw, gutter, view_h;
     double sy, max_sy;
@@ -2776,6 +2782,63 @@ static int cui__gm_hit(const cui_line_mark *m, int n, int line, bool top_half) {
     }
     return deleted;
 }
+/* ---- the glyph lane (cui_code_editor_opts.glyph_lane, glyphs, exec_line) ---- */
+static int cui__gg_lower(const cui_gutter_glyph *g, int n, int line1) {
+    int lo = 0, hi = n;
+    while (lo < hi) { int k = lo + (hi - lo) / 2; if (g[k].line < line1) lo = k + 1; else hi = k; }
+    return lo;
+}
+static void cui__ed_glyph(cui_ctx *ui, const cui__ed_paint *p, cui_vec2 c, int kind, float rad, bool ghost) {
+    cui_color red = ghost ? cui_alpha(p->gl_red, 0.35f) : p->gl_red;
+    switch (kind) {
+    case CUI_GLYPH_BREAKPOINT_DISABLED: cui_draw_circle(ui, c, rad, p->gl_grey); break;
+    case CUI_GLYPH_BREAKPOINT_UNVERIFIED:   /* a ring: set, not bound */
+        cui_draw_circle(ui, c, rad, p->gl_grey);
+        cui_draw_circle(ui, c, rad - CUI_MAX(1.5f, rad * 0.32f), p->gl_bg);
+        break;
+    case CUI_GLYPH_BREAKPOINT_LOG: {
+        cui_vec2 d[4] = { { c.x, c.y - rad * 1.15f }, { c.x + rad * 1.15f, c.y }, { c.x, c.y + rad * 1.15f }, { c.x - rad * 1.15f, c.y } };
+        cui_draw_polygon(ui, d, 4, red);
+        break;
+    }
+    case CUI_GLYPH_BREAKPOINT_CONDITION: {
+        cui_draw_circle(ui, c, rad, red);
+        cui_color w = CUI_RGBA(0xFFFFFFE6);
+        float bw = rad * 1.1f, bh = CUI_MAX(1.0f, rad * 0.22f);
+        cui_draw_rect(ui, (cui_rect){ c.x - bw * 0.5f, c.y - bh * 1.6f, bw, bh }, CUI_CORNERS(0), w);
+        cui_draw_rect(ui, (cui_rect){ c.x - bw * 0.5f, c.y + bh * 0.6f, bw, bh }, CUI_CORNERS(0), w);
+        break;
+    }
+    default: cui_draw_circle(ui, c, rad, red); break;
+    }
+}
+static void cui__ed_paint_lane(cui_ctx *ui, const cui__ed_paint *p, cui_rect r) {
+    if (!p->lane || p->count <= 0) return;
+    float top = r.y + CUI__ED_INSET - (float)p->sy;
+    float cx = r.x + CUI__ED_LANE_X + CUI__ED_LANE * 0.5f;
+    float rad = CUI_MIN(p->lh * 0.3f, 5.5f);
+    int first = p->first, last = p->first + p->count;
+    int k = p->gg_n > 0 ? cui__gg_lower(p->gg, p->gg_n, first + 1) : 0;
+    bool hover_has = false;
+    for (; k < p->gg_n && p->gg[k].line <= last; k++) {
+        int line = p->gg[k].line - 1;
+        if (line < first || line >= last) continue;
+        if (line == p->lane_hover) hover_has = true;
+        float y = top + (float)(cui__ed_prow(p, line - first) * p->lh) + p->lh * 0.5f;
+        cui__ed_glyph(ui, p, (cui_vec2){ cx, y }, p->gg[k].kind, rad, false);
+    }
+    if (p->lane_hover >= first && p->lane_hover < last && !hover_has) {   /* where a click would put one */
+        float y = top + (float)(cui__ed_prow(p, p->lane_hover - first) * p->lh) + p->lh * 0.5f;
+        cui__ed_glyph(ui, p, (cui_vec2){ cx, y }, CUI_GLYPH_BREAKPOINT, rad, true);
+    }
+    if (p->exec_line >= first && p->exec_line < last) {                 /* the paused line: an arrow over the dot */
+        float y = top + (float)(cui__ed_prow(p, p->exec_line - first) * p->lh) + p->lh * 0.5f;
+        float h = CUI_MIN(p->lh * 0.36f, 6.5f), x0 = cx - h * 0.9f;
+        cui_vec2 a[5] = { { x0, y - h * 0.5f }, { cx + h * 0.1f, y - h * 0.5f }, { cx + h * 1.1f, y }, { cx + h * 0.1f, y + h * 0.5f }, { x0, y + h * 0.5f } };
+        cui_draw_polygon(ui, a, 5, p->gl_exec);
+    }
+}
+
 static void cui__ed_paint_gmarks(cui_ctx *ui, const cui__ed_paint *p, cui_rect r) {
     int n = p->gm_n, first = p->first, last = p->first + p->count;   /* lines first .. last - 1 are in view */
     if (n <= 0 || p->count <= 0) return;
@@ -2938,6 +3001,13 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         float bh = p->wrap ? (float)p->lr[bk].n * p->lh : p->lh;   /* every row of a wrapped line */
         cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, bh }, CUI_CORNERS(0), p->band);
     }
+    /* the line a paused program stands on */
+    if (p->exec_line >= p->first && p->exec_line < p->first + p->count) {
+        int bk = p->exec_line - p->first;
+        float y = r.y + CUI__ED_INSET + (float)(cui__ed_prow(p, bk) * p->lh - p->sy);
+        float bh = p->wrap ? (float)p->lr[bk].n * p->lh : p->lh;
+        cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, bh }, CUI_CORNERS(0), p->exec_tint);
+    }
     /* line numbers */
     if (p->gutter > CUI__ED_GAP) {
         for (int k = 0; k < p->count; k++) {
@@ -2951,6 +3021,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         if (p->sx > 0.5f) cui_draw_rect(ui, (cui_rect){ gx, r.y, 1, r.h }, CUI_CORNERS(0), p->line);   /* code scrolled under the gutter */
     }
     cui__ed_paint_gmarks(ui, p, r);
+    cui__ed_paint_lane(ui, p, r);
     cui_push_clip(ui, code);
     cui__tok *toks = NULL;
     int tok_cap = 0;
@@ -3295,6 +3366,7 @@ typedef struct {
     bool focused;
     int caret_line, caret_col;
     int caret_row, caret_vcol;          /* wrapped: the caret's row from the top of the text, and its column in that row */
+    int lane_hover;                     /* the line under the pointer in the glyph lane, 0 based; -1 none */
 } cui__edf;
 
 /* requests made from code since the last frame: select, go to, find */
@@ -3400,6 +3472,11 @@ static void cui__edf_press(cui__edf *f, int line, double col) {
             st->bar_grab = ui->mx >= tx && ui->mx <= tx + len ? ui->mx - tx : len * 0.5f;
             st->bar_drag = 2;
         }
+        return;
+    }
+    if (f->o->glyph_lane && ui->mx >= br.x + CUI__ED_LANE_X && ui->mx < br.x + CUI__ED_LANE_X + CUI__ED_LANE && line >= 0) {
+        int ln = E->wrap ? cui__ed_line_of_row(E, line) : line;     /* a press in the glyph lane: reported, nothing selected */
+        if (ln >= 0 && ln < E->nl) { f->res->gutter_clicked = true; f->res->gutter_line = ln + 1; f->res->gutter_right = false; }
         return;
     }
     if (f->o->line_marks && f->o->line_mark_count > 0 && ui->mx < br.x + 9) {   /* a press on a change mark reports it and selects nothing */
@@ -3523,6 +3600,15 @@ static void cui__edf_pointer(cui__edf *f) {
             } else if (in_line) cui__wakeup_after(ui, (float)(0.5 - (ui->time - st->hov_t)) + 0.01f);
         } else {
             st->hov_mx = st->hov_my = -1e9f;            /* off the text: the rest starts again */
+        }
+        if (f->o->glyph_lane && f->lr.hovered && !f->over_hbar && !st->bar_drag && line >= 0 &&
+            ui->mx >= br.x + CUI__ED_LANE_X && ui->mx < br.x + CUI__ED_LANE_X + CUI__ED_LANE) {
+            int ln = E->wrap ? cui__ed_line_of_row(E, line) : line;
+            if (ln >= 0 && ln < E->nl) {
+                f->lane_hover = ln;
+                cui__set_cursor(ui, CUI_CURSOR_HAND);
+                if (ui->mpressed[1]) { f->res->gutter_clicked = true; f->res->gutter_right = true; f->res->gutter_line = ln + 1; }
+            }
         }
         if (f->lr.hovered && ui->mpressed[0]) cui__edf_press(f, line, col);
         if (st->bar_drag && f->lr.active && ui->mdown[0]) cui__edf_bar_drag(f);
@@ -4097,6 +4183,18 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
     p->num = cui_alpha(CUI_C(ui, TEXT_MUTED), 0.7f);
     p->num_on = CUI_C(ui, TEXT_SECONDARY);
     p->band = cui_alpha(fg, dark ? 0.05f : 0.04f);
+    p->lane = f->o->glyph_lane;
+    p->gg = f->o->glyphs; p->gg_n = f->o->glyphs ? CUI_MAX(0, f->o->glyph_count) : 0;
+    p->exec_line = f->o->exec_line > 0 && f->o->exec_line <= E->nl ? f->o->exec_line - 1 : -1;
+    p->lane_hover = f->lane_hover;
+    if (p->lane || p->exec_line >= 0) {
+        p->gl_red = cui__tone_color(ui, CUI_TONE_DANGER);
+        p->gl_grey = cui_alpha(CUI_C(ui, TEXT_MUTED), 0.8f);
+        p->gl_exec = cui__tone_color(ui, CUI_TONE_WARNING);
+        p->exec_tint = cui_alpha(p->gl_exec, dark ? 0.16f : 0.22f);
+        p->gl_bg = f->o->borderless ? CUI_C(ui, BACKGROUND)
+                 : dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, BACKGROUND), 0.4f) : CUI_C(ui, SURFACE_MUTED);   /* as the editor's own */
+    }
     p->sel = cui_alpha(acc, ui->accent == CUI_ACCENT_NEUTRAL ? 0.28f : 0.26f);
     if (!focused && !p->show_line) p->sel = cui_alpha(fg, dark ? 0.12f : 0.08f);   /* resting: a quiet selection */
     p->match = cui_alpha(acc, 0.12f);
@@ -4190,6 +4288,8 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     int digits = 2;
     for (int v = E.nl / 100; v > 0; v /= 10) digits++;
     f.gutter = o->no_line_numbers ? CUI__ED_GAP : 12 + (float)digits * f.cw + 14;
+    if (o->glyph_lane) f.gutter += CUI__ED_LANE + (o->no_line_numbers ? CUI__ED_LANE_X : 0);
+    f.lane_hover = -1;
     f.height = o->height > 0 ? o->height : 320;
 
     f.br = cui__prev_rect(ui, f.lid);
