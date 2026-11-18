@@ -15,6 +15,8 @@
  * view) are separate functions declared in cui_internal.h so the tests can call them. */
 #include "cui_internal.h"
 
+int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_input_opts *o, bool multiline, int style, const char *search_icon);   /* cui_textedit.c */
+
 #define CUI__CG_MAX_COLS 16384
 #define CUI__CG_DEF_W 120.0f        /* a column width <= 0 */
 #define CUI__CG_MIN_W 24.0f         /* the smallest a drag or a fit makes a column */
@@ -57,6 +59,9 @@ typedef struct cui__cg_state {
     float rn_size, rn_w;
     cui__cg_adv adv[3];           /* the body font, the body font with tabular figures, the header font */
     bool init, want_vis;          /* the cursor still has to be scrolled into view (no layout yet) */
+    bool editing;                 /* an in-place editor is open on (erow, ecol) */
+    int erow, ecol;
+    uint32_t session;             /* counts the editors opened: each gets a fresh text field (no undo history of the last) */
 } cui__cg_state;
 
 typedef struct { const char *s; int len; } cui__cg_item;
@@ -69,6 +74,7 @@ typedef struct cui__cg_paint {
     float cols_end, rows_end;     /* where the last column and the last row end */
     float *lx;                    /* nc + 1 column edges */
     cui__cg_item *cells, *hdr, *rn;
+    unsigned char *marks;         /* nr * nc CUI_CELLGRID_MARK_* masks, or NULL without a mark callback */
     const cui__cg_adv *adv;       /* the three tables of the state */
     unsigned char *right;         /* nc */
     bool striped, lines, has_head, has_rn, focused, has_sel, multi, sortable, ring;
@@ -95,6 +101,8 @@ typedef struct cui__cg {
     double total_w, total_h, max_x, max_y;
     cui_font font, hfont;
     int ev;
+    cui_id id;
+    int begin_row, begin_col;     /* an editor to open on this cell, or -1 */
 } cui__cg;
 
 /* ------------------------------------------------------------------------ */
@@ -390,6 +398,98 @@ static void cui__cg_select_rows(cui__cg *g, int row, int anchor_row) {
     cui__cg_set(g, row, 0, anchor_row, g->cols - 1);
 }
 
+/* ---- in-place editing: the library's text field laid over the cell ---- */
+
+static bool cui__cg_edit_ok(const cui__cg *g) {
+    const cui_cellgrid_edit *e = g->o->edit;
+    return e && e->buf && e->cap >= 2;
+}
+
+static bool cui__cg_editable(const cui__cg *g, int row, int col) {
+    if (!cui__cg_edit_ok(g) || row < 0 || col < 0 || row >= g->rows || col >= g->cols) return false;
+    return !(g->o->mark && (g->o->mark(g->o->ctx, row, col) & CUI_CELLGRID_MARK_LOCKED));
+}
+
+static cui_id cui__cg_edit_id(const cui__cg *g) {
+    uint32_t key[2] = { g->st->session, 0xCEED17u };
+    return cui__hash(key, sizeof key, g->id);
+}
+
+/* A cell's text as the editor starts from it: the callback's text as it is (line breaks stay), cut to cap - 1 bytes
+ * and not inside a character. */
+static void cui__cg_edit_text(const cui__cg *g, int row, int col, char *dst, size_t cap) {
+    dst[0] = 0;
+    const char *t = g->o->cell(g->o->ctx, row, col, dst, cap);
+    if (!t) { dst[0] = 0; return; }
+    if (t == dst) return;
+    size_t n = strlen(t);
+    if (n >= cap) { n = cap - 1; while (n > 0 && ((unsigned char)t[n] & 0xC0) == 0x80) n--; }
+    memmove(dst, t, n);
+    dst[n] = 0;
+}
+
+/* Opens the editor on a cell: its text in the caller's buffer, all selected (a typed character then replaces it,
+ * as the field takes this frame's text input itself). */
+static void cui__cg_edit_begin(cui__cg *g, int row, int col) {
+    cui_ctx *ui = g->ui;
+    cui__cg_state *st = g->st;
+    cui__cg_edit_text(g, row, col, g->o->edit->buf, g->o->edit->cap);
+    cui__cg_set(g, row, col, row, col);
+    st->editing = true; st->erow = row; st->ecol = col; st->session++;
+    cui_id fid = cui__cg_edit_id(g);
+    ui->focus = fid;
+    ui->tf_select_all = fid;
+    cui__cg_reveal(g, row, col);
+}
+
+/* Closes the editor. A commit reports the cell and its text when the text differs from the cell's. */
+static void cui__cg_edit_end(cui__cg *g, bool commit, bool refocus) {
+    cui__cg_state *st = g->st;
+    cui_cellgrid_edit *e = g->o->edit;
+    st->editing = false;
+    if (refocus) g->ui->focus = g->id;
+    if (!commit || !cui__cg_edit_ok(g)) return;
+    char *cur = (char *)cui__frame_alloc(g->ui, e->cap);
+    cui__cg_edit_text(g, st->erow, st->ecol, cur, e->cap);
+    if (strcmp(cur, e->buf) != 0) { e->row = st->erow; e->col = st->ecol; g->ev |= CUI_CELLGRID_EDITED; }
+}
+
+/* Before the grid's own input: a lost focus commits (a click elsewhere), Escape cancels, Enter and Tab commit and move. */
+static void cui__cg_edit_pre(cui__cg *g) {
+    cui_ctx *ui = g->ui;
+    cui__cg_state *st = g->st;
+    if (!st->editing) return;
+    if (!cui__cg_edit_ok(g) || st->erow >= g->rows || st->ecol >= g->cols) { cui__cg_edit_end(g, false, false); return; }
+    if (ui->focus != cui__cg_edit_id(g)) { cui__cg_edit_end(g, true, false); return; }
+    bool blocked = (ui->mods & (CUI_MOD_CTRL | CUI_MOD_ALT | CUI_MOD_SUPER)) != 0, shift = (ui->mods & CUI_MOD_SHIFT) != 0;
+    int dr = 0, dc = 0;
+    if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        cui_key_consume(ui, CUI_KEY_ESCAPE);
+        cui__cg_edit_end(g, false, true);
+        return;
+    }
+    if (!blocked && cui_key_pressed(ui, CUI_KEY_ENTER)) { dr = shift ? -1 : 1; cui_key_consume(ui, CUI_KEY_ENTER); }
+    else if (!blocked && cui_key_pressed(ui, CUI_KEY_TAB)) { dc = shift ? -1 : 1; cui_key_consume(ui, CUI_KEY_TAB); }
+    else return;
+    int r = CUI_CLAMP(st->erow + dr, 0, g->rows - 1), c = CUI_CLAMP(st->ecol + dc, 0, g->cols - 1);
+    cui__cg_edit_end(g, true, true);
+    cui__cg_set(g, r, c, r, c);
+    cui__cg_reveal(g, r, c);
+}
+
+/* After the geometry is final: an editor whose cell left the body is committed, then a requested one opens. */
+static void cui__cg_edit_post(cui__cg *g) {
+    cui__cg_state *st = g->st;
+    if (st->editing && g->known && st->erow < g->rows && st->ecol < g->cols) {
+        double x0 = st->edges[st->ecol] - st->x, x1 = st->edges[st->ecol + 1] - st->x;
+        double y0 = (double)st->erow * (double)g->rh - st->y, y1 = y0 + (double)g->rh;
+        if (x1 <= 0 || x0 >= (double)g->body_w || y1 <= 0 || y0 >= (double)g->body_h)
+            cui__cg_edit_end(g, true, g->ui->focus == cui__cg_edit_id(g));
+    }
+    if (g->begin_row >= 0 && !st->editing && !(g->ev & CUI_CELLGRID_EDITED) && cui__cg_editable(g, g->begin_row, g->begin_col))
+        cui__cg_edit_begin(g, g->begin_row, g->begin_col);
+}
+
 static void cui__cg_press(cui__cg *g, int region, float lx, float ly) {
     cui_ctx *ui = g->ui;
     cui__cg_state *st = g->st;
@@ -430,7 +530,10 @@ static void cui__cg_press(cui__cg *g, int region, float lx, float ly) {
         if (shift && had) cui__cg_set(g, r, c, g->sel->anchor_row, g->sel->anchor_col);
         else cui__cg_set(g, r, c, r, c);
         st->drag = CUI__CG_DRAG_CELL;
-        if (ui->click_count >= 2 && !shift) g->ev |= CUI_CELLGRID_ACTIVATE;
+        if (ui->click_count >= 2 && !shift) {
+            if (cui__cg_editable(g, r, c)) { g->begin_row = r; g->begin_col = c; }
+            else g->ev |= CUI_CELLGRID_ACTIVATE;
+        }
         cui__cg_reveal(g, r, c);
     }
 }
@@ -493,9 +596,19 @@ static void cui__cg_keys(cui__cg *g) {
     }
     if (follow) cui__cg_reveal(g, g->sel->row, g->sel->col);
     int plain = ui->mods & (CUI_MOD_SHIFT | CUI_MOD_CTRL | CUI_MOD_ALT | CUI_MOD_SUPER);
+    bool can = g->sel->row >= 0 && g->sel->col >= 0 && cui__cg_editable(g, g->sel->row, g->sel->col);
     if (g->sel->row >= 0 && plain == 0 && cui_key_pressed(ui, CUI_KEY_ENTER)) {
-        g->ev |= CUI_CELLGRID_ACTIVATE;
+        if (can) { g->begin_row = g->sel->row; g->begin_col = g->sel->col; }
+        else g->ev |= CUI_CELLGRID_ACTIVATE;
         cui_key_consume(ui, CUI_KEY_ENTER);
+    }
+    if (can && plain == 0 && cui_key_pressed(ui, CUI_KEY_F2)) {
+        g->begin_row = g->sel->row; g->begin_col = g->sel->col;
+        cui_key_consume(ui, CUI_KEY_F2);
+    }
+    /* a typed character opens the editor; the field takes the character itself (it replaces the selected text) */
+    if (can && g->begin_row < 0 && ui->text_in_len > 0 && !((ui->mods & CUI_MOD_PRIMARY) && !(ui->mods & CUI_MOD_ALT))) {
+        g->begin_row = g->sel->row; g->begin_col = g->sel->col;
     }
     if (plain == CUI_MOD_PRIMARY && cui_key_pressed(ui, CUI_KEY_C)) {
         g->ev |= CUI_CELLGRID_COPY;
@@ -550,6 +663,18 @@ static void cui__cg_draw_item(cui_ctx *ui, const cui__cg_paint *p, const cui__cg
     cui__draw_text_ellipsis(ui, font, p->size, tx, ty, maxw, col, it->s, it->len, tab);
 }
 
+/* a line through the middle of a cell's text (a row marked for deletion) */
+static void cui__cg_strike(cui_ctx *ui, const cui__cg_paint *p, const cui__cg_adv *a, float x, float y, float w, bool right,
+                           cui_color col, const cui__cg_item *it) {
+    float maxw = w - 2 * p->pad;
+    if (maxw <= 1) return;
+    float tw = cui__cg_est(a, it->s, it->len);
+    if (tw < 0) tw = cui__text_width(ui, CUI_FONT_BODY, p->size, it->s, it->len, right);
+    tw = CUI_MIN(tw, maxw);
+    float x0 = right ? x + w - p->pad - tw : x + p->pad;
+    cui_draw_rect(ui, (cui_rect){ x0, cui__cg_snap(y + p->rh * 0.5f, p->s), tw, 1.0f / p->s }, CUI_CORNERS(0), col);
+}
+
 static void cui__cg_outline(cui_ctx *ui, cui_rect r, float th, cui_color c) {
     if (r.w <= 0 || r.h <= 0) return;
     cui_draw_rect(ui, (cui_rect){ r.x, r.y, r.w, th }, CUI_CORNERS(0), c);
@@ -574,6 +699,22 @@ static void cui__cg_paint_body(cui_ctx *ui, const cui__cg_paint *p, cui_rect R, 
         cui_draw_rect(ui, sr, CUI_CORNERS(0), cui__cg_sel_fill(ui));
         cui_draw_rect(ui, cr, CUI_CORNERS(0), CUI_C(ui, SURFACE));
     }
+    if (p->marks) {   /* tints, under the lines and the text */
+        bool dark = ui->mode == CUI_THEME_DARK;
+        for (int i = 0; i < p->nr; i++) {
+            float y = top + (float)i * p->rh;
+            if (y > B.y + B.h || y + p->rh < B.y) continue;
+            for (int j = 0; j < p->nc; j++) {
+                int m = p->marks[i * p->nc + j];
+                if (!(m & (CUI_CELLGRID_MARK_CHANGED | CUI_CELLGRID_MARK_NEW | CUI_CELLGRID_MARK_DELETED))) continue;
+                cui_rect cell = { R.x + p->lx[j], y, p->lx[j + 1] - p->lx[j], p->rh };
+                if (cell.x > B.x + B.w || cell.x + cell.w < B.x) continue;
+                if (m & CUI_CELLGRID_MARK_CHANGED) cui_draw_rect(ui, cell, CUI_CORNERS(0), cui_alpha(CUI_C(ui, ACCENT), dark ? 0.22f : 0.16f));
+                if (m & CUI_CELLGRID_MARK_NEW) cui_draw_rect(ui, cell, CUI_CORNERS(0), cui_alpha(CUI_C(ui, SUCCESS), dark ? 0.20f : 0.15f));
+                if (m & CUI_CELLGRID_MARK_DELETED) cui_draw_rect(ui, cell, CUI_CORNERS(0), cui_alpha(CUI_C(ui, DANGER), dark ? 0.20f : 0.13f));
+            }
+        }
+    }
     if (p->lines) {
         float y1 = CUI_MIN(R.y + p->rows_end, B.y + B.h), x1 = CUI_MIN(R.x + p->cols_end, B.x + B.w);
         for (int i = 0; i <= p->nc; i++) {
@@ -595,7 +736,12 @@ static void cui__cg_paint_body(cui_ctx *ui, const cui__cg_paint *p, cui_rect R, 
             if (!it->len) continue;
             float x = R.x + p->lx[j];
             if (x > B.x + B.w || R.x + p->lx[j + 1] < B.x) continue;
-            cui__cg_draw_item(ui, p, &p->adv[p->right[j] ? 1 : 0], CUI_FONT_BODY, x, y, p->lx[j + 1] - p->lx[j], 0, p->right[j] != 0, p->right[j] != 0, fg, it);
+            int m = p->marks ? p->marks[i * p->nc + j] : 0;
+            cui_color tc = m & (CUI_CELLGRID_MARK_DELETED | CUI_CELLGRID_MARK_NULL) ? CUI_C(ui, TEXT_MUTED) : fg;
+            const cui__cg_adv *ad = &p->adv[p->right[j] ? 1 : 0];
+            float cw = p->lx[j + 1] - p->lx[j];
+            cui__cg_draw_item(ui, p, ad, CUI_FONT_BODY, x, y, cw, 0, p->right[j] != 0, p->right[j] != 0, tc, it);
+            if (m & CUI_CELLGRID_MARK_DELETED) cui__cg_strike(ui, p, ad, x, y, cw, p->right[j] != 0, tc, it);
         }
     }
     if (p->has_sel) {
@@ -743,6 +889,11 @@ static cui__cg_paint *cui__cg_gather(cui__cg *g, cui_id wid, bool focused, int h
         if (hover_col == c) p->hover_i = j;
         for (int i = 0; i < nr; i++) p->cells[i * nc + j] = cui__cg_keep(ui, tmp, cui__cg_fetch(g, r0 + i, c, w, tmp));
     }
+    if (o->mark) {
+        p->marks = (unsigned char *)cui__frame_alloc(ui, (size_t)nr * (size_t)nc + 1);
+        for (int i = 0; i < nr; i++)
+            for (int j = 0; j < nc; j++) p->marks[i * nc + j] = (unsigned char)o->mark(o->ctx, r0 + i, c0 + j);
+    }
     if (o->row_numbers)
         for (int i = 0; i < nr; i++) p->rn[i] = cui__cg_keep(ui, tmp, cui__cg_fetch(g, r0 + i, -1, g->rn_w, tmp));
     const cui_cellgrid_sel *S = g->sel;
@@ -808,6 +959,39 @@ static int cui__cg_input(cui__cg *g, cui_interact in, cui_id wid) {
     return hover_col;
 }
 
+/* The editor, as children of the grid's node: a clip over the body, in it the cell's box with the text field. */
+static void cui__cg_edit_build(cui__cg *g, int leaf) {
+    cui_ctx *ui = g->ui;
+    cui__cg_state *st = g->st;
+    if (st->erow >= g->rows || st->ecol >= g->cols) return;
+    float s = g->s;
+    double ox = floor(st->x * (double)s + 0.5) / (double)s, oy = floor(st->y * (double)s + 0.5) / (double)s;
+    float cx = (float)(st->edges[st->ecol] - ox), cy = (float)((double)st->erow * (double)g->rh - oy);
+    float cw = CUI_MAX((float)(st->edges[st->ecol + 1] - st->edges[st->ecol]), 96.0f);
+    cui_id fid = cui__cg_edit_id(g);
+    ui->tab_owner = fid;   /* Tab is the editor's to hand on, not focus navigation's */
+    cui__open(ui, leaf);
+    int clip = cui__absolute(ui, 0, g->rn_w, g->head_h, g->body_w, g->body_h);
+    ui->nodes[clip].flags |= CUI_NF_CLIP;
+    cui__open(ui, clip);
+    int cell = cui__absolute(ui, 0, cx, cy, cw, g->rh);
+    cui_node *cn = &ui->nodes[cell];
+    cn->bg = CUI_C(ui, SURFACE);
+    cn->border = 2; cn->border_color = cui__emphasis(ui);
+    cn->dir = CUI_ROW; cn->align = CUI_ALIGN_CENTER;
+    cn->pad[1] = cn->pad[3] = g->pad - 2.0f;
+    cn->flags |= CUI_NF_CLIP;
+    cui__open(ui, cell);
+    ui->tf_override = true; ui->tf_font = g->font; ui->tf_size = g->size;
+    cui_input_opts io;
+    memset(&io, 0, sizeof io);
+    cui__text_field(ui, fid, g->o->edit->buf, g->o->edit->cap, &io, false, 1, NULL);
+    ui->tf_override = false;
+    cui__close(ui);
+    cui__close(ui);
+    cui__close(ui);
+}
+
 int cui_cellgrid_ex(cui_ctx *ui, const char *id_str, int rows, int cols, const cui_cellgrid_opts *opts) {
     cui_cellgrid_opts d;
     memset(&d, 0, sizeof d);
@@ -820,7 +1004,7 @@ int cui_cellgrid_ex(cui_ctx *ui, const char *id_str, int rows, int cols, const c
     int first = ui->node_count;
     cui__cg g;
     memset(&g, 0, sizeof g);
-    g.ui = ui; g.o = o; g.rows = rows; g.cols = cols;
+    g.ui = ui; g.o = o; g.rows = rows; g.cols = cols; g.id = id; g.begin_row = g.begin_col = -1;
     cui__cg_state *st = (cui__cg_state *)cui_state(ui, id, sizeof *st);
     cui__state_set_dtor(ui, id, cui__cg_free);
     g.st = st;
@@ -843,12 +1027,14 @@ int cui_cellgrid_ex(cui_ctx *ui, const char *id_str, int rows, int cols, const c
         if (!cui__cg_sel_same(g.sel, &st->last) || st->want_vis) { st->want_vis = false; cui__cg_reveal(&g, g.sel->row, g.sel->col); }
         cui_cellgrid_sel before = *g.sel;
         in = cui__interact(ui, id, CUI_IF_FOCUSABLE | CUI_IF_DRAG | CUI_IF_TEXT);
+        cui__cg_edit_pre(&g);
         hover_col = cui__cg_input(&g, in, wid);
         if (g.ev & CUI_CELLGRID_RESIZED) {   /* the new width places this frame's cells */
             cui__cg_edges(ui, st, o->col_widths, cols);
             cui__cg_geometry(&g);
             cui__cg_clamp_scroll(&g);
         }
+        cui__cg_edit_post(&g);
         if (!cui__cg_sel_same(g.sel, &before)) g.ev |= CUI_CELLGRID_SELECTED;
         st->last = *g.sel;
         /* the bars show while the pointer is over the grid, after a scroll and while one is held */
@@ -869,6 +1055,7 @@ int cui_cellgrid_ex(cui_ctx *ui, const char *id_str, int rows, int cols, const c
         ln->paint = cui__paint_cellgrid;
         ln->paint_data = cui__cg_gather(&g, wid, in.focused, hover_col);
         ((cui__cg_paint *)ln->paint_data)->ring = in.focus_visible;   /* the keyboard focus ring, drawn by the paint (a node has one paint) */
+        if (st->editing && cui__cg_edit_ok(&g)) cui__cg_edit_build(&g, leaf);
     }
     cui__keep_ltr(ui, first);   /* columns, numbers and the scroll bars do not mirror */
     ui->last_id = id;

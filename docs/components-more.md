@@ -742,6 +742,16 @@ The header stays on top and the row-number column on the left, wide enough for t
 
 Text is cut with an ellipsis when it does not fit and shows at most its first 1,024 bytes; line breaks and tabs show as spaces. A frame at 10,000,000 rows by 2,000 columns takes about the time of one screen of cells (see `cui_bench_cellgrid`).
 
+**Editing and marks (opt in).** With `.edit = &edit` (a `cui_cellgrid_edit` holding your buffer and its size) the cursor cell can be edited in place: a double click, Enter, F2, or typing a printable character (which replaces the text, as in a spreadsheet) opens the library's text field over the cell, with the caret, selection, Ctrl+A/C/X/V, undo and input methods of any text field. Enter commits and moves down, Tab commits and moves right (Shift+Tab left), Escape cancels, a click elsewhere commits. A commit is reported as `CUI_CELLGRID_EDITED` for that frame, with the cell in `edit.row` and `edit.col` and its text in `edit.buf`, when the text differs from what `cell()` gives for it; store it, and the grid shows whatever `cell()` returns afterwards. Scrolling keeps the editor on its cell, and a cell that scrolls out of the body altogether is committed. `.mark` (with or without `.edit`) is asked for a mask of `CUI_CELLGRID_MARK_*` per cell in view: `CHANGED` (an accent tint), `NEW` (a success tint), `DELETED` (a danger tint and the text muted and struck through), `NULL` (muted text) and `LOCKED` (no editor: Enter and a double click report `CUI_CELLGRID_ACTIVATE` as without `.edit`).
+
+```c
+static char text[256];
+static cui_cellgrid_edit edit = { 0, 0, text, sizeof text };
+int ev = cui_cellgrid(ui, "orders", nrows, NCOLS, .cell = my_cell, .ctx = &table, .col_widths = widths, .sel = &sel,
+                      .edit = &edit, .mark = my_marks);
+if (ev & CUI_CELLGRID_EDITED) set_cell(&table, edit.row, edit.col, edit.buf);
+```
+
 ### Tree table and path bar
 
 A tree with columns, as in a file explorer or a debugger's variables, and a path bar for moving up through folders.

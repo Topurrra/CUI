@@ -677,8 +677,275 @@ static void test_memory(void) {
     free(a);
 }
 
-int main(void) {
+/* ---- in-place editing and marks ---- */
+
+enum { ER = 60, EC = 5, ELOCK = 4 };
+typedef struct {
+    float widths[EC];
+    char data[ER][EC][40];
+    cui_cellgrid_sel sel;
+    cui_cellgrid_edit edit;
+    char ebuf[64];
+    bool use_edit, use_mark;
+    unsigned char marks[ER][EC];   /* extra marks (the lock on column ELOCK is added) */
+    int ev, acc, activates, edited;
+    long mark_calls; int mark_max_row, mark_max_col;
+} eapp;
+
+static const char *ecb(void *ctx, int row, int col, char *buf, size_t cap) {
+    eapp *a = ctx;
+    if (row < 0) { snprintf(buf, cap, "H%d", col); return buf; }
+    if (col < 0) { snprintf(buf, cap, "%d", row + 1); return buf; }
+    snprintf(buf, cap, "%s", a->data[row][col]);
+    return buf;
+}
+static int emark(void *ctx, int row, int col) {
+    eapp *a = ctx;
+    a->mark_calls++;
+    if (row > a->mark_max_row) a->mark_max_row = row;
+    if (col > a->mark_max_col) a->mark_max_col = col;
+    return a->marks[row][col] | (col == ELOCK ? CUI_CELLGRID_MARK_LOCKED : 0);
+}
+
+static void ebuild(cui_ctx *ui, void *u) {
+    eapp *a = u;
+    a->ev = cui_cellgrid(ui, "g", ER, EC, .cell = ecb, .ctx = a, .col_widths = a->widths, .header = true, .row_height = 20,
+                         .sel = &a->sel, .striped = true, .grid_lines = true,
+                         .edit = a->use_edit ? &a->edit : NULL, .mark = a->use_mark ? emark : NULL,
+                         .width = CUI_PX(800), .height = CUI_PX(600));
+    a->acc |= a->ev;
+    if (a->ev & CUI_CELLGRID_EDITED) {   /* the app stores the text */
+        snprintf(a->data[a->edit.row][a->edit.col], sizeof a->data[0][0], "%s", a->edit.buf);
+        a->edited++;
+    }
+    if (a->ev & CUI_CELLGRID_ACTIVATE) a->activates++;
+}
+static void eframes(cui_ctx *ui, eapp *a, int n) {
+    for (int i = 0; i < n; i++) { cui_begin_frame(ui, 1.0f / 60.0f); ebuild(ui, a); cui_end_frame(ui); }
+}
+static void ekey(cui_ctx *ui, eapp *a, cui_key k, int mods) {
+    cui_input_key(ui, k, true, mods); eframes(ui, a, 1);
+    cui_input_key(ui, k, false, mods); eframes(ui, a, 1);
+}
+static void etype(cui_ctx *ui, eapp *a, const char *t) { cui_input_text(ui, t); eframes(ui, a, 1); }
+static void eclick(cui_ctx *ui, eapp *a, float x, float y) {
+    cui_input_mouse_move(ui, x, y); eframes(ui, a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true); eframes(ui, a, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false); eframes(ui, a, 1);
+}
+/* the centre of a cell in a grid of 100-point columns and 20-point rows with a header and no row numbers */
+static void ecell(cui_rect r, int row, int col, float *x, float *y) { *x = r.x + col * 100.0f + 50; *y = r.y + 20 + row * 20.0f + 10; }
+static void eclick_cell(cui_ctx *ui, eapp *a, int row, int col) {
+    float x, y;
+    ecell(cui_get_rect(ui, cui_make_id(ui, "g")), row, col, &x, &y);
+    eclick(ui, a, x, y);
+}
+
+static eapp *eapp_new(void) {
+    eapp *a = calloc(1, sizeof *a);
+    for (int c = 0; c < EC; c++) a->widths[c] = 100;
+    for (int r = 0; r < ER; r++) for (int c = 0; c < EC; c++) snprintf(a->data[r][c], sizeof a->data[0][0], "r%dc%d", r, c);
+    a->sel.row = a->sel.col = a->sel.anchor_row = a->sel.anchor_col = -1;
+    a->edit.buf = a->ebuf; a->edit.cap = sizeof a->ebuf;
+    a->use_edit = true; a->use_mark = true;
+    a->mark_max_row = a->mark_max_col = -1;
+    return a;
+}
+
+static void test_edit(void) {
+    printf("in-place editing\n");
+    cui_ctx *ui = new_ctx(false, 1);
+    eapp *a = eapp_new();
+    eframes(ui, a, 3);
+    /* marks are asked for the cells in view only */
+    CHECK(a->mark_calls > 0);
+    CHECK(a->mark_max_row >= 20 && a->mark_max_row < 40);
+    CHECK_EQ(a->mark_max_col, EC - 1);
+
+    /* typing replaces the text; Enter commits and moves down */
+    eclick_cell(ui, a, 3, 2);
+    CHECK(a->sel.row == 3 && a->sel.col == 2);
+    a->acc = 0;
+    etype(ui, a, "Z");
+    CHECK_EQ(a->ev, 0);
+    CHECK(strcmp(a->ebuf, "Z") == 0);
+    etype(ui, a, "y");
+    CHECK(strcmp(a->ebuf, "Zy") == 0);
+    CHECK(strcmp(a->data[3][2], "r3c2") == 0);           /* nothing stored before the commit */
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK(a->acc & CUI_CELLGRID_EDITED);
+    CHECK(!(a->acc & CUI_CELLGRID_ACTIVATE));
+    CHECK(a->edit.row == 3 && a->edit.col == 2);
+    CHECK(strcmp(a->data[3][2], "Zy") == 0);
+    CHECK(a->sel.row == 4 && a->sel.col == 2 && a->sel.anchor_row == 4);
+
+    /* the grid is focused again: the arrow keys move the cursor, they do not edit */
+    ekey(ui, a, CUI_KEY_DOWN, 0);
+    CHECK_EQ(a->sel.row, 5);
+
+    /* F2 keeps the text, all selected; typing then replaces it; Escape cancels */
+    a->acc = 0;
+    ekey(ui, a, CUI_KEY_F2, 0);
+    CHECK(strcmp(a->ebuf, "r5c2") == 0);
+    etype(ui, a, "n");
+    CHECK(strcmp(a->ebuf, "n") == 0);
+    ekey(ui, a, CUI_KEY_ESCAPE, 0);
+    CHECK_EQ(a->acc, 0);
+    CHECK(strcmp(a->data[5][2], "r5c2") == 0);
+    CHECK(a->sel.row == 5 && a->sel.col == 2);
+    /* after Escape the grid has the keys again */
+    ekey(ui, a, CUI_KEY_UP, 0);
+    CHECK_EQ(a->sel.row, 4);
+    ekey(ui, a, CUI_KEY_DOWN, 0);
+
+    /* Enter starts an editor too; an unchanged text commits nothing but the cursor still moves */
+    a->acc = 0;
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK(strcmp(a->ebuf, "r5c2") == 0);
+    CHECK_EQ(a->acc, 0);                                 /* no ACTIVATE with .edit */
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK(!(a->acc & CUI_CELLGRID_EDITED));
+    CHECK_EQ(a->sel.row, 6);
+
+    /* Tab commits and moves right, Shift+Tab left */
+    eclick_cell(ui, a, 6, 1);
+    etype(ui, a, "q");
+    ekey(ui, a, CUI_KEY_TAB, 0);
+    CHECK(a->acc & CUI_CELLGRID_EDITED);
+    CHECK(a->edit.row == 6 && a->edit.col == 1 && strcmp(a->data[6][1], "q") == 0);
+    CHECK(a->sel.row == 6 && a->sel.col == 2);
+    etype(ui, a, "w");
+    ekey(ui, a, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    CHECK(strcmp(a->data[6][2], "w") == 0);
+    CHECK(a->sel.row == 6 && a->sel.col == 1);
+    ekey(ui, a, CUI_KEY_RIGHT, 0);                       /* focus came back to the grid */
+    CHECK_EQ(a->sel.col, 2);
+
+    /* a double click edits (no ACTIVATE), the text all selected, the typed text replaces it */
+    a->acc = 0;
+    {
+        float x, y;
+        ecell(cui_get_rect(ui, cui_make_id(ui, "g")), 8, 3, &x, &y);
+        eclick(ui, a, x, y);
+        eclick(ui, a, x, y);
+    }
+    CHECK(!(a->acc & CUI_CELLGRID_ACTIVATE));
+    CHECK(strcmp(a->ebuf, "r8c3") == 0);
+    etype(ui, a, "Q");
+    CHECK(strcmp(a->ebuf, "Q") == 0);
+    /* a click inside the editor does not commit; clicking another cell does, and moves there */
+    {
+        float x, y;
+        ecell(cui_get_rect(ui, cui_make_id(ui, "g")), 8, 3, &x, &y);
+        a->acc = 0;
+        eclick(ui, a, x + 20, y);
+        CHECK_EQ(a->acc & CUI_CELLGRID_EDITED, 0);
+        etype(ui, a, "R");
+        CHECK(strchr(a->ebuf, 'R') != NULL);              /* still editing, still focused */
+    }
+    eclick_cell(ui, a, 10, 0);
+    CHECK(a->acc & CUI_CELLGRID_EDITED);
+    CHECK(a->edit.row == 8 && a->edit.col == 3 && strcmp(a->data[8][3], a->ebuf) == 0);
+    CHECK(a->sel.row == 10 && a->sel.col == 0);
+    ekey(ui, a, CUI_KEY_DOWN, 0);
+    CHECK_EQ(a->sel.row, 11);
+
+    /* scrolling the cell out of the body commits */
+    a->acc = 0;
+    etype(ui, a, "S");
+    a->sel = (cui_cellgrid_sel){ 50, 0, 50, 0 };
+    eframes(ui, a, 3);
+    CHECK(a->acc & CUI_CELLGRID_EDITED);
+    CHECK(a->edit.row == 11 && strcmp(a->data[11][0], "S") == 0);
+
+    /* a LOCKED cell: no editor, Enter and a double click still activate, typing does nothing */
+    a->sel = (cui_cellgrid_sel){ 2, ELOCK, 2, ELOCK }; eframes(ui, a, 3);
+    eclick_cell(ui, a, 2, ELOCK);
+    a->acc = 0; a->activates = 0;
+    etype(ui, a, "x");
+    ekey(ui, a, CUI_KEY_F2, 0);
+    CHECK_EQ(a->acc, 0);
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK_EQ(a->activates, 1);
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK_EQ(a->activates, 2);
+    CHECK(a->acc & CUI_CELLGRID_ACTIVATE);
+    CHECK(!(a->acc & CUI_CELLGRID_EDITED));
+    eclick_cell(ui, a, 3, ELOCK);
+    eclick_cell(ui, a, 3, ELOCK);
+    CHECK_EQ(a->activates, 3);
+    CHECK(strcmp(a->data[3][ELOCK], "r3c4") == 0);
+    /* Ctrl+C and the arrows are still the grid's */
+    a->acc = 0;
+    ekey(ui, a, CUI_KEY_C, CUI_MOD_CTRL);
+    CHECK_EQ(a->acc, CUI_CELLGRID_COPY);
+
+    /* marks draw in light and dark without trouble */
+    a->marks[12][0] = CUI_CELLGRID_MARK_CHANGED; a->marks[12][1] = CUI_CELLGRID_MARK_NEW;
+    a->marks[12][2] = CUI_CELLGRID_MARK_DELETED; a->marks[12][3] = CUI_CELLGRID_MARK_NULL;
+    for (int m = 0; m < 2; m++) {
+        cui_set_theme(ui, m ? CUI_THEME_DARK : CUI_THEME_LIGHT);
+        eframes(ui, a, 3);
+    }
+    free(a);
+    cui_destroy(ui);
+}
+
+static void test_edit_off(void) {
+    printf("without .edit: activate as before, marks still work\n");
+    cui_ctx *ui = new_ctx(false, 1);
+    eapp *a = eapp_new();
+    a->use_edit = false;
+    eframes(ui, a, 3);
+    CHECK(a->mark_calls > 0);
+    eclick_cell(ui, a, 3, 2);
+    eclick_cell(ui, a, 3, 2);
+    CHECK_EQ(a->activates, 1);
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK_EQ(a->activates, 2);
+    a->acc = 0;
+    etype(ui, a, "Z");
+    ekey(ui, a, CUI_KEY_F2, 0);
+    CHECK_EQ(a->acc, 0);
+    CHECK(strcmp(a->data[3][2], "r3c2") == 0);
+    /* a locked cell without .edit is a cell like any other */
+    eclick_cell(ui, a, 3, ELOCK);
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK_EQ(a->activates, 3);
+    /* the edit options with no buffer: not editable either */
+    a->use_edit = true; a->edit.buf = NULL;
+    eclick_cell(ui, a, 4, 1);
+    etype(ui, a, "Z");
+    ekey(ui, a, CUI_KEY_ENTER, 0);
+    CHECK_EQ(a->activates, 4);
+    free(a);
+    cui_destroy(ui);
+}
+
+/* --shot <file.png> [dark]: marks and an open editor, drawn headless (for a look) */
+static void edit_shot(const char *path, bool dark) {
+    cui_ctx *ui = new_ctx(false, 1);
+    cui_set_theme(ui, dark ? CUI_THEME_DARK : CUI_THEME_LIGHT);
+    cui_set_viewport(ui, 520, 200, 1);
+    eapp *a = eapp_new();
+    a->marks[1][0] = CUI_CELLGRID_MARK_CHANGED; a->marks[1][1] = CUI_CELLGRID_MARK_NEW;
+    a->marks[2][0] = a->marks[2][1] = a->marks[2][2] = a->marks[2][3] = CUI_CELLGRID_MARK_DELETED;
+    a->marks[3][3] = CUI_CELLGRID_MARK_NULL;
+    eframes(ui, a, 3);
+    eclick_cell(ui, a, 4, 2);
+    ekey(ui, a, CUI_KEY_F2, 0);
+    eframes(ui, a, 2);
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    cui_write_png(path, px, dd->width_px, dd->height_px, dd->width_px * 4);
+    free(px); free(a);
+    cui_destroy(ui);
+}
+
+int main(int argc, char **argv) {
     g_sw = cui_sw_create();
+    if (argc > 2 && !strcmp(argv[1], "--shot")) { edit_shot(argv[2], argc > 3); cui_sw_destroy(g_sw); return 0; }
     test_col_at();
     test_nav();
     test_into_view();
@@ -693,6 +960,8 @@ int main(void) {
     test_scale_and_themes();
     test_odd_text();
     test_memory();
+    test_edit();
+    test_edit_off();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

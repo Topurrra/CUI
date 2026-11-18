@@ -1649,6 +1649,24 @@ typedef struct cui_cellgrid_sel {
  * row-number column. Called only for cells in view, on the UI thread, during cui_cell grid. */
 typedef const char *(*cui_cellgrid_cell_fn)(void *ctx, int row, int col, char *buf, size_t cap);
 
+/* In-place editing (opt in with .edit). The caller owns the buffer; the grid copies the cursor cell's text into it
+ * when an edit starts and leaves the edited text in it when CUI_CELLGRID_EDITED is reported. */
+typedef struct cui_cellgrid_edit {
+    int row, col;      /* out: the cell whose edit was just committed (valid with CUI_CELLGRID_EDITED) */
+    char *buf;         /* caller-owned buffer for the editor's text */
+    size_t cap;
+} cui_cellgrid_edit;
+
+/* Marks for a cell in view (see cui_cellgrid_opts.mark): a mask of CUI_CELLGRID_MARK_*. */
+typedef int (*cui_cellgrid_mark_fn)(void *ctx, int row, int col);
+enum {
+    CUI_CELLGRID_MARK_CHANGED = 1 << 0,  /* an edited, not yet saved cell: a tinted background (accent, low alpha) */
+    CUI_CELLGRID_MARK_NEW     = 1 << 1,  /* a cell of a new row: success tint */
+    CUI_CELLGRID_MARK_DELETED = 1 << 2,  /* a cell of a row marked for deletion: danger tint, text muted and struck through */
+    CUI_CELLGRID_MARK_LOCKED  = 1 << 3,  /* this cell cannot be edited (activate does not start an editor) */
+    CUI_CELLGRID_MARK_NULL    = 1 << 4   /* the value is NULL: text drawn muted */
+};
+
 typedef struct cui_cellgrid_opts {
     int _;
     cui_size width, height;          /* default fill */
@@ -1664,15 +1682,26 @@ typedef struct cui_cellgrid_opts {
     cui_cellgrid_sel *sel;              /* optional, in and out: setting it from outside scrolls the cursor into view */
     bool striped;
     bool grid_lines;
+    cui_cellgrid_edit *edit;         /* non-NULL: cells are editable in place (see below) */
+    cui_cellgrid_mark_fn mark;       /* optional: per-cell marks, called for the cells in view (with or without .edit) */
 } cui_cellgrid_opts;
 
 enum {
     CUI_CELLGRID_SELECTED = 1 << 0,     /* the selection changed */
     CUI_CELLGRID_SORTED   = 1 << 1,     /* *sort changed */
     CUI_CELLGRID_COPY     = 1 << 2,     /* Ctrl+C with the cell grid focused: copy the selection yourself */
-    CUI_CELLGRID_ACTIVATE = 1 << 3,     /* double click or Enter on the cursor cell (editing comes later) */
-    CUI_CELLGRID_RESIZED  = 1 << 4      /* a column width changed (save col_widths if you keep them) */
+    CUI_CELLGRID_ACTIVATE = 1 << 3,     /* double click or Enter on the cursor cell (with .edit: only on a LOCKED cell) */
+    CUI_CELLGRID_RESIZED  = 1 << 4,     /* a column width changed (save col_widths if you keep them) */
+    CUI_CELLGRID_EDITED   = 1 << 5      /* an in-place edit was committed: edit->row/col and edit->buf */
 };
+/* In-place editing, with .edit set. An editor starts on the cursor cell on a double click on a cell, Enter, F2, or
+ * a printable character (which replaces the text, as in a spreadsheet); not on a cell the mark callback flags
+ * LOCKED (Enter and a double click then report CUI_CELLGRID_ACTIVATE as without .edit). The editor is the library's
+ * text field laid over the cell (caret, selection, Ctrl+A/C/X/V, undo, IME). Enter commits and moves the cursor
+ * down, Tab commits and moves it right (Shift+Tab left), Escape cancels, a click elsewhere commits. A commit
+ * reports CUI_CELLGRID_EDITED for that frame, with the cell in edit->row/col and its text in edit->buf, only when
+ * the text differs from what cell() gives for it; show the new value from cell() afterwards. Scrolling keeps the
+ * editor on its cell; when the cell scrolls out of the body altogether the edit is committed. */
 /* Returns a mask of CUI_CELLGRID_* events from this frame. Keys while focused: arrows, Page Up/Down, Home/End
  * (row start/end), Ctrl+Home/End (first/last cell), Shift with any of them extends the selection, Ctrl+A
  * selects all. Mouse: click a cell, drag or Shift+click for a range, click a row number for the row,
