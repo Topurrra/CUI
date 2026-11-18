@@ -212,6 +212,23 @@ cui_set_strings(ui, &es);
 
 The date picker, date range picker, calendar, month and week calendars, gantt, calendar heatmap and file browser read the table. A component option that names its own words (the month calendar's `month_names`, the tour's button labels) wins over it. The order of day, month and year in a date stays the English one for now, and the date range picker's preset names ("Last 7 days") are not in the table yet. The English names live in one small file that only these components link, so an app without them pays nothing.
 
+### System fonts for other scripts
+
+The embedded fonts cover Latin. Text in any other script (a Russian page title, a Japanese mail subject) would draw as nothing, and giving every app its own set of fallback fonts is work, so one call turns the system's fonts on:
+
+```c
+cui_font_use_system_fallback(ui, true);   /* Windows; elsewhere it does nothing yet */
+```
+
+A character that the role's font, its `cui_font_add_fallback` fonts, the icons and every font the app loaded all lack is looked up in the system's fonts chosen by script. On Windows: Segoe UI for Latin extended, IPA, combining marks, Greek, Cyrillic, Armenian, Georgian, Hebrew, Arabic, punctuation, currency, letterlike and arrows (its semibold face for the medium and display roles); Nirmala UI for the Indic scripts; Leelawadee UI for Thai, Lao and Khmer; Microsoft YaHei, Yu Gothic, Malgun Gothic, Microsoft JhengHei and SimSun for Han, kana and Hangul (kana from Yu Gothic, Hangul from Malgun, Han from YaHei first); Ebrima for Ethiopic, N'Ko and others; and Segoe UI Symbol and Segoe UI Historic after them. Mongolian, Tibetan, Myanmar, Thaana, Yi, Cherokee and Javanese have their own Windows fonts too. A file that is not on the machine is passed over.
+
+- **Memory and time.** A font file is mapped read only and used without copying, so the outlines stay shared file pages of the system and cost almost no private memory, a 20 MB CJK collection included. It is mapped and parsed the first time a character of its script is measured or drawn (about a millisecond, measured in `tests/test_sysfont.c`), and the frame asks for another one so that nothing stays blank. Latin text never reaches the lookup; a character that no font has is remembered, so it does not walk the chain every frame.
+- **Order.** The app's own fonts come first, so a font you add as a fallback wins, and the old limit of four fallbacks per font does not block the system chain. Emoji stay with the emoji font, whatever Segoe UI Symbol has. The icons role gets nothing. The mono role gets the proportional system fonts, which is better than nothing.
+- **Size.** Glyphs are scaled by their font's units per em like every glyph, and sit on the text's baseline; a system font is a little smaller or larger than Inter in x-height, which is all the difference there is.
+- **Off.** The default. Turning it off again returns to the old lookup at once; fonts already mapped stay mapped and are not used.
+
+Fonts loaded in the middle of a frame are the one place CUI adds a font while text is being measured. The array of fonts is made roomy when the option is turned on, so a `cui_font_*` pointer never moves during a lookup, and the cached layouts are kept: nothing cached can contain a glyph of a font that was not loaded when it was measured. Turning the option on or off drops them.
+
 ## Optional Arabic-script text shaping
 
 Configure with `-DCUI_TEXT_SHAPING=ON` to enable experimental static

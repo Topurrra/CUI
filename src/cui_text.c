@@ -115,6 +115,7 @@ struct cui_font_data {
     float ascent, descent, line_gap;   /* em units (fractions of the font size) */
     float cap_height;
     bool is_icon;
+    bool is_sys;                       /* a system font added by cui_sysfont.c: only its hook reaches it */
     int fallbacks[4];
     int fallback_count;
     int gi_ascii[128];
@@ -169,21 +170,27 @@ static void cui__font_prepare(cui_font_data *fd) {
     }
 }
 
-cui_font cui_font_load_memory(cui_ctx *ui, const void *data, size_t size, bool copy) {
+/* Adds the font `face` of data (a collection has several) and returns its internal index, or -1.
+ * `sys` marks a system font that the system fallback adds in the middle of a lookup: the array of
+ * fonts is never moved then (the caller reserved room) and the layout caches stay, since nothing
+ * cached can hold a glyph of a font that was not loaded yet. */
+int cui__font_add(cui_ctx *ui, const void *data, size_t size, bool copy, int face, bool sys) {
     if (!data || size < 12) return -1;
+    if (sys && ui->font_count >= ui->font_cap) return -1;
+    if (!sys && ui->sysfont) cui__fonts_reserve(ui, 32);   /* keep room for the system fonts (they are added where the array must not move) */
     unsigned char *bytes = (unsigned char *)data;
     if (copy) {
         bytes = cui__alloc(ui, size);
         memcpy(bytes, data, size);
     }
     stbtt_fontinfo info;
-    int off = stbtt_GetFontOffsetForIndex(bytes, 0);
+    int off = stbtt_GetFontOffsetForIndex(bytes, face);
     if (off < 0 || !stbtt_InitFont(&info, bytes, off)) {
         if (copy) cui__free(ui, bytes);
         return -1;
     }
 #ifdef CUI_TEXT_SHAPING
-    cui__shape_cache_clear(ui);
+    if (!sys) cui__shape_cache_clear(ui);
 #endif
     CUI__GROW(ui, ui->fonts, ui->font_count, ui->font_cap, 1);
     cui_font_data *fd = &ui->fonts[ui->font_count];
@@ -195,8 +202,33 @@ cui_font cui_font_load_memory(cui_ctx *ui, const void *data, size_t size, bool c
     cui__shape_font_init(&fd->shaped, bytes, size, off);
 #endif
     fd->owned = copy;
+    fd->is_sys = sys;
     cui__font_prepare(fd);
-    return CUI__USER_FONT_BASE + ui->font_count++;
+    return ui->font_count++;
+}
+
+cui_font cui_font_load_memory(cui_ctx *ui, const void *data, size_t size, bool copy) {
+    int i = cui__font_add(ui, data, size, copy, 0, false);
+    return i < 0 ? -1 : CUI__USER_FONT_BASE + i;
+}
+
+/* Room for n more fonts without the array moving (see cui__font_add). */
+bool cui__fonts_reserve(cui_ctx *ui, int n) {
+    if (ui->font_count + n <= ui->font_cap) return true;
+    int cap = ui->font_count + n;
+    cui_font_data *p = cui__realloc(ui, ui->fonts, sizeof *p * (size_t)cap);
+    if (!p) return false;
+    ui->fonts = p; ui->font_cap = cap;
+    return true;
+}
+
+/* Fonts or fallbacks changed in a way the caches cannot know. */
+void cui__fonts_changed(cui_ctx *ui) {
+#ifdef CUI_TEXT_SHAPING
+    cui__shape_cache_clear(ui);
+#endif
+    ui->settle_frames = CUI_MAX(ui->settle_frames, 2);
+    ui->animating = true;
 }
 
 cui_font cui_font_load_file(cui_ctx *ui, const char *path) {
@@ -328,12 +360,33 @@ static void cui__find_glyph(cui_ctx *ui, cui_font font, uint32_t cp, cui_font *o
         if (g2) { *out_font = icons; *out_gi = g2; return; }
     }
     for (int i = 0; i < ui->font_count; i++) {
-        if (i == font || ui->fonts[i].is_icon) continue;
+        if (i == font || ui->fonts[i].is_icon || ui->fonts[i].is_sys) continue;
         int g2 = cui__glyph_index(&ui->fonts[i], cp);
         if (g2) { *out_font = i; *out_gi = g2; return; }
     }
+    /* last, the system fonts by script (cui_font_use_system_fallback); the hook is reached only
+     * for a character nothing else has, and it remembers what it found */
+    if (ui->sysfont_hook && !fd->is_icon && !fd->is_sys) {
+        int g2 = 0;
+        int sf = ui->sysfont_hook(ui, 0, font, cp, &g2);
+        if (sf >= 0 && g2) { *out_font = sf; *out_gi = g2; return; }
+    }
     *out_font = font;
     *out_gi = 0;
+}
+
+/* The glyph a font draws for cp, with fallbacks and system fonts; 0 for none. For the system fallback and tests. */
+int cui__font_glyph(cui_ctx *ui, cui_font font, uint32_t cp, cui_font *out_font) {
+    cui_font f; int gi;
+    cui__find_glyph(ui, cui__resolve_font(ui, font), cp, &f, &gi);
+    if (out_font) *out_font = f;
+    return gi;
+}
+
+/* The glyph index of cp in font index f itself, no fallbacks; 0 for none. */
+int cui__font_own_glyph(cui_ctx *ui, cui_font f, uint32_t cp) {
+    cui_font_data *fd = cui__fd(ui, f);
+    return fd ? cui__glyph_index(fd, cp) : 0;
 }
 
 /* Effective em size of a glyph from font gf when the text asked for font f. */

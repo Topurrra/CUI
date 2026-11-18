@@ -196,6 +196,12 @@ void cui__fonts_shutdown(cui_ctx *ui);
 void cui__fonts_begin_frame(cui_ctx *ui);
 void cui__fonts_upload(cui_ctx *ui);
 cui_font cui__resolve_font(cui_ctx *ui, cui_font f);
+/* system fonts by script (cui_sysfont.c; cui_text.c adds the fonts and calls the hook) */
+int cui__font_add(cui_ctx *ui, const void *data, size_t size, bool copy, int face, bool sys);   /* internal index or -1 */
+bool cui__fonts_reserve(cui_ctx *ui, int n);                 /* room for n fonts without the array moving */
+void cui__fonts_changed(cui_ctx *ui);                        /* drops cached layouts, asks for a redraw */
+int cui__font_glyph(cui_ctx *ui, cui_font font, uint32_t cp, cui_font *out_font);   /* glyph drawn for cp, fallbacks included; 0 none */
+int cui__font_own_glyph(cui_ctx *ui, cui_font f, uint32_t cp);                      /* in internal font f alone; 0 none */
 
 /* ---- draw list ---- */
 /* The software renderer (render/cui_render_sw.c) makes each of its textures again in another,
@@ -553,6 +559,7 @@ typedef struct cui__vlist_build { int count; float row_h; int first; } cui__vlis
 #define CUI_PARENT_STACK 256
 
 struct cui__emoji;
+struct cui__sysfont;
 struct cui_ctx {
     struct cui__emoji *emoji;   /* color emoji: font, cache and data (cui_emoji.c) */
     /* set by cui_emoji.c when emoji are first used, so the core does not link it in:
@@ -561,6 +568,11 @@ struct cui_ctx {
     /* set with it, so text draws emoji in place: at s, the bytes of an emoji the emoji font
      * draws (0 for none); with r, draws that emoji in r (cui_text.c measures and calls it) */
     int (*emoji_text)(cui_ctx *ui, const char *s, int len, const cui_rect *r, float alpha);
+    /* set by cui_font_use_system_fallback (cui_sysfont.c): for a character no font of the app has, what 0
+     * looks it up in the system fonts of its script (the internal font index, glyph in *gi; -1 for none)
+     * and what 2 lets the fonts go when the context does */
+    struct cui__sysfont *sysfont;
+    int (*sysfont_hook)(cui_ctx *ui, int what, cui_font font, uint32_t cp, int *gi);
     cui_allocator alloc;
     cui_renderer_iface renderer;
     cui_platform_iface platform;

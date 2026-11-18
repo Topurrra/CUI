@@ -430,6 +430,16 @@ CUI_API cui_font cui_font_load_file(cui_ctx *ui, const char *path);
 CUI_API void cui_font_set_role(cui_ctx *ui, cui_font role, cui_font font);
 /* Glyphs missing from `font` are looked up in `fallback` (e.g. CJK, emoji). */
 CUI_API void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback);
+/* Opt in (off by default): a character that no font of the app has is looked up in the system's fonts
+ * chosen by script, so Cyrillic, Greek, Armenian, Georgian, Hebrew, Arabic, the Indic scripts, Thai,
+ * Khmer, Chinese, Japanese, Korean, Ethiopic and more draw instead of nothing. Every role but the icons
+ * gets them (the semibold face for the medium and display roles where the system has one). The fonts of
+ * the app and its cui_font_add_fallback fonts are tried first; emoji stay with the emoji font. A font
+ * file is mapped (not read into memory) and parsed the first time a character of its script is measured
+ * or drawn, a few milliseconds once; Latin text never reaches the lookup. Windows only for now: where
+ * there is no table of system fonts the call does nothing. Turning it off returns to the old lookup
+ * (fonts already mapped stay mapped). */
+CUI_API void cui_font_use_system_fallback(cui_ctx *ui, bool on);
 
 typedef struct cui_text_metrics { float width, height, ascent, descent, line_height; } cui_text_metrics;
 /* CUI_TEXT_SHAPING optionally shapes static RTL lines; see docs/integration.md.

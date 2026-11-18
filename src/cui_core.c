@@ -243,6 +243,7 @@ cui_ctx *cui_create(const cui_ctx_desc *desc) {
 void cui_destroy(cui_ctx *ui) {
     if (!ui) return;
     if (ui->emoji_hook) ui->emoji_hook(ui, 2);
+    if (ui->sysfont_hook) ui->sysfont_hook(ui, 2, -1, 0, NULL);
     cui__fonts_shutdown(ui);
     for (int i = 0; i < ui->state_count; i++) {
         if (ui->states[i].dtor && ui->states[i].data) ui->states[i].dtor(ui, ui->states[i].data);

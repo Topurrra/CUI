@@ -97,6 +97,12 @@ cui_font_add_fallback(ui, CUI_FONT_BODY, cjk);      /* missing glyphs come from 
 cui_font_add_fallback(ui, CUI_FONT_MEDIUM, cjk);
 ```
 
+Or turn on the system's fonts for the scripts Inter lacks, with one call (Windows; see [System fonts for other scripts](integration.md#system-fonts-for-other-scripts)):
+
+```c
+cui_font_use_system_fallback(ui, true);   /* Cyrillic, Greek, Hebrew, Arabic, Indic, Thai, CJK... drawn from the system's fonts */
+```
+
 Text is rasterized with subpixel positioning and kerning at the exact pixel size of the display, so it stays crisp at 100%, 150% and 200%.
 
 ## Motion
