@@ -2297,6 +2297,13 @@ typedef struct cui_code_editor_result {
     int ghost_taken;           /* bytes of .ghost inserted this frame by Tab or Ctrl+Right (one undo step; the edit is also
                                 * reported as usual: changed, splice), 0 none */
     bool ghost_dismissed;      /* Esc dropped the ghost this frame (the editor took the key) */
+    bool context_clicked;      /* a right press on a line this frame, on the text or in the gutter (not in the glyph lane,
+                                * which reports gutter_right): for the caller's context menu. Only reported: the caret and
+                                * the selection stay as they are. */
+    bool context_gutter;       /* with it: the press was left of the text (line numbers, change marks) */
+    int context_line;          /* with it: the line, 1 based */
+    int context_offset;        /* with it: the byte under the pointer on the text, -1 in the gutter */
+    float context_x, context_y;   /* with it: the pointer, in window points (where the menu opens) */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),

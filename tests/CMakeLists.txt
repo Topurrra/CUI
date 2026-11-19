@@ -265,3 +265,7 @@ if(WIN32)
     target_link_libraries(cui_test_sysfont PRIVATE psapi)
 endif()
 add_test(NAME cui_test_sysfont COMMAND cui_test_sysfont)
+
+add_executable(cui_test_editor_context test_editor_context.c)
+target_link_libraries(cui_test_editor_context PRIVATE cui::cui)
+add_test(NAME cui_test_editor_context COMMAND cui_test_editor_context)

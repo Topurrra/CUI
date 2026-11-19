@@ -3733,6 +3733,18 @@ static void cui__edf_pointer(cui__edf *f) {
                 if (ui->mpressed[1]) { f->res->gutter_clicked = true; f->res->gutter_right = true; f->res->gutter_line = ln + 1; }
             }
         }
+        if (ui->mpressed[1] && f->lr.hovered && !f->over_vbar && !f->over_hbar && !st->bar_drag && line >= 0 && !f->res->gutter_clicked) {
+            int ln = E->wrap ? cui__ed_line_of_row(E, line) : line;   /* a right press on a line: reported for a context menu */
+            if (ln >= 0 && ln < E->nl) {
+                bool aff = false;
+                f->res->context_clicked = true;
+                f->res->context_gutter = ui->mx < f->gx;
+                f->res->context_line = ln + 1;
+                f->res->context_offset = ui->mx < f->gx ? -1 : E->wrap ? cui__ed_vpick(E, line, col, &aff) : cui__ed_pos(E, line, col);
+                f->res->context_x = ui->mx;
+                f->res->context_y = ui->my;
+            }
+        }
         if (f->lr.hovered && ui->mpressed[0]) cui__edf_press(f, line, col);
         if (st->bar_drag && f->lr.active && ui->mdown[0]) cui__edf_bar_drag(f);
         if (st->drag && f->lr.active && ui->mdown[0] && !ui->mpressed[0]) cui__edf_drag_select(f);
