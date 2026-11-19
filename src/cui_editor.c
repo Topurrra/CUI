@@ -2734,6 +2734,9 @@ typedef struct {
     const cui__ed_lr *lr;
     const int *lrow;
     int caret_row, br_row[2];
+    /* the ghost text (cui_code_editor_opts.ghost; g_len 0: none): g_n rows of it below row g_row (a line, or wrapped a
+     * row), which push the rows below down; on row g_row the text from byte `cursor` on moves right by g_cols columns */
+    const char *g_text; int g_len, g_n, g_row, g_cols;
 } cui__ed_paint;
 
 /* Draws s[a, b) from column col; tabs expand; only the columns in view. */
@@ -2761,8 +2764,30 @@ static void cui__ed_run(cui_ctx *ui, const cui__ed_paint *p, const char *s, int 
     }
 }
 
-/* The row of the top of line first + k. */
-static double cui__ed_prow(const cui__ed_paint *p, int k) { return p->wrap ? (double)p->lrow[k] : (double)(p->first + k); }
+/* The row on screen of the top of line first + k: the ghost text's rows push the rows below its own down. */
+static double cui__ed_prow(const cui__ed_paint *p, int k) {
+    double row = p->wrap ? (double)p->lrow[k] : (double)(p->first + k);
+    return p->g_n && row > p->g_row ? row + p->g_n : row;
+}
+/* the row on screen of row `row` of the text (wrapped) */
+static double cui__ed_vr(const cui__ed_paint *p, int row) { return (double)row + (p->g_n && row > p->g_row ? p->g_n : 0); }
+/* the rows line first + k takes on screen (wrapped, the ghost's rows may sit between its own) */
+static double cui__ed_prows(const cui__ed_paint *p, int k) {
+    int n = p->wrap ? p->lr[k].n : 1;
+    if (p->g_n && p->wrap && p->g_row >= p->lrow[k] && p->g_row < p->lrow[k] + n - 1) n += p->g_n;
+    return n;
+}
+/* on the ghost's row (gc its columns, else 0): how far a byte's x moves right (the text from the caret on; an end at the
+ * caret stays) */
+static float cui__ed_gdx(const cui__ed_paint *p, int gc, int pos, bool end) {
+    return gc && (end ? pos > p->cursor : pos >= p->cursor) ? (float)gc * p->cw : 0;
+}
+/* cui__ed_run, with the bytes from the caret on drawn gc columns further right (the ghost's first line goes between) */
+static void cui__ed_run_g(cui_ctx *ui, const cui__ed_paint *p, const char *s, int a, int b, int col, float x0, float y, cui_color c, int gc) {
+    if (!gc || b <= p->cursor) { cui__ed_run(ui, p, s, a, b, col, x0, y, c); return; }
+    if (a < p->cursor) { cui__ed_run(ui, p, s, a, p->cursor, col, x0, y, c); col = cui__ed_adv(s, a, p->cursor, p->tab, col); a = p->cursor; }
+    cui__ed_run(ui, p, s, a, b, col + gc, x0, y, c);
+}
 
 /* ---- change marks in the gutter (cui_code_editor_opts.line_marks) ---- */
 static int cui__gm_end(const cui_line_mark *m) { return m->first_line + (m->kind == CUI_LINE_DELETED ? 0 : CUI_MAX(0, m->line_count)); }
@@ -2851,7 +2876,7 @@ static void cui__ed_paint_gmarks(cui_ctx *ui, const cui__ed_paint *p, cui_rect r
         if (m->kind == CUI_LINE_DELETED) {
             double row;   /* the boundary above line first_line */
             if (m->first_line < last) row = cui__ed_prow(p, m->first_line - first);
-            else row = cui__ed_prow(p, p->count - 1) + (p->wrap ? p->lr[p->count - 1].n : 1);
+            else row = cui__ed_prow(p, p->count - 1) + cui__ed_prows(p, p->count - 1);
             float y = top + (float)(row * p->lh);
             cui_vec2 tri[3] = { { bx - 1, y - 4 }, { bx + 5, y }, { bx - 1, y + 4 } };
             cui_draw_polygon(ui, tri, 3, p->gm_col[2]);
@@ -2859,7 +2884,7 @@ static void cui__ed_paint_gmarks(cui_ctx *ui, const cui__ed_paint *p, cui_rect r
         }
         int a = CUI_MAX(m->first_line, first), b = CUI_MIN(cui__gm_end(m), last);
         if (a >= b) continue;
-        double r0 = cui__ed_prow(p, a - first), r1 = cui__ed_prow(p, b - 1 - first) + (p->wrap ? p->lr[b - 1 - first].n : 1);
+        double r0 = cui__ed_prow(p, a - first), r1 = cui__ed_prow(p, b - 1 - first) + cui__ed_prows(p, b - 1 - first);
         cui_draw_rect(ui, (cui_rect){ bx, top + (float)(r0 * p->lh), 3, (float)((r1 - r0) * p->lh) }, CUI_CORNERS(0), p->gm_col[m->kind == CUI_LINE_ADDED ? 0 : 1]);
     }
 }
@@ -2919,7 +2944,8 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
             int rs = R->rs[j - R->j0], re = R->rs[j - R->j0 + 1];
             int rc0 = R->lng ? (R->rc ? R->rc[j - R->j0] : 0) : j ? R->ind : 0;
             int row = p->lrow[k] + j;
-            float y = r.y + CUI__ED_INSET + (float)((double)row * p->lh - p->sy);
+            int gc = p->g_len && row == p->g_row ? p->g_cols : 0;   /* the ghost's row: the text after the caret moves right */
+            float y = r.y + CUI__ED_INSET + (float)(cui__ed_vr(p, row) * p->lh - p->sy);
             if (y > r.y + r.h || y + p->lh < r.y) continue;
             if (s1 > s0 && s1 > rs && (last ? s0 <= re : s0 < re)) {
                 int a = CUI_MAX(s0, rs), b = CUI_MIN(s1, re);
@@ -2933,6 +2959,7 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 if (mk->end <= rs && !(mk->end == mk->start && mk->start == rs)) continue;
                 int a = CUI_MAX(mk->start, rs), b = CUI_MIN(mk->end, re);
                 float xa = (float)cui__ed_adv(s, rs, a, p->tab, rc0) * p->cw, xb = (float)cui__ed_adv(s, rs, b, p->tab, rc0) * p->cw;
+                xa += cui__ed_gdx(p, gc, a, false); xb += cui__ed_gdx(p, gc, b, true);
                 if (xb - xa < 2) { xa -= 1; xb = xa + 2; }
                 cui__ed_draw_mark(ui, p, mk, x0 + xa, xb - xa, y);
             }
@@ -2941,6 +2968,7 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                     if (my <= rs) continue;
                     int a = CUI_MAX(mx, rs), b = CUI_MIN(my, re);
                     float xa = (float)cui__ed_adv(s, rs, a, p->tab, rc0) * p->cw, xb = (float)cui__ed_adv(s, rs, b, p->tab, rc0) * p->cw;
+                    xa += cui__ed_gdx(p, gc, a, false); xb += cui__ed_gdx(p, gc, b, true);
                     cui_draw_rect_border(ui, (cui_rect){ x0 + xa - 1, y + 1, xb - xa + 2, p->lh - 2 }, CUI_CORNERS(3), p->match, p->match_edge, 1);
                 }
             }
@@ -2959,9 +2987,25 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 col = cui__ed_adv(s, a2, b2, p->tab, col);
                 pos = b2;
                 if (toks[t].kind == 0 && cui__ed_blank(s, a, b)) continue;   /* white space */
-                cui__ed_run(ui, p, s, a2, b2, ca, x0, y + ty, p->colors[toks[t].kind]);
+                cui__ed_run_g(ui, p, s, a2, b2, ca, x0, y + ty, p->colors[toks[t].kind], gc);
             }
         }
+    }
+}
+
+/* The ghost text in the faint text color: its first line after the caret, the others on rows of their own below
+ * (from column 0: it is inserted as it is). Only the rows in view; tabs and columns as the text's. */
+static void cui__ed_paint_ghost(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, float x0, float ty) {
+    const char *g = p->g_text;
+    int n = p->g_len;
+    for (int a = 0, j = 0;; j++) {
+        const char *nl = memchr(g + a, '\n', (size_t)(n - a));
+        int b = nl ? (int)(nl - g) : n, e = b > a && g[b - 1] == '\r' ? b - 1 : b;
+        float y = r.y + CUI__ED_INSET + (float)((double)(p->g_row + j) * p->lh - p->sy);
+        if (y > r.y + r.h) break;
+        if (y + p->lh >= r.y && e > a) cui__ed_run(ui, p, g, a, e, j ? 0 : p->caret_col, x0, y + ty, p->muted);
+        if (!nl) break;
+        a = b + 1;
     }
 }
 
@@ -2998,14 +3042,14 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
     if (p->show_line && s0 == s1 && p->caret_line >= p->first && p->caret_line < p->first + p->count) {
         int bk = p->caret_line - p->first;
         float y = r.y + CUI__ED_INSET + (float)(cui__ed_prow(p, bk) * p->lh - p->sy);
-        float bh = p->wrap ? (float)p->lr[bk].n * p->lh : p->lh;   /* every row of a wrapped line */
+        float bh = (float)cui__ed_prows(p, bk) * p->lh;   /* every row of a wrapped line */
         cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, bh }, CUI_CORNERS(0), p->band);
     }
     /* the line a paused program stands on */
     if (p->exec_line >= p->first && p->exec_line < p->first + p->count) {
         int bk = p->exec_line - p->first;
         float y = r.y + CUI__ED_INSET + (float)(cui__ed_prow(p, bk) * p->lh - p->sy);
-        float bh = p->wrap ? (float)p->lr[bk].n * p->lh : p->lh;
+        float bh = (float)cui__ed_prows(p, bk) * p->lh;
         cui_draw_rect(ui, (cui_rect){ r.x, y, r.w, bh }, CUI_CORNERS(0), p->exec_tint);
     }
     /* line numbers */
@@ -3035,7 +3079,8 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         const char *s = p->lt[k];
         int als = p->ls[k], ale = p->ls[k + 1] - 1;     /* the line */
         int ls = p->wa[k], le = p->wb[k], c0 = p->wc[k];   /* what is here of it, and the column it starts at */
-        float y = r.y + CUI__ED_INSET + (float)((double)line * p->lh - p->sy);
+        float y = r.y + CUI__ED_INSET + (float)(cui__ed_prow(p, k) * p->lh - p->sy);
+        int gc = p->g_len && line == p->g_row ? p->g_cols : 0;   /* the ghost's line: the text after the caret moves right */
         /* selection */
         if (s1 > s0 && s1 > als && s0 <= ale) {
             int a = CUI_CLAMP(s0, ls, le), b = CUI_CLAMP(s1, ls, le);
@@ -3051,6 +3096,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             if (mk->end < ls || mk->start > le) continue;   /* outside what is here of a long line: out of view */
             int a = CUI_CLAMP(mk->start, ls, le), b = CUI_CLAMP(mk->end, ls, le);
             float xa = (float)(cui__ed_adv(s, ls, a, p->tab, c0) - p->cb) * p->cw, xb = (float)(cui__ed_adv(s, ls, b, p->tab, c0) - p->cb) * p->cw;
+            xa += cui__ed_gdx(p, gc, a, false); xb += cui__ed_gdx(p, gc, b, true);
             if (xb - xa < 2) { xa -= 1; xb = xa + 2; }   /* an empty match shows as a bar */
             cui__ed_draw_mark(ui, p, mk, x0 + xa, xb - xa, y);
         }
@@ -3058,6 +3104,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         if (p->fq.qn > 0) {
             for (int i = ls, mx, my; i <= le && cui__ed_q_line(&p->fq, s, ls, le, i, &mx, &my, NULL) > 0; i = my) {   /* (not x and y: y is the line's) */
                 float xa = (float)(cui__ed_adv(s, ls, mx, p->tab, c0) - p->cb) * p->cw, xb = (float)(cui__ed_adv(s, ls, my, p->tab, c0) - p->cb) * p->cw;
+                xa += cui__ed_gdx(p, gc, mx, false); xb += cui__ed_gdx(p, gc, my, true);
                 cui_draw_rect_border(ui, (cui_rect){ x0 + xa - 1, y + 1, xb - xa + 2, p->lh - 2 }, CUI_CORNERS(3), p->match, p->match_edge, 1);
             }
         }
@@ -3086,14 +3133,15 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             pos = b;
             if (ca >= p->vc1) break;
             /* A plain-text token may start with whitespace and still contain text. */
-            cui__ed_run(ui, p, s, a, b, ca, x0, y + ty, p->colors[toks[t].kind]);
+            cui__ed_run_g(ui, p, s, a, b, ca, x0, y + ty, p->colors[toks[t].kind], gc);
         }
         /* a block comment opened past the columns in view still carries on (a long line's: the line states say) */
         if (stop < le && p->lang.block_comments && !p->win[k]) block = cui__ed_scan_line(&p->lang, s, ls, le, was_block);
     }
     /* placeholder */
-    if (p->empty && p->placeholder)
+    if (p->empty && p->placeholder && !p->g_len)
         cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0, r.y + CUI__ED_INSET + (float)(-p->sy) + ty, p->muted, p->placeholder, -1, true);
+    if (p->g_len) cui__ed_paint_ghost(ui, p, r, x0, ty);
     /* caret */
     if (p->focused && p->caret_line >= p->first && p->caret_line < p->first + p->count) {
         float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
@@ -3367,7 +3415,82 @@ typedef struct {
     int caret_line, caret_col;
     int caret_row, caret_vcol;          /* wrapped: the caret's row from the top of the text, and its column in that row */
     int lane_hover;                     /* the line under the pointer in the glyph lane, 0 based; -1 none */
+    bool g_on;                          /* the ghost text shows: g_n rows of it under row g_row (a line, or wrapped a row), */
+    int g_n, g_row, g_cols, g_cn;       /* its first line g_cols columns wide; g_cn: its rows counted in content_h */
+    int g_len, g_lines, g_n1, g_wide;   /* found once a frame: its bytes, its line breaks, its first line's bytes, the widest other line's columns */
 } cui__edf;
+
+/* ---- ghost text (cui_code_editor_opts.ghost) ---- */
+
+/* Whether the ghost shows now (the caret at ghost_at, no selection, the lines focused, not read only), and where. */
+static void cui__edf_ghost(cui__edf *f) {
+    const cui_code_editor_opts *o = f->o;
+    f->g_on = false; f->g_n = 0;
+    if (!o->ghost) return;
+    cui__ed *E = f->E;
+    cui_edit_state *e = &E->st->ed;
+    if (!o->ghost[0] || E->ro || E->ui->focus != f->lid || e->cursor != e->anchor || e->cursor != o->ghost_at) return;
+    if (!f->g_len) {
+        const char *g = o->ghost;
+        f->g_len = (int)CUI_MIN(strlen(g), (size_t)(INT_MAX / 2));
+        f->g_n1 = -1;
+        for (int a = 0;;) {
+            const char *nl = memchr(g + a, '\n', (size_t)(f->g_len - a));
+            int b = nl ? (int)(nl - g) : f->g_len, end = b > a && g[b - 1] == '\r' ? b - 1 : b;
+            if (f->g_n1 < 0) f->g_n1 = end;
+            else { f->g_lines++; f->g_wide = CUI_MAX(f->g_wide, cui__ed_adv(g, a, end, E->tab, 0)); }
+            if (!nl) break;
+            a = b + 1;
+        }
+    }
+    f->g_on = true;
+    f->g_n = f->g_lines;
+    int col;
+    if (E->wrap) f->g_row = cui__ed_vrow(E, e->cursor, &col);
+    else { f->g_row = cui__ed_line_of(E, e->cursor); col = cui__ed_col_at(E, f->g_row, e->cursor); }
+    f->g_cols = cui__ed_adv(o->ghost, 0, f->g_n1, E->tab, col) - col;
+}
+
+/* a row on screen to the row of the text under it (a row of the ghost: the caret's); and for the rows in view, the
+ * first row of the text at or below it */
+static int cui__edf_g_hit(const cui__edf *f, int v) { return !f->g_n || v <= f->g_row ? v : v <= f->g_row + f->g_n ? f->g_row : v - f->g_n; }
+static double cui__edf_g_real(const cui__edf *f, double v) { return v <= f->g_row ? v : v <= f->g_row + f->g_n ? f->g_row + 1 : v - f->g_n; }
+
+/* Ctrl+Right on the ghost: past its white space, then to the end of the word (or the run of punctuation) there */
+static int cui__ed_ghost_word(const char *g, int n, int i) {
+    while (i < n && (g[i] == ' ' || g[i] == '\t' || g[i] == '\n' || g[i] == '\r')) i++;
+    if (i >= n) return n;
+    int k = cui__ed_class((unsigned char)g[i]);
+    while (i < n && g[i] != '\n' && g[i] != '\r' && cui__ed_class((unsigned char)g[i]) == k) i++;
+    return i;
+}
+
+/* The keys the ghost takes before anything else: Tab inserts all of it, Ctrl+Right its next word, both as one undo step
+ * of their own, verbatim (no auto-indent); Esc drops it. */
+static void cui__edf_ghost_keys(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui_edit_state *e = &st->ed;
+    cui_ctx *ui = E->ui;
+    const char *g = f->o->ghost;
+    int take = 0;
+    st->tab_free = false;   /* the next Tab is the ghost's, not focus navigation's */
+    if (cui_key_pressed(ui, CUI_KEY_TAB) && !(f->mods & (CUI_MOD_CTRL | CUI_MOD_SHIFT | CUI_MOD_ALT | CUI_MOD_SUPER))) {
+        take = f->g_len;
+        ui->kpressed[CUI_KEY_TAB] = 0;
+    } else if (f->word_mod && !f->shift && ui->kpressed[CUI_KEY_RIGHT]) {
+        for (int rep = ui->kpressed[CUI_KEY_RIGHT]; rep > 0 && take < f->g_len; rep--) take = cui__ed_ghost_word(g, f->g_len, take);
+        ui->kpressed[CUI_KEY_RIGHT] = 0;
+    } else if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
+        f->res->ghost_dismissed = true;
+        ui->kpressed[CUI_KEY_ESCAPE] = 0;
+    }
+    if (take > 0) {
+        e->last_edit = 0;
+        if (cui__ed_replace(E, e->cursor, e->cursor, g, take, 3)) f->res->ghost_taken = take;
+        e->last_edit = 0;   /* typing after it is a step of its own */
+    }
+}
 
 /* requests made from code since the last frame: select, go to, find */
 static void cui__edf_requests(cui__edf *f) {
@@ -3548,7 +3671,7 @@ static void cui__edf_drag_select(cui__edf *f) {
         ui->animating = true;
     }
     float y0 = br.y + CUI__ED_INSET - (float)st->sy;
-    int line = (int)floor(((double)ui->my - y0) / lh);
+    int line = cui__edf_g_hit(f, (int)floor(((double)ui->my - y0) / lh));
     double col = ((double)ui->mx - gx - CUI__ED_GAP + st->sx) / cw;
     bool aff = false;
     int pos = E->wrap ? cui__ed_vpick(E, line, st->drag == 3 ? 0 : col, &aff) : cui__ed_pos(E, line, st->drag == 3 ? 0 : col);
@@ -3579,7 +3702,7 @@ static void cui__edf_pointer(cui__edf *f) {
     f->over_hbar = f->known && f->max_sx > 0 && ui->my >= br.y + br.h - CUI__ED_BAR && ui->mx >= f->gx && !f->over_vbar;
     if (f->lr.hovered) cui__set_cursor(ui, (f->over_vbar || f->over_hbar || ui->mx < f->gx) ? CUI_CURSOR_ARROW : CUI_CURSOR_TEXT);
     if (f->known) {
-        int line = (int)floor(((double)ui->my - y0) / f->lh);
+        int line = cui__edf_g_hit(f, (int)floor(((double)ui->my - y0) / f->lh));
         double col = ((double)ui->mx - f->gx - CUI__ED_GAP + st->sx) / f->cw;
         bool on_text = f->lr.hovered && !f->over_vbar && !f->over_hbar && ui->mx >= f->gx && line >= 0 && !st->bar_drag;
         if (on_text) {                                   /* the byte under the pointer, for hover and Ctrl+click */
@@ -3785,6 +3908,7 @@ static void cui__edf_keys(cui__edf *f) {
     f->word_mod = (f->mods & CUI_MOD_CTRL) != 0; f->line_mod = false;
 #endif
     int before_c = e->cursor, before_a = e->anchor;
+    if (f->o->ghost) { cui__edf_ghost(f); if (f->g_on) cui__edf_ghost_keys(f); }   /* the ghost's keys first */
     for (int k = CUI_KEY_NONE + 1; k < CUI_KEY_COUNT; k++)
         if (ui->kpressed[k] && k != CUI_KEY_TAB && k != CUI_KEY_ESCAPE) st->tab_free = false;
     if (ui->text_in_len > 0) st->tab_free = false;
@@ -3994,8 +4118,9 @@ static void cui__edf_follow_caret(cui__edf *f) {
     cui_edit_state *e = &st->ed;
     float cw = f->cw, lh = f->lh, code_w = f->code_w;
     double view_h = f->view_h;
-    if (E->changed) {
-        f->content_h = (double)(E->wrap ? cui__ed_total_rows(E) : E->nl) * lh;
+    if (E->changed || f->g_cn != f->g_n) {
+        f->content_h = (double)((E->wrap ? cui__ed_total_rows(E) : E->nl) + f->g_n) * lh;
+        f->g_cn = f->g_n;
         f->max_sy = CUI_MAX(0.0, f->content_h - view_h);
         f->max_sx = E->wrap ? 0.0 : CUI_MAX(0.0, (double)CUI_MAX(E->maxlen, 1) * cw + CUI__ED_GAP + 24 - code_w);
     }
@@ -4005,6 +4130,10 @@ static void cui__edf_follow_caret(cui__edf *f) {
     else f->caret_vcol = f->caret_col;
     /* a line wider than the longest in bytes (tabs) still scrolls into reach */
     if (!E->wrap) f->max_sx = CUI_MAX(f->max_sx, (double)f->caret_col * cw + CUI__ED_GAP + 24 - code_w);
+    if (f->g_on && !E->wrap) {   /* the ghost's lines reach as far as they go */
+        int w = CUI_MAX(cui__ed_col_at(E, f->caret_line, cui__ed_end(E, f->caret_line)) + f->g_cols, f->g_wide);
+        f->max_sx = CUI_MAX(f->max_sx, (double)w * cw + CUI__ED_GAP + 24 - code_w);
+    }
     if (E->reveal) {
         double cy = (double)(E->wrap ? f->caret_row : f->caret_line) * lh;
         bool out = cy < st->sy || cy + lh > st->sy + view_h;
@@ -4043,8 +4172,10 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
     p->sid = f->sid;
     int first, last, vr0 = 0, vr1 = 0;   /* (wrapped: the rows in view) */
     for (int pass = 0;; pass++) {
-        first = (int)CUI_MAX(0.0, floor((st->sy - CUI__ED_INSET) / lh));
-        last = (int)CUI_MIN((double)(E->wrap ? cui__ed_total_rows(E) : E->nl), ceil((st->sy + f->view_h + 2 * CUI__ED_INSET) / lh) + 1);
+        double v0 = floor((st->sy - CUI__ED_INSET) / lh), v1 = ceil((st->sy + f->view_h + 2 * CUI__ED_INSET) / lh) + 1;
+        if (f->g_n) { v0 = cui__edf_g_real(f, v0); v1 = cui__edf_g_real(f, v1); }   /* rows on screen to rows of the text */
+        first = (int)CUI_MAX(0.0, v0);
+        last = (int)CUI_MIN((double)(E->wrap ? cui__ed_total_rows(E) : E->nl), v1);
         if (first > last) first = last;
         if (!E->wrap) break;
         vr0 = first; vr1 = last;
@@ -4053,7 +4184,7 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
         first = CUI_MIN(cui__ed_line_of_row(E, first), last);
         /* lines whose rows were a guess are counted, which moves the ones below: again */
         if (pass == 3 || !cui__ed_wrap_count(E, first, last)) break;
-        f->content_h = (double)cui__ed_total_rows(E) * lh;
+        f->content_h = (double)(cui__ed_total_rows(E) + f->g_n) * lh;
         f->max_sy = CUI_MAX(0.0, f->content_h - f->view_h);
         st->sy = CUI_MIN(st->sy, f->max_sy);
     }
@@ -4149,6 +4280,7 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
                 p->br_line[m] = cui__ed_line_of(E, pos[m]);
                 if (E->wrap) p->br_row[m] = cui__ed_vrow(E, pos[m], &p->br_col[m]);
                 else p->br_col[m] = cui__ed_col_at(E, p->br_line[m], pos[m]);
+                if (f->g_on && pos[m] >= e->cursor && (E->wrap ? p->br_row[m] : p->br_line[m]) == f->g_row) p->br_col[m] += f->g_cols;   /* after the ghost */
             }
         }
     }
@@ -4203,6 +4335,10 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
     p->brk_edge = cui_alpha(CUI_C(ui, TEXT_MUTED), 0.55f);
     p->caret = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     p->muted = CUI_C(ui, TEXT_MUTED);
+    if (f->g_on) {   /* the ghost text, copied: the caller owns it */
+        p->g_text = cui__frame_strdup(ui, f->o->ghost, f->g_len);
+        p->g_len = f->g_len; p->g_n = f->g_n; p->g_row = f->g_row; p->g_cols = f->g_cols;
+    }
     p->line = CUI_C(ui, BORDER);
     p->bar = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     /* the scrollbars show while scrolling, while hovered or held */
@@ -4306,6 +4442,12 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     f.max_sy = CUI_MAX(0.0, f.content_h - f.view_h);
 
     cui__edf_requests(&f);   /* after the wrap width is known: an edit from code patches the wrap counts too */
+    if (o->ghost) {   /* the ghost's rows, for the pointer: as they were drawn */
+        cui__edf_ghost(&f);
+        f.content_h += (double)f.g_n * f.lh;
+        f.max_sy = CUI_MAX(0.0, f.content_h - f.view_h);
+        f.g_cn = f.g_n;
+    }
 
     /* input */
     f.mods = ui->mods;
@@ -4333,6 +4475,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     on->flags |= CUI_NF_CLIP;
     cui__open(ui, outer);
     if (st->mode) cui__edf_build_bar(&f);
+    if (o->ghost) cui__edf_ghost(&f);   /* after the keys: what this frame draws */
     cui__edf_follow_caret(&f);
     cui__edf_build_lines(&f, &L, json, dark);
     if (f.focused) cui__wakeup_after(ui, 0.53f);

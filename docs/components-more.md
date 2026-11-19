@@ -994,6 +994,18 @@ if (ra.changed) cui_code_editor_splice(ui, right, ra.splice_start, ra.splice_rem
 if (rb.changed) cui_code_editor_splice(ui, left, rb.splice_start, rb.splice_removed, rb.splice_inserted);    /* next frame */
 ```
 
+#### Ghost text
+
+An inline suggestion (an AI completion) is drawn at the caret in the muted text colour without being part of the text. Pass it with the byte it belongs to; it shows while the caret is there with no selection and the editor has the focus:
+
+```c
+cui_code_editor_result r = cui_code_editor(ui, "code", buf, cap, .lang = "c", .ghost = sugg, .ghost_at = sugg_at);
+if (r.ghost_taken) advance(r.ghost_taken);   /* Tab took all of it, Ctrl+Right a word: show the rest at r.cursor, or drop it */
+if (r.ghost_dismissed || (r.changed && !r.ghost_taken)) sugg = NULL;
+```
+
+Its first line goes inline after the caret (the rest of the line moves right); further lines get rows of their own under the caret's row, pushing the rows below down with a blank gutter beside them, wrapped or not. Tab inserts all of it and Ctrl+Right (Alt+Right on macOS) up to the end of its next word, verbatim (no auto-indent) and as one undo step, through the same path as typing (a buffer or a `.doc`, reported as `changed` with a splice); Esc drops it. While it shows, those keys are its own; when it does not, every key does what it always did. Without `.ghost` the editor does no extra work.
+
 #### On a text document
 
 A buffer you own has one cost no cache can hide: an edit moves every byte after it, so near the top of 100 MB a key costs tens of milliseconds, and the buffer needs spare room for edits. For big files give the editor a `cui_text_doc` instead (`.doc = d`, with `buf` NULL and `cap` 0). A text document is a piece table: the bytes it was made from are never written (adopt a file you read, no copy), edits go to append-only buffers, and the text is a list of pieces of those in a balanced tree that knows the bytes and line breaks of every subtree. An edit costs the same at any size and anywhere in the text, there is no capacity (nothing is refused), and memory stays near the size of the text: no spare room and no second copy. Everything works as on a buffer, with the same results, colors, wrapping, find and replace (regex too), marks, brackets, go to line, `cui_code_editor_edit`, `.read_only` and `.plain`; a test drives an editor on a buffer and one on a document with the same random input and compares what they report and draw after every frame.

@@ -2250,6 +2250,14 @@ typedef struct cui_code_editor_opts {
     int glyph_count;
     int exec_line;             /* 1 based: the line a paused program stands on, tinted across the editor, with an arrow in the
                                 * lane when there is one (0: none) */
+    const char *ghost;         /* a suggestion shown at the caret in the faint text colour, not part of the text (NULL: none).
+                                * Drawn only while the caret is at ghost_at with no selection and the editor has the focus
+                                * (not read only): its first line inline after the caret (the rest of that line moves right),
+                                * further lines as rows of their own under the caret's row (the rows below move down, the
+                                * gutter stays blank beside them). Tab inserts all of it, Ctrl+Right (Alt+Right on macOS) up
+                                * to the end of its next word (see ghost_taken); Esc drops it (ghost_dismissed). The text is
+                                * inserted verbatim (no auto-indent). Costs nothing when NULL; O(its bytes) per frame when shown. */
+    int ghost_at;              /* the byte offset the suggestion belongs to */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
@@ -2286,6 +2294,9 @@ typedef struct cui_code_editor_result {
     bool gutter_clicked;       /* a press in the glyph lane (`glyph_lane`) this frame: gutter_line is the line, 1 based; */
     bool gutter_right;         /* with it: the right button (a menu for the breakpoint), else the left */
     int gutter_line;
+    int ghost_taken;           /* bytes of .ghost inserted this frame by Tab or Ctrl+Right (one undo step; the edit is also
+                                * reported as usual: changed, splice), 0 none */
+    bool ghost_dismissed;      /* Esc dropped the ghost this frame (the editor took the key) */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),
