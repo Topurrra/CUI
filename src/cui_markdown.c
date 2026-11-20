@@ -966,6 +966,7 @@ typedef struct {
     const char *src;
     int len, content_end;
     bool streaming, compact, fit, custom_color, keep_ws;
+    bool wrap_code, fit_tables;  /* cui_markdown_opts.wrap_code, .fit_tables */
     float body;                  /* unscaled body size */
     float u;                     /* spacing unit: body / 13 */
     cui_color fg, fg2, link_c, code_bg, marker_c, rule_c, rail_c;
@@ -1582,6 +1583,7 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
     memset(&co, 0, sizeof co);
     co.lang = lg;
     co.size = c->body;
+    co.wrap = c->wrap_code;
     if (c->dry) {   /* only its text, when it is copied (a diagram off screen copies its source) */
         c->code_seq++;
         if (c->sel->st) md_sel_copy(ui, c->sel, md_next_sel(c), NULL, 0, buf, o);
@@ -2177,7 +2179,7 @@ static int md_table(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
     md_font hf = md_make_font(c, c->ui->theme.text_sm * c->body / c->ui->theme.text_body, CUI_FONT_MEDIUM, CUI_FONT_MEDIUM, 1.3f);
     md_inline *cells = cui__frame_alloc(ui, sizeof(md_inline) * (size_t)((nrows + 1) * ncols));
     int *rowc = cui__frame_alloc(ui, sizeof(int) * (size_t)(nrows + 1));
-    float *colw = cui__frame_alloc(ui, sizeof(float) * (size_t)ncols * 2), *floor_w = colw + ncols;
+    float *colw = cui__frame_alloc(ui, sizeof(float) * (size_t)ncols * 3), *floor_w = colw + ncols, *word_w = colw + ncols * 2;
     md_line raw[MD_MAX_COLS];
     for (int r = 0; r <= nrows; r++) {
         md_line R = L[r == 0 ? i : i + (has_delim ? 2 : 1) + r - 1];
@@ -2188,8 +2190,16 @@ static int md_table(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
             md_inline *in = &cells[r * ncols + k];
             *in = md_parse_inline(ui, raw[k].s, raw[k].len, tail && k == rowc[r] - 1);
             float w = md_runs_width(ui, in, r == 0 ? &hf : &f);
-            if (r == 0) { floor_w[k] = w + 16; colw[k] = w + 16; }
+            if (r == 0) { floor_w[k] = w + 16; colw[k] = w + 16; word_w[k] = 0; }
             else colw[k] = CUI_MAX(colw[k], w + 16);
+            if (c->fit_tables && raw[k].len > 0) {   /* its longest word, about: its share of the cell's width */
+                int run = 0, most = 0;
+                for (int j = 0; j <= raw[k].len; j++) {
+                    if (j < raw[k].len && raw[k].s[j] != ' ') run++;
+                    else { most = CUI_MAX(most, run); run = 0; }
+                }
+                word_w[k] = CUI_MAX(word_w[k], w * (float)most / (float)raw[k].len + 16);
+            }
         }
     }
     float total = 18, u = c->u;
@@ -2204,14 +2214,16 @@ static int md_table(md_ctx *c, const md_box *b, const md_line *L, int n, int i, 
         float extra = avail - total, sum = total - 18;
         for (int k = 0; k < ncols; k++) colw[k] += extra * colw[k] / sum;
     } else if (total > avail) {   /* narrow: long cells wrap first, then the table scrolls */
+        for (int k = 0; k < ncols; k++)   /* how far a column may shrink: fit_tables, to its header or longest word (at most 160) */
+            floor_w[k] = c->fit_tables ? CUI_MIN(CUI_MAX(floor_w[k], word_w[k]), 160.0f * u) : CUI_MAX(floor_w[k], 120.0f * u);
         for (int pass = 0; pass < 4 && total > avail + 0.5f; pass++) {
             float give = 0;
-            for (int k = 0; k < ncols; k++) give += CUI_MAX(0.0f, colw[k] - CUI_MAX(floor_w[k], 120.0f * u));
+            for (int k = 0; k < ncols; k++) give += CUI_MAX(0.0f, colw[k] - floor_w[k]);
             if (give <= 0) break;
             float need = CUI_MIN(give, total - avail);
             total = 18;
             for (int k = 0; k < ncols; k++) {
-                float g = CUI_MAX(0.0f, colw[k] - CUI_MAX(floor_w[k], 120.0f * u));
+                float g = CUI_MAX(0.0f, colw[k] - floor_w[k]);
                 colw[k] -= need * g / give;
                 total += colw[k];
             }
@@ -3453,6 +3465,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     memset(&c, 0, sizeof c);
     c.ui = ui; c.id = id; c.src = text; c.len = len; c.res = &res;
     c.streaming = o->streaming; c.compact = o->compact; c.fit = o->fit_content; c.keep_ws = o->plain && o->preserve_whitespace;
+    c.wrap_code = o->wrap_code && !o->fit_content; c.fit_tables = o->fit_tables;
     c.base_dir = o->base_dir; c.resolve_image = o->resolve_image; c.resolve_user = o->resolve_user;
     c.body = o->size > 0 ? o->size : ui->theme.text_body;
     c.u = c.body / 13.0f;

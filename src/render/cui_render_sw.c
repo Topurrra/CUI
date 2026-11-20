@@ -1690,3 +1690,10 @@ void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, in
 bool cui_write_png(const char *path, const void *rgba, int width, int height, int stride) {
     return stbi_write_png(path, width, height, 4, rgba, stride) != 0;
 }
+
+void *cui_png_encode(const void *rgba, int width, int height, int stride, int *len) {
+    int n = 0;
+    unsigned char *p = stbi_write_png_to_mem((const unsigned char *)rgba, stride, width, height, 4, &n);
+    if (len) *len = p ? n : 0;
+    return p;
+}

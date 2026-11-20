@@ -859,6 +859,92 @@ static void lx_batch(cui__lx *x) {
     }
 }
 
+/* ======================================================================== */
+/* HTTP request files (.http, .rest: REST Client and JetBrains' form)       */
+/* ======================================================================== */
+
+/* {{variables}} in [i, n) as preprocessor tokens, the rest as kind */
+static void http_text(cui__lx *x, int i, int n, int kind) {
+    while (i < n) {
+        int v = lx_find(x->s, i, n, "{{");
+        if (v < 0) { lx_e(x, i, n - i, kind); return; }
+        int e = lx_find(x->s, v + 2, n, "}}");
+        lx_e(x, i, v - i, kind);
+        e = e < 0 ? n : e + 2;
+        lx_e(x, v, e - v, TK_PREPROC);
+        i = e;
+    }
+}
+
+/* a body line: strings, numbers and literals as in JSON, variables, a "< file" line */
+static void http_body(cui__lx *x) {
+    const char *s = x->s;
+    int n = x->n, i = lx_skip_ws(s, 0, n);
+    if (i < n && s[i] == '<' && i + 1 < n && lx_ws(s[i + 1])) { lx_e(x, i, 1, TK_PUNCT); http_text(x, i + 1, n, TK_STRING); return; }
+    while (i < n) {
+        char c = s[i];
+        if (c == '{' && i + 1 < n && s[i + 1] == '{') {
+            int e = lx_find(s, i + 2, n, "}}");
+            e = e < 0 ? n : e + 2;
+            lx_e(x, i, e - i, TK_PREPROC);
+            i = e;
+        } else if (c == '"') {
+            int j = i + 1;
+            while (j < n && s[j] != '"') j += s[j] == '\\' ? 2 : 1;
+            if (j > n) j = n;
+            int k = lx_skip_ws(s, j < n ? j + 1 : n, n);
+            http_text(x, i, j < n ? j + 1 : n, k < n && s[k] == ':' ? TK_FUNC : TK_STRING);   /* a key, or a value */
+            i = j < n ? j + 1 : n;
+        } else if (lx_digit(c) || (c == '-' && i + 1 < n && lx_digit(s[i + 1]))) {
+            int j = i + 1;
+            while (j < n && (lx_digit(s[j]) || s[j] == '.' || s[j] == 'e' || s[j] == 'E' || s[j] == '+' || s[j] == '-')) j++;
+            lx_e(x, i, j - i, TK_NUMBER);
+            i = j;
+        } else if (lx_alpha(c)) {
+            int j = i + 1;
+            while (j < n && lx_alnum(s[j])) j++;
+            if (lx_word_is(s, i, j, "true") || lx_word_is(s, i, j, "false") || lx_word_is(s, i, j, "null")) lx_e(x, i, j - i, TK_CONST);
+            i = j;
+        } else if (strchr("{}[]:,=&", c)) { lx_e(x, i, 1, TK_PUNCT); i++; }
+        else i++;
+    }
+}
+
+/* state: 0 between requests (variables, comments, a request line next), 1 the headers, 2 the body */
+static void lx_http(cui__lx *x, int *state) {
+    const char *s = x->s;
+    int n = x->n, i = lx_skip_ws(s, 0, n), e = lx_trim(s, 0, n);
+    if (lx_has(s, i, n, "###")) { lx_e(x, i, e - i, TK_COMMENT); *state = 0; return; }   /* a new request (and its name) */
+    if (*state == 2) { http_body(x); return; }
+    if (i >= e) { if (*state == 1) *state = 2; return; }                                   /* the blank line: the body follows */
+    if (s[i] == '#' || lx_has(s, i, n, "//")) { lx_e(x, i, e - i, TK_COMMENT); return; }
+    if (*state == 1) {
+        if (s[i] == '?' || s[i] == '&') { lx_e(x, i, 1, TK_PUNCT); http_text(x, i + 1, e, TK_STRING); return; }   /* the query, continued */
+        int c = i;
+        while (c < e && s[c] != ':') c++;
+        if (c >= e) { http_text(x, i, e, TK_TEXT); return; }
+        lx_e(x, i, c - i, TK_FUNC);
+        lx_e(x, c, 1, TK_PUNCT);
+        http_text(x, c + 1, e, TK_TEXT);
+        return;
+    }
+    if (s[i] == '@') {                                                                     /* @name = value */
+        int q = i + 1;
+        while (q < e && s[q] != '=') q++;
+        lx_e(x, i, lx_trim(s, i, q) - i, TK_TYPE);
+        if (q < e) { lx_e(x, q, 1, TK_PUNCT); http_text(x, q + 1, e, TK_STRING); }
+        return;
+    }
+    int w = i;                                                                             /* METHOD URL HTTP/1.1, or a bare URL */
+    while (w < e && s[w] >= 'A' && s[w] <= 'Z') w++;
+    int u = i;
+    if (w > i && w < e && lx_ws(s[w])) { lx_e(x, i, w - i, TK_KEYWORD); u = lx_skip_ws(s, w, e); }
+    int v = lx_find(s, u, e, " HTTP/");
+    http_text(x, u, v < 0 ? e : v, TK_STRING);
+    if (v >= 0) lx_e(x, v, e - v, TK_TYPE);
+    *state = 1;
+}
+
 int cui__tokenize_x(const cui__lang *L, const char *s, int n, int *state, cui__tok *out, int cap) {
     cui__lx x = { s, n, 0, cap, 0, out };
     switch (L->mode) {
@@ -872,6 +958,7 @@ int cui__tokenize_x(const cui__lang *L, const char *s, int n, int *state, cui__t
     case CUI__LM_CSHARP: lx_clike(&x, true, state); break;
     case CUI__LM_JAVA: lx_clike(&x, false, state); break;
     case CUI__LM_BATCH: lx_batch(&x); break;
+    case CUI__LM_HTTP: lx_http(&x, state); break;
     default: break;
     }
     lx_gap(&x, n);

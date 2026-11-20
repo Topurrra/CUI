@@ -968,7 +968,7 @@ typedef struct {
     bool multi;                        /* its lines carry an int state (cui__tokenize_st); the code editor caches it per line */
 } cui__lang;
 enum { CUI__LM_NONE, CUI__LM_MARKDOWN, CUI__LM_YAML, CUI__LM_TOML, CUI__LM_INI, CUI__LM_XML, CUI__LM_HTML, CUI__LM_CSS,
-       CUI__LM_POWERSHELL, CUI__LM_CSHARP, CUI__LM_JAVA, CUI__LM_BATCH };
+       CUI__LM_POWERSHELL, CUI__LM_CSHARP, CUI__LM_JAVA, CUI__LM_BATCH, CUI__LM_HTTP };
 typedef struct { int start, len; uint8_t kind; } cui__tok;
 #define CUI__TK_COUNT 10   /* token kinds; colors from cui__syntax_colors */
 cui__lang cui__lang_for(const char *lang);
@@ -999,6 +999,7 @@ typedef struct cui__code_sel {
     cui_color color;
     cui_id canvas;             /* set by the block: the node the text is painted in */
     float size, lh, x0, y0;    /* set by the block: font size, line height, text origin in the canvas */
+    float wrap_w;              /* set by the block: the width its lines wrap at (cui_code_opts.wrap), 0 when they do not */
 } cui__code_sel;
 void cui__code_block_sel(cui_ctx *ui, const char *id, const char *code, const cui_code_opts *o, cui__code_sel *sel);
 /* The byte of code nearest the point (x, y), in the block's latest layout. */

@@ -1014,6 +1014,8 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
         ui->kpressed[CUI_KEY_ENTER] = 0;
         if (!empty && !o->busy) result |= CUI_COMPOSER_SEND;
     }
+    if (ui->focus == ids.fid && cui_key_pressed(ui, CUI_KEY_V) && (ui->mods & CUI_MOD_PRIMARY) && !(ui->mods & (CUI_MOD_SHIFT | CUI_MOD_ALT)))
+        result |= CUI_COMPOSER_PASTE;
     cui__tween(ui, &st->focus, ui->focus == ids.fid ? 1.0f : 0.0f, CUI__T_FOCUS);
     int box = cui__node_new(ui, ids.id);
     cui_node *bn = &ui->nodes[box];

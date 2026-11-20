@@ -1910,6 +1910,10 @@ typedef struct cui_code_opts {
     float max_height;          /* scrolls beyond this, default none */
     float size;                /* font size, default 13 */
     bool no_header;            /* no title bar, even with a lang */
+    bool wrap;                 /* long lines wrap at the block's width (after a space or punctuation when one fits) instead of
+                                * scrolling sideways; a continuation row starts at the line's own indent plus two spaces. Line
+                                * numbers, the highlighted lines and copying go by the file's lines. The width is the block's
+                                * last frame's, so a block's first frame shows its lines unwrapped */
 } cui_code_opts;
 CUI_API void cui_code_block_ex(cui_ctx *ui, const char *id, const char *code, const cui_code_opts *opts);
 
@@ -2029,6 +2033,9 @@ typedef struct cui_markdown_opts {
                                 * stays, and a wrapped continuation starts at the left edge. Copy is unchanged (it always returned the source) */
     int revision;              /* big texts: nonzero, a number you change whenever the text changes; while it and the text pointer and length
                                 * stay the same the view does not read the text (it otherwise compares it with its copy each frame) */
+    bool wrap_code;            /* code blocks wrap their long lines (cui_code_opts.wrap) instead of scrolling sideways: narrow panels, chat */
+    bool fit_tables;           /* a table wider than the view lets its columns shrink further (their cells wrap) before it scrolls
+                                * sideways: down to a few characters a column, the header's own width included */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */
@@ -3217,7 +3224,8 @@ CUI_API bool cui_model_picker_ex(cui_ctx *ui, const char *id, const cui_model *m
  * It records nothing itself: you open the microphone, push its levels and
  * clear `recording` when the take is sent or thrown away. */
 enum { CUI_COMPOSER_SEND = 1, CUI_COMPOSER_STOP = 2, CUI_COMPOSER_ATTACH = 4, CUI_COMPOSER_REMOVE = 8, CUI_COMPOSER_MODEL = 16,
-       CUI_COMPOSER_RECORD = 32, CUI_COMPOSER_CANCEL = 64, CUI_COMPOSER_VOICE = 128 };
+       CUI_COMPOSER_RECORD = 32, CUI_COMPOSER_CANCEL = 64, CUI_COMPOSER_VOICE = 128,
+       CUI_COMPOSER_PASTE = 256 /* Ctrl+V (Cmd+V) in its text: the text is pasted as usual; an app may take an image from the clipboard */ };
 typedef struct cui_composer_opts {
     int _;
     const char *placeholder;

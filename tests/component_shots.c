@@ -1285,6 +1285,23 @@ SCENE(code_block) {
         "}\n",
         .lang = "c", .title = "counter.c", .line_numbers = true, .highlight_from = 7);
 }
+/* a narrow column: the code wraps instead of scrolling, the table's columns shrink to fit */
+SCENE(code_block_wrap) {
+    cui_column(ui, .width = CUI_FILL, .gap = 12) {
+        cui_code_block(ui, "w",
+            "int total(const int *v, int n) {\n"
+            "    int s = 0; for (int i = 0; i < n; i++) s += v[i];   /* every value, from the first to the last one */\n"
+            "    return printf(\"the total of %d values is %d\\n\", n, s), s;\n"
+            "}\n",
+            .lang = "c", .title = "total.c", .line_numbers = true, .wrap = true);
+        cui_markdown(ui, "md",
+            "| Step | What it does | Time | Notes |\n|---|---|---|---|\n"
+            "| Configure | cmake -B build -G Ninja | 2 s | only the first time |\n"
+            "| Build | cmake --build build | 40 s | -O3 for the hot files, -Os for the rest |\n",
+            .wrap_code = true, .fit_tables = true);
+    }
+}
+
 /* code editor: the buffer is static, so the live page keeps what you type;
  * the find bar and the caret are set once, then belong to the page */
 static char ed_src[16384] =
@@ -5064,7 +5081,7 @@ int main(int argc, char **argv) {
         { "expandables", scene_expandables, 680, 320, true }, { "banner-countdown", scene_banner_countdown, 820, 230, true },
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
-        { "data-grid", scene_data_grid, 760, 312, true }, { "cell-grid", scene_cell_grid, 760, 300, true }, { "code-block", scene_code_block, 720, 340, true },
+        { "data-grid", scene_data_grid, 760, 312, true }, { "cell-grid", scene_cell_grid, 760, 300, true }, { "code-block", scene_code_block, 720, 340, true }, { "code-block-wrap", scene_code_block_wrap, 420, 470, true },
         { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true }, { "markdown-emoji", scene_markdown_emoji, 600, 330, true }, { "markdown-vault", scene_markdown_vault, 560, 190, true }, { "markdown-callouts", scene_markdown_callouts, 560, 640, true },{ "markdown-images", scene_markdown_images, 560, 600, true },
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true }, { "mermaid-back", scene_mermaid_back, 920, 1000, true }, { "mermaid-narrow", scene_mermaid_narrow, 420, 760, true }, { "mermaid-expand", scene_mermaid_expand, 420, 760, true }, { "mermaid-expand-wide", scene_mermaid_expand_wide, 1000, 600, true },

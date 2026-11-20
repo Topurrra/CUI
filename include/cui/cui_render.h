@@ -49,6 +49,8 @@ CUI_API bool cui_sw_last_damage(const cui_sw_renderer *r, int *x, int *y, int *w
 
 /* Writes a PNG file (RGBA pixels). Returns false on failure. */
 CUI_API bool cui_write_png(const char *path, const void *rgba, int width, int height, int stride);
+/* The same PNG in memory: a malloc'd buffer the caller frees with free(), and its size in *len; NULL on failure. */
+CUI_API void *cui_png_encode(const void *rgba, int width, int height, int stride, int *len);
 
 /* ---- OpenGL renderer ---- */
 

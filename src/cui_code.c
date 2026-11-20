@@ -74,6 +74,7 @@ static const struct { const char *names[5]; int mode; bool multi; } cui__lang_mo
     { { "csharp", "cs", "c#" }, CUI__LM_CSHARP, true },
     { { "java" }, CUI__LM_JAVA, true },
     { { "batch", "bat", "cmd" }, CUI__LM_BATCH, false },
+    { { "http", "rest" }, CUI__LM_HTTP, true },
 };
 
 cui__lang cui__lang_for(const char *lang) {
@@ -536,6 +537,7 @@ typedef struct {
     float size, lh, gutter, pad;
     cui_color colors[TK_COUNT], gutter_c, hl_c;
     const cui__code_sel *sel;   /* a selection a surrounding view owns, or NULL */
+    float wrap_w;               /* cui_code_opts.wrap: the text's width, 0 when lines do not wrap */
 } cui__code_paint;
 
 /* Width of a piece of one line as the block paints it: a tab is four spaces. */
@@ -551,34 +553,72 @@ static float cui__code_measure(cui_ctx *ui, float size, const char *s, int n) {
     return x;
 }
 
+/* A wrapped line's continuation rows start at its own indent plus two spaces (none when that is over half the width). */
+static float cui__code_cont_indent(cui_ctx *ui, float size, const char *s, int i, int e, float w) {
+    int k = i;
+    while (k < e && (s[k] == ' ' || s[k] == '\t')) k++;
+    float ind = cui__code_measure(ui, size, s + i, k - i) + cui__text_width(ui, CUI_FONT_MONO, size, "  ", 2, true);
+    return ind > w * 0.5f ? 0 : ind;
+}
+
+/* Where the row of the line [k, e) that starts at k ends, in w of room (w 0: the line does not wrap). It breaks after a blank
+ * or punctuation when the row is then at least a quarter full, else after the last character that fits; never an empty row. */
+static int cui__code_row_end(cui_ctx *ui, float size, const char *s, int k, int e, float w) {
+    if (w <= 0 || k >= e || cui__code_measure(ui, size, s + k, e - k) <= w) return e;
+    float acc = 0;
+    int brk = -1;
+    for (int j = k; j < e;) {
+        int nj = cui__utf8_next(s, e, j);
+        if (nj <= j) nj = j + 1;
+        float cw = cui__code_measure(ui, size, s + j, nj - j);
+        if (acc + cw > w && j > k) return brk > k ? brk : j;
+        acc += cw;
+        if (s[j] && strchr(" \t,;()[]{}/\\-.:&|=<>+*?!", s[j]) && acc >= w * 0.25f && !(nj < e && s[nj] == ' ')) brk = nj;   /* a blank next: after it */
+        j = nj;
+    }
+    return e;
+}
+
 int cui__code_sel_hit(cui_ctx *ui, const cui__code_sel *sel, const char *code, int len, float x, float y) {
     if (!sel->canvas || !cui__has_prev_rect(ui, sel->canvas)) return 0;
     cui_rect r = cui__prev_rect(ui, sel->canvas);
-    int line = (int)floorf((y - r.y - sel->y0 + 1) / sel->lh), i = 0;
-    if (line < 0) return 0;
-    for (int k = 0; k < line; k++) {
-        const char *nl = memchr(code + i, '\n', (size_t)(len - i));
-        if (!nl) return len;
-        i = (int)(nl - code) + 1;
+    int row = (int)floorf((y - r.y - sel->y0 + 1) / sel->lh), i = 0;
+    if (row < 0) return 0;
+    float dx = x - r.x - sel->x0;
+    for (;;) {   /* each line, each of its rows, until the row the point is in */
+        int e = i;
+        while (e < len && code[e] != '\n') e++;
+        float ind = sel->wrap_w > 0 ? cui__code_cont_indent(ui, sel->size, code, i, e, sel->wrap_w) : 0;
+        int k = i;
+        for (int first = 1;; first = 0) {
+            float off = first ? 0 : ind;
+            int re = cui__code_row_end(ui, sel->size, code, k, e, sel->wrap_w - off);
+            if (row == 0) {
+                float acc = off;
+                for (int j = k; j < re;) {
+                    int nj = cui__utf8_next(code, re, j);
+                    if (nj <= j) nj = j + 1;
+                    float cw = cui__code_measure(ui, sel->size, code + j, nj - j);
+                    if (dx < acc + cw * 0.5f) return j;
+                    acc += cw;
+                    j = nj;
+                }
+                return re;
+            }
+            row--;
+            k = re;
+            if (k >= e) break;
+        }
+        if (e >= len) return len;
+        i = e + 1;
     }
-    int e = i;
-    while (e < len && code[e] != '\n') e++;
-    float dx = x - r.x - sel->x0, acc = 0;
-    for (int k = i; k < e;) {
-        int nk = cui__utf8_next(code, e, k);
-        if (nk <= k) nk = k + 1;
-        float cw = cui__code_measure(ui, sel->size, code + k, nk - k);
-        if (dx < acc + cw * 0.5f) return k;
-        acc += cw;
-        k = nk;
-    }
-    return e;
 }
 
 static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
     cui__code_paint *p = data;
     cui_rect r = n->rect;
     float fh = cui__font_line_height(ui, CUI_FONT_MONO, p->size);
+    float tab = cui__text_width(ui, CUI_FONT_MONO, p->size, "    ", 4, true);
     float x0 = r.x + p->pad + p->gutter, y = r.y + p->pad;
     bool block = false;
     int mdst = p->lang.markdown ? CUI__MD_START : 0;
@@ -588,35 +628,50 @@ static void cui__paint_code(cui_ctx *ui, cui_node *n, void *data) {
         if (i == p->len && p->len > 0 && p->code[p->len - 1] == '\n') break;   /* no phantom line after a final newline */
         int e = i;
         while (e < p->len && p->code[e] != '\n') e++;
-        if (line >= p->hl_from && line <= p->hl_to && p->hl_from > 0)
-            cui_draw_rect(ui, (cui_rect){ r.x, y - 1, r.w, p->lh }, CUI_CORNERS(0), p->hl_c);
-        const cui__code_sel *sel = p->sel;
-        if (sel && sel->to > sel->from && sel->from <= e && sel->to > i) {
-            int a = CUI_MAX(sel->from, i), b = CUI_MIN(sel->to, e);
-            float xa = x0 + cui__code_measure(ui, p->size, p->code + i, a - i);
-            float xb = x0 + cui__code_measure(ui, p->size, p->code + i, b - i);
-            if (sel->to > e && e < p->len) xb += cui__text_width(ui, CUI_FONT_MONO, p->size, " ", 1, true);   /* the line break */
-            if (xb > xa) cui_draw_rect(ui, (cui_rect){ xa, y - 1, xb - xa, p->lh }, CUI_CORNERS(0), sel->color);
-        }
-        float ty = y + (p->lh - fh) * 0.5f - 1;
-        if (p->line_numbers) {
-            const char *ln = cui__frame_printf(ui, "%d", line);
-            float w = cui__text_width(ui, CUI_FONT_MONO, p->size, ln, -1, true);
-            cui__draw_text_line(ui, CUI_FONT_MONO, p->size, r.x + p->pad + p->gutter - 16 - w, ty, p->gutter_c, ln, -1, true);
-        }
         int nt = p->lang.multi ? cui__tokenize_st(&p->lang, p->code + i, e - i, &mdst, toks, 256)
                                   : cui__tokenize(&p->lang, p->json, p->code + i, e - i, &block, toks, 256);
-        float x = x0;
-        for (int k = 0; k < nt; k++) {
-            const char *s = p->code + i + toks[k].start;
-            int len = toks[k].len;
-            /* tabs become four spaces */
-            if (len > 0 && s[0] == '\t') { x += cui__text_width(ui, CUI_FONT_MONO, p->size, "    ", 4, true) * (float)len; continue; }
-            if (toks[k].kind != TK_TEXT || s[0] != ' ')
-                cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x, ty, p->colors[toks[k].kind], s, len, true);
-            x += cui__text_width(ui, CUI_FONT_MONO, p->size, s, len, true);
+        float ind = p->wrap_w > 0 ? cui__code_cont_indent(ui, p->size, p->code, i, e, p->wrap_w) : 0;
+        int k = i, t = 0;
+        for (int first = 1;; first = 0) {   /* one row, or several when the line wraps */
+            float rx = x0 + (first ? 0 : ind);
+            int re = cui__code_row_end(ui, p->size, p->code, k, e, p->wrap_w - (first ? 0 : ind));
+            if (line >= p->hl_from && line <= p->hl_to && p->hl_from > 0)
+                cui_draw_rect(ui, (cui_rect){ r.x, y - 1, r.w, p->lh }, CUI_CORNERS(0), p->hl_c);
+            const cui__code_sel *sel = p->sel;
+            if (sel && sel->to > sel->from && sel->from <= re && sel->to > k) {
+                int a = CUI_MAX(sel->from, k), b = CUI_MIN(sel->to, re);
+                float xa = rx + cui__code_measure(ui, p->size, p->code + k, a - k);
+                float xb = rx + cui__code_measure(ui, p->size, p->code + k, b - k);
+                if (sel->to > e && e < p->len && re >= e) xb += cui__text_width(ui, CUI_FONT_MONO, p->size, " ", 1, true);   /* the line break */
+                if (xb > xa) cui_draw_rect(ui, (cui_rect){ xa, y - 1, xb - xa, p->lh }, CUI_CORNERS(0), sel->color);
+            }
+            float ty = y + (p->lh - fh) * 0.5f - 1;
+            if (p->line_numbers && first) {
+                const char *ln = cui__frame_printf(ui, "%d", line);
+                float w = cui__text_width(ui, CUI_FONT_MONO, p->size, ln, -1, true);
+                cui__draw_text_line(ui, CUI_FONT_MONO, p->size, r.x + p->pad + p->gutter - 16 - w, ty, p->gutter_c, ln, -1, true);
+            }
+            float x = rx;
+            for (; t < nt; t++) {   /* the tokens, or their parts, in [k, re) */
+                int ts = i + toks[t].start, te = ts + toks[t].len;
+                if (ts >= re) break;
+                int a = CUI_MAX(ts, k), b = CUI_MIN(te, re);
+                const char *s = p->code + a;
+                if (b > a) {
+                    /* tabs become four spaces */
+                    if (s[0] == '\t') x += tab * (float)(b - a);
+                    else {
+                        if (toks[t].kind != TK_TEXT || s[0] != ' ')
+                            cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x, ty, p->colors[toks[t].kind], s, b - a, true);
+                        x += cui__text_width(ui, CUI_FONT_MONO, p->size, s, b - a, true);
+                    }
+                }
+                if (te > re) break;   /* the rest of this token goes on the next row */
+            }
+            y += p->lh;
+            k = re;
+            if (k >= e) break;
         }
-        y += p->lh;
         line++;
         if (e >= p->len) break;
         i = e + 1;
@@ -666,7 +721,29 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
     }
     float pad = 16;
     float gutter = o->line_numbers ? 16 + cui__text_width(ui, CUI_FONT_MONO, size, "000", lines >= 100 ? 3 : 2, true) + 4 : 0;
-    float content_h = lines * lh + pad * 2;
+    /* wrapping: at the width of the block's latest layout (the first frame shows the lines whole, and asks for another) */
+    float wrap_w = 0;
+    int rows = lines;
+    if (o->wrap && !cui__has_prev_rect(ui, id)) ui->animating = true;
+    else if (o->wrap) {
+        float cw = cui__text_width(ui, CUI_FONT_MONO, size, "0", 1, true);
+        wrap_w = CUI_MAX(cui__prev_rect(ui, id).w - 2 - pad * 2 - gutter - 8, cw * 8);
+        if (maxw > wrap_w) {
+            rows = 0;
+            for (int i = 0, ln = 0; ln < lines; ln++) {
+                int e = i;
+                while (e < len && code[e] != '\n') e++;
+                float ind = cui__code_cont_indent(ui, size, code, i, e, wrap_w);
+                for (int k = i, first = 1;; first = 0) {
+                    k = cui__code_row_end(ui, size, code, k, e, wrap_w - (first ? 0 : ind));
+                    rows++;
+                    if (k >= e) break;
+                }
+                i = e + 1;
+            }
+        }
+    }
+    float content_h = rows * lh + pad * 2;
     int outer = cui__node_new(ui, id);
     cui_node *on = &ui->nodes[outer];
     on->w = CUI_FILL;
@@ -707,12 +784,12 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
     if (o->max_height > 0 && content_h > o->max_height) sb.height = CUI_PX(o->max_height);
     cui_scroll_state *ss = cui_state(ui, id ^ 0x5C0Du, sizeof *ss);
     ss->fade = cui__backdrop(ui);   /* long lines fade out at the edge */
-    cui__scroll_begin_ex(ui, id ^ 0x5C0Du, &sb, true);
+    cui__scroll_begin_ex(ui, id ^ 0x5C0Du, &sb, !o->wrap);
     if (!(o->max_height > 0 && content_h > o->max_height)) { ui->nodes[cui__current(ui)].h = CUI_FIT; ui->nodes[cui__current(ui)].min_h = 0; }
     cui_id canvas_id = sel ? id ^ 0xC0DE5E1u : 0;   /* a selecting view finds the text by its rect */
     int canvas = cui__leaf(ui, canvas_id, CUI_FILL, CUI_PX(content_h));
     cui_node *cn = &ui->nodes[canvas];
-    cn->min_w = maxw + gutter + pad * 2 + 8;   /* at least as wide as the code; the band spans the block */
+    if (!o->wrap) cn->min_w = maxw + gutter + pad * 2 + 8;   /* at least as wide as the code; the band spans the block */
     cui__code_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->code = cui__frame_strdup(ui, code, len);
     p->len = len;
@@ -721,6 +798,7 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
     p->line_numbers = o->line_numbers;
     p->hl_from = o->highlight_from; p->hl_to = o->highlight_to > 0 ? o->highlight_to : o->highlight_from;
     p->size = size; p->lh = lh; p->gutter = gutter; p->pad = pad;
+    p->wrap_w = wrap_w;
     cui__syntax_colors(ui, p->colors);
     p->gutter_c = cui_alpha(CUI_C(ui, TEXT_MUTED), 0.7f);
     p->hl_c = cui_alpha(cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.12f : 0.08f);
@@ -730,6 +808,7 @@ static void cui__code_block_ex_body(cui_ctx *ui, const char *id_str, const char 
         p->sel = sel;
         sel->canvas = canvas_id;
         sel->size = size; sel->lh = lh; sel->x0 = pad + gutter; sel->y0 = pad;
+        sel->wrap_w = wrap_w;
     }
     cui__scroll_end_ex(ui);
     cui__close(ui);
