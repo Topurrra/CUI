@@ -2265,6 +2265,14 @@ typedef struct cui_code_editor_opts {
                                 * to the end of its next word (see ghost_taken); Esc drops it (ghost_dismissed). The text is
                                 * inserted verbatim (no auto-indent). Costs nothing when NULL; O(its bytes) per frame when shown. */
     int ghost_at;              /* the byte offset the suggestion belongs to */
+    const char *eol_hint;      /* a note after the end of one line in the faint text colour, not part of the text (NULL: none):
+                                * who last changed the line, a value while debugging. One line of text, drawn three columns
+                                * after eol_hint_line's last character (wrapped: after its last row) and cut at the editor's
+                                * edge; it takes no input, and is not drawn while the ghost text shows. */
+    int eol_hint_line;         /* the line it follows, from 1 (0: none) */
+    const struct cui_editor_keys *keys;   /* NULL: the usual keys. Else the editor's own commands (undo, redo, cut, copy,
+                                * paste, select all, find, replace, go to line) run on these combinations only, so an app
+                                * can rebind them; see cui_editor_keys_default */
 } cui_code_editor_opts;
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
@@ -3834,6 +3842,14 @@ CUI_API bool cui_money_input_ex(cui_ctx *ui, const char *id, double *value, cons
  * Backspace clears, Esc cancels. Returns true when the combination changed.
  * cui_shortcut_label formats a combination ("Ctrl Shift K"). */
 typedef struct cui_key_combo { int mods; cui_key key; } cui_key_combo;
+
+/* The code editor's own commands, rebindable through cui_code_editor_opts.keys: two combinations each (a key of
+ * CUI_KEY_NONE is unused), matched with cui_shortcut (the modifiers exactly). */
+enum { CUI_EDK_UNDO, CUI_EDK_REDO, CUI_EDK_CUT, CUI_EDK_COPY, CUI_EDK_PASTE, CUI_EDK_SELECT_ALL, CUI_EDK_FIND,
+       CUI_EDK_REPLACE, CUI_EDK_GOTO_LINE, CUI_EDK_COUNT };
+typedef struct cui_editor_keys { cui_key_combo combo[CUI_EDK_COUNT][2]; } cui_editor_keys;
+/* The usual ones: Ctrl+Z; Ctrl+Y and Ctrl+Shift+Z; Ctrl+X; Ctrl+C; Ctrl+V; Ctrl+A; Ctrl+F; Ctrl+H; Ctrl+G (Cmd on macOS). */
+CUI_API void cui_editor_keys_default(cui_editor_keys *k);
 typedef struct cui_shortcut_recorder_opts { int _; const char *placeholder; cui_size width; } cui_shortcut_recorder_opts;
 CUI_API bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id, cui_key_combo *combo, const cui_shortcut_recorder_opts *opts);
 CUI_API const char *cui_shortcut_label(cui_ctx *ui, cui_key_combo combo);

@@ -1398,6 +1398,12 @@ SCENE(code_editor_text) {
     static char text[] = "build:\n\tcc -o app main.c\n\nnotes:\n    spaces work too\n\t\ttwo tab stops\n";
     cui_code_editor(ui, "plain-editor", text, sizeof text, .lang = "text", .read_only = true, .height = 220);
 }
+/* a note at the end of a line: who changed it, as a blame would put it */
+SCENE(code_editor_eol) {
+    static char text[] = "int parse(const char *s) {\n    return s && *s;\n}\n";
+    cui_code_editor(ui, "eol-editor", text, sizeof text, .lang = "c", .read_only = true, .height = 120,
+                    .eol_hint = "Ada Lovelace, 3 days ago \xC2\xB7 Fix the parser for empty input", .eol_hint_line = 2);
+}
 /* ---- tool panels ---- */
 SCENE(inspector) {
     static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 }, scale[3] = { 1, 1, 1 };
@@ -5087,7 +5093,7 @@ int main(int argc, char **argv) {
         { "mermaid", scene_mermaid, 760, 960, true }, { "mermaid-more", scene_mermaid_more, 760, 480, true }, { "mermaid-cycles", scene_mermaid_cycles, 920, 640, true }, { "mermaid-back", scene_mermaid_back, 920, 1000, true }, { "mermaid-narrow", scene_mermaid_narrow, 420, 760, true }, { "mermaid-expand", scene_mermaid_expand, 420, 760, true }, { "mermaid-expand-wide", scene_mermaid_expand_wide, 1000, 600, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
-        { "code-editor-text", scene_code_editor_text, 620, 264, true },
+        { "code-editor-text", scene_code_editor_text, 620, 264, true }, { "code-editor-eol", scene_code_editor_eol, 760, 170, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
         { "markdown-select-all", scene_markdown_select_all, 560, 340, true },

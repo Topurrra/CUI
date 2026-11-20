@@ -1017,6 +1017,27 @@ if (r.ghost_dismissed || (r.changed && !r.ghost_taken)) sugg = NULL;
 
 Its first line goes inline after the caret (the rest of the line moves right); further lines get rows of their own under the caret's row, pushing the rows below down with a blank gutter beside them, wrapped or not. Tab inserts all of it and Ctrl+Right (Alt+Right on macOS) up to the end of its next word, verbatim (no auto-indent) and as one undo step, through the same path as typing (a buffer or a `.doc`, reported as `changed` with a splice); Esc drops it. While it shows, those keys are its own; when it does not, every key does what it always did. Without `.ghost` the editor does no extra work.
 
+#### A note at the end of a line
+
+`.eol_hint` puts one line of text after the end of line `.eol_hint_line` (from 1), three columns on, in the faint text colour: who last changed the line (a blame), a value while debugging. It is not part of the text, takes no input, is cut at the editor's edge, follows a wrapped line's last row and is not drawn while the ghost text shows.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-editor-eol-dark.png"><img src="images/components/code-editor-eol.png" alt="A code editor whose second line ends with a faint note: Ada Lovelace, 3 days ago, Fix the parser for empty input"></picture>
+
+```c
+cui_code_editor(ui, "code", buf, cap, .lang = "c", .eol_hint = blame_text, .eol_hint_line = caret_line);
+```
+
+#### Rebinding the editor's own keys
+
+The editor handles undo, redo, cut, copy, paste, select all, find, replace and go to line itself. To let people rebind them, pass `.keys`: a `cui_editor_keys` with two combinations per command (`CUI_EDK_UNDO` ... `CUI_EDK_GOTO_LINE`). With a table each command runs on its combinations only, so a default that was moved away does nothing; `cui_editor_keys_default` fills in the usual ones (Ctrl+Z; Ctrl+Y and Ctrl+Shift+Z; Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A, Ctrl+F, Ctrl+H, Ctrl+G; Cmd on macOS). Without `.keys` nothing changes.
+
+```c
+static cui_editor_keys keys;
+cui_editor_keys_default(&keys);
+keys.combo[CUI_EDK_UNDO][0] = (cui_key_combo){ CUI_MOD_ALT, CUI_KEY_U };
+cui_code_editor(ui, "code", buf, cap, .keys = &keys);
+```
+
 #### On a text document
 
 A buffer you own has one cost no cache can hide: an edit moves every byte after it, so near the top of 100 MB a key costs tens of milliseconds, and the buffer needs spare room for edits. For big files give the editor a `cui_text_doc` instead (`.doc = d`, with `buf` NULL and `cap` 0). A text document is a piece table: the bytes it was made from are never written (adopt a file you read, no copy), edits go to append-only buffers, and the text is a list of pieces of those in a balanced tree that knows the bytes and line breaks of every subtree. An edit costs the same at any size and anywhere in the text, there is no capacity (nothing is refused), and memory stays near the size of the text: no spare room and no second copy. Everything works as on a buffer, with the same results, colors, wrapping, find and replace (regex too), marks, brackets, go to line, `cui_code_editor_edit`, `.read_only` and `.plain`; a test drives an editor on a buffer and one on a document with the same random input and compares what they report and draw after every frame.

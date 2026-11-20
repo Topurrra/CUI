@@ -2737,6 +2737,7 @@ typedef struct {
     /* the ghost text (cui_code_editor_opts.ghost; g_len 0: none): g_n rows of it below row g_row (a line, or wrapped a
      * row), which push the rows below down; on row g_row the text from byte `cursor` on moves right by g_cols columns */
     const char *g_text; int g_len, g_n, g_row, g_cols;
+    const char *eol; int eol_n, eol_line;   /* cui_code_editor_opts.eol_hint (eol_n 0: none) and its line, from 0 */
 } cui__ed_paint;
 
 /* Draws s[a, b) from column col; tabs expand; only the columns in view. */
@@ -2993,6 +2994,57 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
     }
 }
 
+void cui_editor_keys_default(cui_editor_keys *k) {
+    memset(k, 0, sizeof *k);
+    int p = CUI_MOD_PRIMARY;
+    k->combo[CUI_EDK_UNDO][0] = (cui_key_combo){ p, CUI_KEY_Z };
+    k->combo[CUI_EDK_REDO][0] = (cui_key_combo){ p, CUI_KEY_Y };
+    k->combo[CUI_EDK_REDO][1] = (cui_key_combo){ p | CUI_MOD_SHIFT, CUI_KEY_Z };
+    k->combo[CUI_EDK_CUT][0] = (cui_key_combo){ p, CUI_KEY_X };
+    k->combo[CUI_EDK_COPY][0] = (cui_key_combo){ p, CUI_KEY_C };
+    k->combo[CUI_EDK_PASTE][0] = (cui_key_combo){ p, CUI_KEY_V };
+    k->combo[CUI_EDK_SELECT_ALL][0] = (cui_key_combo){ p, CUI_KEY_A };
+    k->combo[CUI_EDK_FIND][0] = (cui_key_combo){ p, CUI_KEY_F };
+    k->combo[CUI_EDK_REPLACE][0] = (cui_key_combo){ p, CUI_KEY_H };
+    k->combo[CUI_EDK_GOTO_LINE][0] = (cui_key_combo){ p, CUI_KEY_G };
+}
+
+/* one of the editor's own commands this frame: the usual test, or with .keys its two combinations (the keys they
+ * press are taken, so nothing below sees them again) */
+static bool cui__edk(cui_ctx *ui, const cui_code_editor_opts *o, int cmd, bool usual) {
+    if (!o || !o->keys) return usual;
+    for (int j = 0; j < 2; j++) {
+        cui_key_combo c = o->keys->combo[cmd][j];
+        if (c.key && cui_shortcut(ui, c.mods, c.key)) return true;
+    }
+    return false;
+}
+
+/* cui_code_editor_opts.eol_hint: three columns after its line's last character (wrapped: its last row), when that is in view
+ * and all of the line is here (a very long line read in part has its end out of view anyway) */
+static void cui__ed_paint_eol(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, float x0, float ty) {
+    int k = p->eol_line - p->first;
+    if (k < 0 || k >= p->count) return;
+    const char *s = p->lt[k];
+    float x, y;
+    if (p->wrap) {
+        const cui__ed_lr *R = &p->lr[k];
+        int j = R->n - 1;
+        if (j < R->j0 || j >= R->j0 + R->nr) return;   /* its last row is out of view */
+        int rs = R->rs[j - R->j0], re = R->rs[j - R->j0 + 1];
+        int rc0 = R->lng ? (R->rc ? R->rc[j - R->j0] : 0) : j ? R->ind : 0;
+        x = x0 + (float)cui__ed_adv(s, rs, re, p->tab, rc0) * p->cw;
+        y = r.y + CUI__ED_INSET + (float)(cui__ed_vr(p, p->lrow[k] + j) * p->lh - p->sy);
+    } else {
+        int ls = p->wa[k], le = p->wb[k], ale = p->ls[k + 1] - 1;
+        if (le < ale) return;
+        x = x0 + (float)(cui__ed_adv(s, ls, le, p->tab, p->wc[k]) - p->cb) * p->cw;
+        y = r.y + CUI__ED_INSET + (float)(cui__ed_prow(p, k) * p->lh - p->sy);
+    }
+    if (y > r.y + r.h || y + p->lh < r.y) return;
+    cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x + 3 * p->cw, y + ty, cui_alpha(p->muted, 0.75f), p->eol, p->eol_n, true);
+}
+
 /* The ghost text in the faint text color: its first line after the caret, the others on rows of their own below
  * (from column 0: it is inserted as it is). Only the rows in view; tabs and columns as the text's. */
 static void cui__ed_paint_ghost(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, float x0, float ty) {
@@ -3138,6 +3190,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         /* a block comment opened past the columns in view still carries on (a long line's: the line states say) */
         if (stop < le && p->lang.block_comments && !p->win[k]) block = cui__ed_scan_line(&p->lang, s, ls, le, was_block);
     }
+    if (p->eol_n) cui__ed_paint_eol(ui, p, r, x0, ty);
     /* placeholder */
     if (p->empty && p->placeholder && !p->g_len)
         cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0, r.y + CUI__ED_INSET + (float)(-p->sy) + ty, p->muted, p->placeholder, -1, true);
@@ -3548,8 +3601,10 @@ static void cui__edf_bar_keys(cui__edf *f) {
     cui_edit_state *e = &st->ed;
     cui_ctx *ui = E->ui;
     bool mine = ui->focus == f->lid || ui->focus == f->fid || ui->focus == f->rid || ui->focus == f->gid;
-    if (mine && f->prim && (cui_key_pressed(ui, CUI_KEY_F) || cui_key_pressed(ui, CUI_KEY_H))) {
-        bool rep = cui_key_pressed(ui, CUI_KEY_H);   /* Ctrl+H shows the replace row, Ctrl+F hides it */
+    bool k_find = cui__edk(ui, f->o, CUI_EDK_FIND, f->prim && cui_key_pressed(ui, CUI_KEY_F));
+    bool k_rep = cui__edk(ui, f->o, CUI_EDK_REPLACE, f->prim && cui_key_pressed(ui, CUI_KEY_H));
+    if (mine && (k_find || k_rep)) {
+        bool rep = k_rep;   /* Ctrl+H shows the replace row, Ctrl+F hides it */
         int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
         const char *sel = s1 > s0 && s1 - s0 < (int)sizeof st->query ? cui__ed_span(E, s0, s1) : NULL;
         if (sel && !memchr(sel + s0, '\n', (size_t)(s1 - s0)))
@@ -3558,12 +3613,18 @@ static void cui__edf_bar_keys(cui__edf *f) {
         st->rep_show = rep && !E->ro;
         st->bar_focus = true;
         ui->kpressed[CUI_KEY_F] = ui->kpressed[CUI_KEY_H] = 0;
+        if (f->o->keys)
+            for (int j = 0; j < 2; j++) {
+                ui->kpressed[f->o->keys->combo[CUI_EDK_FIND][j].key] = 0;
+                ui->kpressed[f->o->keys->combo[CUI_EDK_REPLACE][j].key] = 0;
+            }
     }
-    if (mine && f->prim && cui_key_pressed(ui, CUI_KEY_G)) {
+    if (mine && cui__edk(ui, f->o, CUI_EDK_GOTO_LINE, f->prim && cui_key_pressed(ui, CUI_KEY_G))) {
         st->mode = 2;
         st->go[0] = 0;
         st->bar_focus = true;
         ui->kpressed[CUI_KEY_G] = 0;
+        if (f->o->keys) for (int j = 0; j < 2; j++) ui->kpressed[f->o->keys->combo[CUI_EDK_GOTO_LINE][j].key] = 0;
     }
     if ((ui->focus == f->fid || ui->focus == f->rid || ui->focus == f->gid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         st->mode = 0;
@@ -3829,7 +3890,7 @@ static void cui__edf_move_keys(cui__edf *f, int *vmove_out, int *vpage_out) {
         cui__ed_move(E, whole ? 0 : e->cursor == ft ? cui__ed_ls(E, line) : ft, shift);
     }
     if (!(E->wrap && !whole) && cui_key_pressed(ui, CUI_KEY_END)) cui__ed_move(E, whole ? E->len : cui__ed_end(E, cui__ed_line_of(E, e->cursor)), shift);
-    if (f->prim && cui_key_pressed(ui, CUI_KEY_A)) { e->anchor = 0; e->cursor = E->len; }
+    if (cui__edk(ui, f->o, CUI_EDK_SELECT_ALL, f->prim && cui_key_pressed(ui, CUI_KEY_A))) { e->anchor = 0; e->cursor = E->len; }
     *vmove_out = vmove; *vpage_out = vpage;
 }
 
@@ -3863,15 +3924,15 @@ static void cui__edf_edit_keys(cui__edf *f) {
     cui_ctx *ui = E->ui;
     bool shift = f->shift, prim = f->prim;
     int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
-    if (prim && cui_key_pressed(ui, CUI_KEY_V) && ui->platform.get_clipboard) {
+    if (cui__edk(ui, f->o, CUI_EDK_PASTE, prim && cui_key_pressed(ui, CUI_KEY_V)) && ui->platform.get_clipboard) {
         const char *clip = ui->platform.get_clipboard(ui->platform.user);
         if (clip && *clip) {
             cui__ed_replace(E, s0, s1, clip, (int)strlen(clip), 3);
             e->last_edit = 0;   /* typing after a paste is its own step */
         }
     }
-    bool undo = prim && !shift && cui_key_pressed(ui, CUI_KEY_Z);
-    bool redo = prim && ((shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y));
+    bool undo = cui__edk(ui, f->o, CUI_EDK_UNDO, prim && !shift && cui_key_pressed(ui, CUI_KEY_Z));
+    bool redo = cui__edk(ui, f->o, CUI_EDK_REDO, prim && ((shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y)));
     if ((undo || redo) && cui__ed_undo(E, redo)) {
         E->changed = E->reveal = true;
         st->pref_col = -1;
@@ -3928,7 +3989,9 @@ static void cui__edf_keys(cui__edf *f) {
     cui__edf_move_keys(f, &vmove, &vpage);
     /* clipboard: without a selection, copy and cut take the whole line */
     int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
-    if (f->prim && (cui_key_pressed(ui, CUI_KEY_C) || cui_key_pressed(ui, CUI_KEY_X))) {
+    bool k_copy = cui__edk(ui, f->o, CUI_EDK_COPY, f->prim && cui_key_pressed(ui, CUI_KEY_C));
+    bool k_cut = cui__edk(ui, f->o, CUI_EDK_CUT, f->prim && cui_key_pressed(ui, CUI_KEY_X));
+    if (k_copy || k_cut) {
         int a = s0, b = s1;
         if (a == b) cui__ed_line_at(E, a, &a, &b);
         if (b > a && ui->platform.set_clipboard) {
@@ -3936,7 +3999,7 @@ static void cui__edf_keys(cui__edf *f) {
             cui__ed_read(E, a, b, c);
             ui->platform.set_clipboard(ui->platform.user, c);
         }
-        if (cui_key_pressed(ui, CUI_KEY_X) && b > a) cui__ed_replace(E, a, b, "", 0, 3);
+        if (k_cut && b > a) cui__ed_replace(E, a, b, "", 0, 3);
     }
     if (!E->ro) cui__edf_edit_keys(f);
     if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
@@ -4347,6 +4410,11 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
     p->brk_edge = cui_alpha(CUI_C(ui, TEXT_MUTED), 0.55f);
     p->caret = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     p->muted = CUI_C(ui, TEXT_MUTED);
+    if (f->o->eol_hint && f->o->eol_hint[0] && f->o->eol_hint_line > 0 && !f->g_on) {   /* the note after a line, copied */
+        p->eol_n = (int)strcspn(f->o->eol_hint, "\r\n");
+        p->eol = cui__frame_strdup(ui, f->o->eol_hint, p->eol_n);
+        p->eol_line = f->o->eol_hint_line - 1;
+    }
     if (f->g_on) {   /* the ghost text, copied: the caller owns it */
         p->g_text = cui__frame_strdup(ui, f->o->ghost, f->g_len);
         p->g_len = f->g_len; p->g_n = f->g_n; p->g_row = f->g_row; p->g_cols = f->g_cols;
