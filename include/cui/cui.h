@@ -6129,6 +6129,12 @@ CUI_API int cui_selection_bar_ex(cui_ctx *ui, const char *id, int count, const c
 
 typedef struct cui_corners { float tl, tr, br, bl; } cui_corners;
 #define CUI_CORNERS(r) (CUI__LIT(cui_corners){ (r), (r), (r), (r) })
+/* The floating layers of the latest layout (popovers, menus, tooltips, dialogs, toasts...), bottom to top: each one's
+ * rectangle in window points, its corner radius, and full when it covers the whole window (a dialog's scrim). For a
+ * host that shows native child windows under the UI (a web view): the parts to cut out of them so the layers show.
+ * Writes at most max (out may be NULL with max 0) and returns how many there are; the first 16 are kept. */
+typedef struct cui_layer_rect { cui_rect rect; cui_corners radius; bool full; } cui_layer_rect;
+CUI_API int cui_floating_layers(cui_ctx *ui, cui_layer_rect *out, int max);
 
 CUI_API void cui_draw_rect(cui_ctx *ui, cui_rect r, cui_corners radius, cui_color fill);
 CUI_API void cui_draw_rect_border(cui_ctx *ui, cui_rect r, cui_corners radius, cui_color fill, cui_color border, float border_width);

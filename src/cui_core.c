@@ -926,6 +926,32 @@ void cui_frame_memory(cui_ctx *ui, size_t *used, size_t *capacity, size_t *peak)
     if (peak) *peak = ui ? CUI_MAX(ui->peak_arena, ui->arena_used) : 0;
 }
 
+/* cui_floating_layers: the floating roots just laid out, by z (then creation order) like cui__paint */
+static void cui__note_layers(cui_ctx *ui) {
+    int n = ui->float_count, kept = 0, total = 0;
+    int *order = cui__frame_alloc(ui, sizeof(int) * (size_t)(n > 0 ? n : 1));
+    for (int k = 0; k < n; k++) order[k] = ui->float_roots[k];
+    for (int a = 1; a < n; a++) {   /* stable, by z */
+        int v = order[a], b = a - 1;
+        while (b >= 0 && ui->nodes[order[b]].z > ui->nodes[v].z) { order[b + 1] = order[b]; b--; }
+        order[b + 1] = v;
+    }
+    for (int k = 0; k < n; k++) {
+        const cui_node *nd = &ui->nodes[order[k]];
+        if (nd->rect.w <= 0 || nd->rect.h <= 0) continue;
+        if (kept < CUI__LAYERS_SEEN) ui->layers_seen.r[kept++] = (cui_layer_rect){ nd->rect, nd->radius, nd->placement == CUI__PLACE_FULL };
+        total++;
+    }
+    ui->layers_seen.n = total;
+}
+
+int cui_floating_layers(cui_ctx *ui, cui_layer_rect *out, int max) {
+    if (!ui) return 0;
+    int kept = CUI_MIN(ui->layers_seen.n, CUI__LAYERS_SEEN);
+    for (int i = 0; i < kept && i < max && out; i++) out[i] = ui->layers_seen.r[i];
+    return ui->layers_seen.n;
+}
+
 void cui_end_frame(cui_ctx *ui) {
     if (!ui->in_frame) return;
     CUI__PROBE(CUI_PROBE_LAYOUT);
@@ -933,6 +959,7 @@ void cui_end_frame(cui_ctx *ui) {
     while (ui->parent_depth > 0) cui__close(ui);
 
     cui__layout(ui);
+    cui__note_layers(ui);
     CUI__PROBE(CUI_PROBE_PAINT);
     cui__paint(ui);
     CUI__PROBE(CUI_PROBE_PAINT_END);

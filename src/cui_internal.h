@@ -365,6 +365,7 @@ typedef struct cui_node {
 #define CUI__ALIGN_NOSTRETCH 7
 
 /* placement values beyond cui_placement for floating roots */
+#define CUI__LAYERS_SEEN 16   /* floating layers cui_floating_layers keeps */
 enum { CUI__PLACE_FULL = 100, CUI__PLACE_CENTER = 101, CUI__PLACE_POINT = 102, CUI__PLACE_EXACT = 103 };   /* EXACT: at (fx, fy) in the size asked, not kept inside the window */
 
 typedef struct cui_scroll_state {
@@ -600,6 +601,7 @@ struct cui_ctx {
     cui_node *nodes; int node_count, node_cap;
     int parents[CUI_PARENT_STACK]; int parent_depth;
     int *float_roots; int float_count, float_cap;
+    struct { cui_layer_rect r[CUI__LAYERS_SEEN]; int n; } layers_seen;   /* cui_floating_layers: the latest layout's floating roots */
     int last_node;
     cui_id last_id;
 

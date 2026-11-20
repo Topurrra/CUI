@@ -281,3 +281,10 @@ cui_rect r = cui_get_rect(ui, id);    /* from the latest layout */
 ```
 
 `cui_last_id(ui)` and `cui_last_rect(ui)` refer to the component created most recently.
+
+`cui_floating_layers(ui, out, max)` lists the floating layers of the latest layout (popovers, menus, tooltips, dialogs, toasts), bottom to top: each one's rectangle, corner radius, and `full` when it covers the whole window (a dialog's scrim). An app that shows a native child window under the UI, such as a web view, cuts these out of it so menus show over it while it stays live:
+
+```c
+cui_layer_rect l[16];
+int n = cui_floating_layers(ui, l, 16);   /* how many there are; at most 16 are written */
+```
