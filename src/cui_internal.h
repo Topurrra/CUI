@@ -641,6 +641,7 @@ struct cui_ctx {
     float mx, my, pmx, pmy;
     bool mouse_inside;
     bool mdown[3], mpressed[3], mreleased[3];
+    float press_x, press_y, release_x, release_y;   /* where the left button was last pressed and released */
     int click_count;
     double last_click_time;
     float last_click_x, last_click_y;

@@ -8,6 +8,8 @@ add_test(NAME cui_tests COMMAND cui_tests)
 add_executable(cui_test_file_places test_file_places.c)
 target_link_libraries(cui_test_file_places PRIVATE cui::cui)
 add_test(NAME cui_test_file_places COMMAND cui_test_file_places)
+add_test(NAME cui_test_file_places_no_home COMMAND ${CMAKE_COMMAND} -E env
+    --unset=HOME --unset=USERPROFILE $<TARGET_FILE:cui_test_file_places>)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME cui_test_file_mounts COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/file_places_mounts.sh $<TARGET_FILE:cui_test_file_places>)
     set_tests_properties(cui_test_file_mounts PROPERTIES SKIP_RETURN_CODE 77)

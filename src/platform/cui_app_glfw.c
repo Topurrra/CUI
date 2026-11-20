@@ -333,7 +333,11 @@ void cui__plat_maximize(cui_app *app) {
 }
 
 void cui__plat_minimize(cui_app *app) { glfwIconifyWindow(cui__g(app)->win); }
-void cui__plat_restore(cui_app *app) { glfwRestoreWindow(cui__g(app)->win); }
+void cui__plat_restore(cui_app *app) {
+    cui__glfw *g = cui__g(app);
+    g->maximize_after_frame = false;   /* a restore before the first frame wins over opening maximized */
+    glfwRestoreWindow(g->win);
+}
 
 cui_window_state cui__plat_window_state(cui_app *app) {
     GLFWwindow *win = cui__g(app)->win;

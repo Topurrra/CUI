@@ -142,6 +142,29 @@ int main(void) {
         }
         cui_app_restore(app);
         reach(app, CUI_WINDOW_NORMAL, "restore to normal");
+        /* a restore takes effect at once: minimized right after it, before the next frame, the
+         * window opens normal again, not maximized */
+        cui_app_maximize(app);
+        if (reach(app, CUI_WINDOW_MAXIMIZED, "maximize before a restore and minimize")) {
+            cui_app_restore(app);
+            cui_app_minimize(app);
+            if (reach(app, CUI_WINDOW_MINIMIZED, "minimize right after a restore")) {
+                expect_placement(app, x2, y2, w, h, CUI_WINDOW_NORMAL, "minimized right after a restore");
+                cui_app_restore(app);
+                reach(app, CUI_WINDOW_NORMAL, "restore after minimizing right after a restore");
+            }
+        }
+        /* and a maximize between them, all before a frame: the window comes back maximized */
+        cui_app_restore(app);
+        cui_app_maximize(app);
+        cui_app_minimize(app);
+        if (reach(app, CUI_WINDOW_MINIMIZED, "minimize right after a restore and a maximize")) {
+            expect_placement(app, x2, y2, w, h, CUI_WINDOW_MAXIMIZED, "minimized right after a restore and a maximize");
+            cui_app_restore(app);
+            reach(app, CUI_WINDOW_MAXIMIZED, "restore to maximized after a restore and a maximize");
+            cui_app_restore(app);
+            reach(app, CUI_WINDOW_NORMAL, "restore to normal after a restore and a maximize");
+        }
     }
     cui_app_destroy(app);
 
@@ -159,6 +182,18 @@ int main(void) {
                 expect_size(app, w, h, "restore after opening maximized");
                 expect_placement(app, x, y, w, h, CUI_WINDOW_NORMAL, "restore after opening maximized");
             }
+        }
+        cui_app_destroy(app);
+    }
+
+    /* a restore right after cui_app_create wins over the saved maximized state */
+    app = cui_app_create(&(cui_app_desc){ .title = "CUI window state test", .placement = &at });
+    expect(app != NULL, "restore before the first frame: window created");
+    if (app) {
+        cui_app_restore(app);
+        if (reach(app, CUI_WINDOW_NORMAL, "restore before the first frame")) {
+            settle(app, 0.5);
+            expect(cui_app_window_state(app) == CUI_WINDOW_NORMAL, "restore before the first frame: still normal after frames");
         }
         cui_app_destroy(app);
     }

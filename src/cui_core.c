@@ -520,6 +520,7 @@ void cui_input_mouse_button(cui_ctx *ui, cui_mouse_button b, bool down) {
     if (down && !ui->mdown[b]) {
         ui->mpressed[b] = true;
         if (b == CUI_MOUSE_LEFT) {
+            ui->press_x = ui->mx; ui->press_y = ui->my;
             if (!ui->pending_clicks.count) {
                 ui->pending_clicks.first_x = ui->mx;
                 ui->pending_clicks.first_y = ui->my;
@@ -536,7 +537,10 @@ void cui_input_mouse_button(cui_ctx *ui, cui_mouse_button b, bool down) {
             if (ui->in_frame) cui__flush_clicks(ui);
         }
     }
-    if (!down && ui->mdown[b]) ui->mreleased[b] = true;
+    if (!down && ui->mdown[b]) {
+        ui->mreleased[b] = true;
+        if (b == CUI_MOUSE_LEFT) { ui->release_x = ui->mx; ui->release_y = ui->my; }
+    }
     ui->mdown[b] = down;
 }
 
@@ -605,6 +609,8 @@ void cui_input_focus(cui_ctx *ui, bool focused) {
     ui->window_focused = focused;
     if (!focused) {
         memset(ui->kdown, 0, sizeof ui->kdown);
+        /* a held left button counts as released where the pointer was last seen */
+        if (ui->mdown[CUI_MOUSE_LEFT]) { ui->release_x = ui->mx; ui->release_y = ui->my; }
         for (int i = 0; i < 3; i++) { if (ui->mdown[i]) ui->mreleased[i] = true; ui->mdown[i] = false; }
         ui->mods = 0;
     }

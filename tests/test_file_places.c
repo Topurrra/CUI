@@ -124,7 +124,7 @@ static void native_places(void) {
     cui_ctx *ui = context(false);
     browser b = { "/" };
     frames(ui, &b, 3);
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(CUI_NO_FILESYSTEM)
     DWORD drives = GetLogicalDrives();
     int found = 0, expected = 0;
     for (int k = 0; k < 26; k++) if (drives & ((DWORD)1 << k)) {
@@ -137,23 +137,35 @@ static void native_places(void) {
     }
     printf("native drive entries: %d of %d\n", found, expected);
     CHECK(found == expected && expected > 0);
-#else
+#elif !defined(CUI_NO_FILESYSTEM)
     CHECK(label(ui, "File system") != NULL);
+#else
+    CHECK(label(ui, "File system") == NULL);
 #endif
     int read = b.listings;
     frames(ui, &b, 5); CHECK(b.listings == read);
     refresh(ui, &b); CHECK(b.listings > read);
+    /* Without a home directory there are no shortcuts to navigate; native storage and refresh
+     * are checked above. Labels alone cannot tell a shortcut from a volume named "Documents". */
+    const char *home_path = getenv("HOME");
+#if defined(_WIN32)
+    if (!home_path) home_path = getenv("USERPROFILE");
+#endif
+    if (!home_path || !*home_path) {
+        cui_destroy(ui);
+        return;
+    }
     click_label(ui, &b, "Home"); frames(ui, &b, 2);
     cui_node *home = label(ui, "Home");
     CHECK(home && home->font == CUI_FONT_MEDIUM);
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(CUI_NO_FILESYSTEM)
     char home_drive[] = "(A:)"; home_drive[1] = b.path[0];
     for (int j = 0; j < ui->node_count; j++) {
         cui_node *n = &ui->nodes[j];
         if (n->text && n->text_len >= 4 && !memcmp(n->text + n->text_len - 4, home_drive, 4))
             CHECK(n->font != CUI_FONT_MEDIUM);
     }
-#else
+#elif !defined(CUI_NO_FILESYSTEM)
     cui_node *root = label(ui, "File system");
     CHECK(root && root->font != CUI_FONT_MEDIUM);
 #endif
@@ -204,6 +216,7 @@ static void idle_double_click(void) {
     }
 }
 
+#if !defined(CUI_NO_FILESYSTEM)
 /** Exercise escaped mount names, filtering, refresh and picker reopening. */
 static void mount_fixture(const char *fixture) {
     cui_ctx *ui = context(false);
@@ -232,6 +245,7 @@ static void mount_fixture(const char *fixture) {
     CHECK(label(ui, "Reconnected") != NULL && label(ui, "Backup") == NULL);
     cui_destroy(ui);
 }
+#endif
 
 /** Save actual CUI picker pixels from the isolated, neutral fixture. */
 static void screenshot(const char *dir, bool dark, bool home) {
@@ -253,6 +267,7 @@ static void screenshot(const char *dir, bool dark, bool home) {
 
 /** Run regressions, or render the same fixture against a before/after library. */
 int main(int argc, char **argv) {
+    int skipped = 0;
     sw = cui_sw_create();
     if (argc == 3 && (!strcmp(argv[1], "--shots") || !strcmp(argv[1], "--home-shots"))) {
         bool home = !strcmp(argv[1], "--home-shots");
@@ -261,9 +276,16 @@ int main(int argc, char **argv) {
     else {
         custom_places(); native_places(); idle_double_click();
         const char *fixture = getenv("CUI_TEST_MOUNTS");
+#if defined(CUI_NO_FILESYSTEM)
+        if (fixture) {
+            puts("file places: mount fixture unavailable with CUI_NO_FILESYSTEM");
+            skipped = 77;
+        }
+#else
         if (fixture) mount_fixture(fixture);
+#endif
     }
     cui_sw_destroy(sw);
     printf("file places: %d checks, %d failures\n", checks, failures);
-    return failures ? 1 : 0;
+    return failures ? 1 : skipped;
 }

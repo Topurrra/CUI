@@ -144,7 +144,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - Disabling a time histogram cancels its active selection drag ([#85](https://github.com/yappologistic/CUI/issues/85)).
 - Read-only and disabled query builders leave the supplied rules unchanged ([#75](https://github.com/yappologistic/CUI/issues/75)).
 - Read-only week calendar events and Gantt tasks can be activated without editing them ([#75](https://github.com/yappologistic/CUI/issues/75)).
-- The week calendar checks the drag threshold even when motion and release arrive in the same frame ([#75](https://github.com/yappologistic/CUI/issues/75)).
+- The week calendar checks the drag threshold even when motion and release arrive in the same frame, measured up to the release, so a pointer that moves on right after a click still opens the event ([#75](https://github.com/yappologistic/CUI/issues/75)).
 - The trace viewer reports view changes when a measurement is drawn or cleared ([#71](https://github.com/yappologistic/CUI/issues/71)).
 - Activating a dot chart from the keyboard before moving its cursor reports the middle sample ([#71](https://github.com/yappologistic/CUI/issues/71)).
 - Clicking a Sankey ribbon reports which input link was clicked ([#71](https://github.com/yappologistic/CUI/issues/71)).
