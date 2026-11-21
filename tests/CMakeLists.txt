@@ -146,6 +146,9 @@ add_test(NAME cui_scroll_check_editor COMMAND cui_bench_scroll --check --scene e
 
 add_executable(cui_component_shots component_shots.c)
 target_link_libraries(cui_component_shots PRIVATE cui::cui)
+if(CUI_TEXT_SHAPING)   # adds the rtl-chrome scene (Hebrew and Arabic with the Windows fonts)
+    target_compile_definitions(cui_component_shots PRIVATE CUI_TEXT_SHAPING)
+endif()
 
 include(CheckLanguage)
 check_language(CXX)
@@ -199,6 +202,11 @@ if(CUI_TEXT_SHAPING)
         target_compile_options(cui_rtl_paragraph PRIVATE /utf-8)
     endif()
     add_executable(cui_shape_dump shape_dump.c ../src/cui_shape.c ../src/cui_bidi.c)
+    # Hebrew and Arabic with the Windows fonts: visual order, joining, and text fields with cui_input_use_bidi
+    add_executable(cui_test_bidi_edit test_bidi_edit.c)
+    target_compile_definitions(cui_test_bidi_edit PRIVATE CUI_TEXT_SHAPING)
+    target_link_libraries(cui_test_bidi_edit PRIVATE cui::cui)
+    add_test(NAME cui_test_bidi_edit COMMAND cui_test_bidi_edit)
 endif()
 
 add_executable(cui_rtl rtl.c)

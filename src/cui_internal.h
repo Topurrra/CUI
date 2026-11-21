@@ -171,6 +171,15 @@ typedef struct cui_text_layout_line { int start, end; float width; } cui_text_la
 
 #ifdef CUI_TEXT_SHAPING
 bool cui__text_needs_shaping(cui_ctx *ui, const char *text, int len);
+/* one line of a text field in reading order (cui_input_use_bidi, cui_text.c): wanted when the option is on
+ * and the text has right-to-left characters; the caret x of a byte offset, the offset nearest x, the x pieces
+ * (pairs in xs, at most max) a selection [s0, s1) covers, the shaped width, and the line drawn */
+bool cui__bidi_wanted(cui_ctx *ui, const char *text, int len);
+float cui__bidi_caret_x(cui_ctx *ui, cui_font font, float size, const char *text, int len, int off);
+int cui__bidi_hit(cui_ctx *ui, cui_font font, float size, const char *text, int len, float x);
+int cui__bidi_spans(cui_ctx *ui, cui_font font, float size, const char *text, int len, int s0, int s1, float *xs, int max);
+float cui__bidi_width(cui_ctx *ui, cui_font font, float size, const char *text, int len);
+void cui__bidi_draw(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color, const char *text, int len);
 #endif
 /* Glyph metrics for layout, in points. */
 float cui__font_line_height(cui_ctx *ui, cui_font font, float size);
@@ -677,6 +686,7 @@ struct cui_ctx {
     const char *text_paragraph;
     int text_paragraph_len;
     cui_direction text_direction;
+    bool input_bidi;                /* cui_input_use_bidi: text fields draw right-to-left text in reading order */
 #endif
     bool text_unshaped;             /* editing keeps logical glyph positions */
     cui_font_data *fonts; int font_count, font_cap;

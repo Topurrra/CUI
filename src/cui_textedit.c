@@ -44,6 +44,9 @@ static float cui__x_at(cui_ctx *ui, const cui__edit_paint *p, const char *line, 
         int n = cui__edit_mask(tmp, sizeof tmp, cps);
         return cui__text_width(ui, p->font, p->size, tmp, n, false);
     }
+#ifdef CUI_TEXT_SHAPING
+    if (!p->multiline && cui__bidi_wanted(ui, line, line_len)) return cui__bidi_caret_x(ui, p->font, p->size, line, line_len, off);
+#endif
     (void)line_len;
     return cui__text_width(ui, p->font, p->size, line, off, false);
 }
@@ -83,18 +86,31 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
             shown_len = cui__edit_mask(mask, p->len * 3 + 4, cui__cp_count(p->buf, p->len));
             shown = mask;
         }
-        if (p->focused && s1 > s0) {
+        bool bidi = false;
+#ifdef CUI_TEXT_SHAPING
+        bidi = !p->password && cui__bidi_wanted(ui, p->buf, p->len);
+        if (bidi && p->focused && s1 > s0) {   /* a selection over runs of both directions is several pieces */
+            float xs[2 * 16];
+            int n = cui__bidi_spans(ui, p->font, p->size, p->buf, p->len, s0, s1, xs, 16);
+            for (int i = 0; i < n; i++) {
+                cui_rect sr = { x + xs[2 * i], r.y + (r.h - fh) * 0.5f - 1, xs[2 * i + 1] - xs[2 * i], fh + 2 };
+                cui_draw_rect(ui, sr, CUI_CORNERS(3), p->selection);
+            }
+        }
+        if (bidi) cui__bidi_draw(ui, p->font, p->size, x, y, p->text, shown, shown_len);
+#endif
+        if (!bidi && p->focused && s1 > s0) {
             float a = cui__x_at(ui, p, p->buf, p->len, s0), b = cui__x_at(ui, p, p->buf, p->len, s1);
             cui_rect sr = { x + a, r.y + (r.h - fh) * 0.5f - 1, b - a, fh + 2 };
             cui_draw_rect(ui, sr, CUI_CORNERS(3), p->selection);
         }
-        cui__draw_text_line(ui, p->font, p->size, x, y, p->text, shown, shown_len, false);
+        if (!bidi) cui__draw_text_line(ui, p->font, p->size, x, y, p->text, shown, shown_len, false);
         if (p->focused && s1 == s0) {
             float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
             float a = blink > 0.35f ? 1.0f : 0.0f;
             if (p->caret_phase < 0.5) a = 1;
             float cx = x + cui__x_at(ui, p, p->buf, p->len, p->cursor);
-            if (p->cursor == 0) cx -= 1.0f;   /* stand clear of the first glyph or the placeholder */
+            if (p->cursor == 0 && !bidi) cx -= 1.0f;   /* stand clear of the first glyph or the placeholder */
             cui_rect cr = { roundf(cx * ui->scale) / ui->scale - 0.5f, r.y + (r.h - fh) * 0.5f, 1.5f, fh };
             /* At offset 0 the bar sits left of the text clip (that is where "stand clear of
              * the first glyph" puts it), so draw it against the field's clip instead. */
@@ -336,7 +352,11 @@ static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
                 p = cui__utf8_next(buf, len, p);
             }
             pos = best;
-        } else pos = cui__text_hit(ui, c->font, c->size, buf, len, x);
+        }
+#ifdef CUI_TEXT_SHAPING
+        else if (cui__bidi_wanted(ui, buf, len)) pos = cui__bidi_hit(ui, c->font, c->size, buf, len, x);
+#endif
+        else pos = cui__text_hit(ui, c->font, c->size, buf, len, x);
     } else {
         float y = ui->my - c->area.y + e->scroll_y;
         int ln = (int)floorf(y / c->line_h);
@@ -496,6 +516,9 @@ static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *r
     if (!c->multiline) {
         float cx = cui__x_at(ui, &c->measure, c->buf, len, e->cursor);
         float full = cui__x_at(ui, &c->measure, c->buf, len, len);
+#ifdef CUI_TEXT_SHAPING
+        if (!c->password && cui__bidi_wanted(ui, c->buf, len)) full = cui__bidi_width(ui, c->font, c->size, c->buf, len);   /* the end is not always at the right */
+#endif
         if (area.w > 0) {
             if (cx - e->scroll_x > area.w - 2) e->scroll_x = cx - area.w + 2;
             if (cx - e->scroll_x < 0) e->scroll_x = cx;
