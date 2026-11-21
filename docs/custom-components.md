@@ -110,3 +110,5 @@ Both request new frames while moving and stop when settled, so idle apps stay id
 ## Interaction model
 
 For fully custom widgets, use the canvas result or `cui_last_hovered`. Hit testing uses the rectangles from the previous frame and honours overlays: a component under an open dialog or menu never sees the mouse. Keyboard focus, Tab order and the focus ring are handled for built-in components; custom canvases can read keys with `cui_key_pressed` while hovered or after a click, and take the wheel with `cui_wheel_region` and `cui_wheel_take` (see [Wheel input](#wheel-input)).
+
+To move the keyboard focus yourself through focusable components (the arrows in a grid of hoverable cards), read it with `cui_focus_get` (the id that has it, 0 for none) and `cui_focus_visible` (it came from the keyboard: the ring shows and Enter or Space click), and give it with `cui_focus_set(ui, cui_make_id(ui, "card-3"), true)`, using the id the component is built with in the same id scope. A component built earlier in the frame sees the change on the next frame, which `cui_focus_set` asks for.

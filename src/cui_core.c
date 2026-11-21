@@ -476,6 +476,13 @@ cui_id cui_last_id(cui_ctx *ui) { return ui->last_id; }
 cui_rect cui_last_rect(cui_ctx *ui) { return cui__prev_rect(ui, ui->last_id); }
 cui_rect cui_get_rect(cui_ctx *ui, cui_id id) { return cui__prev_rect(ui, id); }
 bool cui_last_hovered(cui_ctx *ui) { return ui->last_id && ui->hot == ui->last_id; }
+cui_id cui_focus_get(cui_ctx *ui) { return ui->focus; }
+bool cui_focus_visible(cui_ctx *ui) { return ui->focus && ui->focus_visible; }
+void cui_focus_set(cui_ctx *ui, cui_id id, bool visible) {
+    ui->focus = id;
+    ui->focus_visible = id && visible;
+    cui_request_redraw(ui);
+}
 
 bool cui_is_disabled(cui_ctx *ui) { return ui->disabled_depth > 0; }
 void cui_push_disabled(cui_ctx *ui, bool d) {

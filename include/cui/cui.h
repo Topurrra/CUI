@@ -594,6 +594,14 @@ CUI_API cui_rect cui_last_rect(cui_ctx *ui);
 /* Rectangle of any component or box id from the latest layout. */
 CUI_API cui_rect cui_get_rect(cui_ctx *ui, cui_id id);
 CUI_API bool cui_last_hovered(cui_ctx *ui);
+/* Keyboard focus by id, for a focus of your own that the arrows move through focusable components (a grid of hoverable
+ * cards): the component that has the keyboard (0: none), whether that focus came from the keyboard (the ring shows and
+ * Enter or Space click it), and giving the focus to a component by the id it is built with (cui_make_id in the same id
+ * scope; 0 drops the focus). visible: as Tab gives it (ring, keys); false: as a click gives it. A component built
+ * earlier in this frame sees the change on the next one; cui_focus_set asks for that frame. */
+CUI_API cui_id cui_focus_get(cui_ctx *ui);
+CUI_API bool cui_focus_visible(cui_ctx *ui);
+CUI_API void cui_focus_set(cui_ctx *ui, cui_id id, bool visible);
 CUI_API bool cui_is_disabled(cui_ctx *ui);
 CUI_API void cui_push_disabled(cui_ctx *ui, bool disabled);
 CUI_API void cui_pop_disabled(cui_ctx *ui);
