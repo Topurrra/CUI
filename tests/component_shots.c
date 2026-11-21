@@ -4393,6 +4393,49 @@ SCENE(seed_field) {
     }
 }
 
+#ifdef CUI_TEXT_SHAPING
+/* Hebrew and Arabic in an app's chrome (a CUI_TEXT_SHAPING build with the Windows system fonts): tab titles, a
+ * history list, and two text fields with cui_input_use_bidi, the focused one selecting "c " and two Hebrew
+ * letters across a Latin and a Hebrew run (two pieces: the Hebrew run is reversed, its start at the right) */
+static char s_rtl_ar[96] = "\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7 \xd8\xa8\xd8\xa7\xd9\x84\xd8\xb9\xd8\xa7\xd9\x84\xd9\x85";
+static char s_rtl_mix[96] = "abc \xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d 123";
+static void body_rtl_chrome(cui_ctx *ui) {
+    static int tab = 0;
+    const char *t[] = { "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d \xd7\xa2\xd7\x95\xd7\x9c\xd7\x9d",
+                        "\xd8\xa7\xd9\x84\xd8\xb3\xd9\x84\xd8\xa7\xd9\x85 \xd8\xb9\xd9\x84\xd9\x8a\xd9\x83\xd9\x85", "Wiki (2026)" };
+    cui_column(ui, UPTO(560), .gap = 14) {
+        cui_tabs(ui, "rtl-tabs", t, 3, &tab);
+        cui_card(ui, .pad = 6) {
+            cui_list_item(ui, "\xd7\x95\xd7\x99\xd7\xa7\xd7\x99\xd7\xa4\xd7\x93\xd7\x99\xd7\x94, \xd7\x94\xd7\x90\xd7\xa0\xd7\xa6\xd7\x99\xd7\xa7\xd7\x9c\xd7\x95\xd7\xa4\xd7\x93\xd7\x99\xd7\x94 \xd7\x94\xd7\x97\xd7\x95\xd7\xa4\xd7\xa9\xd7\x99\xd7\xaa", .icon = CUI_ICON_HISTORY, .trailing = "he.wikipedia.org");
+            cui_list_item(ui, "\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7 \xd8\xa8\xd8\xa7\xd9\x84\xd8\xb9\xd8\xa7\xd9\x84\xd9\x85: \xd8\xa7\xd9\x84\xd8\xb5\xd9\x81\xd8\xad\xd8\xa9 \xd8\xa7\xd9\x84\xd8\xb1\xd8\xa6\xd9\x8a\xd8\xb3\xd9\x8a\xd8\xa9", .icon = CUI_ICON_STAR, .trailing = "ar.example");
+            cui_list_item(ui, "News: \xd7\x97\xd7\x93\xd7\xa9\xd7\x95\xd7\xaa 24 - \xd8\xa3\xd8\xae\xd8\xa8\xd8\xa7\xd8\xb1", .icon = CUI_ICON_HISTORY, .trailing = "news.example");
+        }
+        cui_row(ui, .gap = 12, .width = CUI_FILL) {
+            cui_box(ui, .width = CUI_FILL) { cui_input(ui, "rtl-ar", s_rtl_ar, sizeof s_rtl_ar, .icon = CUI_ICON_SEARCH); }
+            cui_box(ui, .width = CUI_FILL) { cui_input(ui, "rtl-mix", s_rtl_mix, sizeof s_rtl_mix, .autofocus = true); }
+        }
+    }
+}
+static void scene_rtl_chrome(cui_ctx *ui, int f) {
+    if (f < 0) {
+        f = -f - 1;
+        if (f == 0) { cui_font_use_system_fallback(ui, true); cui_input_use_bidi(ui, true); }
+        /* Home, Right twice, then Shift+Right four times: the selection of bytes [2, 8), "c " and two Hebrew letters */
+        static const struct { int frame; cui_key key; int mods; } k[] = {
+            { 3, CUI_KEY_HOME, 0 }, { 5, CUI_KEY_RIGHT, 0 }, { 7, CUI_KEY_RIGHT, 0 },
+            { 9, CUI_KEY_RIGHT, CUI_MOD_SHIFT }, { 11, CUI_KEY_RIGHT, CUI_MOD_SHIFT }, { 13, CUI_KEY_RIGHT, CUI_MOD_SHIFT },
+            { 15, CUI_KEY_RIGHT, CUI_MOD_SHIFT },
+        };
+        for (size_t i = 0; i < sizeof k / sizeof *k; i++) {
+            if (f == k[i].frame) cui_input_key(ui, k[i].key, true, k[i].mods);
+            if (f == k[i].frame + 1) cui_input_key(ui, k[i].key, false, k[i].mods);
+        }
+        return;
+    }
+    frame_wrap(ui, body_rtl_chrome);
+}
+#endif
+
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
@@ -5136,6 +5179,9 @@ int main(int argc, char **argv) {
         { "gradient-slider", scene_gradient_slider, 680, 250, true }, { "step-slider", scene_step_slider, 680, 150, true },
         { "palette-strip", scene_palette_strip, 680, 150, true }, { "aspect-picker", scene_aspect_picker, 680, 160, true },
         { "option-action", scene_option_action, 680, 150, true }, { "seed-field", scene_seed_field, 680, 240, true },
+#ifdef CUI_TEXT_SHAPING
+        { "rtl-chrome", scene_rtl_chrome, 620, 330, true },
+#endif
     };
     cui_sw_renderer *sw = cui_sw_create();
     if (argc <= 2 || strcmp(argv[2], "button-states") == 0) { render_states(dir, false, sw); render_states(dir, true, sw); }

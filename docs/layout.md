@@ -86,7 +86,9 @@ Component coverage:
   right), and other custom-drawn components such as charts, gauges, the mixer
   controls and the node editor. They draw the same in both directions.
 
-Editing, cursor navigation and IME are unchanged.
+Editing, cursor navigation and IME are unchanged. With `CUI_TEXT_SHAPING=ON`,
+`cui_input_use_bidi` draws a single-line field's right-to-left text in reading order,
+with the caret and selection following the glyphs ([integration](integration.md#optional-arabic-script-text-shaping)).
 
 With `CUI_TEXT_SHAPING=ON`, the resolved container direction sets the paragraph
 base, including English-first mixed text in a forced RTL container. Direct drawing

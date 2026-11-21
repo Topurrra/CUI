@@ -20,7 +20,9 @@
 #ifdef CUI_TEXT_SHAPING
 #include "cui_shape.h"
 #include "cui_bidi.h"
-typedef struct { int font, id, start; float x, y; } cui_shaped_glyph;
+/* pen and adv: where the glyph's advance starts and how wide it is (x adds the mark offset); rtl: its run's
+ * direction. Text fields read these to place the caret (cui_input_use_bidi). */
+typedef struct { int font, id, start; float x, y, pen, adv; bool rtl; } cui_shaped_glyph;
 typedef struct cui_shaped_line {
     struct cui_shaped_line *next;
     int start, end, font, count;
@@ -983,9 +985,8 @@ static uint32_t cui__shape_script(uint32_t cp) {
     return 0;
 }
 
-static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *text, int len,
-                             bool tabular, bool draw, float x, float y, cui_color color, float max_x) {
-    cui_font_data *base = &ui->fonts[font];
+/* the shaped glyphs of one line in visual order, cached with its paragraph; NULL when out of memory */
+static cui_shaped_line *cui__shape_line(cui_ctx *ui, cui_font font, float size, const char *text, int len, bool tabular) {
     const char *paragraph = text;
     int plen = len, line_start = 0;
     if (ui->text_paragraph && (uintptr_t)text >= (uintptr_t)ui->text_paragraph &&
@@ -1004,7 +1005,7 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
     cui_shaped_line *cached = p->lines;
     while (cached && !(cached->start == line_start && cached->end == line_start + len &&
         cached->font == font && cached->size == size && cached->tabular == tabular)) cached = cached->next;
-    if (cached) goto paint;
+    if (cached) return cached;
     if (p->line_count == 128) cui__shape_lines_free(ui, p);
     cached = cui__alloc(ui, sizeof *cached);
     if (!cached) return 0;
@@ -1075,7 +1076,7 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
                     cui_shape_glyph *g = &input[k];
                     CUI__GROW(ui, glyphs, glyph_count, glyph_cap, 1);
                     glyphs[glyph_count++] = (shaped_glyph){ gf, g->id, g->cluster,
-                        span->width + g->x * em, g->y * em };
+                        span->width + g->x * em, g->y * em, span->width, g->advance * em, rtl };
                     span->width += g->advance * em;
                     span->count++;
                 }
@@ -1089,7 +1090,7 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
             for (int j = 0; j < span->count; j++) {
                 CUI__GROW(ui, cached->glyphs, cached->count, result_cap, 1);
                 cui_shaped_glyph g = glyphs[span->first + j];
-                g.x += pen; g.start -= line_start;
+                g.x += pen; g.pen += pen; g.start -= line_start;
                 cached->glyphs[cached->count++] = g;
             }
             pen += span->width;
@@ -1099,7 +1100,14 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
     cui__free(ui, spans);
     cui__free(ui, order); cui__free(ui, levels);
     cached->width = pen; cached->next = p->lines; p->lines = cached; p->line_count++;
-paint:
+    return cached;
+}
+
+static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *text, int len,
+                             bool tabular, bool draw, float x, float y, cui_color color, float max_x) {
+    cui_font_data *base = &ui->fonts[font];
+    cui_shaped_line *cached = cui__shape_line(ui, font, size, text, len, tabular);
+    if (!cached) return 0;
     if (draw) {
         float scale = ui->scale;
         float baseline = roundf((y + base->ascent * size) * scale);
@@ -1128,7 +1136,149 @@ paint:
     }
     return cached->width;
 }
+
+/* ---- one line of a text field in reading order (cui_input_use_bidi) ----
+ * The field's text is one left-to-right paragraph, shaped like a label. A cluster is the glyphs of one
+ * logical character range [start, end) (a ligature covers several characters); its caret positions run
+ * from its leading edge (right in a right-to-left run) to its trailing edge, a ligature's inner offsets
+ * spread evenly across it. A caret takes the trailing edge of the character before it. */
+typedef struct { float l, r; int start, end; bool rtl; } cui__bidi_cluster;
+
+typedef struct { cui_direction dir; bool unshaped; const char *para; } cui__bidi_saved;
+static cui__bidi_saved cui__bidi_enter(cui_ctx *ui) {
+    cui__bidi_saved s = { ui->text_direction, ui->text_unshaped, ui->text_paragraph };
+    ui->text_direction = CUI_DIRECTION_LTR; ui->text_unshaped = false; ui->text_paragraph = NULL;
+    return s;
+}
+static void cui__bidi_leave(cui_ctx *ui, cui__bidi_saved s) {
+    ui->text_direction = s.dir; ui->text_unshaped = s.unshaped; ui->text_paragraph = s.para;
+}
+
+bool cui__bidi_wanted(cui_ctx *ui, const char *text, int len) {
+    if (!ui->input_bidi || !text || len <= 0) return false;
+    cui__bidi_saved s = cui__bidi_enter(ui);
+    bool want = cui__text_needs_shaping(ui, text, len);
+    cui__bidi_leave(ui, s);
+    return want;
+}
+
+/* the clusters of text in logical order, in frame memory; returns their count */
+static int cui__bidi_clusters(cui_ctx *ui, cui_font font, float size, const char *text, int len, cui__bidi_cluster **out) {
+    *out = NULL;
+    font = cui__resolve_font(ui, font);
+    if (font < 0 || len <= 0) return 0;
+    cui__bidi_saved s = cui__bidi_enter(ui);
+    cui_shaped_line *line = cui__shape_line(ui, font, size, text, len, false);
+    cui__bidi_leave(ui, s);
+    if (!line || !line->count) return 0;
+    int *at = cui__frame_alloc(ui, ((size_t)len + 1) * sizeof *at);
+    cui__bidi_cluster *c = cui__frame_alloc(ui, (size_t)line->count * sizeof *c);
+    if (!at || !c) return 0;
+    for (int i = 0; i <= len; i++) at[i] = -1;
+    int n = 0;
+    for (int j = 0; j < line->count; j++) {
+        const cui_shaped_glyph *g = &line->glyphs[j];
+        int st = CUI_CLAMP(g->start, 0, len - 1);
+        if (at[st] < 0) { at[st] = n; c[n++] = (cui__bidi_cluster){ 1e30f, -1e30f, st, len, g->rtl }; }
+        cui__bidi_cluster *k = &c[at[st]];
+        k->l = CUI_MIN(k->l, g->pen); k->r = CUI_MAX(k->r, g->pen + g->adv);
+    }
+    /* logical order; each runs to the next one's start, the first from 0 */
+    cui__bidi_cluster *o = cui__frame_alloc(ui, (size_t)n * sizeof *o);
+    if (!o) return 0;
+    int m = 0;
+    for (int i = 0; i < len; i++) if (at[i] >= 0) o[m++] = c[at[i]];
+    for (int i = 0; i < m; i++) o[i].end = i + 1 < m ? o[i + 1].start : len;
+    if (m) o[0].start = 0;
+    *out = o;
+    return m;
+}
+
+/* the x of offset off inside cluster k (start <= off <= end) */
+static float cui__bidi_at(const cui__bidi_cluster *k, int off) {
+    float lead = k->rtl ? k->r : k->l, trail = k->rtl ? k->l : k->r;
+    return lead + (trail - lead) * (float)(off - k->start) / (float)CUI_MAX(1, k->end - k->start);
+}
+
+float cui__bidi_caret_x(cui_ctx *ui, cui_font font, float size, const char *text, int len, int off) {
+    cui__bidi_cluster *c;
+    int n = cui__bidi_clusters(ui, font, size, text, len, &c);
+    if (!n) return 0;
+    if (off <= 0) return cui__bidi_at(&c[0], 0);
+    int i = 0;
+    while (i + 1 < n && c[i].end < off) i++;
+    return cui__bidi_at(&c[i], CUI_MIN(off, c[i].end));
+}
+
+int cui__bidi_hit(cui_ctx *ui, cui_font font, float size, const char *text, int len, float x) {
+    cui__bidi_cluster *c;
+    int n = cui__bidi_clusters(ui, font, size, text, len, &c);
+    if (!n) return 0;
+    int best = 0;
+    float bd = 1e30f;
+    for (int i = 0; i < n; i++) {   /* the cluster under x, or the nearest */
+        float d = x < c[i].l ? c[i].l - x : x > c[i].r ? x - c[i].r : 0;
+        if (d < bd) { bd = d; best = i; }
+    }
+    const cui__bidi_cluster *k = &c[best];
+    float lead = k->rtl ? k->r : k->l, trail = k->rtl ? k->l : k->r;
+    float f = trail != lead ? (x - lead) / (trail - lead) : 0;
+    f = CUI_CLAMP(f, 0.0f, 1.0f);
+    int off = k->start + (int)floorf(f * (float)(k->end - k->start) + 0.5f);
+    while (off > k->start && off < len && ((unsigned char)text[off] & 0xC0) == 0x80) off--;   /* a character boundary */
+    return off;
+}
+
+int cui__bidi_spans(cui_ctx *ui, cui_font font, float size, const char *text, int len, int s0, int s1, float *xs, int max) {
+    cui__bidi_cluster *c;
+    int n = cui__bidi_clusters(ui, font, size, text, len, &c);
+    int count = 0;
+    for (int i = 0; i < n; i++) {
+        int a = CUI_MAX(s0, c[i].start), b = CUI_MIN(s1, c[i].end);
+        if (a >= b) continue;
+        float x0 = cui__bidi_at(&c[i], a), x1 = cui__bidi_at(&c[i], b);
+        if (x0 > x1) { float t = x0; x0 = x1; x1 = t; }
+        /* join a piece that touches one already found (pieces of one run arrive in either order) */
+        int j = 0;
+        for (; j < count; j++)
+            if (x0 <= xs[2 * j + 1] + 0.5f && x1 >= xs[2 * j] - 0.5f) {
+                xs[2 * j] = CUI_MIN(xs[2 * j], x0); xs[2 * j + 1] = CUI_MAX(xs[2 * j + 1], x1);
+                break;
+            }
+        if (j == count && count < max) { xs[2 * count] = x0; xs[2 * count + 1] = x1; count++; }
+    }
+    /* a joined piece may now touch another */
+    for (int i = 0; i < count; i++)
+        for (int j = i + 1; j < count; j++)
+            if (xs[2 * j] <= xs[2 * i + 1] + 0.5f && xs[2 * j + 1] >= xs[2 * i] - 0.5f) {
+                xs[2 * i] = CUI_MIN(xs[2 * i], xs[2 * j]); xs[2 * i + 1] = CUI_MAX(xs[2 * i + 1], xs[2 * j + 1]);
+                xs[2 * j] = xs[2 * (count - 1)]; xs[2 * j + 1] = xs[2 * (count - 1) + 1];
+                count--; j = i;
+            }
+    return count;
+}
+
+float cui__bidi_width(cui_ctx *ui, cui_font font, float size, const char *text, int len) {
+    cui__bidi_saved s = cui__bidi_enter(ui);
+    float w = cui__text_width(ui, font, size, text, len, false);
+    cui__bidi_leave(ui, s);
+    return w;
+}
+
+void cui__bidi_draw(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color, const char *text, int len) {
+    cui__bidi_saved s = cui__bidi_enter(ui);
+    cui__draw_text_line(ui, font, size, x, y, color, text, len, false);
+    cui__bidi_leave(ui, s);
+}
 #endif
+
+void cui_input_use_bidi(cui_ctx *ui, bool on) {
+#ifdef CUI_TEXT_SHAPING
+    ui->input_bidi = on;
+#else
+    (void)ui; (void)on;
+#endif
+}
 
 /* ---- drawing ---- */
 

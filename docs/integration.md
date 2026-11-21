@@ -249,8 +249,29 @@ strings keep the original iterator, rasterization and optical tracking. Shaped
 strings use the font's natural advances without optical tracking, which would
 otherwise pull cursive joins apart.
 
-Text fields keep their existing drawing, cursor and selection behavior. This option
-does not add RTL editing or IME. Shaped paragraphs wrap greedily
+Text fields keep their existing drawing, cursor and selection behavior unless the app
+calls `cui_input_use_bidi(ui, true)`: then a single-line field with right-to-left
+text draws it like a label (one left-to-right paragraph, shaped and ordered), and
+the caret, the selection and clicks follow the glyphs. A caret goes at the trailing
+edge of the character before it (the leading edge of the first character at offset
+0), so at a boundary between runs of different direction it sits where the next
+character of the earlier run would appear; a ligature's inner offsets spread evenly
+across it. A selection is one rectangle per visual piece. Left and Right still move
+one character in logical order (in a Hebrew run the caret moves the other way on
+screen), as do Home, End and the word jumps. Multi-line and password fields, and
+IME composition, are unchanged.
+
+![Hebrew and Arabic titles, a list and two fields with cui_input_use_bidi](images/components/rtl-chrome.png)
+
+`cui_test_bidi_edit` checks the visual order, Arabic joining, and the caret, hit and
+selection helpers with the Windows fonts; `cui_test_bidi_edit --bench` prints the
+layout time of a title: Latin about 0.6 us, a Hebrew or Arabic title shaped the first
+time 45 to 110 us (a Latin prefix in the same string adds about 80 us: Inter's
+lookups), then about 0.05 us from the cache. The cache keeps 64 paragraphs, so a
+frame that shows more than 64 different right-to-left strings shapes some of them
+again every frame.
+
+Shaped paragraphs wrap greedily
 at spaces using complete shaped candidate-line advances. They retain their
 paragraph levels and use UAX #9 line ordering for each resulting line. The Latin
 path retains its existing heading balancing and orphan adjustment. An overlong
