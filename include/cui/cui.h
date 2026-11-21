@@ -6166,6 +6166,10 @@ typedef struct cui_corners { float tl, tr, br, bl; } cui_corners;
 typedef struct cui_layer_rect {
     cui_rect rect; cui_corners radius; bool full;
     cui_rect panel; cui_corners panel_radius; float panel_opacity; cui_elevation panel_elevation; cui_color scrim;
+    /* How the box is painted, for a host that redraws its rounded corners itself: the fill, the border (color, width in points)
+     * and the opacity this frame. A full layer's are its panel's (opacity is panel_opacity); another layer's are its own box's
+     * (a popover, a menu, a tooltip). fill.a 0 and border_w 0 for a box without them. */
+    cui_color fill, border; float border_w, opacity;
 } cui_layer_rect;
 CUI_API int cui_floating_layers(cui_ctx *ui, cui_layer_rect *out, int max);
 
