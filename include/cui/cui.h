@@ -6132,8 +6132,14 @@ typedef struct cui_corners { float tl, tr, br, bl; } cui_corners;
 /* The floating layers of the latest layout (popovers, menus, tooltips, dialogs, toasts...), bottom to top: each one's
  * rectangle in window points, its corner radius, and full when it covers the whole window (a dialog's scrim). For a
  * host that shows native child windows under the UI (a web view): the parts to cut out of them so the layers show.
- * Writes at most max (out may be NULL with max 0) and returns how many there are; the first 16 are kept. */
-typedef struct cui_layer_rect { cui_rect rect; cui_corners radius; bool full; } cui_layer_rect;
+ * Writes at most max (out may be NULL with max 0) and returns how many there are; the first 16 are kept.
+ * A full layer also says what is on it, so such a host can cut out only its panel and dim the rest itself: the panel
+ * (the layer's first child: a dialog's or sheet's box) as painted this frame, moved and scaled by its animation, with
+ * its corner radius, opacity and elevation, and the scrim's color with its alpha this frame. Zero for other layers. */
+typedef struct cui_layer_rect {
+    cui_rect rect; cui_corners radius; bool full;
+    cui_rect panel; cui_corners panel_radius; float panel_opacity; cui_elevation panel_elevation; cui_color scrim;
+} cui_layer_rect;
 CUI_API int cui_floating_layers(cui_ctx *ui, cui_layer_rect *out, int max);
 
 CUI_API void cui_draw_rect(cui_ctx *ui, cui_rect r, cui_corners radius, cui_color fill);

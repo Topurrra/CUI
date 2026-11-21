@@ -288,3 +288,5 @@ cui_rect r = cui_get_rect(ui, id);    /* from the latest layout */
 cui_layer_rect l[16];
 int n = cui_floating_layers(ui, l, 16);   /* how many there are; at most 16 are written */
 ```
+
+A `full` layer (a dialog or a sheet) also says what is on it, so such an app can cut out only the panel and dim the rest of its native window itself: `panel` is the panel's rectangle as painted this frame (moved and scaled by its open and close animation), `panel_radius`, `panel_opacity` and `panel_elevation` its corners, opacity and shadow, and `scrim` the scrim's color with its alpha this frame (it follows the fade). These are zero for every other layer.
