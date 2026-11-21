@@ -277,3 +277,7 @@ add_test(NAME cui_test_editor_context COMMAND cui_test_editor_context)
 add_executable(cui_test_editor_keys test_editor_keys.c)
 target_link_libraries(cui_test_editor_keys PRIVATE cui::cui)
 add_test(NAME cui_test_editor_keys COMMAND cui_test_editor_keys)
+
+add_executable(cui_test_floating_layers test_floating_layers.c)
+target_link_libraries(cui_test_floating_layers PRIVATE cui::cui)
+add_test(NAME cui_test_floating_layers COMMAND cui_test_floating_layers)

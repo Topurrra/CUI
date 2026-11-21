@@ -933,6 +933,19 @@ void cui_frame_memory(cui_ctx *ui, size_t *used, size_t *capacity, size_t *peak)
     if (peak) *peak = ui ? CUI_MAX(ui->peak_arena, ui->arena_used) : 0;
 }
 
+/* a full layer's panel (its first child) as cui__paint_node draws it: scaled about its centre, then moved */
+static void cui__note_panel(cui_ctx *ui, const cui_node *root, cui_layer_rect *l) {
+    l->scrim = cui_color_of(ui, root->bg);
+    if (root->first < 0) return;
+    const cui_node *p = &ui->nodes[root->first];
+    if (p->rect.w <= 0 || p->rect.h <= 0) return;
+    float s = p->scale, cx = p->rect.x + p->rect.w * 0.5f, cy = p->rect.y + p->rect.h * 0.5f;
+    l->panel = (cui_rect){ cx + (p->rect.x - cx) * s + p->tx, cy + (p->rect.y - cy) * s + p->ty, p->rect.w * s, p->rect.h * s };
+    l->panel_radius = (cui_corners){ p->radius.tl * s, p->radius.tr * s, p->radius.br * s, p->radius.bl * s };
+    l->panel_opacity = p->opacity;
+    l->panel_elevation = p->elevation;
+}
+
 /* cui_floating_layers: the floating roots just laid out, by z (then creation order) like cui__paint */
 static void cui__note_layers(cui_ctx *ui) {
     int n = ui->float_count, kept = 0, total = 0;
@@ -946,7 +959,14 @@ static void cui__note_layers(cui_ctx *ui) {
     for (int k = 0; k < n; k++) {
         const cui_node *nd = &ui->nodes[order[k]];
         if (nd->rect.w <= 0 || nd->rect.h <= 0) continue;
-        if (kept < CUI__LAYERS_SEEN) ui->layers_seen.r[kept++] = (cui_layer_rect){ nd->rect, nd->radius, nd->placement == CUI__PLACE_FULL };
+        if (kept < CUI__LAYERS_SEEN) {
+            cui_layer_rect *l = &ui->layers_seen.r[kept++];
+            memset(l, 0, sizeof *l);
+            l->rect = nd->rect;
+            l->radius = nd->radius;
+            l->full = nd->placement == CUI__PLACE_FULL;
+            if (l->full) cui__note_panel(ui, nd, l);
+        }
         total++;
     }
     ui->layers_seen.n = total;
