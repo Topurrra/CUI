@@ -864,9 +864,23 @@ static void md_sel_copy(cui_ctx *ui, md_sel *S, md_pos blk, const md_run *runs, 
 /* Painting                                                                 */
 /* ------------------------------------------------------------------------ */
 
+/* Highlights (cui_markdown_opts.highlights). md_hlr: a range in the bytes of the text it is for (the source, or a joined
+ * paragraph's buffer), idx its number in the caller's array. md_hlp: the part of one on a block, as offsets in the
+ * block's text, in order. */
+typedef struct { int a, b, idx; } md_hlr;
+typedef struct { int a, b; bool cur; } md_hlp;
+typedef struct { const md_hlp *p; int n; cui_color c, cur; } md_hlset;
+
+/* The first piece at h0 or after that ends past `at`: the segments of a block come in order, so h0 only moves forward. */
+static int md_hl_skip(const md_hlset *H, int h0, int at) {
+    while (h0 < H->n && H->p[h0].b <= at) h0++;
+    return h0;
+}
+
 typedef struct {
     const md_seg *seg; int n;
     md_font f;
+    md_hlset hl;                  /* marked text under the glyphs (n 0: none) */
     cui_color fg, link_c, code_bg;
     const float *hover, *focus;   /* per link of the block */
     bool underline_rest;          /* links keep a full underline (text on a colored surface) */
@@ -888,6 +902,7 @@ static void md_paint_inline(cui_ctx *ui, cui_node *n, void *data) {
     float th = CUI_MAX(1.0f, f->size / 13.0f);
     int sa = 0, sb = 0;
     if (p->sel && !md_sel_range(p->sel, p->block, &sa, &sb)) sb = 0;
+    int h0 = 0;
     for (int k = 0; k < p->n; k++) {
         const md_seg *s = &p->seg[k];
         float top = n->rect.y + (float)s->line * f->lh;
@@ -900,6 +915,13 @@ static void md_paint_inline(cui_ctx *ui, cui_node *n, void *data) {
         if (s->style & MS_CODE) {
             float ch = f->mono_size * 1.5f;
             cui_draw_rect(ui, (cui_rect){ x, top + (f->lh - ch) * 0.5f, s->w, ch }, CUI_CORNERS(4), p->code_bg);
+        }
+        if (p->hl.n > 0) {   /* marked (find in page), under the glyphs and the selection */
+            h0 = md_hl_skip(&p->hl, h0, s->at);
+            for (int h = h0; h < p->hl.n && p->hl.p[h].a < s->at + s->len; h++) {
+                float x0 = md_seg_x(ui, f, s, p->hl.p[h].a - s->at), x1 = md_seg_x(ui, f, s, p->hl.p[h].b - s->at);
+                if (x1 > x0) cui_draw_rect(ui, (cui_rect){ x + x0, top, x1 - x0, f->lh }, CUI_CORNERS(2), p->hl.p[h].cur ? p->hl.cur : p->hl.c);
+            }
         }
         if (s->at < sb && s->at + s->len > sa) {   /* selected, under the glyphs */
             float x0 = md_seg_x(ui, f, s, sa - s->at), x1 = md_seg_x(ui, f, s, sb - s->at);
@@ -996,6 +1018,13 @@ typedef struct {
     md_arena *ar;                /* scratch memory instead of the frame's */
     bool oom;
     struct md_doc *doc;          /* the doc whose headings it collects */
+    /* highlights (cui_markdown_opts.highlights), in the bytes of src */
+    md_hlr *hl; int hln;
+    int hlcur;                   /* idx of the current range, -1 when none */
+    int cur_a, cur_b;            /* and its bytes (-1 when none) */
+    cui_color hl_c, hl_cur_c;
+    const char *jbuf; int jlen;  /* the latest joined paragraph's buffer (md_join), and the ranges translated to it */
+    md_hlr *jhl; int jhln;
 } md_ctx;
 
 /* Scratch memory: the frame's, or the worker's arena (NULL when out of memory there). */
@@ -1010,6 +1039,112 @@ static void *md_scratch(md_ctx *c, size_t n) {
 
 /* The next selectable block's number: in document order, under the top level block being built. */
 static md_pos md_next_sel(md_ctx *c) { return md_mkpos(c->top, c->sel->seq++, 0); }
+
+/* ---- highlights: marked ranges of the text (cui_markdown_opts.highlights) ---- */
+
+/* True when run r is plain text that lies in [base, base + blen); *s0 is its first byte there. */
+static bool md_run_src(const md_run *r, const char *base, int blen, int *s0) {
+    if ((r->style & MS_BREAK) || !r->p || r->len <= 0) return false;
+    uintptr_t p = (uintptr_t)r->p, b = (uintptr_t)base;
+    if (p < b || p + (uintptr_t)r->len > b + (uintptr_t)blen) return false;
+    *s0 = (int)(p - b);
+    return true;
+}
+
+/* The first range of R (sorted, disjoint) that ends after byte e0. */
+static int md_hl_first(const md_hlr *R, int n, int e0) {
+    int lo = 0, hi = n;
+    while (lo < hi) {
+        int m = (lo + hi) / 2;
+        if (R[m].b > e0) hi = m; else lo = m + 1;
+    }
+    return lo;
+}
+
+/* The parts of the ranges that fall on the runs of one block, as offsets in the block's text. *cur_a: where the current
+ * range starts in the block, -1 when it is not on it. The runs point into the source, or into the buffer of a joined
+ * paragraph (md_join), whose ranges are translated. */
+static int md_hl_pieces(md_ctx *c, const md_inline *in, md_hlp **out, int *cur_a) {
+    *out = NULL; *cur_a = -1;
+    const md_hlr *R = c->hl;
+    int n = c->hln, s0 = 0;
+    const char *base = c->src;
+    int blen = c->len;
+    if (c->jbuf) {
+        for (int k = 0; k < in->nruns; k++) {
+            if (md_run_src(&in->runs[k], c->jbuf, c->jlen, &s0)) { base = c->jbuf; blen = c->jlen; R = c->jhl; n = c->jhln; break; }
+            if (md_run_src(&in->runs[k], base, blen, &s0)) break;
+        }
+    }
+    if (n <= 0) return 0;
+    int e0 = 0x7FFFFFFF, e1 = -1;
+    for (int k = 0; k < in->nruns; k++) {
+        if (!md_run_src(&in->runs[k], base, blen, &s0)) continue;
+        if (s0 < e0) e0 = s0;
+        if (s0 + in->runs[k].len > e1) e1 = s0 + in->runs[k].len;
+    }
+    if (e1 < 0) return 0;
+    int lo = md_hl_first(R, n, e0), cnt = 0;
+    for (int i = lo; i < n && R[i].a < e1; i++) cnt++;
+    if (!cnt) return 0;
+    md_hlp *P = cui__frame_alloc(c->ui, sizeof *P * (size_t)(cnt + in->nruns));
+    int np = 0, k0 = 0;
+    for (int i = lo; i < n && R[i].a < e1; i++) {
+        while (k0 < in->nruns && (!md_run_src(&in->runs[k0], base, blen, &s0) || s0 + in->runs[k0].len <= R[i].a)) k0++;
+        for (int k = k0; k < in->nruns; k++) {
+            const md_run *r = &in->runs[k];
+            if (!md_run_src(r, base, blen, &s0)) continue;
+            if (s0 >= R[i].b) break;
+            int a = CUI_MAX(R[i].a, s0), b = CUI_MIN(R[i].b, s0 + r->len);
+            if (b <= a) continue;
+            P[np].a = r->at + (a - s0); P[np].b = r->at + (b - s0);
+            P[np].cur = R[i].idx == c->hlcur;
+            if (P[np].cur && *cur_a < 0) *cur_a = P[np].a;
+            np++;
+        }
+    }
+    *out = P;
+    return np;
+}
+
+/* The result's place of the current highlight, from the latest layout: block lid (its leaf), laid out as L, line height lh. */
+static void md_hl_report(md_ctx *c, cui_id lid, const md_lay *L, float lh, int cur_a) {
+    cui_ctx *ui = c->ui;
+    if (cur_a < 0 || c->res->highlight_found || !cui__has_prev_rect(ui, lid) || !cui__has_prev_rect(ui, c->root_id)) return;
+    int line = 0;
+    for (int q = 0; q < L->n; q++) {
+        if (L->seg[q].at > cur_a) break;
+        line = L->seg[q].line;
+    }
+    c->res->highlight_y = cui__prev_rect(ui, lid).y + (float)line * lh - cui__prev_rect(ui, c->root_id).y;
+    c->res->highlight_found = true;
+    c->res->highlight_exact = true;
+}
+
+/* A paragraph joined from several source lines (md_join): the ranges as offsets in the joined buffer. line k of the
+ * buffer is bytes [bo[k], bo[k] + len[k]) of it, and starts at so[k] in the source. */
+static void md_hl_join(md_ctx *c, const char *buf, int blen, const int *so, const int *bo, const int *len, int n) {
+    c->jbuf = NULL; c->jhl = NULL; c->jhln = 0;
+    if (c->hln <= 0 || n <= 0) return;
+    for (int k = 0; k < n; k++)   /* lines that are not in the source in order: no marks */
+        if (so[k] < 0 || so[k] + len[k] > c->len || (k > 0 && so[k] < so[k - 1] + len[k - 1])) return;
+    int e0 = so[0], e1 = so[n - 1] + len[n - 1];
+    int lo = md_hl_first(c->hl, c->hln, e0), cnt = 0;
+    for (int i = lo; i < c->hln && c->hl[i].a < e1; i++) cnt++;
+    if (!cnt) return;
+    md_hlr *J = cui__frame_alloc(c->ui, sizeof *J * (size_t)(cnt + n));
+    int nj = 0, k0 = 0;
+    for (int i = lo; i < c->hln && c->hl[i].a < e1; i++) {
+        while (k0 < n && so[k0] + len[k0] <= c->hl[i].a) k0++;
+        for (int k = k0; k < n && so[k] < c->hl[i].b; k++) {
+            int a = CUI_MAX(c->hl[i].a, so[k]), b = CUI_MIN(c->hl[i].b, so[k] + len[k]);
+            if (b <= a) continue;
+            J[nj].a = bo[k] + (a - so[k]); J[nj].b = bo[k] + (b - so[k]); J[nj].idx = c->hl[i].idx;
+            nj++;
+        }
+    }
+    c->jbuf = buf; c->jlen = blen; c->jhl = J; c->jhln = nj;
+}
 static cui_id md_pos_id(const md_ctx *c, md_pos p) { return cui__hash(&p.block, sizeof p.block, c->bid ^ 0x5E1B1u); }
 
 typedef struct { float w; int depth; bool tight; cui_color fg; } md_box;
@@ -1055,7 +1190,7 @@ static void md_sel_drag_off(md_ctx *c, cui_interact r) {
     if (dx * dx + dy * dy > MD_DRAG_START * MD_DRAG_START) { ui->active = c->id; S->st->link_drag = true; ui->animating = true; }
 }
 
-typedef struct { const md_sel *sel; md_pos block; } md_text_paint;
+typedef struct { const md_sel *sel; md_pos block; md_hlset hl; } md_text_paint;
 
 /* x of byte k of a one line text node w wide, from its left edge, as cui__paint_text places it. */
 static float md_text_node_x(cui_ctx *ui, const cui_node *n, float w, int k) {
@@ -1069,6 +1204,10 @@ static float md_text_node_x(cui_ctx *ui, const cui_node *n, float w, int k) {
 static void md_paint_text_sel(cui_ctx *ui, cui_node *n, void *data) {
     const md_text_paint *p = data;
     int a, b;
+    for (int h = 0; h < p->hl.n; h++) {   /* marked text (find in page) */
+        float x0 = md_text_node_x(ui, n, n->rect.w, CUI_MIN(p->hl.p[h].a, n->text_len)), x1 = md_text_node_x(ui, n, n->rect.w, CUI_MIN(p->hl.p[h].b, n->text_len));
+        if (x1 > x0) cui_draw_rect(ui, (cui_rect){ n->rect.x + x0, n->rect.y, x1 - x0, n->rect.h }, CUI_CORNERS(2), p->hl.p[h].cur ? p->hl.cur : p->hl.c);
+    }
     if (!md_sel_range(p->sel, p->block, &a, &b)) return;
     float x0 = md_text_node_x(ui, n, n->rect.w, CUI_MIN(a, n->text_len)), x1 = md_text_node_x(ui, n, n->rect.w, CUI_MIN(b, n->text_len));
     if (x1 > x0) cui_draw_rect(ui, (cui_rect){ n->rect.x + x0, n->rect.y, x1 - x0, n->rect.h }, CUI_CORNERS(0), p->sel->color);
@@ -1085,6 +1224,16 @@ static void md_sel_text_node(md_ctx *c, int node, const md_inline *in) {
     cui_node *n = &ui->nodes[node];
     md_text_paint *p = cui__frame_alloc(ui, sizeof *p);
     p->sel = S; p->block = blk;
+    if (c->hln > 0) {
+        md_hlp *hp;
+        int hcur;
+        p->hl.n = md_hl_pieces(c, in, &hp, &hcur);
+        p->hl.p = hp; p->hl.c = c->hl_c; p->hl.cur = c->hl_cur_c;
+        if (hcur >= 0 && !c->res->highlight_found && cui__has_prev_rect(ui, lid) && cui__has_prev_rect(ui, c->root_id)) {
+            c->res->highlight_y = cui__prev_rect(ui, lid).y - cui__prev_rect(ui, c->root_id).y;
+            c->res->highlight_found = c->res->highlight_exact = true;
+        }
+    }
     n->id = lid;
     n->paint = md_paint_text_sel;
     n->paint_data = p;
@@ -1177,7 +1326,10 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
         if (!lk->autolink) { ui->last_id = id; cui_tooltip(ui, r.hovered && url ? url : ""); }
     }
     cui_id lid = c->leaf_id;
-    if (!lid && S->st) lid = md_pos_id(c, blk);   /* its rect, to find text under the pointer */
+    if (!lid && (S->st || c->hln > 0)) lid = md_pos_id(c, blk);   /* its rect, to find text under the pointer, or the marked text */
+    md_hlp *hp = NULL;
+    int hn = 0, hcur = -1;
+    if (c->hln > 0) hn = md_hl_pieces(c, in, &hp, &hcur);
     int leaf = cui__leaf(ui, lid, CUI_FILL, CUI_PX((float)L.lines * f->lh));
     c->leaf_id = 0;
     md_paint *p = cui__frame_alloc(ui, sizeof *p);
@@ -1186,6 +1338,8 @@ static float md_inline_emit(md_ctx *c, const md_inline *in, const md_font *f, cu
     p->hover = hover; p->focus = focus;
     p->underline_rest = c->custom_color;
     p->sel = S; p->block = blk;
+    p->hl.p = hp; p->hl.n = hn; p->hl.c = c->hl_c; p->hl.cur = c->hl_cur_c;
+    if (hcur >= 0) md_hl_report(c, lid, &L, f->lh, hcur);
     if (S->st && (S->hover || S->probe) && cui__has_prev_rect(ui, lid)) {
         cui_rect r = cui__prev_rect(ui, lid);
         if (md_sel_offer(S, r)) {
@@ -1227,6 +1381,7 @@ static const char *md_join(md_ctx *c, const md_line *L, int n, int *out_len) {
     for (int k = 0; k < n; k++) total += L[k].len;
     char *buf = cui__frame_alloc(c->ui, (size_t)total + 1);
     int o = 0;
+    int *hm = c->hln > 0 ? cui__frame_alloc(c->ui, sizeof(int) * 3 * (size_t)n) : NULL;   /* highlights: where each line sits */
     for (int k = 0; k < n; k++) {
         int b;
         md_indent(L[k], &b);
@@ -1238,12 +1393,14 @@ static const char *md_join(md_ctx *c, const md_line *L, int n, int *out_len) {
             if (sp >= 2) hard = true;
             else if (sp == 0 && e > 0 && T.s[e - 1] == '\\') { hard = true; e--; }
         }
+        if (hm) { hm[k] = T.off; hm[n + k] = o; hm[2 * n + k] = e; }
         memcpy(buf + o, T.s, (size_t)e);
         o += e;
         if (!last) buf[o++] = hard ? '\n' : ' ';
     }
     buf[o] = 0;
     *out_len = o;
+    if (hm) md_hl_join(c, buf, o, hm, hm + n, hm + 2 * n, n);
     return buf;
 }
 
@@ -1586,6 +1743,21 @@ static void md_lower(char *d, const char *s, int n) {
     d[n] = 0;
 }
 
+/* A code block is not drawn marked, but it reports where the current highlight is: its line, by the block's height. */
+static void md_code_report(md_ctx *c, const md_line *L, int n) {
+    cui_ctx *ui = c->ui;
+    cui_id id = ui->last_id;
+    if (c->cur_a < 0 || c->res->highlight_found || n <= 0) return;
+    if (c->cur_a < L[0].off || c->cur_a > L[n - 1].off + L[n - 1].len) return;
+    if (!cui__has_prev_rect(ui, id) || !cui__has_prev_rect(ui, c->root_id)) return;
+    int k = 0;
+    while (k + 1 < n && L[k + 1].off <= c->cur_a) k++;
+    cui_rect r = cui__prev_rect(ui, id);
+    c->res->highlight_y = r.y + r.h * ((float)k + 0.5f) / (float)n - cui__prev_rect(ui, c->root_id).y;
+    c->res->highlight_found = true;
+    c->res->highlight_exact = true;
+}
+
 static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang) {
     cui_ctx *ui = c->ui;
     int total = n + 1;
@@ -1627,6 +1799,7 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
     }
     if (!S->st) {
         cui_code_block_ex(ui, cid, buf, &co);
+        md_code_report(c, L, n);
         return c->fit ? widest + 42 : 0;
     }
     md_code_sel *cs = cui__frame_alloc(ui, sizeof *cs);
@@ -1634,6 +1807,7 @@ static float md_code(md_ctx *c, const md_line *L, int n, int strip, md_line lang
     cs->cs.color = S->color;
     cs->next = S->codes; S->codes = cs;
     cui__code_block_sel(ui, cid, buf, &co, &cs->cs);
+    md_code_report(c, L, n);
     if ((S->hover || S->probe) && cui__has_prev_rect(ui, cs->cs.canvas)) {
         if (md_sel_offer(S, cui__prev_rect(ui, cs->cs.canvas))) {
             S->at = cs->block; S->at.off = cui__code_sel_hit(ui, &cs->cs, buf, o, S->x, S->y);
@@ -3427,6 +3601,21 @@ static void md_big_build(md_ctx *c, md_big *st, const cui_markdown_opts *o, floa
         for (int k = CUI_MAX(last + 1, S->lo.top); k < n && k <= S->hi.top; k++) md_big_block(c, d, k, t, W);
         c->dry = false;
     }
+    if (c->cur_a >= 0 && !c->res->highlight_found && c->cur_a < d->covered) {   /* the current highlight is in a block not built: where it would be */
+        int lo = 0, hi = n - 1;
+        while (lo < hi) {
+            int m = (lo + hi + 1) / 2;
+            if (d->blk[m].off <= c->cur_a) lo = m; else hi = m - 1;
+        }
+        const md_blk *B = &d->blk[lo];
+        if ((lo < first || lo > last) && cui__has_prev_rect(ui, c->root_id) && cui__has_prev_rect(ui, cid)) {
+            float coff = cui__prev_rect(ui, cid).y - cui__prev_rect(ui, c->root_id).y;
+            float frac = B->end > B->off ? CUI_CLAMP((float)(c->cur_a - B->off) / (float)(B->end - B->off), 0.0f, 1.0f) : 0.0f;
+            c->res->highlight_y = coff + (float)md_fen_sum(st->fen, lo) + md_big_gap(c, st, d, lo) + frac * st->h[lo];
+            c->res->highlight_found = true;
+            c->res->highlight_exact = false;
+        }
+    }
     st->built = d; st->b0 = first; st->b1 = last + 1;
     if (!current) { c->res->task_offset = -1; c->res->task_line = 0; }   /* offsets into an older text: nothing to apply */
     c->src = keep_src;
@@ -3514,6 +3703,26 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
         c.marker_c = CUI_C(ui, TEXT_SECONDARY);
         c.rule_c = CUI_C(ui, BORDER);
         c.rail_c = cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), 0.45f);
+    }
+
+    /* marked ranges: the ones in order and inside the text (opts.highlights), and the tones they are drawn in */
+    c.hlcur = -1; c.cur_a = c.cur_b = -1;
+    if (o->highlights && o->highlight_count > 0) {
+        md_hlr *H = cui__frame_alloc(ui, sizeof *H * (size_t)o->highlight_count);
+        int nh = 0, last = 0;
+        for (int i = 0; i < o->highlight_count; i++) {
+            int a = o->highlights[i].from, b = CUI_MIN(o->highlights[i].to, len);
+            if (a < last || b <= a) continue;
+            H[nh].a = a; H[nh].b = b; H[nh].idx = i;
+            nh++;
+            last = b;
+            if (i + 1 == o->highlight_current) { c.hlcur = i; c.cur_a = a; c.cur_b = b; }
+        }
+        c.hl = H; c.hln = nh;
+        bool dark = ui->mode == CUI_THEME_DARK;
+        cui_color warn = CUI_C(ui, WARNING);
+        c.hl_c = cui_alpha(warn, dark ? 0.26f : 0.32f);
+        c.hl_cur_c = cui_alpha(warn, dark ? 0.46f : 0.62f);
     }
 
     /* wrap at the width of the latest layout (exact when the width is fixed) */
