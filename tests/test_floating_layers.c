@@ -13,7 +13,7 @@
 static int g_checks, g_failed;
 #define CHECK(c) do { g_checks++; if (!(c)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
 
-static bool g_open;
+static bool g_open, g_close;
 
 static void frame(cui_ctx *ui) {
     cui_begin_frame(ui, 1.0f / 60.0f);
@@ -29,6 +29,7 @@ static void frame_pop(cui_ctx *ui, bool open) {
     cui_column(ui, .pad = 20) {
         cui_button(ui, "Menu");
         if (open) cui_popover_open(ui, "pop");
+        if (g_close) cui_popover_close(ui, "pop");
         if (cui_popover_begin(ui, "pop", NULL)) { cui_text(ui, "A popover"); cui_popover_end(ui); }
     }
     cui_end_frame(ui);
@@ -100,7 +101,47 @@ int main(void) {
             CHECK(pl[found].border_w == 1.0f && pl[found].border.a >= 16 && pl[found].border.a <= 20);   /* black at 7% */
             CHECK(pl[found].opacity > 0.99f);
             CHECK(fabsf(pl[found].radius.tl - cui_theme_get(ui)->radius_panel) < 0.01f);
+            /* at rest the box as drawn is the layout's rectangle, with the popover's shadow */
+            CHECK(fabsf(pl[found].drawn.x - pl[found].rect.x) < 0.01f && fabsf(pl[found].drawn.y - pl[found].rect.y) < 0.01f);
+            CHECK(fabsf(pl[found].drawn.w - pl[found].rect.w) < 0.01f && fabsf(pl[found].drawn.h - pl[found].rect.h) < 0.01f);
+            CHECK(fabsf(pl[found].drawn_radius.tl - pl[found].radius.tl) < 0.01f);
+            CHECK(pl[found].elevation == CUI_ELEVATION_FLOATING && pl[found].elevation_alpha == 1.0f);
         }
+    }
+
+    /* opening: the box as drawn grows from under full size, inside the layout's rectangle, and follows the opacity every frame;
+     * closing the same way back */
+    {
+        g_close = true;
+        frame_pop(ui, false);
+        g_close = false;
+        for (int i = 0; i < 90; i++) frame_pop(ui, false);
+        frame_pop(ui, true);
+        float last_w = 0;
+        int seen = 0, grew = 0;
+        for (int i = 0; i < 40; i++) {
+            frame_pop(ui, false);
+            cui_layer_rect pl[16];
+            int n = cui_floating_layers(ui, pl, 16);
+            for (int k = 0; k < n && k < 16; k++) {
+                if (pl[k].full) continue;
+                seen++;
+                const cui_layer_rect *q = &pl[k];
+                if (q->opacity < 0.98f) {
+                    CHECK(q->drawn.w < q->rect.w - 0.01f && q->drawn.h < q->rect.h - 0.01f);   /* smaller than the rest rectangle */
+                    CHECK(q->drawn.w > 0 && q->drawn_radius.tl < q->radius.tl + 0.001f);
+                    float ratio = q->drawn.w / q->rect.w;
+                    CHECK(ratio >= 0.9f && ratio <= 1.0f);                                    /* CUI__ENTER_SCALE .. 1 */
+                    CHECK(fabsf(q->drawn_radius.tl / q->radius.tl - ratio) < 0.001f);        /* the radii scale with it */
+                    CHECK(fabsf((q->drawn.x + q->drawn.w * 0.5f) - (q->rect.x + q->rect.w * 0.5f)) < 0.01f);   /* about its centre... */
+                    CHECK(fabsf(q->drawn.y + q->drawn.h * 0.5f - (q->rect.y + q->rect.h * 0.5f)) <= 6.01f);    /* ...slid by at most 6 pt */
+                    if (q->drawn.w > last_w + 0.0001f) grew++;
+                    last_w = q->drawn.w;
+                    CHECK(q->elevation == CUI_ELEVATION_FLOATING);
+                }
+            }
+        }
+        CHECK(seen > 10 && grew >= 3);
     }
 
     cui_destroy(ui);

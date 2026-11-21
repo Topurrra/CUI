@@ -949,6 +949,19 @@ static void cui__note_panel(cui_ctx *ui, const cui_node *root, cui_layer_rect *l
     l->border = cui_color_of(ui, p->border_color);
     l->border_w = p->border;
     l->opacity = p->opacity;
+    l->drawn = l->panel;
+    l->drawn_radius = l->panel_radius;
+    l->elevation = p->elevation;
+    l->elevation_alpha = p->elevation_alpha;
+}
+
+/* a floating layer's own box as cui__paint_node draws it (scaled about its centre, then moved) */
+static void cui__note_drawn(const cui_node *nd, cui_layer_rect *l) {
+    float s = nd->scale, cx = nd->rect.x + nd->rect.w * 0.5f, cy = nd->rect.y + nd->rect.h * 0.5f;
+    l->drawn = (cui_rect){ cx + (nd->rect.x - cx) * s + nd->tx, cy + (nd->rect.y - cy) * s + nd->ty, nd->rect.w * s, nd->rect.h * s };
+    l->drawn_radius = (cui_corners){ nd->radius.tl * s, nd->radius.tr * s, nd->radius.br * s, nd->radius.bl * s };
+    l->elevation = nd->elevation;
+    l->elevation_alpha = nd->elevation_alpha;
 }
 
 /* cui_floating_layers: the floating roots just laid out, by z (then creation order) like cui__paint */
@@ -977,6 +990,7 @@ static void cui__note_layers(cui_ctx *ui) {
                 l->border = cui_color_of(ui, nd->border_color);
                 l->border_w = nd->border;
                 l->opacity = nd->opacity;
+                cui__note_drawn(nd, l);
             }
         }
         total++;
