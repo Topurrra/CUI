@@ -383,6 +383,13 @@ CUI_API cui_accent cui_get_accent(cui_ctx *ui);
  * changes through cui_set_theme/cui_set_accent animate smoothly. */
 CUI_API cui_theme *cui_theme_get(cui_ctx *ui);
 CUI_API void cui_set_reduced_motion(cui_ctx *ui, bool reduced);
+/* Layer cache, off by default. On, a popover, menu, dialog, sheet or command palette that is
+ * opening or closing is drawn as a group (cui_draw_data.groups): the software renderer draws
+ * it once into a bitmap and then blends that bitmap, scaled, moved and faded, on each frame
+ * of the animation instead of drawing its shadow, body and text again (the panel then fades
+ * as a whole). It draws the bitmap again when the content changes and lets it go when the
+ * animation ends; the bitmaps are bounded (cui_sw_layer_stats). OpenGL draws as before. */
+CUI_API void cui_set_layer_cache(cui_ctx *ui, bool on);
 CUI_API cui_color cui_color_of(cui_ctx *ui, cui_color c);   /* resolves tokens */
 
 /* Text the components show, for another language. CUI keeps the pointer (the
@@ -6247,6 +6254,27 @@ typedef struct cui_draw_cmd {
     uint32_t index_count;
 } cui_draw_cmd;
 
+/* A group (cui_set_layer_cache): a popover, menu or dialog that is animating. Its commands in
+ * cui_draw_data.commands draw it as always, moved, scaled and faded, so a renderer that knows
+ * nothing about groups draws it right. Beside them is the same content at rest (before the
+ * group's scale, offset and opacity): a renderer can draw that once into a bitmap and, while
+ * the group animates, blend the bitmap instead of drawing the commands (the software renderer
+ * does). A point p at rest is at p * scale + (dx, dy) on screen, and the group's opacity applies
+ * to the group as a whole. The rest commands' clips are in rest pixels; indices count from
+ * rest_vertices; index_offset from rest_indices. */
+typedef struct cui_draw_group {
+    cui_id id;                         /* the same on every frame of the animation */
+    int command_offset, command_count; /* its commands in cui_draw_data.commands */
+    const cui_vertex *rest_vertices;
+    int rest_vertex_count;
+    const uint32_t *rest_indices;
+    int rest_index_count;
+    const cui_draw_cmd *rest_commands;
+    int rest_command_count;
+    float scale, dx, dy, opacity;
+    cui_rect clip;                     /* pixels on screen: what the group may cover */
+} cui_draw_group;
+
 typedef struct cui_draw_data {
     const cui_vertex *vertices;
     int vertex_count;
@@ -6257,6 +6285,8 @@ typedef struct cui_draw_data {
     int width_px, height_px;   /* framebuffer size */
     cui_color clear_color;
     cui_texture font_atlas;
+    const cui_draw_group *groups;   /* cui_set_layer_cache: the groups this frame (none without it) */
+    int group_count;
 } cui_draw_data;
 
 /* Valid after cui_end_frame until the next cui_begin_frame. */

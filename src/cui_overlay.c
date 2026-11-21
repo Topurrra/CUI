@@ -125,7 +125,7 @@ bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, floa
     cui_node *n = &ui->nodes[root];
     cui__panel_style(ui, n, pad);
     n->gap = gap;
-    n->flags |= CUI_NF_HIT_OPAQUE;
+    n->flags |= CUI_NF_HIT_OPAQUE | CUI_NF_LAYER;
     if (width > 0) n->w = CUI_PX(width);
     else if (anchor && !p->no_anchor_w && cui__has_prev_rect(ui, anchor)) n->min_w = cui__prev_rect(ui, anchor).w;
     n->min_w = CUI_MAX(n->min_w, menu ? 180.0f : 0.0f);
@@ -862,7 +862,7 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
     pn->elevation_alpha = 1;
     pn->pad[0] = pn->pad[1] = pn->pad[2] = pn->pad[3] = 24;
     pn->gap = 16;
-    pn->flags |= CUI_NF_HIT_OPAQUE;
+    pn->flags |= CUI_NF_HIT_OPAQUE | CUI_NF_LAYER;
     if (kind == 0) {
         pn->w = CUI_PX(st->w > 0 ? st->w : CUI_MIN(width, ui->vw - 32));
         pn->max_h = ui->vh - 48;
@@ -1776,7 +1776,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
     pn->border_color = ui->mode == CUI_THEME_DARK ? CUI_C(ui, BORDER) : cui_alpha(cui__rgba(0, 0, 0, 255), 0.07f);
     pn->radius = CUI_CORNERS(ui->theme.radius_panel);
     pn->elevation = CUI_ELEVATION_FLOATING;
-    pn->flags |= CUI_NF_HIT_OPAQUE | CUI_NF_CLIP;
+    pn->flags |= CUI_NF_HIT_OPAQUE | CUI_NF_CLIP | CUI_NF_LAYER;
     pn->opacity = t;
     pn->scale = CUI__ENTER_SCALE + (1.0f - CUI__ENTER_SCALE) * t;
     pn->ty = (1 - t) * -8;

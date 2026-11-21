@@ -876,7 +876,7 @@ typedef struct {
 
 /* Slants the glyphs drawn since v0 around the baseline: a synthesized italic. */
 static void md_shear(cui_ctx *ui, int v0, float base) {
-    cui_xform x = ui->dl.xform_stack[ui->dl.xform_depth - 1];
+    cui_xform x = cui__draw_xform(ui);
     float by = base * ui->scale * x.scale + x.oy;
     for (int v = v0; v < ui->dl.vtx_count; v++) ui->dl.vtx[v].x += MD_SHEAR * (by - ui->dl.vtx[v].y);
 }
