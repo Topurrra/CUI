@@ -11,7 +11,10 @@
  *     for a group too big for the cache, and let go on the first frame without the group.
  *   - A real popover: a group while it animates, none at rest or after it closed and the bitmap freed
  *     then, hit areas the same as without the cache, incremental frames the same as whole frames, also
- *     with threads.
+ *     with threads (the incremental ones copy back what is under the bitmap from saved tiles: they must
+ *     be pixel for pixel the whole frames, and most tiles under the bitmap must come from the copies).
+ *   - The blends of a scaled bitmap (the first one, SSE2, AVX2) give the same pixels.
+ *   - CUI_LAYER_SNAP: the end of the opening copied, not resampled, still close to the plain drawing.
  * Prints the differences; with --shots DIR writes the plain and the cached pictures as PNG. */
 #include "../src/cui_internal.h"
 #include <cui/cui_render.h>
@@ -282,8 +285,8 @@ static void keep_hits(cui_ctx *ui, hits *o) {
     memcpy(o->h, ui->hits, sizeof *o->h * (size_t)o->n);
 }
 
-static void test_popover(int w, int h, float scale, int threads) {
-    printf("a real popover (%dx%d at %.0fx, %d threads)\n", w, h, (double)scale, threads);
+static void test_popover(int w, int h, float scale, int threads, unsigned flags) {
+    printf("a real popover (%dx%d at %.0fx, %d threads%s)\n", w, h, (double)scale, threads, flags & CUI_LAYER_SNAP ? ", CUI_LAYER_SNAP" : "");
     /* two contexts fed the same frames: one with the cache, one without */
     cui_sw_renderer *sw_c = cui_sw_create(), *sw_p = cui_sw_create(), *sw_whole = cui_sw_create();
     cui_ctx *uc = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw_c), .theme = CUI_THEME_DARK });
@@ -300,6 +303,7 @@ static void test_popover(int w, int h, float scale, int threads) {
     }
     /* the whole-frame renderer draws uc's frames too: it needs the same textures, in the same order */
     cui_set_layer_cache(uc, true);
+    cui_set_layer_cache_flags(uc, flags);
     cui_sw_set_incremental(sw_c, true);
     cui_sw_set_incremental(sw_p, false);
     cui_sw_set_threads(sw_c, threads);
@@ -383,10 +387,14 @@ static void test_popover(int w, int h, float scale, int threads) {
     CHECK(scaled_mean < 0.6);
     CHECK(hit_diffs == 0);
     CHECK(uc->draw_data.group_count == 0);
-    /* incremental against whole, with the cache: one context, two renderers over the same draw data */
+    /* incremental against whole, with the cache: one context, two renderers over the same draw data; then again with
+     * CUI_LAYER_SNAP. The incremental renderer copies back what is under the bitmap from its saved tiles: pixel for pixel
+     * what drawing it gives. */
     cui_sw_destroy(sw_whole);
     sw_whole = NULL;
-    {
+    for (int fl = 0; fl < 2; fl++) {
+        inc_worst = 0;
+        int blend_diffs = 0, blend_checks = 0;
         cui_sw_renderer *inc = cui_sw_create(), *whole = cui_sw_create();
         g_tee[0] = cui_sw_iface(inc);
         g_tee[1] = cui_sw_iface(whole);
@@ -397,6 +405,7 @@ static void test_popover(int w, int h, float scale, int threads) {
         cui_set_viewport(ui, (float)w, (float)h, scale);
         cui_set_reduced_motion(ui, false);
         cui_set_layer_cache(ui, true);
+        cui_set_layer_cache_flags(ui, fl ? CUI_LAYER_SNAP : 0);
         g_bg = cui_image_create(ui, pw, ph, bgpx);
         cui_sw_set_incremental(inc, true);
         cui_sw_set_incremental(whole, false);
@@ -414,11 +423,31 @@ static void test_popover(int w, int h, float scale, int threads) {
                 cui_sw_render(whole, dd, pwh, pw, ph, pw * 4, CUI_SW_BGRA);
                 diff d = compare(pc, pwh, pw, ph);
                 if (d.max > inc_worst) inc_worst = d.max;
+                /* the blends of a scaled bitmap (the first one, SSE2, AVX2 where there is AVX2): the same integers */
+                for (int lv = 0; fl == 0 && lv < 3; lv++) {
+                    cui__sw_test_blend(lv);
+                    cui_sw_render(whole, dd, pp, pw, ph, pw * 4, CUI_SW_BGRA);
+                    cui__sw_test_blend(-1);
+                    if (memcmp(pp, pwh, (size_t)pw * ph * 4)) blend_diffs++;
+                    blend_checks++;
+                }
                 if (i > 3 && !ui->animating) break;
             }
         }
-        printf("  incremental frames with %d threads / whole frames on one: max %d\n", threads, inc_worst);
+        long saved, restored, snapped;
+        cui__sw_under_stats(inc, &saved, &restored, &snapped);
+        size_t held_inc;
+        cui_sw_layer_stats(inc, NULL, &held_inc, NULL);
+        printf("  incremental frames with %d threads%s / whole frames on one: max %d (tiles under the bitmap: %ld saved, %ld copied back; %ld snapped; %zu bytes held after)\n",
+               threads, fl ? ", CUI_LAYER_SNAP" : "", inc_worst, saved, restored, snapped, held_inc);
         CHECK(inc_worst == 0);
+        CHECK(saved > 0 && restored > 4 * saved);
+        CHECK(held_inc == 0);
+        CHECK(fl ? snapped >= 3 : snapped == 0);
+        if (fl == 0) {
+            printf("  the blends of a scaled bitmap against each other: %d of %d frames differ\n", blend_diffs, blend_checks);
+            CHECK(blend_checks >= 30 && blend_diffs == 0);
+        }
         cui_image_destroy(ui, g_bg);
         cui_destroy(ui);
         cui_sw_destroy(inc);
@@ -434,9 +463,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "--shots") && i + 1 < argc) g_shots = argv[++i];
     test_drawn_groups();
-    test_popover(1200, 800, 1, 1);
-    test_popover(900, 600, 2, 4);
-    test_popover(2400, 1500, 1, 4);
+    test_popover(1200, 800, 1, 1, 0);
+    test_popover(900, 600, 2, 4, 0);
+    test_popover(2400, 1500, 1, 4, 0);
+    test_popover(1200, 800, 1, 1, CUI_LAYER_SNAP);
+    test_popover(900, 600, 2, 1, CUI_LAYER_SNAP);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

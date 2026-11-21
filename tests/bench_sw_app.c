@@ -2,10 +2,11 @@
  * long list scrolling cost the whole process (all threads), with either renderer.
  *
  *     cui_bench_sw_app [--renderer software|opengl] [--size WxH] [--scale S] [--cycles N] [--steps N]
- *                      [--threads N] [--no-picture] [--layer-cache]
+ *                      [--threads N] [--no-picture] [--layer-cache] [--snap]
  *
  * --layer-cache turns on cui_set_layer_cache (the popover blended from a bitmap while it animates);
- * the software renderer then also prints how often it drew the bitmap and its memory.
+ * the software renderer then also prints how often it drew the bitmap and its memory. --snap adds
+ * cui_set_layer_cache_flags(CUI_LAYER_SNAP).
  *
  * The window: a toolbar, a page area (a full-size picture stands in for the page while a popover is
  * open, as a browser shows a snapshot of its native page), and a side panel with a virtual list of
@@ -14,8 +15,10 @@
  *   scroll   N wheel steps (default 240) over the list, half down then half up, each waited out
  * For each section it prints frames, wall time, the process CPU (every thread), the UI thread's CPU,
  * and the sums of the frame phases from the frame probe: build (input to the draw list), raster
- * (the renderer) and present (the blit or the swap). Prints; checks nothing. Windows reads the CPU
- * of the process and the thread; elsewhere those columns are 0. */
+ * (the renderer) and present (the blit or the swap), in ms and (Windows) in millions of the UI
+ * thread's cycles, which other processes on the machine do not inflate as much. A step waits until
+ * the animation it started has settled. Prints; checks nothing. Windows reads the CPU of the process
+ * and the thread; elsewhere those columns are 0. */
 #include <cui/cui.h>
 #include <cui/cui_app.h>
 #include "../src/cui_internal.h"
@@ -48,16 +51,23 @@ static void put_env(const char *kv) { putenv((char *)kv); }
 
 /* ---- the frame probe: phase sums ---- */
 static struct {
-    double mark[CUI_PROBE_WAKE + 1];
+    double mark[CUI_PROBE_WAKE + 1], cmark[CUI_PROBE_WAKE + 1];
     double build, raster, present;
+    double cbuild, craster, cpresent;   /* the same in millions of the UI thread's cycles (Windows; steady under load) */
 } P;
+#if defined(_WIN32)
+static double thread_mcycles(void) { ULONG64 c = 0; QueryThreadCycleTime(GetCurrentThread(), &c); return (double)c / 1e6; }
+#else
+static double thread_mcycles(void) { return 0; }
+#endif
 static void probe(void *user, cui_probe_mark m) {
     (void)user;
-    double t = now_ms();
+    double t = now_ms(), c = thread_mcycles();
     P.mark[m] = t;
-    if (m == CUI_PROBE_PRESENT) P.raster += t - P.mark[CUI_PROBE_RENDER];
-    else if (m == CUI_PROBE_DONE) P.present += t - P.mark[CUI_PROBE_PRESENT];
-    else if (m == CUI_PROBE_PAINT_END && P.mark[CUI_PROBE_BEGIN] > 0) P.build += t - P.mark[CUI_PROBE_BEGIN];
+    P.cmark[m] = c;
+    if (m == CUI_PROBE_PRESENT) { P.raster += t - P.mark[CUI_PROBE_RENDER]; P.craster += c - P.cmark[CUI_PROBE_RENDER]; }
+    else if (m == CUI_PROBE_DONE) { P.present += t - P.mark[CUI_PROBE_PRESENT]; P.cpresent += c - P.cmark[CUI_PROBE_PRESENT]; }
+    else if (m == CUI_PROBE_PAINT_END && P.mark[CUI_PROBE_BEGIN] > 0) { P.build += t - P.mark[CUI_PROBE_BEGIN]; P.cbuild += c - P.cmark[CUI_PROBE_BEGIN]; }
 }
 
 /* ---- the window ---- */
@@ -126,7 +136,7 @@ static void frame(cui_ctx *ui) {
 }
 
 /* ---- the run ---- */
-typedef struct { const char *name; int frames; double wall, cpu, ui_cpu, build, raster, present; } section;
+typedef struct { const char *name; int frames; double wall, cpu, ui_cpu, build, raster, present, cbuild, craster, cpresent; } section;
 static void section_begin(section *s, const char *name) {
     memset(s, 0, sizeof *s);
     s->name = name;
@@ -136,17 +146,18 @@ static void section_begin(section *s, const char *name) {
 static void section_end(section *s) {
     s->wall = now_ms() - s->wall; s->cpu = proc_cpu_ms() - s->cpu; s->ui_cpu = thread_cpu_ms() - s->ui_cpu;
     s->build = P.build; s->raster = P.raster; s->present = P.present;
+    s->cbuild = P.cbuild; s->craster = P.craster; s->cpresent = P.cpresent;
 }
 static void section_print(const section *s, int actions) {
-    printf("%-8s %6d %9.0f %9.0f %9.0f %9.1f %9.1f %9.1f %9.1f\n", s->name, s->frames, s->wall, s->cpu, s->ui_cpu,
-           s->build, s->raster, s->present, actions ? s->cpu / actions : 0);
+    printf("%-8s %6d %9.0f %9.0f %9.0f %9.1f %9.1f %9.1f %9.1f | %8.1f %8.1f %8.1f\n", s->name, s->frames, s->wall, s->cpu, s->ui_cpu,
+           s->build, s->raster, s->present, actions ? s->cpu / actions : 0, s->cbuild, s->craster, s->cpresent);
 }
 
 int main(int argc, char **argv) {
     const char *renderer = "software";
     int w = 1200, h = 800, cycles = 6, steps = 240, threads = 0;
     float scale = 0;
-    bool layer_cache = false;
+    bool layer_cache = false, snap = false;
     W.use_picture = true;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--renderer") && i + 1 < argc) renderer = argv[++i];
@@ -157,6 +168,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) threads = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-picture")) W.use_picture = false;
         else if (!strcmp(argv[i], "--layer-cache")) layer_cache = true;
+        else if (!strcmp(argv[i], "--snap")) snap = true;
     }
     bool sw = strcmp(renderer, "opengl") != 0;
     static char env_r[64], env_s[64];
@@ -169,13 +181,14 @@ int main(int argc, char **argv) {
     cui_ctx *ui = cui_app_ui(app);
     cui_set_reduced_motion(ui, false);
     cui_set_layer_cache(ui, layer_cache);
+    cui_set_layer_cache_flags(ui, snap ? CUI_LAYER_SNAP : 0);
     if (threads > 0 && app->sw) cui_sw_set_threads(app->sw, threads);
     cui_set_probe(probe, NULL);
 
     /* states: 0 warm, 1 popover, 2 scroll, 3 done */
     int state = 0, action = 0, since = 0, frames = 0;
     section sec[2];
-    bool waiting = false;
+    bool waiting = false, anim = false;
     while (cui_app_frame(app)) {
         ui = cui_app_ui(app);
         if (!W.pic) {   /* the stand-in for the page: noise-free, like a page (flat areas and text-like stripes) */
@@ -197,7 +210,7 @@ int main(int argc, char **argv) {
         }
         frames++;
         if (state > 0 && state < 3) sec[state - 1].frames++;
-        bool settled = since >= 3 && !ui->animating;
+        bool settled = since >= 3 && !anim;
         since++;
         if (state == 0 && frames >= 30) {
             state = 1; action = 0; since = 0; waiting = false;
@@ -216,6 +229,8 @@ int main(int argc, char **argv) {
             }
         }
         frame(ui);
+        /* still moving: read after the build (cui_begin_frame clears it, and the redraw asked below sets it) */
+        anim = ui->animating;
         if (state == 3) break;
         if (state < 3) cui_request_redraw(ui);
     }
@@ -223,14 +238,18 @@ int main(int argc, char **argv) {
     cui_vec2 sz = cui_app_size(app);
     printf("%s, %.0fx%.0f pt at scale %.2g%s%s, %d popover cycles, %d wheel steps (ms)\n", sw ? "software" : "opengl", sz.x, sz.y,
            (double)cui_dpi_scale(ui), W.use_picture ? "" : ", no picture", layer_cache ? ", layer cache" : "", cycles, steps);
-    printf("%-8s %6s %9s %9s %9s %9s %9s %9s %9s\n", "section", "frames", "wall", "cpu", "ui cpu", "build", "raster", "present", "cpu/act");
+    printf("%-8s %6s %9s %9s %9s %9s %9s %9s %9s | %s\n", "section", "frames", "wall", "cpu", "ui cpu", "build", "raster", "present", "cpu/act",
+           "UI thread Mcycles: build, raster, present");
     section_print(&sec[0], cycles);
     section_print(&sec[1], steps);
     if (layer_cache && app->sw) {
         int rasters;
         size_t bytes, peak;
         cui_sw_layer_stats(app->sw, &rasters, &bytes, &peak);
-        printf("layer cache: %d bitmaps drawn, %zu bytes held now, %zu at most\n", rasters, bytes, peak);
+        long saved, restored, snapped;
+        cui__sw_under_stats(app->sw, &saved, &restored, &snapped);
+        printf("layer cache: %d bitmaps drawn, %zu bytes held now, %zu at most; tiles under them %ld saved, %ld copied back; %ld frames snapped\n",
+               rasters, bytes, peak, saved, restored, snapped);
     }
     cui_image_destroy(ui, W.pic);
     cui_app_destroy(app);

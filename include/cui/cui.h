@@ -390,6 +390,13 @@ CUI_API void cui_set_reduced_motion(cui_ctx *ui, bool reduced);
  * as a whole). It draws the bitmap again when the content changes and lets it go when the
  * animation ends; the bitmaps are bounded (cui_sw_layer_stats). OpenGL draws as before. */
 CUI_API void cui_set_layer_cache(cui_ctx *ui, bool on);
+/* Cheaper frames for the layer cache, each a small change of looks (none by default: 0, as before;
+ * cui_draw_data.layer_flags passes them to the renderer):
+ *   CUI_LAYER_SNAP: a group scaled so little that no pixel of its bitmap would move by more than a
+ *     quarter of a pixel is copied on whole pixels, not resampled (the end of an opening spring: about
+ *     a third of its frames). At most three quarters of a pixel from where it is drawn scaled. */
+enum { CUI_LAYER_SNAP = 1 };
+CUI_API void cui_set_layer_cache_flags(cui_ctx *ui, unsigned flags);
 CUI_API cui_color cui_color_of(cui_ctx *ui, cui_color c);   /* resolves tokens */
 
 /* Text the components show, for another language. CUI keeps the pointer (the
@@ -6329,6 +6336,7 @@ typedef struct cui_draw_data {
     cui_texture font_atlas;
     const cui_draw_group *groups;   /* cui_set_layer_cache: the groups this frame (none without it) */
     int group_count;
+    unsigned layer_flags;           /* cui_set_layer_cache_flags (CUI_LAYER_SNAP...), 0 without */
 } cui_draw_data;
 
 /* Valid after cui_end_frame until the next cui_begin_frame. */

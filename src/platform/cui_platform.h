@@ -43,6 +43,11 @@ struct cui_app {
     int frames;
     cui_window_placement placement;   /* the copy desc.placement points to, when one was given */
     bool fs_hint;              /* cui_app_set_fullscreen(on): the "press F11" toast is due (cui_app_fullscreen_hint) */
+    /* software, desc.present_exposed_part: the part (x0, y0, x1, y1) the system asked to repaint since the last
+     * present, shown with the next frame's change instead of the whole picture */
+    bool force_part;
+    int force_rect[4];
+    int presents_full, presents_part;   /* how many presents copied the whole picture and a part (tests) */
 };
 
 /* Implemented by each backend. */

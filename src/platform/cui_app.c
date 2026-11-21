@@ -286,9 +286,21 @@ void cui__app_render(cui_app *app) {
         CUI__PROBE(CUI_PROBE_PRESENT);
         int dx, dy, dw, dh;
         bool changed = cui_sw_last_damage(app->sw, &dx, &dy, &dw, &dh);
-        if (app->force_present || !app->presented_once || (changed && !cui__plat_present_part(app, app->sw_pixels, w, h, w * 4, dx, dy, dw, dh)))
+        if (app->force_part && !app->force_present) {
+            /* only a part was exposed: it and what changed, as one rectangle */
+            int x0 = CUI_MAX(0, app->force_rect[0]), y0 = CUI_MAX(0, app->force_rect[1]);
+            int x1 = CUI_MIN(w, app->force_rect[2]), y1 = CUI_MIN(h, app->force_rect[3]);
+            if (changed) { x0 = CUI_MIN(x0, dx); y0 = CUI_MIN(y0, dy); x1 = CUI_MAX(x1, dx + dw); y1 = CUI_MAX(y1, dy + dh); }
+            if (x0 < x1 && y0 < y1) { changed = true; dx = x0; dy = y0; dw = x1 - x0; dh = y1 - y0; }
+        }
+        if (app->force_present || !app->presented_once || (changed && !cui__plat_present_part(app, app->sw_pixels, w, h, w * 4, dx, dy, dw, dh))) {
             cui__plat_present(app, app->sw_pixels, w, h, w * 4);
+            app->presents_full++;
+        } else if (changed) {
+            app->presents_part++;
+        }
         app->force_present = false;
+        app->force_part = false;
     }
     app->presented_once = true;
     app->last_present = cui__plat_now();
