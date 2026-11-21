@@ -132,6 +132,12 @@ typedef struct cui_app_desc {
      * frames. The same as calling cui_set_caret_blink(ui, cui_system_caret_blink()) after creating the window. Off:
      * the caret blinks for as long as a field has the focus, as before. */
     bool follow_system_caret;
+    /* Software renderer: when the system asks to repaint only a part of the window (Windows: WM_PAINT's rectangle,
+     * for example where a child window's region shrank), the next frame copies that part and what changed instead
+     * of the whole picture. Helps an app whose child window changes shape while something animates (a browser
+     * cutting popovers out of its page). Off: an exposed part makes the next frame copy the whole picture, as
+     * before. Windows only; ignored elsewhere and with OpenGL. */
+    bool present_exposed_part;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */

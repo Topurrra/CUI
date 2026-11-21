@@ -99,6 +99,10 @@ if(CUI_WITH_APP)
     add_executable(cui_test_fullscreen test_fullscreen.c)
     target_link_libraries(cui_test_fullscreen PRIVATE cui::cui)
     add_test(NAME cui_test_fullscreen COMMAND cui_test_fullscreen)
+
+    add_executable(cui_test_present_part test_present_part.c)   # present_exposed_part: a repainted part copied as a part
+    target_link_libraries(cui_test_present_part PRIVATE cui::cui)
+    add_test(NAME cui_test_present_part COMMAND cui_test_present_part)
 endif()
 
 add_executable(cui_bench bench.c ../examples/gallery_ui.c ../examples/gallery_more.c)

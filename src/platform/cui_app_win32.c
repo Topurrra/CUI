@@ -606,7 +606,20 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
         EndPaint(hwnd, &ps);
-        if (app) app->force_present = true;   /* software: the next frame shows the whole picture, not only what changed */
+        RECT cr;
+        if (app && app->desc.present_exposed_part && app->presented_once && !(w && w->in_size_move) && GetClientRect(hwnd, &cr) &&
+            ps.rcPaint.left < ps.rcPaint.right && ps.rcPaint.top < ps.rcPaint.bottom &&
+            (ps.rcPaint.left > 0 || ps.rcPaint.top > 0 || ps.rcPaint.right < cr.right || ps.rcPaint.bottom < cr.bottom)) {
+            /* a part of the window (a child window's region changed): the next frame shows that part with what changed */
+            if (!app->force_part) {
+                app->force_rect[0] = ps.rcPaint.left; app->force_rect[1] = ps.rcPaint.top;
+                app->force_rect[2] = ps.rcPaint.right; app->force_rect[3] = ps.rcPaint.bottom;
+            } else {
+                app->force_rect[0] = CUI_MIN(app->force_rect[0], (int)ps.rcPaint.left); app->force_rect[1] = CUI_MIN(app->force_rect[1], (int)ps.rcPaint.top);
+                app->force_rect[2] = CUI_MAX(app->force_rect[2], (int)ps.rcPaint.right); app->force_rect[3] = CUI_MAX(app->force_rect[3], (int)ps.rcPaint.bottom);
+            }
+            app->force_part = true;
+        } else if (app) app->force_present = true;   /* software: the next frame shows the whole picture, not only what changed */
         if (w && w->in_size_move) cui__app_live_frame(app);
         cui_request_redraw(ui);
         return 0;

@@ -642,6 +642,7 @@ void cui__draw_text_at(cui_ctx *ui, cui_font font, float size, float x, float y,
  * that knows nothing of groups expects. Hits and the clip stack keep the screen transform. */
 
 void cui_set_layer_cache(cui_ctx *ui, bool on) { if (ui) ui->dl.layer_cache = on; }
+void cui_set_layer_cache_flags(cui_ctx *ui, unsigned flags) { if (ui) ui->dl.layer_flags = flags & CUI_LAYER_SNAP; }
 
 bool cui__group_begin(cui_ctx *ui, cui_id id) {
     cui_draw_list *dl = &ui->dl;
@@ -714,6 +715,7 @@ void cui__groups_publish(cui_ctx *ui, cui_draw_data *dd) {
     cui_draw_list *dl = &ui->dl;
     dd->groups = NULL;
     dd->group_count = 0;
+    dd->layer_flags = dl->layer_cache ? dl->layer_flags : 0;
     if (!dl->group_count) return;
     int none = 0;
     CUI__GROW(ui, dl->gpub, none, dl->gpub_cap, dl->group_count);

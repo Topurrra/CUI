@@ -232,6 +232,11 @@ struct cui_sw_renderer;
 void cui__sw_move_textures(struct cui_sw_renderer *r, const cui_renderer_iface *to);
 /* the last frame: pixels moved by (0: none), and the share of the frame drawn and moved (0 to 1) */
 void cui__sw_last_stats(const struct cui_sw_renderer *r, int *shift, float *drawn, float *moved);
+/* the layer cache so far: tiles under a bitmap saved, and copied back instead of drawn; groups copied on whole
+ * pixels by CUI_LAYER_SNAP instead of resampled (tests) */
+void cui__sw_under_stats(const struct cui_sw_renderer *r, long *saved, long *restored, long *snapped);
+/* tests: the blend of scaled bitmaps, -1 the fastest (default), 0 the first one, 1 SSE2, 2 AVX2 where there is AVX2 */
+void cui__sw_test_blend(int level);
 typedef struct cui_xform { float scale, ox, oy, alpha, tx, ty; } cui_xform;
 
 /* A group of the draw list (cui_set_layer_cache, cui_draw.c): where its rest copy is in the group
@@ -266,6 +271,7 @@ typedef struct cui_draw_list {
     uint32_t *gidx; int gidx_count, gidx_cap;
     cui_draw_cmd *gcmd; int gcmd_count, gcmd_cap;
     cui_draw_group *gpub; int gpub_cap;   /* what cui_draw_data.groups points at */
+    unsigned layer_flags;                 /* cui_set_layer_cache_flags */
 } cui_draw_list;
 
 void cui__draw_reset(cui_ctx *ui);

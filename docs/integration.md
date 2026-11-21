@@ -88,6 +88,16 @@ cui_app *app = cui_app_create(&(cui_app_desc){ .title = "Notes", .follow_system_
 
 `follow_system_caret` is `cui_set_caret_blink(ui, cui_system_caret_blink())`. `cui_system_caret_blink()` is the system's timeout in seconds, or `-1` when its caret does not blink (Windows: a caret blink time of INFINITE), or 5 where the system cannot tell. Typing, moving the caret or focusing a field starts the blink again. Use `cui_set_caret_blink(ui, seconds)` directly for another time (`< 0` never blinks, `0` blinks while focused, the default). It covers text fields, text areas, the code editor and code boxes (the terminal's cursor does not blink in CUI).
 
+### Copying only the part the system asks for
+
+With the software renderer each frame copies to the window only what changed, but a repaint the system asks for (WM_PAINT) made the next frame copy the whole picture. An app whose child window changes shape while something animates (a browser cutting a popover out of its page) gets such a request on every frame, for the part the child no longer covers. Opt in and the next frame copies that part with its own change instead:
+
+```c
+cui_app *app = cui_app_create(&(cui_app_desc){ .title = "Browser", .present_exposed_part = true });
+```
+
+A request for the whole window, the first frame and a resize still copy everything. Windows only; ignored with OpenGL and elsewhere. `tests/test_present_part.c` checks it.
+
 ### Frames only when something changed
 
 On Windows an embedded engine's message pump, an input method window or COM's apartment window can wake the loop many times a second, and every wake used to draw a frame. Opt in and the loop skips the wakes that change nothing:
