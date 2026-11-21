@@ -20,6 +20,8 @@ typedef struct {
     float line_h;
     int line_count;
     cui_text_layout_line *lines;
+    int para_dir;                        /* cui_input_opts.direction (cui_input_use_paragraphs) */
+    int lead_at;                         /* cui_edit_state.lead_at */
 } cui__edit_paint;
 
 static int cui__edit_mask(char *out, int cap, int len_cp) {
@@ -129,9 +131,14 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
             const char *line = p->buf + L->start;
             int ll = L->end - L->start;
             bool bidi = false;   /* cui_input_use_bidi: this line has right-to-left text, drawn in reading order like a label */
+            float ox = 0;        /* cui_input_use_paragraphs: a right-to-left paragraph's lines are right-aligned */
+            bool rtl_line = false;
 #ifdef CUI_TEXT_SHAPING
-            bidi = cui__bidi_wanted(ui, line, ll);
+            cui__ta_line ta;
+            cui__ta_line_info(ui, p->font, p->size, p->buf, p->len, L->start, L->end, p->para_dir, r.w, &ta);
+            bidi = ta.bidi; ox = ta.ox; rtl_line = ta.rtl;
 #endif
+            (void)rtl_line;
             if (p->focused && s1 > s0) {
                 int a0 = CUI_MAX(s0, L->start), a1 = CUI_MIN(s1, L->end);
                 bool extends = s1 > L->end && k < p->line_count - 1;
@@ -145,14 +152,16 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
 #ifdef CUI_TEXT_SHAPING
                     else {   /* a selection over runs of both directions is several pieces; one running past the line's end reaches 4 points beyond it */
                         float xs[2 * 16];
+                        cui__ta_ctx(ui, &ta);
                         int n = cui__bidi_spans(ui, p->font, p->size, line, ll, a0 - L->start, CUI_MAX(a1, a0) - L->start, xs, 16);
-                        if (extends && n > 0) {
+                        cui__ta_ctx_end(ui);
+                        if (extends && n > 0) {   /* in a right-to-left paragraph the line's end is at the left */
                             int far = 0;
-                            for (int i = 1; i < n; i++) if (xs[2 * i + 1] > xs[2 * far + 1]) far = i;
-                            xs[2 * far + 1] += 4;
+                            if (rtl_line) { for (int i = 1; i < n; i++) if (xs[2 * i] < xs[2 * far]) far = i; xs[2 * far] -= 4; }
+                            else { for (int i = 1; i < n; i++) if (xs[2 * i + 1] > xs[2 * far + 1]) far = i; xs[2 * far + 1] += 4; }
                         }
                         for (int i = 0; i < n; i++) {
-                            cui_rect sr = { r.x + xs[2 * i], ly, xs[2 * i + 1] - xs[2 * i], p->line_h };
+                            cui_rect sr = { r.x + ox + xs[2 * i], ly, xs[2 * i + 1] - xs[2 * i], p->line_h };
                             cui_draw_rect(ui, sr, CUI_CORNERS(2), p->selection);
                         }
                     }
@@ -160,7 +169,7 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
                 }
             }
 #ifdef CUI_TEXT_SHAPING
-            if (bidi) cui__bidi_draw(ui, p->font, p->size, r.x, ty, p->text, line, ll);
+            if (bidi) { cui__ta_ctx(ui, &ta); cui__bidi_draw(ui, p->font, p->size, r.x + ox, ty, p->text, line, ll); cui__ta_ctx_end(ui); }
 #endif
             if (!bidi) cui__draw_text_line(ui, p->font, p->size, r.x, ty, p->text, line, ll, false);
             if (p->focused && s0 == s1) {
@@ -171,7 +180,12 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
                     float a = (blink > 0.35f || p->caret_phase < 0.5 || !cui__caret_blinks(ui, p->caret_phase)) ? 1.0f : 0.0f;
                     float cx = r.x + cui__text_width(ui, p->font, p->size, line, p->cursor - L->start, false);
 #ifdef CUI_TEXT_SHAPING
-                    if (bidi) cx = r.x + cui__bidi_caret_x(ui, p->font, p->size, line, ll, p->cursor - L->start);
+                    if (bidi) {
+                        cui__ta_ctx(ui, &ta);
+                        cx = r.x + ox + cui__bidi_caret_x_at(ui, p->font, p->size, line, ll, p->cursor - L->start, p->lead_at == p->cursor);
+                        cui__ta_ctx_end(ui);
+                        if (ox > 0 || ui->input_paras) cx = CUI_MIN(cx, r.x + r.w - 1.5f);   /* at the right edge of a right-aligned line */
+                    }
 #endif
                     cui_rect cr = { roundf(cx * ui->scale) / ui->scale - 0.5f, ty, 1.5f, fh };
                     cui_draw_rect(ui, cr, CUI_CORNERS(0.75f), cui_alpha(p->caret, a));
@@ -339,9 +353,52 @@ typedef struct {
     bool moved, edited, vertical;
 } cui__edit_frame;
 
+#ifdef CUI_TEXT_SHAPING
+/* how wrapped line `ln` is ordered and aligned (cui_input_use_paragraphs) */
+static void cui__ta_info(const cui__edit_frame *c, int ln, cui__ta_line *t) {
+    const cui_text_layout_line *L = &c->lines[ln];
+    cui__ta_line_info(c->ui, c->font, c->size, c->buf, c->len, L->start, L->end, c->e->para_dir, c->area.w, t);
+}
+#endif
+
+/* the x (from the area's left) of the caret at byte offset `off` of wrapped line `ln` */
+static float cui__ta_caret(const cui__edit_frame *c, int ln, int off) {
+    cui_ctx *ui = c->ui;
+    const cui_text_layout_line *L = &c->lines[ln];
+#ifdef CUI_TEXT_SHAPING
+    cui__ta_line t;
+    cui__ta_info(c, ln, &t);
+    if (t.bidi) {
+        cui__ta_ctx(ui, &t);
+        float x = t.ox + cui__bidi_caret_x_at(ui, c->font, c->size, c->buf + L->start, L->end - L->start, off - L->start, c->e->lead_at == off);
+        cui__ta_ctx_end(ui);
+        return x;
+    }
+#endif
+    return cui__text_width(ui, c->font, c->size, c->buf + L->start, off - L->start, false);
+}
+
+/* the byte offset of wrapped line `ln` nearest to x (from the area's left) */
+static int cui__ta_hit(const cui__edit_frame *c, int ln, float x) {
+    cui_ctx *ui = c->ui;
+    const cui_text_layout_line *L = &c->lines[ln];
+#ifdef CUI_TEXT_SHAPING
+    cui__ta_line t;
+    cui__ta_info(c, ln, &t);
+    if (t.bidi) {
+        cui__ta_ctx(ui, &t);
+        int pos = L->start + cui__bidi_hit(ui, c->font, c->size, c->buf + L->start, L->end - L->start, x - t.ox);
+        cui__ta_ctx_end(ui);
+        return pos;
+    }
+#endif
+    return L->start + cui__text_hit(ui, c->font, c->size, c->buf + L->start, L->end - L->start, x);
+}
+
 /* the caret goes to `to`; without Shift the selection collapses onto it */
 static void cui__edit_move(cui__edit_frame *c, int to) {
     c->e->cursor = to;
+    c->e->lead_at = -1;
     if (!c->shift) c->e->anchor = to;
     c->moved = true;
 }
@@ -389,12 +446,7 @@ static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
         int ln = (int)floorf(y / c->line_h);
         ln = CUI_CLAMP(ln, 0, c->nlines - 1);
         cui_text_layout_line *L = &c->lines[ln];
-#ifdef CUI_TEXT_SHAPING
-        if (cui__bidi_wanted(ui, buf + L->start, L->end - L->start))
-            pos = L->start + cui__bidi_hit(ui, c->font, c->size, buf + L->start, L->end - L->start, ui->mx - c->area.x);
-        else
-#endif
-        pos = L->start + cui__text_hit(ui, c->font, c->size, buf + L->start, L->end - L->start, ui->mx - c->area.x);
+        pos = cui__ta_hit(c, ln, ui->mx - c->area.x);
         if (pos > L->end) pos = L->end;
         if (ln < c->nlines - 1 && pos == L->end && L->end == c->lines[ln + 1].start && pos > L->start) pos = cui__utf8_prev(buf, pos);
     }
@@ -414,6 +466,59 @@ static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
     }
     ui->caret_time = ui->time;
     e->preferred_x = -1;
+    e->lead_at = -1;
+}
+
+/* with cui_input_use_paragraphs: is the line at byte offset `off` right to left? (then Left and Right swap their meaning for a selection) */
+static bool cui__ta_rtl_at(const cui__edit_frame *c, int off) {
+#ifdef CUI_TEXT_SHAPING
+    if (c->multiline && c->ui->input_paras && c->nlines > 0) {
+        cui__ta_line t;
+        cui__ta_info(c, cui__line_of(c->lines, c->nlines, off), &t);
+        return t.rtl;
+    }
+#else
+    (void)c; (void)off;
+#endif
+    return false;
+}
+
+/* Left (dir -1) or Right (dir +1) with cui_input_use_paragraphs, in a line with right-to-left text: the caret goes to the
+ * neighbouring place on the screen. At the line's edge it goes on to the next line's first place (the way the text reads on:
+ * Right in a left-to-right paragraph, Left in a right-to-left one) or back to the previous line's last. False: not this
+ * case, the caller takes the logical step. */
+static bool cui__ta_visual_move(cui__edit_frame *c, int dir) {
+#ifdef CUI_TEXT_SHAPING
+    cui_ctx *ui = c->ui;
+    if (!c->multiline || !ui->input_paras || c->nlines <= 0) return false;
+    int cur = c->e->cursor;
+    int ln = cui__line_of(c->lines, c->nlines, cur);
+    cui__ta_line t;
+    cui__ta_info(c, ln, &t);
+    if (!t.bidi) return false;
+    const cui_text_layout_line *L = &c->lines[ln];
+    int max_off = L->end - L->start;
+    /* a wrapped line's end is the next line's start: the caret is shown there */
+    if (ln < c->nlines - 1 && L->end == c->lines[ln + 1].start && max_off > 0) max_off = cui__utf8_prev(c->buf + L->start, max_off);
+    bool lead = false;
+    cui__ta_ctx(ui, &t);
+    int to = cui__bidi_step(ui, c->font, c->size, c->buf + L->start, L->end - L->start, max_off, cur - L->start,
+                            c->e->lead_at == cur, dir, &lead);
+    cui__ta_ctx_end(ui);
+    if (to >= 0) { cui__edit_move(c, L->start + to); c->e->lead_at = lead ? L->start + to : -1; return true; }
+    if ((dir > 0) != t.rtl) {   /* on to the next line */
+        cui__edit_move(c, ln + 1 < c->nlines ? c->lines[ln + 1].start : L->end);
+    } else if (ln > 0) {        /* back to the previous line's last place (a wrapped line's end is shown on this one) */
+        const cui_text_layout_line *P = &c->lines[ln - 1];
+        int back = P->end;
+        if (back == L->start && back > P->start) back = cui__utf8_prev(c->buf, back);
+        cui__edit_move(c, back);
+    } else cui__edit_move(c, cur);
+    return true;
+#else
+    (void)c; (void)dir;
+    return false;
+#endif
 }
 
 /* arrows, Home, End and select all */
@@ -425,11 +530,13 @@ static void cui__edit_move_keys(cui__edit_frame *c) {
     bool shift = c->shift, word_mod = c->word_mod, line_mod = c->line_mod;
     int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
     for (int rep = cui_key_pressed(ui, CUI_KEY_LEFT) ? ui->kpressed[CUI_KEY_LEFT] : 0; rep > 0; rep--) {
-        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s0; c->moved = true; continue; }
+        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = cui__ta_rtl_at(c, e->cursor) ? s1 : s0; c->moved = true; continue; }
+        if (!word_mod && !line_mod && cui__ta_visual_move(c, -1)) continue;
         cui__edit_move(c, line_mod ? 0 : word_mod ? cui__word_left(buf, e->cursor) : cui__utf8_prev(buf, e->cursor));
     }
     for (int rep = cui_key_pressed(ui, CUI_KEY_RIGHT) ? ui->kpressed[CUI_KEY_RIGHT] : 0; rep > 0; rep--) {
-        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = s1; c->moved = true; continue; }
+        if (!shift && s1 > s0 && !word_mod) { e->cursor = e->anchor = cui__ta_rtl_at(c, e->cursor) ? s0 : s1; c->moved = true; continue; }
+        if (!word_mod && !line_mod && cui__ta_visual_move(c, 1)) continue;
         cui__edit_move(c, line_mod ? len : word_mod ? cui__word_right(buf, len, e->cursor) : cui__utf8_next(buf, len, e->cursor));
     }
     c->vertical = c->multiline && (cui_key_pressed(ui, CUI_KEY_UP) || cui_key_pressed(ui, CUI_KEY_DOWN));
@@ -438,14 +545,16 @@ static void cui__edit_move_keys(cui__edit_frame *c) {
         int nlines = c->nlines;
         int ln = cui__line_of(lines, nlines, e->cursor);
         cui_text_layout_line *L = &lines[ln];
-        float x = e->preferred_x >= 0 ? e->preferred_x : cui__text_width(ui, c->font, c->size, buf + L->start, e->cursor - L->start, false);
+        (void)L;
+        /* the x on the screen (a right-to-left paragraph's lines are right-aligned and ordered by their glyphs), kept over several lines */
+        float x = e->preferred_x >= 0 ? e->preferred_x : cui__ta_caret(c, ln, e->cursor);
         int dir = cui_key_pressed(ui, CUI_KEY_UP) ? -1 : 1;
         int target = ln + dir;
         if (target < 0) cui__edit_move(c, 0);
         else if (target >= nlines) cui__edit_move(c, len);
         else {
             cui_text_layout_line *T = &lines[target];
-            int pos = T->start + cui__text_hit(ui, c->font, c->size, buf + T->start, T->end - T->start, x);
+            int pos = cui__ta_hit(c, target, x);
             if (target < nlines - 1 && pos == T->end && T->end == lines[target + 1].start && pos > T->start) pos = cui__utf8_prev(buf, pos);
             cui__edit_move(c, pos);
         }
@@ -572,12 +681,7 @@ static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *r
         if (!c->multiline) cr.x = area.x + cui__x_at(ui, &c->measure, c->buf, len, e->cursor) - e->scroll_x;
         else if (c->nlines > 0) {   /* the caret's line, so the candidate list opens under it, not under the whole area */
             int ln = cui__line_of(c->lines, c->nlines, e->cursor);
-            const cui_text_layout_line *L = &c->lines[ln];
-            cr.x = area.x + cui__text_width(ui, c->font, c->size, c->buf + L->start, e->cursor - L->start, false);
-#ifdef CUI_TEXT_SHAPING
-            if (cui__bidi_wanted(ui, c->buf + L->start, L->end - L->start))
-                cr.x = area.x + cui__bidi_caret_x(ui, c->font, c->size, c->buf + L->start, L->end - L->start, e->cursor - L->start);
-#endif
+            cr.x = area.x + cui__ta_caret(c, ln, e->cursor);
             cr.y = area.y + (float)ln * c->line_h - e->scroll_y;
             cr.h = c->line_h;
         }
@@ -642,7 +746,7 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
             res.blurred = true;
         }
     }
-    if (c.edited) res.changed = true;
+    if (c.edited) { res.changed = true; e->lead_at = -1; }
     if (c.edited || c.moved) ui->caret_time = ui->time;
     if (c.edited) e->last_cursor = e->cursor;
     if ((c.edited || c.moved) && !c.vertical) e->preferred_x = -1;
@@ -676,6 +780,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     if (!e->init) {
         e->init = true;
         e->preferred_x = -1;
+        e->lead_at = -1;
         cui__state_set_dtor(ui, id, cui__edit_dtor);
         if (o->autofocus) ui->focus = id;
     }
@@ -702,6 +807,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     float line_h = size * (size > 18 ? 1.3f : 1.5f);
     cui_rect area = cui__prev_rect(ui, area_id);
     bool password = o->password && !e->show_password;
+    e->para_dir = o->direction;
     cui__edit_result er = cui__edit_logic(ui, id, e, buf, cap, multiline, password, o->read_only || disabled, area,
                                           font, size, line_h, rf);
     float wheel = multiline && !disabled && area.h > 0 ? cui__take_vertical_wheel(ui, area_id) : 0;
@@ -797,6 +903,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     p->caret = cui__emphasis(ui);
     p->selection = cui__selection_color(ui);
     p->line_h = line_h;
+    p->para_dir = o->direction; p->lead_at = e->lead_at;
     if (multiline) {
         cui_rect a = area;
         p->line_count = cui__edit_lines(ui, font, size, p->buf, len, a.w > 0 ? a.w : 200, &p->lines);

@@ -1157,22 +1157,70 @@ static float cui__shape_run(cui_ctx *ui, cui_font font, float size, const char *
  * spread evenly across it. A caret takes the trailing edge of the character before it. */
 typedef struct { float l, r; int start, end; bool rtl; } cui__bidi_cluster;
 
-typedef struct { cui_direction dir; bool unshaped; const char *para; } cui__bidi_saved;
-static cui__bidi_saved cui__bidi_enter(cui_ctx *ui) {
-    cui__bidi_saved s = { ui->text_direction, ui->text_unshaped, ui->text_paragraph };
-    ui->text_direction = CUI_DIRECTION_LTR; ui->text_unshaped = false; ui->text_paragraph = NULL;
+typedef struct { cui_direction dir; bool unshaped; const char *para; int para_len; } cui__bidi_saved;
+/* a text area line (cui__ta_ctx) is shaped inside its paragraph, with the paragraph's base direction; anything else as one
+ * left-to-right paragraph by itself */
+static cui__bidi_saved cui__bidi_enter_as(cui_ctx *ui, bool in_paragraph) {
+    cui__bidi_saved s = { ui->text_direction, ui->text_unshaped, ui->text_paragraph, ui->text_paragraph_len };
+    ui->text_unshaped = false;
+    if (in_paragraph && ui->bidi_para) {
+        ui->text_direction = ui->bidi_para_dir ? CUI_DIRECTION_RTL : CUI_DIRECTION_LTR;
+        ui->text_paragraph = ui->bidi_para; ui->text_paragraph_len = ui->bidi_para_len;
+    } else {
+        ui->text_direction = CUI_DIRECTION_LTR; ui->text_paragraph = NULL;
+    }
     return s;
 }
+static cui__bidi_saved cui__bidi_enter(cui_ctx *ui) { return cui__bidi_enter_as(ui, true); }
 static void cui__bidi_leave(cui_ctx *ui, cui__bidi_saved s) {
-    ui->text_direction = s.dir; ui->text_unshaped = s.unshaped; ui->text_paragraph = s.para;
+    ui->text_direction = s.dir; ui->text_unshaped = s.unshaped; ui->text_paragraph = s.para; ui->text_paragraph_len = s.para_len;
 }
 
 bool cui__bidi_wanted(cui_ctx *ui, const char *text, int len) {
     if (!ui->input_bidi || !text || len <= 0) return false;
-    cui__bidi_saved s = cui__bidi_enter(ui);
+    cui__bidi_saved s = cui__bidi_enter_as(ui, false);
     bool want = cui__text_needs_shaping(ui, text, len);
     cui__bidi_leave(ui, s);
     return want;
+}
+
+/* ---- text areas as paragraphs (cui_input_use_paragraphs) ---- */
+
+void cui__ta_ctx(cui_ctx *ui, const cui__ta_line *t) {
+    ui->bidi_para = t->para; ui->bidi_para_len = t->plen; ui->bidi_para_dir = t->dir;
+}
+void cui__ta_ctx_end(cui_ctx *ui) { ui->bidi_para = NULL; ui->bidi_para_len = 0; ui->bidi_para_dir = 0; }
+
+/* the first strong character decides, looking at most 4 KB in; none found: left to right */
+static int cui__para_first_strong(const char *p, int len) {
+    for (int at = 0; at < len && at < 4096;) {
+        uint32_t cp;
+        at += cui__utf8_decode(p + at, len - at, &cp);
+        int d = cui__bidi_strong_direction(cp);
+        if (d >= 0) return d;
+    }
+    return 0;
+}
+
+void cui__ta_line_info(cui_ctx *ui, cui_font font, float size, const char *buf, int len, int ls, int le, int field_dir, float area_w, cui__ta_line *out) {
+    memset(out, 0, sizeof *out);
+    if (!ui->input_bidi) return;
+    if (!ui->input_paras) { out->bidi = cui__bidi_wanted(ui, buf + ls, le - ls); return; }
+    int ps = ls, pe = le;
+    while (ps > 0 && buf[ps - 1] != '\n') ps--;
+    while (pe < len && buf[pe] != '\n') pe++;
+    int dir = field_dir == CUI_DIRECTION_RTL ? 1 : field_dir == CUI_DIRECTION_LTR ? 0 : cui__para_first_strong(buf + ps, pe - ps);
+    out->rtl = dir == 1;
+    out->dir = dir;
+    out->bidi = out->rtl || cui__bidi_wanted(ui, buf + ls, le - ls);
+    if (!out->bidi) return;
+    out->para = buf + ps; out->plen = pe - ps;
+    if (out->rtl) {
+        cui__ta_ctx(ui, out);
+        float w = le > ls ? cui__bidi_width(ui, font, size, buf + ls, le - ls) : 0;
+        cui__ta_ctx_end(ui);
+        out->ox = CUI_MAX(0, area_w - w);
+    }
 }
 
 /* the clusters of text in logical order, in frame memory; returns their count */
@@ -1213,14 +1261,20 @@ static float cui__bidi_at(const cui__bidi_cluster *k, int off) {
     return lead + (trail - lead) * (float)(off - k->start) / (float)CUI_MAX(1, k->end - k->start);
 }
 
-float cui__bidi_caret_x(cui_ctx *ui, cui_font font, float size, const char *text, int len, int off) {
+/* lead: where a run boundary has two places for the caret, the one at the leading edge of the character after it (else the
+ * trailing edge of the one before) */
+float cui__bidi_caret_x_at(cui_ctx *ui, cui_font font, float size, const char *text, int len, int off, bool lead) {
     cui__bidi_cluster *c;
     int n = cui__bidi_clusters(ui, font, size, text, len, &c);
     if (!n) return 0;
     if (off <= 0) return cui__bidi_at(&c[0], 0);
     int i = 0;
     while (i + 1 < n && c[i].end < off) i++;
+    if (lead && i + 1 < n && c[i].end == off) i++;
     return cui__bidi_at(&c[i], CUI_MIN(off, c[i].end));
+}
+float cui__bidi_caret_x(cui_ctx *ui, cui_font font, float size, const char *text, int len, int off) {
+    return cui__bidi_caret_x_at(ui, font, size, text, len, off, false);
 }
 
 int cui__bidi_hit(cui_ctx *ui, cui_font font, float size, const char *text, int len, float x) {
@@ -1271,6 +1325,35 @@ int cui__bidi_spans(cui_ctx *ui, cui_font font, float size, const char *text, in
     return count;
 }
 
+/* The neighbouring caret place on the screen. Every character boundary has one place (the trailing edge of the character
+ * before it) and, between runs, a second (the leading edge of the one after it): both are candidates. *lead_out says which
+ * the result is, for cui__bidi_caret_x_at. */
+int cui__bidi_step(cui_ctx *ui, cui_font font, float size, const char *text, int len, int max_off, int off, bool lead, int dir, bool *lead_out) {
+    cui__bidi_cluster *c;
+    *lead_out = false;
+    int n = cui__bidi_clusters(ui, font, size, text, len, &c);
+    if (!n || len > 4000) return -1;
+    float cur = cui__bidi_caret_x_at(ui, font, size, text, len, off, lead);
+    int best = -1;
+    bool best_lead = false;
+    float bx = 0;
+    int i = 0;
+    for (int o = 0; o <= len && o <= max_off;) {
+        while (i + 1 < n && c[i].end < o) i++;
+        for (int v = 0; v < 2; v++) {
+            if (v && (o <= 0 || i + 1 >= n || c[i].end != o)) break;
+            float x = cui__bidi_at(&c[v ? i + 1 : i], v ? c[i + 1].start : CUI_MIN(o, c[i].end));
+            if (dir < 0 ? x < cur - 0.01f : x > cur + 0.01f) {
+                if (best < 0 || (dir < 0 ? x > bx : x < bx)) { best = o; bx = x; best_lead = v != 0; }
+            }
+        }
+        if (o >= len) break;
+        o = cui__utf8_next(text, len, o);
+    }
+    *lead_out = best_lead;
+    return best;
+}
+
 float cui__bidi_width(cui_ctx *ui, cui_font font, float size, const char *text, int len) {
     cui__bidi_saved s = cui__bidi_enter(ui);
     float w = cui__text_width(ui, font, size, text, len, false);
@@ -1288,6 +1371,14 @@ void cui__bidi_draw(cui_ctx *ui, cui_font font, float size, float x, float y, cu
 void cui_input_use_bidi(cui_ctx *ui, bool on) {
 #ifdef CUI_TEXT_SHAPING
     ui->input_bidi = on;
+#else
+    (void)ui; (void)on;
+#endif
+}
+
+void cui_input_use_paragraphs(cui_ctx *ui, bool on) {
+#ifdef CUI_TEXT_SHAPING
+    ui->input_paras = on;
 #else
     (void)ui; (void)on;
 #endif

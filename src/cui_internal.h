@@ -180,6 +180,18 @@ int cui__bidi_hit(cui_ctx *ui, cui_font font, float size, const char *text, int 
 int cui__bidi_spans(cui_ctx *ui, cui_font font, float size, const char *text, int len, int s0, int s1, float *xs, int max);
 float cui__bidi_width(cui_ctx *ui, cui_font font, float size, const char *text, int len);
 void cui__bidi_draw(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color, const char *text, int len);
+/* text area lines with cui_input_use_paragraphs: what one wrapped line [ls, le) of buf needs. The line belongs to the paragraph
+ * between newlines; the paragraph's base direction (the field's explicit one, else the first strong character) orders it, and
+ * a right-to-left paragraph is right-aligned (ox: the line's left edge from the area's left). cui__ta_ctx makes the cui__bidi_*
+ * calls that follow it use the paragraph (call cui__ta_ctx_end after them); without the option it is the old per-line state. */
+typedef struct cui__ta_line { bool bidi, rtl; float ox; const char *para; int plen, dir; } cui__ta_line;
+void cui__ta_line_info(cui_ctx *ui, cui_font font, float size, const char *buf, int len, int ls, int le, int field_dir, float area_w, cui__ta_line *out);
+void cui__ta_ctx(cui_ctx *ui, const cui__ta_line *t);
+void cui__ta_ctx_end(cui_ctx *ui);
+/* the offset one step to the left (dir < 0) or right (dir > 0) of off on the screen, over the offsets 0..max_off of the line;
+ * -1 when there is none (lead: the caret is at the leading edge of the character at off, see cui__bidi_caret_x_at) */
+int cui__bidi_step(cui_ctx *ui, cui_font font, float size, const char *text, int len, int max_off, int off, bool lead, int dir, bool *lead_out);
+float cui__bidi_caret_x_at(cui_ctx *ui, cui_font font, float size, const char *text, int len, int off, bool lead);
 #endif
 /* Glyph metrics for layout, in points. */
 float cui__font_line_height(cui_ctx *ui, cui_font font, float size);
@@ -696,6 +708,9 @@ struct cui_ctx {
     int text_paragraph_len;
     cui_direction text_direction;
     bool input_bidi;                /* cui_input_use_bidi: text fields draw right-to-left text in reading order */
+    bool input_paras;               /* cui_input_use_paragraphs: text areas order and align each paragraph by its own direction */
+    const char *bidi_para;          /* set around the cui__bidi_* calls for one text area line (cui__ta_ctx) */
+    int bidi_para_len, bidi_para_dir;
 #endif
     bool text_unshaped;             /* editing keeps logical glyph positions */
     cui_font_data *fonts; int font_count, font_cap;
@@ -919,6 +934,8 @@ typedef struct cui_edit_state {
     bool had_focus;
     bool init;
     bool show_password;
+    int lead_at;               /* the caret at this offset sits at the leading edge of the character after it (cui__bidi_caret_x_at); -1: nowhere */
+    int para_dir;              /* text area with cui_input_use_paragraphs: the field's cui_input_opts.direction (set every frame) */
 } cui_edit_state;
 void cui__edit_attach(cui_ctx *ui, cui_id id, cui_edit_state *e);   /* once per state: the history is freed with it */
 /* Snapshot before an edit. kind: 1 insert, 2 delete, 3 other; edits of the
