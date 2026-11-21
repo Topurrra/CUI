@@ -2050,6 +2050,7 @@ CUI_API bool cui_json_view_ex(cui_ctx *ui, const char *id, const char *json, con
  * view moves to keep what is on screen in place when blocks above it turn out
  * taller or shorter. Comparing the text with its copy costs about a millisecond
  * per 10 MB a frame; .revision skips even that. */
+typedef struct cui_markdown_range { int from, to; } cui_markdown_range;   /* bytes [from, to) of the text */
 typedef struct cui_markdown_opts {
     int _;
     cui_size width;            /* default fill */
@@ -2086,6 +2087,16 @@ typedef struct cui_markdown_opts {
      * Set, a remote source asks here first and then .resolve_image. */
     bool (*resolve_pixels)(const char *src, void *user, int *w, int *h, const void **rgba);
     void *pixels_user;         /* passed to resolve_pixels */
+    /* Marked text (find in page): `highlights` points at `highlight_count` byte ranges of the text, in ascending order and
+     * not overlapping (one that is empty, out of order or past the end is skipped). Each is drawn under its text in the
+     * theme's warning tone; the range `highlight_current` (1 based, 0: none) is drawn stronger, and the result reports
+     * where it is (highlight_y), so the app can scroll it into view exactly. Running text, list items, quotes, callouts
+     * and table cells are drawn marked; a code block, a diagram and a table header of a .no_select view are not (a code
+     * block still reports its place, to the line). Unset (count 0): nothing changes. The array only has to stay valid
+     * for the call. A big text pays nothing for ranges in blocks it does not build. */
+    const cui_markdown_range *highlights;
+    int highlight_count;
+    int highlight_current;
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */
@@ -2107,6 +2118,12 @@ typedef struct cui_markdown_result {
     bool task_checked;         /* the state the box was toggled to */
     float height;              /* height of the view in the latest layout */
     bool copied;               /* Ctrl+C put the selected text on the clipboard this frame */
+    /* The current highlight (cui_markdown_opts.highlight_current), from the latest layout. highlight_found is false while
+     * its place is not known (the first frame; a block not laid out yet). highlight_y is the top of its line relative to
+     * the top of the view, in points (as cui_markdown_heading.y). highlight_exact is false when the place is only an
+     * estimate because the block is not built yet (a big text): scroll there, and it is exact a frame or two later. */
+    bool highlight_found, highlight_exact;
+    float highlight_y;
 } cui_markdown_result;
 CUI_API cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id, const char *text, const cui_markdown_opts *opts);
 /* Writes a reported task toggle into text ('x' or ' ' between the brackets).

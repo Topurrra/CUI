@@ -255,6 +255,9 @@ add_test(NAME cui_test_editor_jobs COMMAND cui_test_editor_jobs)
 add_executable(cui_test_markdown_big test_markdown_big.c)   # the markdown view's big path against the small one
 target_link_libraries(cui_test_markdown_big PRIVATE cui::cui)
 add_test(NAME cui_test_markdown_big COMMAND cui_test_markdown_big ${CMAKE_SOURCE_DIR}/docs)
+add_executable(cui_test_markdown_highlight test_markdown_highlight.c)   # marked ranges (find in page): drawing, place, big texts
+target_link_libraries(cui_test_markdown_highlight PRIVATE cui::cui)
+add_test(NAME cui_test_markdown_highlight COMMAND cui_test_markdown_highlight)
 
 # Windows rendering probe: what a window costs with OpenGL, Direct3D 11 and GDI (see the file's header).
 option(CUI_BUILD_RENDER_PROBE "Build the Windows rendering probe (OpenGL against Direct3D 11)" OFF)
