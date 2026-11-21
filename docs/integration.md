@@ -319,6 +319,21 @@ lines stay left-aligned and its Up and Down keys keep their logical columns. Pas
 fields draw their dots exactly as before (the dots have no direction). IME
 composition shown inside the text is unchanged.
 
+Text areas can also work as bidi paragraphs: `cui_input_use_paragraphs(ui, true)` (with
+`cui_input_use_bidi`). A paragraph is the text between newlines. Its base direction is
+`cui_input_opts.direction` (`CUI_DIRECTION_LTR` or `CUI_DIRECTION_RTL`) or, by default,
+its first strong character (none: left to right); all its wrapped lines are ordered by that one
+resolution, so a line that wraps inside a right-to-left run stays right, and a right-to-left
+paragraph is right-aligned. Up and Down keep the caret's x position on the screen from line
+to line, whatever the lines' direction. In a line with right-to-left text Left and Right move to
+the neighbouring place on the screen (a boundary between a left-to-right and a right-to-left
+run has two places; the caret remembers which one it is at), at a line's edge on to the next
+line's first place or back to the previous one's last (right-to-left paragraph: Left goes on);
+word jumps, Home and End stay logical. The wrap still measures the text unshaped (joined
+Arabic is a little narrower than measured). IME composition is drawn by the system at the
+rectangle `set_text_input_rect` reports, which follows the caret; CUI does not draw it inside the text.
+Off, nothing changes. `test_bidi_edit --bench-area` times a 150 KB mixed document.
+
 ![Hebrew and Arabic titles, a list and two fields with cui_input_use_bidi](images/components/rtl-chrome.png)
 
 `cui_test_bidi_edit` checks the visual order, Arabic joining, and the caret, hit and

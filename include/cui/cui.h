@@ -453,6 +453,20 @@ CUI_API void cui_font_use_system_fallback(cui_ctx *ui, bool on);
  * paragraph). Password fields draw their dots as before. Needs a CUI_TEXT_SHAPING build (otherwise the
  * call does nothing) and a font with the script (cui_font_use_system_fallback on Windows). */
 CUI_API void cui_input_use_bidi(cui_ctx *ui, bool on);
+/* Text areas as bidi paragraphs (needs cui_input_use_bidi too; off by default, then a text area behaves as described
+ * above). A paragraph is the text between newlines. Each takes its base direction from the field's
+ * cui_input_opts.direction (LTR or RTL), else from its first strong character (Latin: left to right; Hebrew, Arabic:
+ * right to left; none: left to right), and all of its wrapped lines are ordered by that one resolution, so a line
+ * that wraps inside a right-to-left run stays correct. A right-to-left paragraph is right-aligned. The caret
+ * and selection are drawn at the glyphs' places; a selection over runs of both directions is several pieces. Up and Down keep the
+ * caret's x position on the screen (not its column in the text) from line to line, whatever the lines' direction.
+ * Left and Right move to the neighbouring position on the screen in lines with right-to-left text (and at the line's
+ * end go on to the neighbouring character in the text). Lines of a left-to-right paragraph without right-to-left
+ * text, and text areas in an app that does not turn this on, are unchanged. The wrap itself still measures the
+ * text unshaped. IME composition is shown by the system at cui_platform_iface.set_text_input_rect, which follows
+ * the caret. */
+#define CUI_INPUT_PARAGRAPHS 1
+CUI_API void cui_input_use_paragraphs(cui_ctx *ui, bool on);
 
 typedef struct cui_text_metrics { float width, height, ascent, descent, line_height; } cui_text_metrics;
 /* CUI_TEXT_SHAPING optionally shapes static RTL lines; see docs/integration.md.
@@ -746,6 +760,8 @@ typedef struct cui_input_opts {
     float height;              /* textarea: height in points; negative fills the space */
     const char *prefix;        /* muted text before the value, e.g. "$" or "https://" */
     const char *suffix;        /* muted text after the value, e.g. "USD" or "kg" */
+    cui_direction direction;   /* textarea with cui_input_use_paragraphs: CUI_DIRECTION_LTR or _RTL fixes every paragraph's base
+                                  direction (an empty one too); INHERIT and AUTO take it from each paragraph's first strong character */
 } cui_input_opts;
 
 /* Single line text field. Returns CUI_CHANGED / CUI_SUBMITTED (Enter) flags. */
