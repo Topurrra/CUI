@@ -42,6 +42,7 @@ struct cui_app {
     int screenshot_frames;
     int frames;
     cui_window_placement placement;   /* the copy desc.placement points to, when one was given */
+    bool fs_hint;              /* cui_app_set_fullscreen(on): the "press F11" toast is due (cui_app_fullscreen_hint) */
 };
 
 /* Implemented by each backend. */
@@ -81,6 +82,22 @@ double cui__plat_now(void);
 int cui__plat_system_dark(void);                      /* -1 unknown, 0 light, 1 dark */
 bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap);
 bool cui__plat_open_url(const char *url);
+
+/* Opt-in costs saved at rest (cui_app.h). Backends that cannot return false and do nothing; the shared code then
+ * treats every frame as due. */
+float cui__plat_caret_blink(void);
+bool cui__plat_frames_on_change(cui_app *app, bool on);
+void cui__plat_arm(cui_app *app);
+bool cui__plat_frame_due(cui_app *app);        /* false: skip this frame (only with frames_on_change) */
+void cui__plat_request_frame(cui_app *app);
+long cui__plat_frames_skipped(cui_app *app);
+bool cui__plat_schedule(cui_app *app, int64_t ms, void (*tick)(void *), void *user);
+bool cui__plat_set_fullscreen(cui_app *app, bool on);
+bool cui__plat_is_fullscreen(cui_app *app);
+float cui__plat_fullscreen_strip(cui_app *app);
+bool cui__plat_fullscreen_peek(cui_app *app, float chrome_h, bool hold);
+void cui__plat_fullscreen_end_peek(cui_app *app);
+void cui__plat_fullscreen_sim_pointer(cui_app *app, bool on, int sx, int sy, int cx, int cy);
 
 /* Shared helpers for backends. */
 void cui__app_render(cui_app *app);                   /* end frame (if open), render, present */

@@ -445,11 +445,12 @@ CUI_API void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback
  * there is no table of system fonts the call does nothing. Turning it off returns to the old lookup
  * (fonts already mapped stay mapped). */
 CUI_API void cui_font_use_system_fallback(cui_ctx *ui, bool on);
-/* Text fields (single line) draw Hebrew, Arabic and other right-to-left text in reading order, shaped and
+/* Text fields (single line, and each line of a text area) draw Hebrew, Arabic and other right-to-left text in reading order, shaped and
  * joined like labels, with the caret, selection and clicks following the glyphs. Off by default: typed text
  * stays in logical order, left to right. The caret keys still move in logical order (Left goes one character
  * back in the text), and a caret between runs of different direction sits at the end of the character
- * before it. Multi-line and password fields are unchanged. Needs a CUI_TEXT_SHAPING build (otherwise the
+ * before it. A text area orders each wrapped line by itself (a paragraph's lines are not joined into one bidi
+ * paragraph). Password fields draw their dots as before. Needs a CUI_TEXT_SHAPING build (otherwise the
  * call does nothing) and a font with the script (cui_font_use_system_fallback on Windows). */
 CUI_API void cui_input_use_bidi(cui_ctx *ui, bool on);
 

@@ -128,17 +128,41 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
             float ty = ly + (p->line_h - fh) * 0.5f;
             const char *line = p->buf + L->start;
             int ll = L->end - L->start;
+            bool bidi = false;   /* cui_input_use_bidi: this line has right-to-left text, drawn in reading order like a label */
+#ifdef CUI_TEXT_SHAPING
+            bidi = cui__bidi_wanted(ui, line, ll);
+#endif
             if (p->focused && s1 > s0) {
                 int a0 = CUI_MAX(s0, L->start), a1 = CUI_MIN(s1, L->end);
                 bool extends = s1 > L->end && k < p->line_count - 1;
                 if (a1 > a0 || (extends && a0 <= L->end && s0 <= L->end)) {
-                    float xa = cui__text_width(ui, p->font, p->size, line, a0 - L->start, false);
-                    float xb = cui__text_width(ui, p->font, p->size, line, CUI_MAX(a1, a0) - L->start, false) + (extends ? 4 : 0);
-                    cui_rect sr = { r.x + xa, ly, xb - xa, p->line_h };
-                    cui_draw_rect(ui, sr, CUI_CORNERS(2), p->selection);
+                    if (!bidi) {
+                        float xa = cui__text_width(ui, p->font, p->size, line, a0 - L->start, false);
+                        float xb = cui__text_width(ui, p->font, p->size, line, CUI_MAX(a1, a0) - L->start, false) + (extends ? 4 : 0);
+                        cui_rect sr = { r.x + xa, ly, xb - xa, p->line_h };
+                        cui_draw_rect(ui, sr, CUI_CORNERS(2), p->selection);
+                    }
+#ifdef CUI_TEXT_SHAPING
+                    else {   /* a selection over runs of both directions is several pieces; one running past the line's end reaches 4 points beyond it */
+                        float xs[2 * 16];
+                        int n = cui__bidi_spans(ui, p->font, p->size, line, ll, a0 - L->start, CUI_MAX(a1, a0) - L->start, xs, 16);
+                        if (extends && n > 0) {
+                            int far = 0;
+                            for (int i = 1; i < n; i++) if (xs[2 * i + 1] > xs[2 * far + 1]) far = i;
+                            xs[2 * far + 1] += 4;
+                        }
+                        for (int i = 0; i < n; i++) {
+                            cui_rect sr = { r.x + xs[2 * i], ly, xs[2 * i + 1] - xs[2 * i], p->line_h };
+                            cui_draw_rect(ui, sr, CUI_CORNERS(2), p->selection);
+                        }
+                    }
+#endif
                 }
             }
-            cui__draw_text_line(ui, p->font, p->size, r.x, ty, p->text, line, ll, false);
+#ifdef CUI_TEXT_SHAPING
+            if (bidi) cui__bidi_draw(ui, p->font, p->size, r.x, ty, p->text, line, ll);
+#endif
+            if (!bidi) cui__draw_text_line(ui, p->font, p->size, r.x, ty, p->text, line, ll, false);
             if (p->focused && s0 == s1) {
                 bool here = p->cursor >= L->start && (p->cursor < L->end || (p->cursor == L->end && (k == p->line_count - 1 || p->lines[k + 1].start > L->end)));
                 if (k + 1 < p->line_count && p->cursor == p->lines[k + 1].start && p->cursor == L->end) here = false;
@@ -146,6 +170,9 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
                     float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
                     float a = (blink > 0.35f || p->caret_phase < 0.5 || !cui__caret_blinks(ui, p->caret_phase)) ? 1.0f : 0.0f;
                     float cx = r.x + cui__text_width(ui, p->font, p->size, line, p->cursor - L->start, false);
+#ifdef CUI_TEXT_SHAPING
+                    if (bidi) cx = r.x + cui__bidi_caret_x(ui, p->font, p->size, line, ll, p->cursor - L->start);
+#endif
                     cui_rect cr = { roundf(cx * ui->scale) / ui->scale - 0.5f, ty, 1.5f, fh };
                     cui_draw_rect(ui, cr, CUI_CORNERS(0.75f), cui_alpha(p->caret, a));
                 }
@@ -362,6 +389,11 @@ static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
         int ln = (int)floorf(y / c->line_h);
         ln = CUI_CLAMP(ln, 0, c->nlines - 1);
         cui_text_layout_line *L = &c->lines[ln];
+#ifdef CUI_TEXT_SHAPING
+        if (cui__bidi_wanted(ui, buf + L->start, L->end - L->start))
+            pos = L->start + cui__bidi_hit(ui, c->font, c->size, buf + L->start, L->end - L->start, ui->mx - c->area.x);
+        else
+#endif
         pos = L->start + cui__text_hit(ui, c->font, c->size, buf + L->start, L->end - L->start, ui->mx - c->area.x);
         if (pos > L->end) pos = L->end;
         if (ln < c->nlines - 1 && pos == L->end && L->end == c->lines[ln + 1].start && pos > L->start) pos = cui__utf8_prev(buf, pos);
@@ -542,6 +574,10 @@ static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *r
             int ln = cui__line_of(c->lines, c->nlines, e->cursor);
             const cui_text_layout_line *L = &c->lines[ln];
             cr.x = area.x + cui__text_width(ui, c->font, c->size, c->buf + L->start, e->cursor - L->start, false);
+#ifdef CUI_TEXT_SHAPING
+            if (cui__bidi_wanted(ui, c->buf + L->start, L->end - L->start))
+                cr.x = area.x + cui__bidi_caret_x(ui, c->font, c->size, c->buf + L->start, L->end - L->start, e->cursor - L->start);
+#endif
             cr.y = area.y + (float)ln * c->line_h - e->scroll_y;
             cr.h = c->line_h;
         }

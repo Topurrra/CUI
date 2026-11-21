@@ -574,6 +574,9 @@ typedef struct cui__vlist_build { int count; float row_h; int first; } cui__vlis
 
 struct cui__emoji;
 struct cui__sysfont;
+#ifdef CUI_TEXT_SHAPING
+typedef struct cui__ell_memo { uint64_t key; int cut; float cut_w; } cui__ell_memo;
+#endif
 struct cui_ctx {
     struct cui__emoji *emoji;   /* color emoji: font, cache and data (cui_emoji.c) */
     /* set by cui_emoji.c when emoji are first used, so the core does not link it in:
@@ -687,6 +690,8 @@ struct cui_ctx {
 #ifdef CUI_TEXT_SHAPING
     struct cui_shaped_paragraph *shape_cache;
     int shape_cache_count;
+    cui__ell_memo ell_memo[16];     /* the last cuts of cui__draw_text_ellipsis for shaped text */
+    int shape_cache_cap;            /* paragraphs kept: 64, more while one frame uses more (cui__paragraph) */
     const char *text_paragraph;
     int text_paragraph_len;
     cui_direction text_direction;
