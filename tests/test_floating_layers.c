@@ -24,6 +24,16 @@ static void frame(cui_ctx *ui) {
     cui_end_frame(ui);
 }
 
+static void frame_pop(cui_ctx *ui, bool open) {
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_column(ui, .pad = 20) {
+        cui_button(ui, "Menu");
+        if (open) cui_popover_open(ui, "pop");
+        if (cui_popover_begin(ui, "pop", NULL)) { cui_text(ui, "A popover"); cui_popover_end(ui); }
+    }
+    cui_end_frame(ui);
+}
+
 static int full_layer(cui_ctx *ui, cui_layer_rect *out) {
     cui_layer_rect l[16];
     int n = cui_floating_layers(ui, l, 16);
@@ -61,6 +71,13 @@ int main(void) {
     CHECK(fabsf(l.panel_radius.tl - cui_theme_get(ui)->radius_surface) < 0.01f);
     CHECK(l.panel_elevation == CUI_ELEVATION_FLOATING);
     CHECK(l.rect.w == 800 && l.rect.h == 600);
+    /* how the panel is painted (cui_overlay.c): the raised surface, a 1 pt border (black at 6% in the light theme) */
+    {
+        cui_color sr = cui_color_of(ui, CUI_COLOR_SURFACE_RAISED);
+        CHECK(l.fill.r == sr.r && l.fill.g == sr.g && l.fill.b == sr.b && l.fill.a == sr.a);
+        CHECK(l.border_w == 1.0f && l.border.r == 0 && l.border.a >= 14 && l.border.a <= 18);
+        CHECK(l.opacity > 0.99f);
+    }
 
     /* closing: the scrim fades out, then the layer is gone */
     g_open = false;
@@ -69,6 +86,22 @@ int main(void) {
     CHECK(full_layer(ui, &l) && l.scrim.a < want.a);
     for (int i = 0; i < 90; i++) frame(ui);
     CHECK(!full_layer(ui, &l));
+
+    /* a popover reports its own box: fill, border, radius and opacity (the panel style every popover and menu has) */
+    for (int i = 0; i < 90; i++) frame_pop(ui, i == 1);
+    {
+        cui_layer_rect pl[16];
+        int n = cui_floating_layers(ui, pl, 16), found = -1;
+        for (int i = 0; i < n && i < 16; i++) if (!pl[i].full) found = i;
+        CHECK(found >= 0);
+        if (found >= 0) {
+            cui_color sr = cui_color_of(ui, CUI_COLOR_SURFACE_RAISED);
+            CHECK(pl[found].fill.r == sr.r && pl[found].fill.g == sr.g && pl[found].fill.b == sr.b && pl[found].fill.a == sr.a);
+            CHECK(pl[found].border_w == 1.0f && pl[found].border.a >= 16 && pl[found].border.a <= 20);   /* black at 7% */
+            CHECK(pl[found].opacity > 0.99f);
+            CHECK(fabsf(pl[found].radius.tl - cui_theme_get(ui)->radius_panel) < 0.01f);
+        }
+    }
 
     cui_destroy(ui);
     cui_sw_destroy(sw);

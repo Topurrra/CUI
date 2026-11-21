@@ -944,6 +944,10 @@ static void cui__note_panel(cui_ctx *ui, const cui_node *root, cui_layer_rect *l
     l->panel_radius = (cui_corners){ p->radius.tl * s, p->radius.tr * s, p->radius.br * s, p->radius.bl * s };
     l->panel_opacity = p->opacity;
     l->panel_elevation = p->elevation;
+    l->fill = cui_color_of(ui, p->bg);
+    l->border = cui_color_of(ui, p->border_color);
+    l->border_w = p->border;
+    l->opacity = p->opacity;
 }
 
 /* cui_floating_layers: the floating roots just laid out, by z (then creation order) like cui__paint */
@@ -965,7 +969,14 @@ static void cui__note_layers(cui_ctx *ui) {
             l->rect = nd->rect;
             l->radius = nd->radius;
             l->full = nd->placement == CUI__PLACE_FULL;
-            if (l->full) cui__note_panel(ui, nd, l);
+            if (l->full) {
+                cui__note_panel(ui, nd, l);
+            } else {
+                l->fill = cui_color_of(ui, nd->bg);
+                l->border = cui_color_of(ui, nd->border_color);
+                l->border_w = nd->border;
+                l->opacity = nd->opacity;
+            }
         }
         total++;
     }
