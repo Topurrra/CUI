@@ -1304,8 +1304,12 @@ static LRESULT CALLBACK cui__win32_idle_proc(HWND hwnd, UINT msg, WPARAM wp, LPA
     (void)id;
     cui__win32 *w = (cui__win32 *)ref;
     /* questions that change nothing (a child window asks for the cursor and the hit test as the pointer crosses it; screen
-     * readers and the taskbar ask for text, icons and objects) bring no frame; everything else does */
-    if (msg != WM_SETCURSOR && msg != WM_NCHITTEST && msg != WM_GETOBJECT && msg != WM_GETTEXT && msg != WM_GETTEXTLENGTH && msg != WM_GETICON)
+     * readers and the taskbar ask for text, icons and objects; WM_SYSTIMER, 0x118, is the system's own timer for the system caret
+     * and Text Services, which show up at rest with a focused text field and draw nothing of ours) bring no frame; everything
+     * else does. WM_NCACTIVATE is one more: DefWindowProc sends it to itself after a WM_SYSTIMER (seen with wParam 0, while the
+     * window kept the focus), and a real change of activation also sends WM_ACTIVATE, which counts) */
+    if (msg != WM_SETCURSOR && msg != WM_NCHITTEST && msg != WM_GETOBJECT && msg != WM_GETTEXT && msg != WM_GETTEXTLENGTH && msg != WM_GETICON &&
+        msg != WM_NCACTIVATE && msg != 0x0118 /* WM_SYSTIMER */)
         w->idle_own = true;
     return cui__defsub(hwnd, msg, wp, lp);
 }
