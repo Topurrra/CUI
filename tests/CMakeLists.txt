@@ -133,6 +133,9 @@ add_test(NAME cui_test_sw_shadow COMMAND cui_test_sw_shadow)
 add_executable(cui_test_sw_fast test_sw_fast.c)   # glyphs, fills, pictures and hidden parts against the per pixel float formulas
 target_link_libraries(cui_test_sw_fast PRIVATE cui::cui)
 add_test(NAME cui_test_sw_fast COMMAND cui_test_sw_fast)
+add_executable(cui_test_layer_cache test_layer_cache.c)   # the layer cache: groups blended from a bitmap against the plain drawing
+target_link_libraries(cui_test_layer_cache PRIVATE cui::cui)
+add_test(NAME cui_test_layer_cache COMMAND cui_test_layer_cache)
 add_executable(cui_bench_sw_shadow bench_sw_shadow.c)   # a popover's shadow, a full-window picture and a popover opening, software renderer
 target_link_libraries(cui_bench_sw_shadow PRIVATE cui::cui)
 if(CUI_WITH_APP)

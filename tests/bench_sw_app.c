@@ -2,7 +2,10 @@
  * long list scrolling cost the whole process (all threads), with either renderer.
  *
  *     cui_bench_sw_app [--renderer software|opengl] [--size WxH] [--scale S] [--cycles N] [--steps N]
- *                      [--threads N] [--no-picture]
+ *                      [--threads N] [--no-picture] [--layer-cache]
+ *
+ * --layer-cache turns on cui_set_layer_cache (the popover blended from a bitmap while it animates);
+ * the software renderer then also prints how often it drew the bitmap and its memory.
  *
  * The window: a toolbar, a page area (a full-size picture stands in for the page while a popover is
  * open, as a browser shows a snapshot of its native page), and a side panel with a virtual list of
@@ -143,6 +146,7 @@ int main(int argc, char **argv) {
     const char *renderer = "software";
     int w = 1200, h = 800, cycles = 6, steps = 240, threads = 0;
     float scale = 0;
+    bool layer_cache = false;
     W.use_picture = true;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--renderer") && i + 1 < argc) renderer = argv[++i];
@@ -152,6 +156,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--steps") && i + 1 < argc) steps = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) threads = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-picture")) W.use_picture = false;
+        else if (!strcmp(argv[i], "--layer-cache")) layer_cache = true;
     }
     bool sw = strcmp(renderer, "opengl") != 0;
     static char env_r[64], env_s[64];
@@ -163,6 +168,7 @@ int main(int argc, char **argv) {
     if (!app) { fprintf(stderr, "no window\n"); return 1; }
     cui_ctx *ui = cui_app_ui(app);
     cui_set_reduced_motion(ui, false);
+    cui_set_layer_cache(ui, layer_cache);
     if (threads > 0 && app->sw) cui_sw_set_threads(app->sw, threads);
     cui_set_probe(probe, NULL);
 
@@ -215,11 +221,17 @@ int main(int argc, char **argv) {
     }
     cui_set_probe(NULL, NULL);
     cui_vec2 sz = cui_app_size(app);
-    printf("%s, %.0fx%.0f pt at scale %.2g%s, %d popover cycles, %d wheel steps (ms)\n", sw ? "software" : "opengl", sz.x, sz.y,
-           (double)cui_dpi_scale(ui), W.use_picture ? "" : ", no picture", cycles, steps);
+    printf("%s, %.0fx%.0f pt at scale %.2g%s%s, %d popover cycles, %d wheel steps (ms)\n", sw ? "software" : "opengl", sz.x, sz.y,
+           (double)cui_dpi_scale(ui), W.use_picture ? "" : ", no picture", layer_cache ? ", layer cache" : "", cycles, steps);
     printf("%-8s %6s %9s %9s %9s %9s %9s %9s %9s\n", "section", "frames", "wall", "cpu", "ui cpu", "build", "raster", "present", "cpu/act");
     section_print(&sec[0], cycles);
     section_print(&sec[1], steps);
+    if (layer_cache && app->sw) {
+        int rasters;
+        size_t bytes, peak;
+        cui_sw_layer_stats(app->sw, &rasters, &bytes, &peak);
+        printf("layer cache: %d bitmaps drawn, %zu bytes held now, %zu at most\n", rasters, bytes, peak);
+    }
     cui_image_destroy(ui, W.pic);
     cui_app_destroy(app);
     return 0;
