@@ -6193,6 +6193,11 @@ typedef struct cui_layer_rect {
      * and the opacity this frame. A full layer's are its panel's (opacity is panel_opacity); another layer's are its own box's
      * (a popover, a menu, a tooltip). fill.a 0 and border_w 0 for a box without them. */
     cui_color fill, border; float border_w, opacity;
+    /* The box as drawn this frame, for a host that follows an open or close animation frame by frame: the rectangle moved and scaled
+     * by the layer's own transform (a popover or menu grows in from a little under full size and slides a few points while it
+     * fades; a full layer's is its panel, the same as panel), its corner radii scaled the same way, and its shadow (CUI_ELEVATION_NONE
+     * for none; elevation_alpha is the shadow's strength before the opacity). At rest drawn equals rect. */
+    cui_rect drawn; cui_corners drawn_radius; cui_elevation elevation; float elevation_alpha;
 } cui_layer_rect;
 CUI_API int cui_floating_layers(cui_ctx *ui, cui_layer_rect *out, int max);
 
