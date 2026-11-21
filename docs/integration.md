@@ -305,7 +305,7 @@ strings use the font's natural advances without optical tracking, which would
 otherwise pull cursive joins apart.
 
 Text fields keep their existing drawing, cursor and selection behavior unless the app
-calls `cui_input_use_bidi(ui, true)`: then a single-line field with right-to-left
+calls `cui_input_use_bidi(ui, true)`: then a single-line field, or each line of a text area, with right-to-left
 text draws it like a label (one left-to-right paragraph, shaped and ordered), and
 the caret, the selection and clicks follow the glyphs. A caret goes at the trailing
 edge of the character before it (the leading edge of the first character at offset
@@ -313,8 +313,11 @@ edge of the character before it (the leading edge of the first character at offs
 character of the earlier run would appear; a ligature's inner offsets spread evenly
 across it. A selection is one rectangle per visual piece. Left and Right still move
 one character in logical order (in a Hebrew run the caret moves the other way on
-screen), as do Home, End and the word jumps. Multi-line and password fields, and
-IME composition, are unchanged.
+screen), as do Home, End and the word jumps. A text area orders each wrapped line by
+itself (clicks, selection pieces and the input method's caret rectangle too); its
+lines stay left-aligned and its Up and Down keys keep their logical columns. Password
+fields draw their dots exactly as before (the dots have no direction). IME
+composition shown inside the text is unchanged.
 
 ![Hebrew and Arabic titles, a list and two fields with cui_input_use_bidi](images/components/rtl-chrome.png)
 
@@ -322,9 +325,13 @@ IME composition, are unchanged.
 selection helpers with the Windows fonts; `cui_test_bidi_edit --bench` prints the
 layout time of a title: Latin about 0.6 us, a Hebrew or Arabic title shaped the first
 time 45 to 110 us (a Latin prefix in the same string adds about 80 us: Inter's
-lookups), then about 0.05 us from the cache. The cache keeps 64 paragraphs, so a
-frame that shows more than 64 different right-to-left strings shapes some of them
-again every frame.
+lookups), then about 0.05 us from the cache. The cache keeps 64 paragraphs and grows
+by half (up to 768) when a frame asks for more than it holds, so a history panel or
+a strip of tabs with more than 64 different right-to-left strings shapes each of
+them once, then draws from the cache (`cui_test_bidi_edit`: 200 strings kept, a
+warm frame 0.07 ms). A label cut with an ellipsis (`cui__draw_text_ellipsis`) is
+cut by its shaped width: Arabic joins are narrower than its letters one by one, and
+the ellipsis used to float away from the text; the cut is remembered per string.
 
 Shaped paragraphs wrap greedily
 at spaces using complete shaped candidate-line advances. They retain their
@@ -340,7 +347,7 @@ and treated as boundary neutrals. CUI substitutes mirrored characters before sha
 The internal `cui_bidi.h` separates paragraph resolution from line ordering: resolve
 the paragraph once, then order each line range without changing paragraph levels.
 The wrapper resolves each paragraph once and reuses those levels for every line.
-A context retains up to 64 paragraphs in least-recently-used order and up to 128
+A context retains up to 64 paragraphs (more while one frame uses more, up to 768) in least-recently-used order and up to 128
 shaped line ranges per paragraph. Cached glyph positions are shared by measurement
 and drawing; loading fonts or changing font roles/fallbacks invalidates them. Atlas
 resets and viewport scale changes keep glyph positions in logical units valid.

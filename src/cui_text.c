@@ -40,6 +40,7 @@ typedef struct cui_shaped_paragraph {
     cui_text_layout_line *wrap_lines;
     int wrap_count, wrap_font;
     float wrap_size, wrap_width;
+    uint64_t used;   /* the frame that last asked for it: a paragraph used this frame is not evicted, the cache grows instead */
 } cui_shaped_paragraph;
 static void cui__shape_lines_free(cui_ctx *ui, cui_shaped_paragraph *p) {
     while (p->lines) {
@@ -57,17 +58,29 @@ static void cui__shape_cache_clear(cui_ctx *ui) {
     }
     ui->shape_cache_count = 0;
 }
+#define CUI__SHAPE_CACHE_MAX 768   /* most paragraphs kept when one frame shows that many different right-to-left strings */
 static cui_shaped_paragraph *cui__paragraph(cui_ctx *ui, const char *text, int len, int base) {
     cui_shaped_paragraph **link = &ui->shape_cache;
     while (*link) {
         cui_shaped_paragraph *p = *link;
         if (p->len == len && p->requested_base == base && !memcmp(p->text, text, (size_t)len)) {
-            *link = p->next; p->next = ui->shape_cache; ui->shape_cache = p; return p;
+            *link = p->next; p->next = ui->shape_cache; ui->shape_cache = p; p->used = ui->frame; return p;
         }
         link = &p->next;
     }
-    /* Bound retained text; evict the least recently used paragraph. */
-    if (ui->shape_cache_count == 64) {
+    /* Bound retained text; evict the least recently used paragraph. 64 are kept; when the least recently used one was used
+     * in this very frame, the frame shows more right-to-left strings than that and would shape some of them again every
+     * frame (a history panel, many tabs): the bound grows by half, up to CUI__SHAPE_CACHE_MAX. */
+    if (ui->shape_cache_cap < 64) ui->shape_cache_cap = 64;
+    if (ui->shape_cache_count >= ui->shape_cache_cap) {
+        link = &ui->shape_cache;
+        while ((*link)->next) link = &(*link)->next;
+        if ((*link)->used == ui->frame && ui->shape_cache_cap < CUI__SHAPE_CACHE_MAX) {
+            ui->shape_cache_cap += ui->shape_cache_cap / 2;
+            if (ui->shape_cache_cap > CUI__SHAPE_CACHE_MAX) ui->shape_cache_cap = CUI__SHAPE_CACHE_MAX;
+        }
+    }
+    if (ui->shape_cache_count >= ui->shape_cache_cap) {
         link = &ui->shape_cache;
         while ((*link)->next) link = &(*link)->next;
         cui_shaped_paragraph *p = *link; *link = NULL;
@@ -89,7 +102,7 @@ static cui_shaped_paragraph *cui__paragraph(cui_ctx *ui, const char *text, int l
         p->offsets[p->count] = at;
         at += cui__utf8_decode(text + at, len - at, &p->chars[p->count++].cp);
     }
-    p->offsets[p->count] = len; p->len = len; p->requested_base = base;
+    p->offsets[p->count] = len; p->len = len; p->requested_base = base; p->used = ui->frame;
     p->base = cui__bidi_paragraph(p->chars, p->count, base);
     p->next = ui->shape_cache; ui->shape_cache = p; ui->shape_cache_count++;
     return p;
@@ -1359,6 +1372,43 @@ void cui__draw_text_line(cui_ctx *ui, cui_font font, float size, float x, float 
     cui__draw_run(ui, font, size, x, y, color, text, len, tabular, 1e30f);
 }
 
+#ifdef CUI_TEXT_SHAPING
+/* The cut of right-to-left text: the logical prefix whose shaped width plus the ellipsis fits. Joined Arabic and kerned
+ * runs are narrower or wider than the glyphs one by one (guess is what those add up to), so the ellipsis went too far from
+ * the text, or onto it. Checked and adjusted a character at a time against the shaped width; the result is remembered for
+ * the next frame (the probes are strings of their own). */
+static int cui__ellipsis_cut_shaped(cui_ctx *ui, cui_font font, float size, float max_w, const char *text, int len, bool tabular,
+                                    float avail, int guess, float *cut_w) {
+    uint64_t key = 1469598103934665603ull;
+    for (int i = 0; i < len; i++) key = (key ^ (uint8_t)text[i]) * 1099511628211ull;
+    uint32_t bits[3];
+    memcpy(&bits[0], &size, 4); memcpy(&bits[1], &max_w, 4); bits[2] = (uint32_t)font + (tabular ? 0x10000u : 0);
+    for (int i = 0; i < 3; i++) key = (key ^ bits[i]) * 1099511628211ull;
+    key |= 1;
+    cui__ell_memo *m = &ui->ell_memo[key & 15];
+    if (m->key == key) { *cut_w = m->cut_w; return m->cut; }
+    int cut = guess, steps = 0;
+    float w = cui__text_width(ui, font, size, text, cut, tabular);
+    while (cut > 0 && w > avail && steps++ < 48) {
+        cut = cui__utf8_prev(text, cut);
+        w = cui__text_width(ui, font, size, text, cut, tabular);
+    }
+    if (w <= avail)
+        for (steps = 0; cut < len && steps++ < 48;) {
+            int nx = cui__utf8_next(text, len, cut);
+            float nw = cui__text_width(ui, font, size, text, nx, tabular);
+            if (nw > avail) break;
+            cut = nx; w = nw;
+        }
+    int trimmed = cut;
+    while (cut > 0 && text[cut - 1] == ' ') cut--;
+    if (cut != trimmed) w = cui__text_width(ui, font, size, text, cut, tabular);
+    m->key = key; m->cut = cut; m->cut_w = w;
+    *cut_w = w;
+    return cut;
+}
+#endif
+
 void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, float y, float max_w,
                              cui_color color, const char *text, int len, bool tabular) {
     if (len < 0 && text) len = (int)strlen(text);
@@ -1380,6 +1430,9 @@ void cui__draw_text_ellipsis(cui_ctx *ui, cui_font font, float size, float x, fl
         cut_w = it.x;
     }
     while (cut > 0 && text[cut - 1] == ' ') { cut--; cut_w = cui__text_width(ui, font, size, text, cut, tabular); }
+#ifdef CUI_TEXT_SHAPING
+    if (cui__text_needs_shaping(ui, text, len)) cut = cui__ellipsis_cut_shaped(ui, font, size, max_w, text, len, tabular, avail, cut, &cut_w);
+#endif
     /* right-to-left text ends on the left, so its ellipsis goes there */
     bool rtl = false;
 #ifdef CUI_TEXT_SHAPING

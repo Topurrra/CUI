@@ -144,10 +144,143 @@ static void test_field(void) {
     CHECK(field_caret(true, "hello", CUI_KEY_END) == field_caret(false, "hello", CUI_KEY_END));
 }
 
+/* Draws one ellipsis-cut line the way a tab strip does into an RGBA buffer; the first and last inked columns. */
+static bool g_shots;
+static const char *g_shot_dir = ".";
+static void ink_cols(const uint8_t *px, int w, int h, int *a, int *b) {
+    *a = w; *b = -1;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const uint8_t *p = px + ((size_t)y * w + x) * 4;
+            if (p[0] < 128) { if (x < *a) *a = x; if (x > *b) *b = x; }
+        }
+}
+static void draw_cut(const char *text, float max_w, const char *shot, int *ink_a, int *ink_b) {
+    enum { W = 300, H = 24 };
+    static uint8_t px[W * H * 4];
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, W, H, 1);
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    cui_draw_rect(ui, (cui_rect){ 0, 0, W, H }, CUI_CORNERS(0), (cui_color){ 255, 255, 255, 255 });
+    cui__draw_text_ellipsis(ui, CUI_FONT_BODY, 14, 10, 4, max_w, (cui_color){ 0, 0, 0, 255 }, text, -1, false);
+    cui_end_frame(ui);
+    cui_sw_render(g_sw, cui_get_draw_data(ui), px, W, H, W * 4, CUI_SW_RGBA);
+    ink_cols(px, W, H, ink_a, ink_b);
+    if (g_shots && shot) {
+        char path[300];
+        snprintf(path, sizeof path, "%s/%s", g_shot_dir, shot);
+        cui_write_png(path, px, W, H, W * 4);
+    }
+    cui_destroy(ui);
+}
+
+/* a title that starts in Latin and ends right to left, cut at the right edge: the ink stays inside the box, and the cut
+ * is close to the edge (a short title that fits is drawn whole) */
+static void test_cut(void) {
+    static const char *he = "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d \xd7\xa2\xd7\x95\xd7\x9c\xd7\x9d \xd7\x95\xd7\x99\xd7\xa7\xd7\x99\xd7\xa4\xd7\x93\xd7\x99\xd7\x94 \xd7\x94\xd7\x90\xd7\xa0\xd7\xa6\xd7\x99\xd7\xa7\xd7\x9c\xd7\x95\xd7\xa4\xd7\x93\xd7\x99\xd7\x94";
+    static const char *ar = "\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7 \xd8\xa8\xd8\xa7\xd9\x84\xd8\xb9\xd8\xa7\xd9\x84\xd9\x85 \xd8\xa7\xd9\x84\xd8\xb3\xd9\x84\xd8\xa7\xd9\x85 \xd8\xb9\xd9\x84\xd9\x8a\xd9\x83\xd9\x85";
+    const char *src[2] = { he, ar };
+    char text[256];
+    int bad = 0;
+    for (int k = 0; k < 2; k++) {
+        snprintf(text, sizeof text, "Wiki: %s", src[k]);
+        cui_ctx *wc = new_ctx();
+        float full = wid(wc, text);
+        cui_destroy(wc);
+        for (int mw = 50; mw < (int)full; mw += 2) {
+            int a, b;
+            char shot[64];
+            snprintf(shot, sizeof shot, "cut%d_%d.png", k, mw);
+            draw_cut(text, (float)mw, (mw % 40 == 0) ? shot : NULL, &a, &b);
+            bool over = b > 10 + mw + 1, under = 10 + mw - b > 22;
+            if (over || under) { bad++; printf("  cut %d max_w %d: ink %d..%d (%s)\n", k, mw, a, b, over ? "too wide" : "much too short"); }
+        }
+    }
+    CHECK(bad == 0);
+}
+
 static double now_ms(void) {
     LARGE_INTEGER f, c;
     QueryPerformanceFrequency(&f); QueryPerformanceCounter(&c);
     return 1000.0 * (double)c.QuadPart / (double)f.QuadPart;
+}
+
+/* the multi-line field: with the option a line of Hebrew starts at the right (its caret at the line start is at the right end,
+ * clicking and selecting follow the glyphs); the first line stays left to right; without it nothing changes */
+static float area_caret(bool bidi, const char *text, int key, float *line2_x) {
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 480, 200, 1);
+    cui_input_use_bidi(ui, bidi);
+    cui_platform_iface pf = { 0 };
+    pf.set_text_input_rect = ime_rect;
+    cui_set_platform(ui, &pf);
+    char buf[128];
+    snprintf(buf, sizeof buf, "%s", text);
+    for (int f = 0; f < 6; f++) {
+        if (f == 2) cui_input_key(ui, (cui_key)key, true, 0);
+        if (f == 3) cui_input_key(ui, (cui_key)key, false, 0);
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        cui_column(ui, .pad = 10) {
+            cui_textarea(ui, "a", buf, sizeof buf, .autofocus = true, .height = 90, .width = CUI_PX(300));
+        }
+        cui_end_frame(ui);
+    }
+    if (line2_x) *line2_x = g_ime.y;
+    cui_destroy(ui);
+    return g_ime.x;
+}
+
+static void test_area(void) {
+    const char *t = HE;
+    float off_home = area_caret(false, t, CUI_KEY_HOME, NULL), off_end = area_caret(false, t, CUI_KEY_END, NULL);
+    float on_home = area_caret(true, t, CUI_KEY_HOME, NULL), on_end = area_caret(true, t, CUI_KEY_END, NULL);
+    CHECK(off_home < off_end);   /* the old way: logical order drawn left to right */
+    CHECK(on_home > on_end);     /* reading order: the start of the line is at the right */
+    CHECK(CLOSE(on_end, off_home));
+    CHECK(area_caret(true, "hello", CUI_KEY_END, NULL) == area_caret(false, "hello", CUI_KEY_END, NULL));   /* Latin: the same either way */
+    if (g_shots) {   /* a picture: Latin, Hebrew and mixed lines, everything selected */
+        static uint8_t px[320 * 130 * 4];
+        cui_ctx *ui = new_ctx();
+        cui_set_viewport(ui, 320, 130, 1);
+        char buf[160];
+        snprintf(buf, sizeof buf, "abc def\n%s %s\nabc %s xyz", HE, HE, HE);
+        for (int f = 0; f < 6; f++) {
+            if (f == 2) { cui_input_key(ui, CUI_KEY_A, true, CUI_MOD_CTRL); cui_input_key(ui, CUI_KEY_A, false, CUI_MOD_CTRL); }
+            cui_begin_frame(ui, 1.0f / 60.0f);
+            cui_column(ui, .pad = 10) { cui_textarea(ui, "a", buf, sizeof buf, .autofocus = true, .height = 100, .width = CUI_PX(300)); }
+            cui_end_frame(ui);
+        }
+        cui_sw_render(g_sw, cui_get_draw_data(ui), px, 320, 130, 320 * 4, CUI_SW_RGBA);
+        char path[300];
+        snprintf(path, sizeof path, "%s/area.png", g_shot_dir);
+        cui_write_png(path, px, 320, 130, 320 * 4);
+        cui_destroy(ui);
+    }
+}
+
+/* a frame that shows more right-to-left strings than the cache keeps does not shape the surplus again on every frame: the
+ * bound grows with the frame's use (and stays bounded) */
+static void test_cache_growth(void) {
+    cui_ctx *ui = new_ctx();
+    enum { N = 200 };
+    char buf[N][48];
+    for (int i = 0; i < N; i++) snprintf(buf[i], sizeof buf[i], HE " %d " AR_BEH, i);
+    for (int frame = 0; frame < 3; frame++) {
+        cui_begin_frame(ui, 1.0f / 60.0f);
+        for (int i = 0; i < N; i++) (void)cui_measure_text(ui, CUI_FONT_BODY, 14, buf[i], -1);
+        cui_end_frame(ui);
+    }
+    CHECK(ui->shape_cache_count > 64);    /* all of the frame's strings are kept */
+    CHECK(ui->shape_cache_count <= 768);
+    int kept = ui->shape_cache_count;
+    double t0 = now_ms();
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    for (int i = 0; i < N; i++) (void)cui_measure_text(ui, CUI_FONT_BODY, 14, buf[i], -1);
+    cui_end_frame(ui);
+    double warm = now_ms() - t0;
+    CHECK(ui->shape_cache_count == kept);   /* a further frame shapes nothing new */
+    printf("  %d distinct strings: kept %d, a warm frame %.2f ms\n", N, kept, warm);
+    cui_destroy(ui);
 }
 
 /* layout times per title: cold (every text new, so nothing cached) and cached, shaped against Latin */
@@ -196,6 +329,10 @@ int main(int argc, char **argv) {
     test_mixed();
     test_arabic();
     test_field();
+    for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--shots")) { g_shots = true; g_shot_dir = argv[i + 1]; }
+    test_cut();
+    test_area();
+    test_cache_growth();
     if (argc > 1 && !strcmp(argv[1], "--bench")) bench();
     cui_sw_destroy(g_sw);
     printf("test_bidi_edit: %d checks, %d failed\n", g_checks, g_failed);
