@@ -127,6 +127,11 @@ typedef struct cui_app_desc {
      * not maximized. Copied when the window is created.
      * Default: none, the system picks the place. */
     const cui_window_placement *placement;
+    /* The text caret stops blinking as the system's does: after the system's caret timeout (Windows: SPI_GETCARETTIMEOUT,
+     * 5 seconds by default), and never when the system's caret does not blink. A focused field at rest then asks for no
+     * frames. The same as calling cui_set_caret_blink(ui, cui_system_caret_blink()) after creating the window. Off:
+     * the caret blinks for as long as a field has the focus, as before. */
+    bool follow_system_caret;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */
@@ -277,6 +282,78 @@ CUI_API bool cui_app_open_url(const char *url);
 /* Renders the current UI into an RGBA buffer (any backend). Handy for
  * screenshots and tests. Returns false when the buffer is too small. */
 CUI_API bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height);
+
+/* ---- The caret and idle frames: opt-in costs saved at rest ---- */
+
+/* The value cui_set_caret_blink takes for the system's own caret: seconds the caret blinks after it last moved (Windows:
+ * the caret timeout), -1 when the system's caret does not blink (Windows: a caret blink time of INFINITE), 5 where the
+ * system cannot tell. Read when called; see also cui_app_desc.follow_system_caret. */
+CUI_API float cui_system_caret_blink(void);
+
+/* Draw a frame only when something changed. Without it a message for the window (an embedded engine's pump, an input
+ * method, COM's apartment window) wakes the loop and runs a frame that draws the same picture. With it, the loop built
+ * on cui_app_frame_poll and cui_app_wait skips such frames:
+ *
+ *     cui_app_frames_on_change(app, true);          // after the app's own window subclasses (see below)
+ *     while (running) {
+ *         cui_app_arm(app);                         // forget what came before
+ *         cui_app_wait(&app, 1);
+ *         if (!cui_app_frame_due(app)) continue;    // nothing changed: sleep again
+ *         if (!cui_app_frame_poll(app)) break;
+ *         ... draw ...
+ *     }
+ *
+ * A frame is due when CUI wants one (cui_app_pending: input, an animation, a cui_request_wakeup that is due, the first
+ * frame), when a message other than a question that changes nothing (WM_SETCURSOR, WM_NCHITTEST, WM_GETOBJECT, WM_GETTEXT,
+ * WM_GETTEXTLENGTH, WM_GETICON) reached the window, or when the app said so with cui_app_request_frame (an engine callback
+ * or a worker finished: the app's own events that CUI cannot see). Windows only; elsewhere cui_app_frames_on_change
+ * returns false and cui_app_frame_due is always true, so the same loop runs unchanged.
+ *
+ * cui_app_frames_on_change(app, true) subclasses the window and must be called after the app's own subclasses (it
+ * must see each message first, also those a later subclass handles). Calling it with false takes the subclass out.
+ * Thread: the one that made the window. */
+CUI_API bool cui_app_frames_on_change(cui_app *app, bool on);
+CUI_API void cui_app_arm(cui_app *app);          /* before cui_app_wait */
+CUI_API bool cui_app_frame_due(cui_app *app);    /* after cui_app_wait: whether to draw the next frame */
+CUI_API void cui_app_request_frame(cui_app *app);   /* the next cui_app_frame_due is true (call from the UI thread) */
+CUI_API long cui_app_frames_skipped(cui_app *app);  /* wakes that brought no frame, for a trace */
+/* Runs tick(user) from a timer in ms milliseconds (replacing the one set before, whose tick then never runs; ms < 0:
+ * none), between frames and without drawing one, while the loop waits. When another message loop runs (a dialog, the
+ * size loop) it asks for a frame instead, which is when the app should run its timers by hand. For deadlines the app
+ * keeps itself (the next sleep of a tab, a list refresh) so that nothing runs at rest. One timer per thread. Windows
+ * only (returns false elsewhere: use cui_request_wakeup in a frame). Without cui_app_frames_on_change (or cui_app_arm) the
+ * timer only wakes the loop and the frame it draws is the app's chance to run its deadlines. */
+CUI_API bool cui_app_schedule(cui_app *app, int64_t ms, void (*tick)(void *user), void *user);
+
+/* ---- Fullscreen (Windows) ---- */
+
+/* Borderless fullscreen: the window covers its monitor, over the taskbar, with no caption or frame; leaving puts back what
+ * was there (the normal rectangle, maximized, or minimized with the right state to come back to). The change is made
+ * between frames (posted to the window), so the size change it causes runs the next frame at the new size: build the
+ * chrome (tab strip, toolbar, menu) only while !cui_app_is_fullscreen, and the content fills the window. While fullscreen
+ * the window ignores the system's move, size and maximize commands (the whole client area is the app's, HTCLIENT), and
+ * minimize and restore work as usual; a minimized window enters fullscreen when restored. Returns false where the
+ * platform cannot (other backends: nothing happens, cui_app_is_fullscreen stays false) and while minimized.
+ * Call it again with the wanted state each frame if you like: a change already under way is not posted twice.
+ *
+ * Peek: the top 2 pixels of the window (cui_app_fullscreen_strip) are an edge strip. Reserve it when you cover the window
+ * with your own child window (an embedded engine); the pointer on it asks for the chrome. cui_app_fullscreen_peek, called
+ * each frame while fullscreen, says whether the chrome should be shown over the content now (slid in): it turns on when
+ * the pointer touches the edge strip and off when the pointer is below chrome_h points or outside the window and hold is
+ * false (hold: a menu or popover is open, a field has the focus). While it is shown it asks for a frame every 0.1 s and
+ * reads the pointer from the system (no mouse messages reach the window over a child window); at rest nothing runs.
+ *
+ * Hint: cui_app_set_fullscreen(on = true) arms a one-off toast; cui_app_fullscreen_hint shows it ("Press F11 to exit full
+ * screen" unless text is given) the first frame the window is fullscreen and returns whether it did. */
+CUI_API bool cui_app_set_fullscreen(cui_app *app, bool on);
+CUI_API bool cui_app_is_fullscreen(cui_app *app);   /* the window is fullscreen now (the change has been made) */
+CUI_API float cui_app_fullscreen_strip(cui_app *app);   /* points of the edge strip, 0 when not fullscreen */
+CUI_API bool cui_app_fullscreen_peek(cui_app *app, float chrome_h, bool hold);
+CUI_API void cui_app_fullscreen_end_peek(cui_app *app);   /* hide the peeked chrome now (a page took over the window) */
+CUI_API bool cui_app_fullscreen_hint(cui_app *app, const char *text);
+/* Tests: the pointer is at this screen position from now on (on = true), or the real pointer again (on = false); a
+ * WM_MOUSEMOVE at the client position (cx, cy) is sent as the system does when the pointer crosses the edge strip. */
+CUI_API void cui_app_fullscreen_sim_pointer(cui_app *app, bool on, int screen_x, int screen_y, int client_x, int client_y);
 
 #ifdef __cplusplus
 }

@@ -40,7 +40,7 @@ Double-click timing uses the clock advanced by `cui_begin_frame`, so the first
 click after an idle interval is timed in the frame that receives it. Forward each
 press and release, including quick taps collected before the same frame.
 
-An idle CUI app costs nothing: with no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that blink or wait (the caret, tooltips, toasts) set `cui_next_wakeup`; a focused text field asks for a frame about twice a second while its caret blinks, and `cui_set_caret_blink(ui, 5)` stops the blink 5 seconds after the caret last moved (as Windows does), or `-1` never blinks, so a focused field at rest draws nothing. When your own content changes on a timer, such as a clock, a poll or messages arriving, call `cui_request_wakeup(ui, seconds)` during the frame. The loop then wakes for it instead of redrawing continuously. `cui_request_redraw` asks for the next frame right away, for things that change every frame.
+An idle CUI app costs nothing: with no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that blink or wait (the caret, tooltips, toasts) set `cui_next_wakeup`; a focused text field asks for a frame about twice a second while its caret blinks, and `cui_set_caret_blink(ui, 5)` stops the blink 5 seconds after the caret last moved (as Windows does; `.follow_system_caret = true` in `cui_app_desc` takes the system's own timeout, see [Saving work at rest](#saving-work-at-rest-and-fullscreen-opt-in-windows)), or `-1` never blinks, so a focused field at rest draws nothing. When your own content changes on a timer, such as a clock, a poll or messages arriving, call `cui_request_wakeup(ui, seconds)` during the frame. The loop then wakes for it instead of redrawing continuously. `cui_request_redraw` asks for the next frame right away, for things that change every frame.
 
 ### Input reference
 
@@ -73,6 +73,61 @@ Useful queries for your app: `cui_wants_keyboard` (a text field has focus), `cui
 ## Using the built-in backends with your loop
 
 The SDL2 and GLFW backends are complete `cui_app` implementations (`-DCUI_PLATFORM=sdl2` or `glfw`). Read `src/platform/cui_app_sdl2.c` for a compact, real example of the integration above: about 250 lines including the key map.
+
+## Saving work at rest, and fullscreen (opt in, Windows)
+
+Three options an app turns on when it wants to cost nothing while nobody is looking. Each is off by default, and each is a no-op on the other backends (the same code runs there). Test: `tests/test_fullscreen.c` (`cui_test_fullscreen`).
+
+### The caret stops blinking as the system's does
+
+A focused text field asks for a frame twice a second for as long as its caret blinks. Windows' own caret stops after its timeout (5 seconds by default, set in the accessibility settings), and so can CUI's:
+
+```c
+cui_app *app = cui_app_create(&(cui_app_desc){ .title = "Notes", .follow_system_caret = true });
+```
+
+`follow_system_caret` is `cui_set_caret_blink(ui, cui_system_caret_blink())`. `cui_system_caret_blink()` is the system's timeout in seconds, or `-1` when its caret does not blink (Windows: a caret blink time of INFINITE), or 5 where the system cannot tell. Typing, moving the caret or focusing a field starts the blink again. Use `cui_set_caret_blink(ui, seconds)` directly for another time (`< 0` never blinks, `0` blinks while focused, the default). It covers text fields, text areas, the code editor and code boxes (the terminal's cursor does not blink in CUI).
+
+### Frames only when something changed
+
+On Windows an embedded engine's message pump, an input method window or COM's apartment window can wake the loop many times a second, and every wake used to draw a frame. Opt in and the loop skips the wakes that change nothing:
+
+```c
+cui_app_frames_on_change(app, true);       // after your own window subclasses: it must see each message first
+while (running) {
+    cui_app_arm(app);                      // forget what came before
+    cui_app_wait(&app, 1);
+    if (!cui_app_frame_due(app)) continue; // nothing changed: sleep again
+    if (!cui_app_frame_poll(app)) break;
+    /* ... draw ... */
+}
+```
+
+A frame is due when CUI wants one (`cui_app_pending`: input, an animation, a `cui_request_wakeup` that is due, the first frame), when any message other than a harmless question (cursor, hit test, accessibility and title queries) reached the window, or when you said so with `cui_app_request_frame(app)`: call it when something of yours changed that CUI cannot see (an engine callback ran, a worker finished). `cui_app_frames_skipped(app)` counts the skipped wakes for a trace.
+
+Timers become deadlines. `cui_app_schedule(app, ms, tick, user)` runs `tick` from a thread timer in `ms` milliseconds, between frames and without drawing one, and replaces the timer set before (`ms < 0` clears it). Re-arm it from the frame with the next deadline, so that a window at rest runs nothing at all; if another message loop is running (a dialog, the size loop) the timer asks for a frame instead. JNBrowser measures 0 ms/s and 0 frames at rest this way (`tests/scripts/run_idle.ps1`).
+
+### Fullscreen
+
+```c
+cui_app_set_fullscreen(app, true);              // F11: between frames, the window covers its monitor
+bool fs = cui_app_is_fullscreen(app);           // the change has been made: build no chrome while true
+```
+
+The window loses its caption and frame, covers its monitor (over the taskbar), and leaving puts back what was there: the normal rectangle, maximized, or minimized with the right state to come back to. While fullscreen the window ignores the system's move, size and maximize commands; minimize and restore work. The change is posted to the window and made between frames, so the size change it causes runs the next frame at the new size. Call `cui_app_set_fullscreen` with the wanted state every frame if that is easier: a change under way is not posted twice. It returns false while the window is minimized (when it is restored the change goes on) and on other backends.
+
+Peek (the chrome slides in over the content when the pointer touches the top edge): reserve `cui_app_fullscreen_strip(app)` points at the top of your content (2 pixels: a child window such as an embedded browser must leave them uncovered, so the pointer reaches CUI there). Each frame while fullscreen, `cui_app_fullscreen_peek(app, chrome_h, hold)` says whether to show the chrome now: on when the pointer touches the strip, off when it is below `chrome_h` points or outside the window and `hold` is false (a menu is open, a field has the focus). While shown it asks for a frame every 0.1 s and reads the pointer from the system (no mouse messages arrive over a child window); at rest nothing runs. `cui_app_fullscreen_end_peek` hides it at once.
+
+Hint: `cui_app_fullscreen_hint(app, NULL)` shows the toast "Press F11 to exit full screen" the first frame after the window entered fullscreen, once per entering (a text of your own replaces it), and returns whether it did.
+
+```c
+bool fs = cui_app_is_fullscreen(app);
+bool peek = fs && cui_app_fullscreen_peek(app, toolbar_h, menu_open);
+if (!fs || peek) build_toolbar(ui);      // the peeked toolbar goes over the content
+cui_app_fullscreen_hint(app, NULL);
+```
+
+Tests that cannot move the real pointer use `cui_app_fullscreen_sim_pointer`.
 
 ## Renderers
 

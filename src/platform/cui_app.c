@@ -567,3 +567,64 @@ void cui_app_toggle_maximize(cui_app *app) {
     if (cui__plat_window_state(app) == CUI_WINDOW_MAXIMIZED) cui__plat_restore(app);
     else cui_app_maximize(app);
 }
+
+/* ---- the caret and idle frames (cui_app.h) ---- */
+
+float cui_system_caret_blink(void) { return cui__plat_caret_blink(); }
+
+bool cui_app_frames_on_change(cui_app *app, bool on) { app = cui__app_or_current(app); return app && cui__plat_frames_on_change(app, on); }
+void cui_app_arm(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_arm(app); }
+bool cui_app_frame_due(cui_app *app) { app = cui__app_or_current(app); return !app || cui__plat_frame_due(app); }
+void cui_app_request_frame(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_request_frame(app); }
+long cui_app_frames_skipped(cui_app *app) { app = cui__app_or_current(app); return app ? cui__plat_frames_skipped(app) : 0; }
+bool cui_app_schedule(cui_app *app, int64_t ms, void (*tick)(void *user), void *user) {
+    app = cui__app_or_current(app);
+    return app && cui__plat_schedule(app, ms, tick, user);
+}
+
+/* ---- fullscreen (cui_app.h) ---- */
+
+bool cui_app_set_fullscreen(cui_app *app, bool on) {
+    app = cui__app_or_current(app);
+    if (!app) return false;
+    bool was = cui__plat_is_fullscreen(app);
+    bool ok = cui__plat_set_fullscreen(app, on);
+    if (ok && on && !was) app->fs_hint = true;
+    return ok;
+}
+bool cui_app_is_fullscreen(cui_app *app) { app = cui__app_or_current(app); return app && cui__plat_is_fullscreen(app); }
+float cui_app_fullscreen_strip(cui_app *app) { app = cui__app_or_current(app); return app ? cui__plat_fullscreen_strip(app) : 0; }
+bool cui_app_fullscreen_peek(cui_app *app, float chrome_h, bool hold) {
+    app = cui__app_or_current(app);
+    return app && cui__plat_fullscreen_peek(app, chrome_h, hold);
+}
+void cui_app_fullscreen_end_peek(cui_app *app) { app = cui__app_or_current(app); if (app) cui__plat_fullscreen_end_peek(app); }
+bool cui_app_fullscreen_hint(cui_app *app, const char *text) {
+    app = cui__app_or_current(app);
+    if (!app || !app->fs_hint || !cui__plat_is_fullscreen(app)) return false;
+    app->fs_hint = false;
+    cui_toast(app->ui, text && *text ? text : "Press F11 to exit full screen", .duration = 2.5f);
+    return true;
+}
+void cui_app_fullscreen_sim_pointer(cui_app *app, bool on, int sx, int sy, int cx, int cy) {
+    app = cui__app_or_current(app);
+    if (app) cui__plat_fullscreen_sim_pointer(app, on, sx, sy, cx, cy);
+}
+
+#ifndef _WIN32
+/* Only the Windows backend has these: elsewhere the caret blinks as it always did, every wake draws a frame, and the window
+ * is not made fullscreen (cui_app.h). */
+float cui__plat_caret_blink(void) { return 5.0f; }
+bool cui__plat_frames_on_change(cui_app *app, bool on) { (void)app; (void)on; return false; }
+void cui__plat_arm(cui_app *app) { (void)app; }
+bool cui__plat_frame_due(cui_app *app) { (void)app; return true; }
+void cui__plat_request_frame(cui_app *app) { (void)app; }
+long cui__plat_frames_skipped(cui_app *app) { (void)app; return 0; }
+bool cui__plat_schedule(cui_app *app, int64_t ms, void (*tick)(void *), void *user) { (void)app; (void)ms; (void)tick; (void)user; return false; }
+bool cui__plat_set_fullscreen(cui_app *app, bool on) { (void)app; (void)on; return false; }
+bool cui__plat_is_fullscreen(cui_app *app) { (void)app; return false; }
+float cui__plat_fullscreen_strip(cui_app *app) { (void)app; return 0; }
+bool cui__plat_fullscreen_peek(cui_app *app, float chrome_h, bool hold) { (void)app; (void)chrome_h; (void)hold; return false; }
+void cui__plat_fullscreen_end_peek(cui_app *app) { (void)app; }
+void cui__plat_fullscreen_sim_pointer(cui_app *app, bool on, int sx, int sy, int cx, int cy) { (void)app; (void)on; (void)sx; (void)sy; (void)cx; (void)cy; }
+#endif

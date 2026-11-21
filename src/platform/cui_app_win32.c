@@ -56,7 +56,27 @@ typedef struct {
     HANDLE timer;          /* timed waits: high resolution where Windows has it (10 1803 and later) */
     bool show_pending;     /* shown with the first picture (cui__plat_show) */
     bool ole_drop;         /* the window is an OLE drop target (cui_app_desc.file_hover) */
+    /* cui_app_frames_on_change */
+    bool idle_on;          /* the subclass is in */
+    bool idle_own;         /* a message reached the window since cui_app_arm (or cui_app_request_frame) */
+    bool idle_waiting;     /* between cui_app_arm and cui_app_frame_due */
+    long idle_skipped;
+    /* cui_app_set_fullscreen */
+    bool fs_want, fs_applied, fs_posted;
+    bool fs_peek, fs_hold;
+    bool fs_sim;           /* tests: the pointer is at fs_sim_pt (screen coordinates) */
+    POINT fs_sim_pt;
+    WINDOWPLACEMENT fs_saved;   /* what leaving comes back to */
+    bool fs_was_max;
+    RECT fs_max_rect;      /* the maximized window's rectangle before entering: leaving puts it back in one step */
+    LONG_PTR fs_style;
 } cui__win32;
+
+#define CUI__FS_MSG (WM_APP + 0x52)   /* posted: make the window match fs_want, between frames */
+#define CUI__FS_STRIP_PX 2            /* the top rows of a fullscreen window that stay the app's: the pointer there asks for the chrome */
+
+static void cui__win32_fs_post(cui_app *app, cui__win32 *w);
+static void cui__win32_fs_apply(cui_app *app, cui__win32 *w);
 
 static HMODULE cui__opengl32;
 static PFN_GetDpiForWindow cui__GetDpiForWindow;
@@ -498,6 +518,7 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         }
         break;
     case WM_NCHITTEST:
+        if (w && w->fs_applied) return HTCLIENT;   /* fullscreen: no edges to drag, no caption */
         /* custom title bar: the edges still resize; everything else is the app's */
         if (app->desc.custom_titlebar) {
             POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
@@ -558,7 +579,20 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);   /* the move loop ate the release */
         cui_request_redraw(ui);
         return 0;
+    case CUI__FS_MSG:
+        if (w) {
+            w->fs_posted = false;
+            cui__win32_fs_apply(app, w);
+        }
+        return 0;
+    case WM_SYSCOMMAND:
+        if (w && w->fs_applied) {
+            UINT c = (UINT)(wp & 0xFFF0);
+            if (c == SC_MAXIMIZE || c == SC_MOVE || c == SC_SIZE) return 0;   /* fullscreen: not the system's to move or size */
+        }
+        break;
     case WM_SIZE:
+        if (w && wp != SIZE_MINIMIZED) cui__win32_fs_post(app, w);   /* restored from minimized: a pending fullscreen goes on */
         if (w) {
             w->width = LOWORD(lp);
             w->height = HIWORD(lp);
@@ -596,6 +630,10 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         return 0;
     }
     case WM_MOUSEMOVE:
+        if (w && w->fs_applied && !w->fs_peek && (int)(short)HIWORD(lp) < CUI__FS_STRIP_PX) {
+            w->fs_peek = true;   /* the pointer is on the strip at the top edge: show the chrome */
+            cui_request_redraw(ui);
+        }
         if (w && !w->tracking) {
             TRACKMOUSEEVENT tme = { sizeof tme, TME_LEAVE, hwnd, 0 };
             TrackMouseEvent(&tme);
@@ -1243,4 +1281,210 @@ bool cui__plat_position(cui_app *app, int *x, int *y) {
     *x = (int)o.x;
     *y = (int)o.y;
     return true;
+}
+
+/* ---- the caret and idle frames (cui_app.h) ---- */
+
+float cui__plat_caret_blink(void) {
+    DWORD ms = 0;
+    if (GetCaretBlinkTime() == INFINITE) return -1.0f;   /* the system's caret does not blink */
+    if (SystemParametersInfoW(0x2022 /* SPI_GETCARETTIMEOUT */, 0, &ms, 0) && ms > 0 && ms < 0x7fffffffu) return (float)ms / 1000.0f;
+    return 5.0f;
+}
+
+typedef LRESULT (CALLBACK *cui__subproc)(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
+typedef BOOL (WINAPI *cui__setsub_fn)(HWND, cui__subproc, UINT_PTR, DWORD_PTR);
+typedef BOOL (WINAPI *cui__remsub_fn)(HWND, cui__subproc, UINT_PTR);
+typedef LRESULT (WINAPI *cui__defsub_fn)(HWND, UINT, WPARAM, LPARAM);
+#define CUI__IDLE_SUBCLASS_ID 0x43554946u   /* "CUIF" */
+
+static cui__defsub_fn cui__defsub;
+
+static LRESULT CALLBACK cui__win32_idle_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref) {
+    (void)id;
+    cui__win32 *w = (cui__win32 *)ref;
+    /* questions that change nothing (a child window asks for the cursor and the hit test as the pointer crosses it; screen
+     * readers and the taskbar ask for text, icons and objects) bring no frame; everything else does */
+    if (msg != WM_SETCURSOR && msg != WM_NCHITTEST && msg != WM_GETOBJECT && msg != WM_GETTEXT && msg != WM_GETTEXTLENGTH && msg != WM_GETICON)
+        w->idle_own = true;
+    return cui__defsub(hwnd, msg, wp, lp);
+}
+
+bool cui__plat_frames_on_change(cui_app *app, bool on) {
+    cui__win32 *w = cui__w(app);
+    if (!w || !w->hwnd) return false;
+    HMODULE cc = LoadLibraryW(L"comctl32.dll");
+    cui__setsub_fn setsub = cc ? (cui__setsub_fn)(void *)GetProcAddress(cc, "SetWindowSubclass") : NULL;
+    cui__remsub_fn remsub = cc ? (cui__remsub_fn)(void *)GetProcAddress(cc, "RemoveWindowSubclass") : NULL;
+    cui__defsub = cc ? (cui__defsub_fn)(void *)GetProcAddress(cc, "DefSubclassProc") : NULL;
+    if (!setsub || !remsub || !cui__defsub) return false;
+    if (!on) {
+        if (w->idle_on) remsub(w->hwnd, cui__win32_idle_proc, CUI__IDLE_SUBCLASS_ID);
+        w->idle_on = false;
+        return true;
+    }
+    if (w->idle_on) remsub(w->hwnd, cui__win32_idle_proc, CUI__IDLE_SUBCLASS_ID);   /* again: to the front */
+    w->idle_on = setsub(w->hwnd, cui__win32_idle_proc, CUI__IDLE_SUBCLASS_ID, (DWORD_PTR)w) != 0;
+    return w->idle_on;
+}
+
+void cui__plat_arm(cui_app *app) {
+    cui__win32 *w = cui__w(app);
+    w->idle_own = false;
+    w->idle_waiting = true;
+}
+
+bool cui__plat_frame_due(cui_app *app) {
+    cui__win32 *w = cui__w(app);
+    w->idle_waiting = false;
+    if (!w->idle_on || w->idle_own || cui_app_pending(app)) return true;
+    w->idle_skipped++;
+    return false;
+}
+
+void cui__plat_request_frame(cui_app *app) { cui__w(app)->idle_own = true; }
+long cui__plat_frames_skipped(cui_app *app) { return cui__w(app)->idle_skipped; }
+
+static struct {
+    cui_app *app;
+    UINT_PTR id;
+    void (*tick)(void *);
+    void *user;
+} cui__sched;
+
+static void CALLBACK cui__win32_sched_proc(HWND hwnd, UINT msg, UINT_PTR id, DWORD t) {
+    (void)hwnd; (void)msg; (void)t;
+    KillTimer(NULL, id);
+    if (id != cui__sched.id) return;
+    cui__sched.id = 0;
+    cui__win32 *w = cui__w(cui__sched.app);
+    if (!w->idle_waiting || !w->idle_on) { w->idle_own = true; return; }   /* another message loop's: the next frame runs it */
+    if (cui__sched.tick) cui__sched.tick(cui__sched.user);
+}
+
+bool cui__plat_schedule(cui_app *app, int64_t ms, void (*tick)(void *), void *user) {
+    cui__win32 *w = cui__w(app);
+    if (!w) return false;
+    cui__sched.app = app;
+    cui__sched.tick = tick;
+    cui__sched.user = user;
+    if (cui__sched.id) { KillTimer(NULL, cui__sched.id); cui__sched.id = 0; }
+    if (ms < 0) return true;
+    UINT d = ms > 0x7fffffff ? 0x7fffffffu : (UINT)ms;
+    if (d < USER_TIMER_MINIMUM) d = USER_TIMER_MINIMUM;
+    cui__sched.id = SetTimer(NULL, 0, d, cui__win32_sched_proc);
+    return cui__sched.id != 0;
+}
+
+/* ---- fullscreen (cui_app.h) ---- */
+
+static bool cui__win32_monitor_rect(HWND hwnd, RECT *r) {
+    MONITORINFO mi;
+    mi.cbSize = sizeof mi;
+    if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) return false;
+    *r = mi.rcMonitor;
+    return true;
+}
+
+static void cui__win32_fs_enter(cui__win32 *w) {
+    RECT mr;
+    if (!cui__win32_monitor_rect(w->hwnd, &mr)) return;
+    w->fs_saved.length = sizeof w->fs_saved;
+    if (!GetWindowPlacement(w->hwnd, &w->fs_saved)) return;
+    w->fs_was_max = IsZoomed(w->hwnd) != 0;
+    if (w->fs_was_max) GetWindowRect(w->hwnd, &w->fs_max_rect);
+    w->fs_style = GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+    w->fs_applied = true;   /* before the size change: the frame it causes is built fullscreen */
+    /* no caption, no resize frame, not maximized (a maximized window is kept back by its frame width, NCCALCSIZE above) */
+    SetWindowLongPtrW(w->hwnd, GWL_STYLE, w->fs_style & ~(LONG_PTR)(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZE));
+    SetWindowPos(w->hwnd, HWND_TOP, mr.left, mr.top, mr.right - mr.left, mr.bottom - mr.top, SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+}
+
+static void cui__win32_fs_leave(cui__win32 *w) {
+    w->fs_applied = false;
+    w->fs_peek = false;
+    LONG_PTR cur = GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+    LONG_PTR keep = WS_MINIMIZE | WS_VISIBLE;
+    WINDOWPLACEMENT wp = w->fs_saved;
+    if (IsIconic(w->hwnd)) {   /* it left while minimized: stays minimized, comes back as it was before */
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, (w->fs_style & ~(LONG_PTR)(WS_MAXIMIZE | keep)) | (cur & keep));
+        wp.showCmd = SW_SHOWMINNOACTIVE;
+        wp.flags = w->fs_was_max ? WPF_RESTORETOMAXIMIZED : 0;
+    } else if (w->fs_was_max && IsWindowVisible(w->hwnd)) {
+        /* maximized before: the style (WS_MAXIMIZE back) and the maximized rectangle are set in one step, so the window goes from
+         * the monitor's rectangle straight to the maximized one (SW_SHOWMAXIMIZED from a restored window showed the normal
+         * rectangle for a frame first); SetWindowPlacement then only stores the normal rectangle. */
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, (w->fs_style & ~keep) | (cur & keep) | WS_MAXIMIZE);
+        SetWindowPos(w->hwnd, NULL, w->fs_max_rect.left, w->fs_max_rect.top, w->fs_max_rect.right - w->fs_max_rect.left,
+                     w->fs_max_rect.bottom - w->fs_max_rect.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        wp.showCmd = SW_SHOWMAXIMIZED;
+        wp.flags = 0;
+    } else {
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, (w->fs_style & ~(LONG_PTR)(WS_MAXIMIZE | keep)) | (cur & keep));
+        wp.showCmd = !IsWindowVisible(w->hwnd) ? SW_HIDE : w->fs_was_max ? SW_SHOWMAXIMIZED : SW_SHOWNOACTIVATE;
+        wp.flags = 0;
+    }
+    SetWindowPlacement(w->hwnd, &wp);
+    SetWindowPos(w->hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+static void cui__win32_fs_apply(cui_app *app, cui__win32 *w) {
+    (void)app;
+    if (w->fs_want && !w->fs_applied && !IsIconic(w->hwnd)) cui__win32_fs_enter(w);
+    else if (!w->fs_want && w->fs_applied) cui__win32_fs_leave(w);
+}
+
+static void cui__win32_fs_post(cui_app *app, cui__win32 *w) {
+    (void)app;
+    if (w->fs_want != w->fs_applied && !w->fs_posted && !(w->fs_want && IsIconic(w->hwnd)))
+        w->fs_posted = PostMessageW(w->hwnd, CUI__FS_MSG, 0, 0) != 0;
+}
+
+bool cui__plat_set_fullscreen(cui_app *app, bool on) {
+    cui__win32 *w = cui__w(app);
+    if (!w || !w->hwnd) return false;
+    w->fs_want = on;
+    if (on && !w->fs_applied && IsIconic(w->hwnd)) return false;   /* comes when restored (WM_SIZE) if still wanted */
+    cui__win32_fs_post(app, w);
+    cui_request_redraw(app->ui);
+    return true;
+}
+
+bool cui__plat_is_fullscreen(cui_app *app) { cui__win32 *w = cui__w(app); return w && w->fs_applied; }
+
+float cui__plat_fullscreen_strip(cui_app *app) {
+    cui__win32 *w = cui__w(app);
+    return w && w->fs_applied && w->scale > 0 ? (float)CUI__FS_STRIP_PX / w->scale : 0;
+}
+
+void cui__plat_fullscreen_end_peek(cui_app *app) { cui__w(app)->fs_peek = false; }
+
+bool cui__plat_fullscreen_peek(cui_app *app, float chrome_h, bool hold) {
+    cui__win32 *w = cui__w(app);
+    w->fs_hold = hold;
+    if (!w->fs_peek) return false;
+    if (!w->fs_applied) { w->fs_peek = false; return false; }
+    POINT pt;
+    RECT wr;
+    if (w->fs_sim) pt = w->fs_sim_pt;
+    else GetCursorPos(&pt);
+    /* no mouse messages reach us once the pointer is over a child window, so while the chrome is shown (only then) a short
+     * timer looks where the pointer is: the chrome goes when it is below its height or outside the window and nothing holds it */
+    if (!hold && GetWindowRect(w->hwnd, &wr) && (pt.y - wr.top > (LONG)(chrome_h * w->scale + 0.5f) || pt.y < wr.top || pt.x < wr.left ||
+                                                   pt.x >= wr.right || pt.y >= wr.bottom)) {
+        w->fs_peek = false;
+        return false;
+    }
+    cui_request_wakeup(app->ui, 0.1f);
+    return true;
+}
+
+void cui__plat_fullscreen_sim_pointer(cui_app *app, bool on, int sx, int sy, int cx, int cy) {
+    cui__win32 *w = cui__w(app);
+    if (!on) { w->fs_sim = false; cui_request_redraw(app->ui); return; }
+    w->fs_sim = true;
+    w->fs_sim_pt.x = sx;
+    w->fs_sim_pt.y = sy;
+    SendMessageW(w->hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(cx, cy));
+    cui_request_redraw(app->ui);
 }
