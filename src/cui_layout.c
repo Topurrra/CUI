@@ -1056,6 +1056,8 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
     }
     bool xf = n->opacity < 0.999f || n->scale != 1.0f || n->tx != 0 || n->ty != 0;
     if (xf) cui__push_xform(ui, n->scale, r.x + r.w * 0.5f, r.y + r.h * 0.5f, n->opacity, n->tx, n->ty);
+    /* a floating panel that animates, with the layer cache on: drawn at its own origin, its transform beside */
+    bool group = xf && (n->flags & CUI_NF_LAYER) && n->id && ui->dl.layer_cache && cui__group_begin(ui, n->id);
     if (n->flags & (CUI_NF_INTERACTIVE | CUI_NF_BLOCKER | CUI_NF_HIT_OPAQUE | CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) {
         cui_rect hr = (n->flags & CUI_NF_BLOCKER) ? r : cui__rect_intersect(cui__xform_rect(ui, r), clip);
         cui__add_hit(ui, n->id, hr, n->flags);
@@ -1111,6 +1113,7 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
     if (border_after) cui_draw_rect_border(ui, r, n->radius, cui__rgba(0, 0, 0, 0), n->border_color, n->border);
     if (n->paint && (n->flags & CUI_NF_PAINT_AFTER)) n->paint(ui, n, n->paint_data);
     if (n->flags & (CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y)) cui__paint_scrollbars(ui, n, clip);
+    if (group) cui__group_end(ui);
     if (xf) cui__pop_xform(ui);
 }
 

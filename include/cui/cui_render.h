@@ -46,6 +46,11 @@ CUI_API void cui_sw_set_threads(cui_sw_renderer *r, int threads);
  * that part needs copying to the screen; it returns false when nothing changed. */
 CUI_API void cui_sw_set_incremental(cui_sw_renderer *r, bool on);
 CUI_API bool cui_sw_last_damage(const cui_sw_renderer *r, int *x, int *y, int *w, int *h);
+/* The layer cache (cui_set_layer_cache): how many times a group was drawn into its bitmap so
+ * far, and the bytes the bitmaps hold now and held at most. At most 4 groups are cached at
+ * once, each up to 4,194,304 pixels and 8,388,608 pixels together (32 MB); a group past that
+ * is drawn the plain way. A bitmap is freed on the first frame without its group. */
+CUI_API void cui_sw_layer_stats(const cui_sw_renderer *r, int *rasters, size_t *bytes, size_t *peak_bytes);
 
 /* Writes a PNG file (RGBA pixels). Returns false on failure. */
 CUI_API bool cui_write_png(const char *path, const void *rgba, int width, int height, int stride);

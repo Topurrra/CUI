@@ -11,7 +11,7 @@
  *   hashing                          cui_core.c
  *   animation                        cui_core.c (springs, tweens) and the motion tokens
  *   fonts and text                   cui_text.c, cui_draw.c
- *   draw list                        cui_draw.c (and the ordered dither primitive); moving textures
+ *   draw list                        cui_draw.c (the ordered dither primitive, layer groups); moving textures
  *                                    between renderers, render/cui_render_sw.c
  *   layout tree                      cui_layout.c (cui_node, building and laying out the tree)
  *   per id state                     cui_core.c (cui_state, garbage collection)
@@ -234,6 +234,16 @@ void cui__sw_move_textures(struct cui_sw_renderer *r, const cui_renderer_iface *
 void cui__sw_last_stats(const struct cui_sw_renderer *r, int *shift, float *drawn, float *moved);
 typedef struct cui_xform { float scale, ox, oy, alpha, tx, ty; } cui_xform;
 
+/* A group of the draw list (cui_set_layer_cache, cui_draw.c): where its rest copy is in the group
+ * buffers, its commands in the frame's, and how it is placed. */
+typedef struct cui__group {
+    cui_id id;
+    int c0, nc;                 /* its commands in dl.cmd */
+    int gv0, nv, gi0, ni, gc0, ngc;   /* its rest copy in dl.gvtx, dl.gidx, dl.gcmd */
+    cui_xform xf;               /* scale, ox, oy (pixels), alpha */
+    cui_rect clip;              /* screen pixels */
+} cui__group;
+
 typedef struct cui_draw_list {
     cui_vertex *vtx; int vtx_count, vtx_cap;
     uint32_t *idx; int idx_count, idx_cap;
@@ -241,11 +251,36 @@ typedef struct cui_draw_list {
     cui_rect clip_stack[64]; int clip_depth;
     cui_xform xform_stack[32]; int xform_depth;
     cui_texture cur_tex;
+    /* What the vertices are drawn with: xform_stack, except inside a group, where it starts again
+     * from the group's own origin (identity) while xform_stack keeps the screen transform for hits. */
+    cui_xform dxform_stack[32];
+    /* layer groups (cui_set_layer_cache): on, the group being drawn, its clips in its own space,
+     * the first command a new one may merge into, and the groups and their rest copies */
+    bool layer_cache, group_on;
+    int cmd_floor;
+    cui_rect gclip_stack[64]; int gclip_depth;
+    cui__group cur;
+    int g_v0, g_i0;
+    cui__group *groups; int group_count, group_cap;
+    cui_vertex *gvtx; int gvtx_count, gvtx_cap;
+    uint32_t *gidx; int gidx_count, gidx_cap;
+    cui_draw_cmd *gcmd; int gcmd_count, gcmd_cap;
+    cui_draw_group *gpub; int gpub_cap;   /* what cui_draw_data.groups points at */
 } cui_draw_list;
 
 void cui__draw_reset(cui_ctx *ui);
 void cui__push_xform(cui_ctx *ui, float scale, float ox, float oy, float alpha, float tx, float ty);
 void cui__pop_xform(cui_ctx *ui);
+/* The transform vertices are drawn with now (in a group: from the group's origin). */
+cui_xform cui__draw_xform(cui_ctx *ui);
+/* A group: what is drawn between begin and end (right after the cui__push_xform of the node that
+ * animates, before its pop) is recorded at the group's origin and kept beside the frame's commands,
+ * which get the transform as before. Groups do not nest: a begin inside one does nothing (false). */
+bool cui__group_begin(cui_ctx *ui, cui_id id);
+void cui__group_end(cui_ctx *ui);
+/* cui_draw_data.groups for the frame (cui_end_frame) and the buffers freed (cui_destroy) */
+void cui__groups_publish(cui_ctx *ui, cui_draw_data *dd);
+void cui__groups_free(cui_ctx *ui);
 void cui__draw_glyph_quad(cui_ctx *ui, float x0, float y0, float x1, float y1,
                           float u0, float v0, float u1, float v1, cui_color c);
 /* Rectangles on whole device pixels as one batch, without anti-aliasing (r: x0, y0, x1, y1 each, in device pixels): see cui_draw.c */
@@ -304,7 +339,8 @@ enum {
     CUI_NF_LINE_START  = 1 << 16,  /* computed: first child of a wrapped line */
     CUI_NF_KEEP_W      = 1 << 17,  /* never shrinks below its preferred width (its siblings give way) */
     CUI_NF_ADAPTIVE    = 1 << 18,  /* rearranges itself when narrow: min_w is its minimum, not its content */
-    CUI_NF_OVERLAY     = 1 << 19   /* absolute: painted and hit tested after the flow children, over them */
+    CUI_NF_OVERLAY     = 1 << 19,  /* absolute: painted and hit tested after the flow children, over them */
+    CUI_NF_LAYER       = 1 << 20   /* a floating panel: with the layer cache on, drawn as a group while it animates */
     /* bits 20 and up are the hit-only CUI_HIT_* flags: a hit records its node's flags in the same word */
 };
 

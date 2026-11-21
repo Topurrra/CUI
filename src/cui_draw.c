@@ -3,10 +3,15 @@
  * stay smooth at any size and DPI. Paths use feathered geometry. */
 #include "cui_internal.h"
 
+/* the clip vertices are cut by now: in a group, the group's own (in its space) */
+static inline cui_rect cui__draw_clip(const cui_draw_list *dl) {
+    return dl->group_on ? dl->gclip_stack[dl->gclip_depth - 1] : dl->clip_stack[dl->clip_depth - 1];
+}
+
 static cui_draw_cmd *cui__cmd(cui_ctx *ui) {
     cui_draw_list *dl = &ui->dl;
-    cui_rect clip = dl->clip_stack[dl->clip_depth - 1];
-    if (dl->cmd_count > 0) {
+    cui_rect clip = cui__draw_clip(dl);
+    if (dl->cmd_count > dl->cmd_floor) {   /* never into a command from before a group's start or end */
         cui_draw_cmd *c = &dl->cmd[dl->cmd_count - 1];
         if (c->texture == dl->cur_tex && memcmp(&c->clip, &clip, sizeof clip) == 0) return c;
         if (c->index_count == 0) { c->texture = dl->cur_tex; c->clip = clip; return c; }
@@ -29,16 +34,15 @@ void cui__draw_reset(cui_ctx *ui) {
     dl->xform_depth = 1;
     cui_xform id = { 1, 0, 0, 1, 0, 0 };
     dl->xform_stack[0] = id;
+    dl->dxform_stack[0] = id;
     dl->cur_tex = 0;
+    dl->group_on = false;
+    dl->cmd_floor = 0;
+    dl->group_count = dl->gvtx_count = dl->gidx_count = dl->gcmd_count = 0;
 }
 
-/* Composite transform: p' = p * scale + (tx, ty) (stored in ox/oy), alpha. */
-void cui__push_xform(cui_ctx *ui, float s, float ox, float oy, float alpha, float tx, float ty) {
-    cui_draw_list *dl = &ui->dl;
-    if (dl->xform_depth >= 32) return;
-    cui_xform p = dl->xform_stack[dl->xform_depth - 1];
-    float sc = ui->scale;
-    ox *= sc; oy *= sc; tx *= sc; ty *= sc;
+/* p (the parent) followed by a scale s around (ox, oy) and a move by (tx, ty), in pixels */
+static cui_xform cui__xf_compose(cui_xform p, float s, float ox, float oy, float alpha, float tx, float ty) {
     float bx = ox - ox * s + tx, by = oy - oy * s + ty;
     cui_xform n;
     n.scale = s * p.scale;
@@ -46,12 +50,26 @@ void cui__push_xform(cui_ctx *ui, float s, float ox, float oy, float alpha, floa
     n.oy = by * p.scale + p.oy;
     n.alpha = alpha * p.alpha;
     n.tx = n.ty = 0;
-    dl->xform_stack[dl->xform_depth++] = n;
+    return n;
+}
+
+/* Composite transform: p' = p * scale + (tx, ty) (stored in ox/oy), alpha. */
+void cui__push_xform(cui_ctx *ui, float s, float ox, float oy, float alpha, float tx, float ty) {
+    cui_draw_list *dl = &ui->dl;
+    if (dl->xform_depth >= 32) return;
+    float sc = ui->scale;
+    ox *= sc; oy *= sc; tx *= sc; ty *= sc;
+    int d = dl->xform_depth++;
+    dl->xform_stack[d] = cui__xf_compose(dl->xform_stack[d - 1], s, ox, oy, alpha, tx, ty);
+    dl->dxform_stack[d] = cui__xf_compose(dl->dxform_stack[d - 1], s, ox, oy, alpha, tx, ty);
 }
 
 void cui__pop_xform(cui_ctx *ui) { if (ui->dl.xform_depth > 1) ui->dl.xform_depth--; }
 
-static inline cui_xform cui__xf(cui_ctx *ui) { return ui->dl.xform_stack[ui->dl.xform_depth - 1]; }
+/* Vertices take the drawing transform: the screen's, or in a group the group's own. Hits and the
+ * clip stack keep the screen's (xform_stack). */
+static inline cui_xform cui__xf(cui_ctx *ui) { return ui->dl.dxform_stack[ui->dl.xform_depth - 1]; }
+cui_xform cui__draw_xform(cui_ctx *ui) { return cui__xf(ui); }
 static inline bool cui__xf_identity(cui_xform x) { return x.scale == 1 && x.ox == 0 && x.oy == 0 && x.alpha == 1; }
 
 static inline cui_color cui__xa(cui_color c, float a) {
@@ -60,19 +78,30 @@ static inline cui_color cui__xa(cui_color c, float a) {
     return c;
 }
 
-void cui_push_clip(cui_ctx *ui, cui_rect r) {
-    cui_draw_list *dl = &ui->dl;
-    cui_xform x = cui__xf(ui);
-    float s = ui->scale;
-    cui_rect px = { r.x * s * x.scale + x.ox, r.y * s * x.scale + x.oy, r.w * s * x.scale, r.h * s * x.scale };
-    /* snap to whole pixels outward */
+/* r (pixels) under x, snapped to whole pixels outward */
+static cui_rect cui__clip_px(cui_rect r, cui_xform x) {
+    cui_rect px = { r.x * x.scale + x.ox, r.y * x.scale + x.oy, r.w * x.scale, r.h * x.scale };
     float x0 = floorf(px.x), y0 = floorf(px.y), x1 = ceilf(px.x + px.w), y1 = ceilf(px.y + px.h);
     px.x = x0; px.y = y0; px.w = x1 - x0; px.h = y1 - y0;
-    cui_rect cur = dl->clip_stack[dl->clip_depth - 1];
-    if (dl->clip_depth < 64) dl->clip_stack[dl->clip_depth++] = cui__rect_intersect(cur, px);
+    return px;
 }
 
-void cui_pop_clip(cui_ctx *ui) { if (ui->dl.clip_depth > 1) ui->dl.clip_depth--; }
+void cui_push_clip(cui_ctx *ui, cui_rect r) {
+    cui_draw_list *dl = &ui->dl;
+    float s = ui->scale;
+    r.x *= s; r.y *= s; r.w *= s; r.h *= s;
+    cui_rect cur = dl->clip_stack[dl->clip_depth - 1];
+    if (dl->clip_depth < 64) dl->clip_stack[dl->clip_depth++] = cui__rect_intersect(cur, cui__clip_px(r, dl->xform_stack[dl->xform_depth - 1]));
+    if (dl->group_on && dl->gclip_depth < 64) {   /* and in the group's space, which its commands keep */
+        cui_rect g = dl->gclip_stack[dl->gclip_depth - 1];
+        dl->gclip_stack[dl->gclip_depth++] = cui__rect_intersect(g, cui__clip_px(r, cui__xf(ui)));
+    }
+}
+
+void cui_pop_clip(cui_ctx *ui) {
+    if (ui->dl.clip_depth > 1) ui->dl.clip_depth--;
+    if (ui->dl.group_on && ui->dl.gclip_depth > 1) ui->dl.gclip_depth--;
+}
 
 static void cui__set_texture(cui_ctx *ui, cui_texture t) { ui->dl.cur_tex = t; }
 
@@ -98,7 +127,7 @@ static uint32_t *cui__idx(cui_ctx *ui, int ni) {
 }
 
 static bool cui__clip_rejects(cui_ctx *ui, float x0, float y0, float x1, float y1) {
-    cui_rect c = ui->dl.clip_stack[ui->dl.clip_depth - 1];
+    cui_rect c = cui__draw_clip(&ui->dl);
     return x1 < c.x || y1 < c.y || x0 > c.x + c.w || y0 > c.y + c.h || c.w <= 0 || c.h <= 0;
 }
 
@@ -604,4 +633,108 @@ void cui__draw_text_at(cui_ctx *ui, cui_font font, float size, float x, float y,
     float fh = cui__font_line_height(ui, font, size);
     float tx = anchor == CUI__AT_CENTER ? x - w * 0.5f : anchor == CUI__AT_RIGHT ? x - w : x;
     cui__draw_text_line(ui, font, size, tx, y - fh * 0.5f, color, s, -1, tab);
+}
+
+/* ---- layer groups (cui_set_layer_cache) ----
+ * A floating panel that animates is drawn once at its own origin: its vertices, indices and
+ * commands are copied aside (the rest copy a renderer may cache as a bitmap), then the frame's own
+ * vertices get the transform and opacity, so the frame's commands draw it exactly as a renderer
+ * that knows nothing of groups expects. Hits and the clip stack keep the screen transform. */
+
+void cui_set_layer_cache(cui_ctx *ui, bool on) { if (ui) ui->dl.layer_cache = on; }
+
+bool cui__group_begin(cui_ctx *ui, cui_id id) {
+    cui_draw_list *dl = &ui->dl;
+    int d = dl->xform_depth - 1;
+    cui_xform g = dl->xform_stack[d];
+    if (!dl->layer_cache || dl->group_on || !(g.scale > 0.01f && g.scale < 100.0f) || !(g.alpha >= 0)) return false;
+    dl->group_on = true;
+    dl->cur.id = id;
+    dl->cur.xf = g;
+    dl->cur.clip = dl->clip_stack[dl->clip_depth - 1];
+    cui_xform identity = { 1, 0, 0, 1, 0, 0 };
+    dl->dxform_stack[d] = identity;
+    dl->gclip_depth = 1;
+    dl->gclip_stack[0] = (cui_rect){ -1e6f, -1e6f, 2e6f, 2e6f };
+    dl->cmd_floor = dl->cmd_count;
+    dl->cur.c0 = dl->cmd_count;
+    dl->g_v0 = dl->vtx_count;
+    dl->g_i0 = dl->idx_count;
+    return true;
+}
+
+/* a vertex drawn at the group's origin, put where the screen transform x puts it */
+static void cui__xf_vertex(cui_vertex *v, cui_xform x) {
+    int mode = (int)(v->mode + 0.5f);
+    float s = x.scale;
+    v->x = v->x * s + x.ox; v->y = v->y * s + x.oy;
+    if (s != 1) {
+        v->lx *= s; v->ly *= s; v->hw *= s; v->hh *= s;
+        v->r_tl *= s; v->r_tr *= s; v->r_br *= s; v->r_bl *= s;
+        if (mode == CUI_SHADE_RRECT || mode == CUI_SHADE_SHADOW || mode == CUI_SHADE_IMAGE) v->border *= s;   /* a width (dither: its floor) */
+    }
+    if (mode != CUI_SHADE_DITHER) v->color = cui__xa(v->color, x.alpha);   /* (dither: the density) */
+    v->border_color = cui__xa(v->border_color, x.alpha);
+}
+
+void cui__group_end(cui_ctx *ui) {
+    cui_draw_list *dl = &ui->dl;
+    if (!dl->group_on) return;
+    dl->group_on = false;
+    int d = dl->xform_depth - 1;
+    dl->dxform_stack[d] = dl->xform_stack[d];
+    cui__group g = dl->cur;
+    int v0 = dl->g_v0, i0 = dl->g_i0, nv = dl->vtx_count - v0, ni = dl->idx_count - i0;
+    g.nc = dl->cmd_count - g.c0;
+    dl->cmd_floor = dl->cmd_count;
+    if (nv <= 0 || ni <= 0 || g.nc <= 0) return;
+    /* the rest copy: indices from its first vertex, index offsets from its first index */
+    CUI__GROW(ui, dl->gvtx, dl->gvtx_count, dl->gvtx_cap, nv);
+    CUI__GROW(ui, dl->gidx, dl->gidx_count, dl->gidx_cap, ni);
+    CUI__GROW(ui, dl->gcmd, dl->gcmd_count, dl->gcmd_cap, g.nc);
+    g.gv0 = dl->gvtx_count; g.nv = nv;
+    g.gi0 = dl->gidx_count; g.ni = ni;
+    g.gc0 = dl->gcmd_count; g.ngc = g.nc;
+    memcpy(dl->gvtx + g.gv0, dl->vtx + v0, sizeof *dl->vtx * (size_t)nv);
+    for (int k = 0; k < ni; k++) dl->gidx[g.gi0 + k] = dl->idx[i0 + k] - (uint32_t)v0;
+    for (int k = 0; k < g.nc; k++) {
+        cui_draw_cmd c = dl->cmd[g.c0 + k];
+        c.index_offset -= (uint32_t)i0;
+        dl->gcmd[g.gc0 + k] = c;
+    }
+    dl->gvtx_count += nv; dl->gidx_count += ni; dl->gcmd_count += g.nc;
+    /* the frame's copy, transformed: on screen, inside what the group may cover */
+    for (int k = v0; k < dl->vtx_count; k++) cui__xf_vertex(&dl->vtx[k], g.xf);
+    for (int k = g.c0; k < dl->cmd_count; k++) dl->cmd[k].clip = cui__rect_intersect(g.clip, cui__clip_px(dl->cmd[k].clip, g.xf));
+    CUI__GROW(ui, dl->groups, dl->group_count, dl->group_cap, 1);
+    dl->groups[dl->group_count++] = g;
+}
+
+void cui__groups_publish(cui_ctx *ui, cui_draw_data *dd) {
+    cui_draw_list *dl = &ui->dl;
+    dd->groups = NULL;
+    dd->group_count = 0;
+    if (!dl->group_count) return;
+    int none = 0;
+    CUI__GROW(ui, dl->gpub, none, dl->gpub_cap, dl->group_count);
+    for (int i = 0; i < dl->group_count; i++) {
+        const cui__group *g = &dl->groups[i];
+        cui_draw_group *p = &dl->gpub[i];
+        p->id = g->id;
+        p->command_offset = g->c0; p->command_count = g->nc;
+        p->rest_vertices = dl->gvtx + g->gv0; p->rest_vertex_count = g->nv;
+        p->rest_indices = dl->gidx + g->gi0; p->rest_index_count = g->ni;
+        p->rest_commands = dl->gcmd + g->gc0; p->rest_command_count = g->ngc;
+        p->scale = g->xf.scale; p->dx = g->xf.ox; p->dy = g->xf.oy; p->opacity = g->xf.alpha;
+        p->clip = g->clip;
+    }
+    dd->groups = dl->gpub;
+    dd->group_count = dl->group_count;
+}
+
+void cui__groups_free(cui_ctx *ui) {
+    cui_draw_list *dl = &ui->dl;
+    cui__free(ui, dl->groups); cui__free(ui, dl->gvtx); cui__free(ui, dl->gidx); cui__free(ui, dl->gcmd); cui__free(ui, dl->gpub);
+    dl->groups = NULL; dl->gvtx = NULL; dl->gidx = NULL; dl->gcmd = NULL; dl->gpub = NULL;
+    dl->group_cap = dl->gvtx_cap = dl->gidx_cap = dl->gcmd_cap = dl->gpub_cap = 0;
 }

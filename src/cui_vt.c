@@ -1409,7 +1409,7 @@ static void cui__vt_decor(cui_ctx *ui, const cui__vt_paint *p, uint32_t at, floa
 
 /* Slants the glyphs drawn since vertex v0 around the baseline `base`: a synthesized italic (the monospace font has none). */
 static void cui__vt_slant(cui_ctx *ui, int v0, float base) {
-    cui_xform x = ui->dl.xform_stack[ui->dl.xform_depth - 1];
+    cui_xform x = cui__draw_xform(ui);
     float by = base * ui->scale * x.scale + x.oy;
     for (int v = v0; v < ui->dl.vtx_count; v++) ui->dl.vtx[v].x += 0.2f * (by - ui->dl.vtx[v].y);
 }

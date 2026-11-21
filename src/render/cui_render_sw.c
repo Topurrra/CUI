@@ -54,9 +54,33 @@ typedef struct cui__sw_prim {
     uint32_t key;                /* color and shading of the uniform part */
     uint8_t quad, forced, mode;  /* six indices; samples a part of a texture written since last frame; shading */
     uint8_t occ;
+    uint8_t layer;               /* a group's bitmap (layer + 1 in r->layers), blended instead of its commands; 0 none */
 } cui__sw_prim;
 
 typedef struct cui__sw_pool cui__sw_pool;
+
+/* The layer cache (cui_set_layer_cache): a group drawn once into a bitmap at its rest place, then
+ * blended each frame where the group's transform puts it. The bitmap has a clear one pixel border,
+ * so a sample at its edge reads nothing outside it. */
+#define CUI__SW_LAYERS 4
+#define CUI__SW_LAYER_PX (2048 * 2048)           /* one bitmap at most, in pixels (16 MB) */
+#define CUI__SW_LAYERS_PX (2 * CUI__SW_LAYER_PX)  /* all of them (32 MB) */
+typedef struct cui__sw_layer {
+    cui_id id;
+    bool used, valid, fresh, seen;  /* valid: the pixels are what hash says; fresh: made this frame */
+    bool drawn;                     /* the pixels were drawn on the last frame */
+    uint64_t hash, last;            /* of the content in the pixels; of the content last frame */
+    int x0, y0, w, h;               /* the bitmap's place in rest pixels, and size */
+    cui_sw_format fmt;
+    uint8_t *px; size_t cap;
+    int *span; int span_cap;        /* per row: the first and one past the last pixel that is not clear */
+    float s, dx, dy; int a256;      /* this frame: scale, offset (pixels) and opacity (0..256) */
+    /* this frame, scaled: per screen column from tx0 the bitmap column left of its sample and the two weights (low 16
+     * bits for that column, high for the next); per screen row from ty0 the bitmap row, its weight and the screen
+     * columns [a, b) that read pixels which are not clear */
+    int tx0, tnx, ty0, tny, tcap_x, tcap_y;
+    int *tcol; int32_t *tw; int *trow;
+} cui__sw_layer;
 
 struct cui_sw_renderer {
     cui__sw_tex *tex;
@@ -84,6 +108,15 @@ struct cui_sw_renderer {
      * (new glyphs go to unused parts, so text already on screen stays put) */
     struct { cui_texture t; int x0, y0, x1, y1; } changed[32];
     int nchanged; bool changed_overflow;
+    /* the layer cache: the bitmaps, the renderer that draws a group into one (it borrows these
+     * textures), its copy of the group, and per group this frame the bitmap used (-1: drawn plain) */
+    cui__sw_layer *layers;
+    cui_sw_renderer *sub;
+    bool keep_alpha;                       /* the clear keeps the clear color's alpha (the sub renderer's bitmaps) */
+    cui_vertex *lvtx; int lvtx_cap;
+    cui_draw_cmd *lcmd; int lcmd_cap;
+    int *gslot; int gslot_cap;
+    int layer_rasters; size_t layer_bytes, layer_peak;
 };
 
 static void cui__sw_note_change(cui_sw_renderer *r, cui_texture t, int x0, int y0, int x1, int y1) {
@@ -197,8 +230,11 @@ cui_sw_renderer *cui_sw_create(void) {
     return r;
 }
 
+static void cui__sw_layers_free(cui_sw_renderer *r);
+
 void cui_sw_destroy(cui_sw_renderer *r) {
     if (!r) return;
+    cui__sw_layers_free(r);
     for (int i = 0; i < r->tex_count; i++) free(r->tex[i].data);
     free(r->tex);
     cui__sw_pool_destroy(r->pool);
@@ -225,6 +261,11 @@ void cui__sw_last_stats(const cui_sw_renderer *r, int *shift, float *drawn, floa
     if (shift) *shift = r ? r->last_shift : 0;
     if (drawn) *drawn = r ? r->last_drawn : 0;
     if (moved) *moved = r ? r->last_moved : 0;
+}
+void cui_sw_layer_stats(const cui_sw_renderer *r, int *rasters, size_t *bytes, size_t *peak_bytes) {
+    if (rasters) *rasters = r ? r->layer_rasters : 0;
+    if (bytes) *bytes = r ? r->layer_bytes : 0;
+    if (peak_bytes) *peak_bytes = r ? r->layer_peak : 0;
 }
 bool cui_sw_last_damage(const cui_sw_renderer *r, int *x, int *y, int *w, int *h) {
     if (!r) return false;
@@ -1238,10 +1279,20 @@ static bool cui__sw_prim_cols(const cui__sw_prim *p, int tw, int *a, int *b) {
     return cui__sw_tile_range(x0, x1, tw, a, b);
 }
 
+static int cui__sw_layer_prim(cui_sw_renderer *r, const cui_draw_data *dd, int gi, int n, int tw, int th);
+
 /* This frame's primitives, and per tile row the ones that may paint it, in drawing order. */
 static void cui__sw_build(cui_sw_renderer *r, const cui_draw_data *dd, int tw, int th) {
-    int n = 0;
+    int n = 0, gi = 0, ng = dd->groups ? dd->group_count : 0;
     for (int ci = 0; ci < dd->command_count; ci++) {
+        /* a group drawn from its bitmap: one primitive instead of its commands */
+        while (gi < ng && (r->gslot[gi] < 0 || dd->groups[gi].command_offset < ci)) gi++;
+        if (gi < ng && dd->groups[gi].command_offset == ci) {
+            n = cui__sw_layer_prim(r, dd, gi, n, tw, th);
+            ci += dd->groups[gi].command_count - 1;
+            gi++;
+            continue;
+        }
         const cui_draw_cmd *cmd = &dd->commands[ci];
         cui_texture tid = cmd->texture ? cmd->texture : dd->font_atlas;
         int cx0 = cui__sw_iclamp(floorf(cmd->clip.x)), cy0 = cui__sw_iclamp(floorf(cmd->clip.y));
@@ -1285,6 +1336,7 @@ static void cui__sw_build(cui_sw_renderer *r, const cui_draw_data *dd, int tw, i
             p->ua[1] = p->ub[1] = p->ua[3] = p->ub[3] = 0;
             p->key = 0;
             p->occ = 0;
+            p->layer = 0;
             uint64_t h = (uint64_t)tid * 0x100000001B3ull + 7;
             if (quad && cui__sw_quad_ok(v[0], v[1], v[2], v[3])) {
                 /* what cui__raster_quad reads: the first vertex, the right side and the bottom */
@@ -1433,6 +1485,419 @@ static int cui__sw_vote(cui_sw_renderer *r, int height, int out[3]) {
     return n;
 }
 
+/* ---- the layer cache (cui_set_layer_cache) ----
+ * A group (cui_draw_data.groups) is drawn once into a bitmap at its rest place, by a second renderer
+ * that borrows this one's textures, then each frame of its animation the bitmap is blended where the
+ * group's transform puts it: one primitive instead of the group's shadows, body and text. The bitmap
+ * is drawn again when the group's content changes (a hash of its rest vertices and commands, and a
+ * texture it samples being written) and let go on the first frame without the group. A group at rest
+ * (no scale, whole pixel offset, opaque) whose bitmap is not current is drawn the plain way: that is
+ * cheap with incremental frames, and the bitmap is made when it moves again. */
+
+static void cui__sw_layer_release(cui_sw_renderer *r, cui__sw_layer *L) {
+    r->layer_bytes -= L->cap;
+    free(L->px);
+    free(L->span);
+    free(L->tcol); free(L->tw); free(L->trow);
+    memset(L, 0, sizeof *L);
+}
+
+/* L's tables for this frame's scaled blend (cui__sw_layer_blit); false when there is no memory for them */
+static bool cui__sw_layer_tables(cui__sw_layer *L) {
+    float s = L->s, inv = 1.0f / s;
+    int xa = (int)floorf(L->dx + s * (float)L->x0), xb = (int)ceilf(L->dx + s * (float)(L->x0 + L->w));
+    int ya = (int)floorf(L->dy + s * (float)L->y0), yb = (int)ceilf(L->dy + s * (float)(L->y0 + L->h));
+    int nx = CUI_MAX(0, xb - xa), ny = CUI_MAX(0, yb - ya);
+    if (nx > L->tcap_x) {
+        int *c = realloc(L->tcol, sizeof *c * (size_t)nx);
+        if (c) L->tcol = c;
+        int32_t *w = realloc(L->tw, sizeof *w * (size_t)nx);
+        if (w) L->tw = w;
+        if (!c || !w) return false;
+        L->tcap_x = nx;
+    }
+    if (ny > L->tcap_y) {
+        int *t = realloc(L->trow, sizeof *t * 4 * (size_t)ny);
+        if (!t) return false;
+        L->trow = t; L->tcap_y = ny;
+    }
+    L->tx0 = xa; L->tnx = nx; L->ty0 = ya; L->tny = ny;
+    for (int i = 0; i < nx; i++) {
+        float u = (((float)(xa + i) + 0.5f) - L->dx) * inv - (float)L->x0 - 0.5f;
+        float fu = floorf(u);
+        int iu = (int)fu;
+        float f = u - fu;
+        if (iu < 0) { iu = 0; f = 0; }
+        if (iu > L->w - 2) { iu = L->w - 2; f = 1; }
+        int wq = (int)(f * 256.0f + 0.5f);
+        L->tcol[i] = iu;
+        L->tw[i] = (int32_t)((uint32_t)wq << 16 | (uint32_t)(256 - wq));
+    }
+    for (int j = 0; j < ny; j++) {
+        float v = (((float)(ya + j) + 0.5f) - L->dy) * inv - (float)L->y0 - 0.5f;
+        float fv = floorf(v);
+        int jv = (int)fv;
+        float f = v - fv;
+        if (jv < 0) { jv = 0; f = 0; }
+        if (jv > L->h - 2) { jv = L->h - 2; f = 1; }
+        int wy = (int)(f * 256.0f + 0.5f);
+        /* the pixels that are not clear in the rows it reads, then the screen columns that read them (tcol only grows) */
+        int sl = L->span[2 * jv], sr = L->span[2 * jv + 1];
+        if (wy) {
+            int sl2 = L->span[2 * jv + 2], sr2 = L->span[2 * jv + 3];
+            if (wy == 256) { sl = sl2; sr = sr2; }
+            else if (sl2 < sr2) { if (sl >= sr) { sl = sl2; sr = sr2; } else { sl = CUI_MIN(sl, sl2); sr = CUI_MAX(sr, sr2); } }
+        }
+        int a = 0, b = 0;
+        if (sl < sr) {
+            int lo = 0, hi = nx;   /* first i with tcol[i] + 1 >= sl */
+            while (lo < hi) { int m = (lo + hi) / 2; if (L->tcol[m] + 1 < sl) lo = m + 1; else hi = m; }
+            a = lo;
+            lo = a; hi = nx;       /* first i with tcol[i] >= sr */
+            while (lo < hi) { int m = (lo + hi) / 2; if (L->tcol[m] < sr) lo = m + 1; else hi = m; }
+            b = lo;
+        }
+        int *t = L->trow + 4 * j;
+        t[0] = jv; t[1] = wy; t[2] = xa + a; t[3] = xa + b;
+    }
+    return true;
+}
+
+/* everything the cache holds (no group left, or the renderer goes) */
+static void cui__sw_layers_free(cui_sw_renderer *r) {
+    if (r->layers)
+        for (int i = 0; i < CUI__SW_LAYERS; i++) cui__sw_layer_release(r, &r->layers[i]);
+    free(r->layers); r->layers = NULL;
+    if (r->sub) { r->sub->tex = NULL; r->sub->tex_count = r->sub->tex_cap = 0; cui_sw_destroy(r->sub); r->sub = NULL; }
+    free(r->lvtx); r->lvtx = NULL; r->lvtx_cap = 0;
+    free(r->lcmd); r->lcmd = NULL; r->lcmd_cap = 0;
+}
+
+/* what a group's bitmap depends on: its rest vertices relative to the bitmap, indices and commands */
+static uint64_t cui__sw_group_hash(const cui_draw_group *g, cui_texture atlas, float ox, float oy) {
+    uint64_t h = 0x6C6179657243ull;
+    for (int i = 0; i < g->rest_vertex_count; i++) h = cui__sw_vertex_hash(&g->rest_vertices[i], ox, oy, h);
+    h = cui__sw_hash_bytes(g->rest_indices, sizeof *g->rest_indices * (size_t)g->rest_index_count, h);
+    for (int i = 0; i < g->rest_command_count; i++) {
+        const cui_draw_cmd *c = &g->rest_commands[i];
+        h = cui__sw_mix(h, (uint64_t)(c->texture ? c->texture : atlas));
+        h = cui__sw_mix(h, ((uint64_t)c->index_offset << 32) | c->index_count);
+        h = cui__sw_mix(h, cui__sw_rel(c->clip.x, ox));
+        h = cui__sw_mix(h, cui__sw_rel(c->clip.y, oy));
+        h = cui__sw_mix(h, cui__sw_fbits(c->clip.w) << 32 | cui__sw_fbits(c->clip.h));
+    }
+    return h;
+}
+
+/* a part of a texture the group samples was written since the last frame (as cui__sw_build decides it) */
+static bool cui__sw_group_tex_changed(const cui_sw_renderer *r, const cui_draw_group *g, cui_texture atlas) {
+    if (r->changed_overflow) return true;
+    for (int i = 0; i < g->rest_command_count && r->nchanged; i++) {
+        const cui_draw_cmd *c = &g->rest_commands[i];
+        cui_texture t = c->texture ? c->texture : atlas;
+        int k = 0;
+        while (k < r->nchanged && r->changed[k].t != t) k++;
+        if (k == r->nchanged || !c->index_count) continue;
+        int slot = (int)t - 1;
+        float tw = 1, th = 1;
+        if (slot >= 0 && slot < r->tex_count && r->tex[slot].used) { tw = (float)r->tex[slot].w; th = (float)r->tex[slot].h; }
+        float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
+        for (uint32_t j = 0; j < c->index_count; j++) {
+            uint32_t vi = g->rest_indices[c->index_offset + j];
+            if (vi >= (uint32_t)g->rest_vertex_count) continue;
+            const cui_vertex *v = &g->rest_vertices[vi];
+            u0 = CUI_MIN(u0, v->u); u1 = CUI_MAX(u1, v->u); v0 = CUI_MIN(v0, v->v); v1 = CUI_MAX(v1, v->v);
+        }
+        u0 *= tw; u1 *= tw; v0 *= th; v1 *= th;
+        if (u1 >= (float)r->changed[k].x0 - 1 && u0 <= (float)r->changed[k].x1 + 1 && v1 >= (float)r->changed[k].y0 - 1 && v0 <= (float)r->changed[k].y1 + 1) return true;
+    }
+    return false;
+}
+
+/* draws group g into L's bitmap (x0, y0, w, h in rest pixels); false when there is no memory for it */
+static bool cui__sw_layer_draw(cui_sw_renderer *r, cui__sw_layer *L, const cui_draw_group *g, const cui_draw_data *dd,
+                               cui_sw_format fmt, int x0, int y0, int w, int h) {
+    size_t need = (size_t)w * (size_t)h * 4;
+    if (L->cap < need || L->cap > 2 * need) {
+        r->layer_bytes -= L->cap;
+        free(L->px);
+        L->px = malloc(need);
+        L->cap = L->px ? need : 0;
+        r->layer_bytes += L->cap;
+        if (!L->px) return false;
+        if (r->layer_bytes > r->layer_peak) r->layer_peak = r->layer_bytes;
+    }
+    if (h > L->span_cap) {
+        int *sp = realloc(L->span, sizeof *L->span * 2 * (size_t)h);
+        if (!sp) return false;
+        L->span = sp; L->span_cap = h;
+    }
+    if (!r->sub) {
+        r->sub = cui_sw_create();
+        if (!r->sub) return false;
+        r->sub->threads = 1;
+        r->sub->keep_alpha = true;
+    }
+    /* the group moved to the bitmap's origin (whole pixels: the same samples) */
+    int nv = g->rest_vertex_count, nc = g->rest_command_count;
+    r->lvtx = cui__sw_grow(r->lvtx, &r->lvtx_cap, nv, sizeof *r->lvtx);
+    r->lcmd = cui__sw_grow(r->lcmd, &r->lcmd_cap, nc, sizeof *r->lcmd);
+    for (int i = 0; i < nv; i++) { r->lvtx[i] = g->rest_vertices[i]; r->lvtx[i].x -= (float)x0; r->lvtx[i].y -= (float)y0; }
+    for (int i = 0; i < nc; i++) { r->lcmd[i] = g->rest_commands[i]; r->lcmd[i].clip.x -= (float)x0; r->lcmd[i].clip.y -= (float)y0; }
+    cui_draw_data sd;
+    memset(&sd, 0, sizeof sd);   /* clear: transparent */
+    sd.vertices = r->lvtx; sd.vertex_count = nv;
+    sd.indices = g->rest_indices; sd.index_count = g->rest_index_count;
+    sd.commands = r->lcmd; sd.command_count = nc;
+    sd.width_px = w; sd.height_px = h;
+    sd.font_atlas = dd->font_atlas;
+    r->sub->tex = r->tex; r->sub->tex_count = r->tex_count; r->sub->tex_cap = r->tex_cap;
+    cui_sw_render(r->sub, &sd, L->px, w, h, w * 4, fmt);
+    r->sub->tex = NULL; r->sub->tex_count = r->sub->tex_cap = 0;
+    /* per row, the pixels that are not clear */
+    for (int y = 0; y < h; y++) {
+        const uint8_t *row = L->px + (size_t)y * (size_t)w * 4;
+        int a = 0, b = w;
+        while (a < w && !row[a * 4 + 3]) a++;
+        while (b > a && !row[(b - 1) * 4 + 3]) b--;
+        L->span[2 * y] = a; L->span[2 * y + 1] = b;
+    }
+    L->x0 = x0; L->y0 = y0; L->w = w; L->h = h; L->fmt = fmt;
+    L->valid = true;
+    r->layer_rasters++;
+    return true;
+}
+
+/* Which groups are drawn from a bitmap this frame (r->gslot), their bitmaps drawn where needed. */
+static void cui__sw_layers_prepare(cui_sw_renderer *r, const cui_draw_data *dd, cui_sw_format fmt) {
+    int ng = dd->groups ? dd->group_count : 0;
+    if (ng > r->gslot_cap) { r->gslot = cui__sw_xrealloc(r->gslot, sizeof *r->gslot * (size_t)ng); r->gslot_cap = ng; }
+    if (!ng && !r->layers) return;
+    if (!r->layers) r->layers = calloc(CUI__SW_LAYERS, sizeof *r->layers);
+    if (!r->layers) { for (int i = 0; i < ng; i++) r->gslot[i] = -1; return; }
+    for (int i = 0; i < CUI__SW_LAYERS; i++) r->layers[i].seen = false;
+    for (int gi = 0; gi < ng; gi++) {
+        const cui_draw_group *g = &dd->groups[gi];
+        r->gslot[gi] = -1;
+        if (g->rest_vertex_count <= 0 || g->command_count <= 0 || !(g->scale >= 0.5f && g->scale <= 2.0f) ||
+            !(g->opacity >= 0) || !(fabsf(g->dx) < 1e6f && fabsf(g->dy) < 1e6f)) continue;
+        /* the bitmap: the rest bounds with a clear pixel around them */
+        float mnx = 1e30f, mny = 1e30f, mxx = -1e30f, mxy = -1e30f;
+        for (int i = 0; i < g->rest_vertex_count; i++) {
+            const cui_vertex *v = &g->rest_vertices[i];
+            mnx = CUI_MIN(mnx, v->x); mxx = CUI_MAX(mxx, v->x); mny = CUI_MIN(mny, v->y); mxy = CUI_MAX(mxy, v->y);
+        }
+        double bx0 = floor(mnx) - 1, by0 = floor(mny) - 1, bx1 = ceil(mxx) + 1, by1 = ceil(mxy) + 1;
+        if (!(bx0 > -1e6 && by0 > -1e6 && bx1 < 1e6 && by1 < 1e6) || (bx1 - bx0) * (by1 - by0) > CUI__SW_LAYER_PX) continue;
+        int x0 = (int)bx0, y0 = (int)by0, w = (int)(bx1 - bx0), h = (int)(by1 - by0);
+        if (w < 2 || h < 2) continue;
+        /* its bitmap from the last frame, else a free one */
+        int slot = -1, spare = -1;
+        for (int i = 0; i < CUI__SW_LAYERS; i++) {
+            if (r->layers[i].used && r->layers[i].id == g->id && !r->layers[i].seen) { slot = i; break; }
+            if (!r->layers[i].used && spare < 0) spare = i;
+        }
+        if (slot < 0) {
+            if (spare < 0) continue;
+            slot = spare;
+            memset(&r->layers[slot], 0, sizeof r->layers[slot]);
+            r->layers[slot].used = true; r->layers[slot].id = g->id; r->layers[slot].fresh = true;
+        }
+        cui__sw_layer *L = &r->layers[slot];
+        L->seen = true;
+        uint64_t hh = cui__sw_mix(cui__sw_group_hash(g, dd->font_atlas, (float)x0, (float)y0) ^ (uint64_t)fmt,
+                                  ((uint64_t)(uint32_t)w << 32) | (uint32_t)h);
+        if (L->valid && (L->fmt != fmt || L->x0 != x0 || L->y0 != y0 || L->w != w || L->h != h || cui__sw_group_tex_changed(r, g, dd->font_atlas)))
+            L->valid = false;
+        /* the transform; unscaled (within 1/10000: a spring's end is not always exactly 1), on whole pixels,
+         * so it is copied, not resampled */
+        float ps = L->s, pdx = L->dx, pdy = L->dy;
+        int pa = L->a256;
+        L->s = fabsf(g->scale - 1.0f) < 1e-4f ? 1.0f : g->scale;
+        L->dx = L->s == 1.0f ? floorf(g->dx + 0.5f) : g->dx;
+        L->dy = L->s == 1.0f ? floorf(g->dy + 0.5f) : g->dy;
+        L->a256 = (int)((g->opacity > 1 ? 1 : g->opacity) * 256.0f + 0.5f);
+        /* at rest: placed as on the last frame (new: unscaled and opaque) */
+        bool at_rest = L->fresh ? L->s == 1.0f && L->a256 == 256 : L->s == ps && L->dx == pdx && L->dy == pdy && L->a256 == pa;
+        bool use = L->valid && hh == L->hash;
+        /* moving: drawn into the bitmap, except right after drawing it for content that changed again
+         * (content that changes on every frame, a spinner say, then goes plain every other frame) */
+        bool drawn = false;
+        if (!use && !at_rest && (L->fresh || hh == L->last || !L->drawn) &&
+            r->layer_bytes - L->cap + (size_t)w * (size_t)h * 4 <= (size_t)CUI__SW_LAYERS_PX * 4) {
+            use = drawn = cui__sw_layer_draw(r, L, g, dd, fmt, x0, y0, w, h);
+            if (use) L->hash = hh;
+        }
+        if (!use) L->valid = false;
+        else if (L->s != 1.0f && !cui__sw_layer_tables(L)) use = false;   /* (no memory for the tables: plain) */
+        L->drawn = drawn;
+        L->last = hh;
+        L->fresh = false;
+        r->gslot[gi] = use ? slot : -1;
+    }
+    /* the bitmaps of groups that are gone */
+    bool any = false;
+    for (int i = 0; i < CUI__SW_LAYERS; i++) {
+        if (r->layers[i].used && !r->layers[i].seen) cui__sw_layer_release(r, &r->layers[i]);
+        any |= r->layers[i].used;
+    }
+    if (!any) cui__sw_layers_free(r);
+}
+
+/* group gi's primitive: its bitmap where the transform puts it, inside the group's clip */
+static int cui__sw_layer_prim(cui_sw_renderer *r, const cui_draw_data *dd, int gi, int n, int tw, int th) {
+    const cui_draw_group *g = &dd->groups[gi];
+    int slot = r->gslot[gi];
+    const cui__sw_layer *L = &r->layers[slot];
+    if (n == r->prims_cap) r->prims = cui__sw_grow(r->prims, &r->prims_cap, n + 1, sizeof *r->prims);
+    cui__sw_prim *p = &r->prims[n];
+    memset(p, 0, sizeof *p);
+    p->bx0 = L->s * (float)L->x0 + L->dx; p->bx1 = L->s * (float)(L->x0 + L->w) + L->dx;
+    p->by0 = L->s * (float)L->y0 + L->dy; p->by1 = L->s * (float)(L->y0 + L->h) + L->dy;
+    p->cx0 = cui__sw_iclamp(floorf(g->clip.x)); p->cy0 = cui__sw_iclamp(floorf(g->clip.y));
+    p->cx1 = cui__sw_iclamp(ceilf(g->clip.x + g->clip.w)); p->cy1 = cui__sw_iclamp(ceilf(g->clip.y + g->clip.h));
+    p->cmd = (uint32_t)g->command_offset;
+    int a, b;
+    if (p->cx0 >= p->cx1 || p->cy0 >= p->cy1 || !cui__sw_prim_rows(p, 0, th, &a, &b) || !cui__sw_prim_cols(p, tw, &a, &b)) return n;
+    p->ax = p->bx0; p->ay = p->by0;
+    p->ua[0] = p->ub[0] = 1000000000; p->ua[2] = p->ub[2] = -1000000000;
+    p->h = cui__sw_mix(cui__sw_mix(cui__sw_mix(0x1A7E4ull, L->hash), cui__sw_fbits(L->s) << 16 | (uint64_t)L->a256),
+                       ((uint64_t)(uint32_t)L->w << 32) | (uint32_t)L->h);
+    p->layer = (uint8_t)(slot + 1);
+    return n + 1;
+}
+
+/* n pixels of a bitmap row s over d at opacity a256 (0..256), premultiplied: d = c + d * (255 - c.a) / 255 */
+static void cui__sw_over_row(uint8_t *d, const uint8_t *s, int n, int a256) {
+    int k = 0;
+#if defined(CUI__SW_SSE2)
+    const __m128i z = _mm_setzero_si128(), k128 = _mm_set1_epi16(128), k255 = _mm_set1_epi16(255), A = _mm_set1_epi16((short)a256);
+    const __m128i amask = _mm_set1_epi32((int)0xFF000000u);
+    for (; k + 4 <= n; k += 4) {
+        __m128i c8 = _mm_loadu_si128((const __m128i *)(const void *)(s + (size_t)k * 4));
+        __m128i am = _mm_and_si128(c8, amask);
+        if (_mm_movemask_epi8(_mm_cmpeq_epi32(am, z)) == 0xFFFF) continue;   /* four clear pixels */
+        if (a256 == 256 && _mm_movemask_epi8(_mm_cmpeq_epi32(am, amask)) == 0xFFFF) {   /* four opaque ones */
+            _mm_storeu_si128((__m128i *)(void *)(d + (size_t)k * 4), c8);
+            continue;
+        }
+        __m128i dp = _mm_loadu_si128((const __m128i *)(const void *)(d + (size_t)k * 4));
+        __m128i out[2];
+        for (int half = 0; half < 2; half++) {
+            __m128i c = half ? _mm_unpackhi_epi8(c8, z) : _mm_unpacklo_epi8(c8, z);
+            if (a256 < 256) c = _mm_srli_epi16(_mm_add_epi16(_mm_mullo_epi16(c, A), k128), 8);
+            __m128i al = _mm_shufflehi_epi16(_mm_shufflelo_epi16(c, 0xFF), 0xFF);
+            __m128i x = _mm_mullo_epi16(half ? _mm_unpackhi_epi8(dp, z) : _mm_unpacklo_epi8(dp, z), _mm_sub_epi16(k255, al));
+            x = _mm_add_epi16(x, k128);
+            x = _mm_srli_epi16(_mm_add_epi16(x, _mm_srli_epi16(x, 8)), 8);
+            out[half] = _mm_add_epi16(c, x);
+        }
+        _mm_storeu_si128((__m128i *)(void *)(d + (size_t)k * 4), _mm_packus_epi16(out[0], out[1]));
+    }
+#endif
+    for (; k < n; k++) {
+        const uint8_t *c = s + (size_t)k * 4;
+        uint8_t *q = d + (size_t)k * 4;
+        if (!c[3]) continue;
+        unsigned cv[4];
+        for (int ch = 0; ch < 4; ch++) cv[ch] = a256 < 256 ? (c[ch] * (unsigned)a256 + 128u) >> 8 : c[ch];
+        unsigned ia = 255u - cv[3];
+        for (int ch = 0; ch < 4; ch++) {
+            unsigned x = q[ch] * ia + 128u;
+            unsigned v = cv[ch] + ((x + (x >> 8)) >> 8);
+            q[ch] = (uint8_t)(v > 255 ? 255 : v);
+        }
+    }
+}
+
+/* n pixels, each the bilinear mix of the bitmap at column col[k] and col[k] + 1 (weights lw[k]: low 16
+ * bits for the first, high for the second, summing to 256) and of rows ra and rb (wy for rb, 0..256),
+ * over d at opacity a256: the same integers in both paths */
+static void cui__sw_blit_row(uint8_t *d, const uint8_t *ra, const uint8_t *rb, const int *col, const int32_t *lw, int n, int wy, int a256) {
+    int k = 0;
+#if defined(CUI__SW_SSE2)
+    const __m128i z = _mm_setzero_si128(), k128 = _mm_set1_epi16(128), k255 = _mm_set1_epi16(255), A = _mm_set1_epi16((short)a256);
+    const __m128i W0 = _mm_set1_epi16((short)(256 - wy)), W1 = _mm_set1_epi16((short)wy), h32 = _mm_set1_epi32(128);
+    for (; k + 2 <= n; k += 2) {
+        __m128i a = _mm_unpacklo_epi64(_mm_loadl_epi64((const __m128i *)(const void *)(ra + (size_t)col[k] * 4)),
+                                       _mm_loadl_epi64((const __m128i *)(const void *)(ra + (size_t)col[k + 1] * 4)));
+        __m128i lo = _mm_unpacklo_epi8(a, z), hi = _mm_unpackhi_epi8(a, z);
+        if (wy) {
+            __m128i b = _mm_unpacklo_epi64(_mm_loadl_epi64((const __m128i *)(const void *)(rb + (size_t)col[k] * 4)),
+                                           _mm_loadl_epi64((const __m128i *)(const void *)(rb + (size_t)col[k + 1] * 4)));
+            lo = _mm_srli_epi16(_mm_add_epi16(_mm_add_epi16(_mm_mullo_epi16(lo, W0), _mm_mullo_epi16(_mm_unpacklo_epi8(b, z), W1)), k128), 8);
+            hi = _mm_srli_epi16(_mm_add_epi16(_mm_add_epi16(_mm_mullo_epi16(hi, W0), _mm_mullo_epi16(_mm_unpackhi_epi8(b, z), W1)), k128), 8);
+        }
+        /* (first, second) per channel, then one multiply-add per pixel */
+        lo = _mm_unpacklo_epi16(lo, _mm_srli_si128(lo, 8));
+        hi = _mm_unpacklo_epi16(hi, _mm_srli_si128(hi, 8));
+        __m128i m0 = _mm_srli_epi32(_mm_add_epi32(_mm_madd_epi16(lo, _mm_set1_epi32(lw[k])), h32), 8);
+        __m128i m1 = _mm_srli_epi32(_mm_add_epi32(_mm_madd_epi16(hi, _mm_set1_epi32(lw[k + 1])), h32), 8);
+        __m128i c = _mm_packs_epi32(m0, m1);
+        if (a256 < 256) c = _mm_srli_epi16(_mm_add_epi16(_mm_mullo_epi16(c, A), k128), 8);
+        __m128i al = _mm_shufflehi_epi16(_mm_shufflelo_epi16(c, 0xFF), 0xFF);
+        if (_mm_movemask_epi8(_mm_cmpeq_epi16(al, z)) == 0xFFFF) continue;   /* both clear */
+        uint8_t *q = d + (size_t)k * 4;
+        __m128i x = _mm_mullo_epi16(_mm_unpacklo_epi8(_mm_loadl_epi64((const __m128i *)(const void *)q), z), _mm_sub_epi16(k255, al));
+        x = _mm_add_epi16(x, k128);
+        x = _mm_srli_epi16(_mm_add_epi16(x, _mm_srli_epi16(x, 8)), 8);
+        _mm_storel_epi64((__m128i *)(void *)q, _mm_packus_epi16(_mm_add_epi16(c, x), z));
+    }
+#endif
+    for (; k < n; k++) {
+        const uint8_t *pa = ra + (size_t)col[k] * 4, *pb = rb + (size_t)col[k] * 4;
+        unsigned w1 = (unsigned)lw[k] >> 16, w0 = (unsigned)lw[k] & 0xFFFFu, cv[4];
+        for (int ch = 0; ch < 4; ch++) {
+            unsigned t0 = pa[ch], t1 = pa[ch + 4];
+            if (wy) {
+                t0 = (t0 * (256u - (unsigned)wy) + pb[ch] * (unsigned)wy + 128u) >> 8;
+                t1 = (t1 * (256u - (unsigned)wy) + pb[ch + 4] * (unsigned)wy + 128u) >> 8;
+            }
+            unsigned v = (t0 * w0 + t1 * w1 + 128u) >> 8;
+            cv[ch] = a256 < 256 ? (v * (unsigned)a256 + 128u) >> 8 : v;
+        }
+        if (!cv[3]) continue;
+        uint8_t *q = d + (size_t)k * 4;
+        unsigned ia = 255u - cv[3];
+        for (int ch = 0; ch < 4; ch++) {
+            unsigned x = q[ch] * ia + 128u;
+            unsigned v = cv[ch] + ((x + (x >> 8)) >> 8);
+            q[ch] = (uint8_t)(v > 255 ? 255 : v);
+        }
+    }
+}
+
+/* layer L blended over the pixels [cx0, cx1) x [cy0, cy1) of the frame */
+static void cui__sw_layer_blit(const cui__sw_job *job, const cui__sw_layer *L, int cx0, int cy0, int cx1, int cy1) {
+    if (L->a256 <= 0 || !L->px) return;
+    float s = L->s;
+    int xa = CUI_MAX(cx0, (int)floorf(L->dx + s * (float)L->x0)), xb = CUI_MIN(cx1, (int)ceilf(L->dx + s * (float)(L->x0 + L->w)));
+    int ya = CUI_MAX(cy0, (int)floorf(L->dy + s * (float)L->y0)), yb = CUI_MIN(cy1, (int)ceilf(L->dy + s * (float)(L->y0 + L->h)));
+    if (xa >= xb || ya >= yb) return;
+    size_t bw = (size_t)L->w * 4;
+    if (s == 1.0f && L->dx == floorf(L->dx) && L->dy == floorf(L->dy)) {
+        /* whole pixels: each pixel is one texel */
+        int ox = (int)L->dx + L->x0, oy = (int)L->dy + L->y0;
+        for (int y = ya; y < yb; y++) {
+            int ty = y - oy;
+            if (ty < 0 || ty >= L->h) continue;
+            int a = CUI_MAX(xa, L->span[2 * ty] + ox), b = CUI_MIN(xb, L->span[2 * ty + 1] + ox);
+            if (a < b) cui__sw_over_row(job->pixels + (size_t)y * (size_t)job->stride + (size_t)a * 4, L->px + (size_t)ty * bw + (size_t)(a - ox) * 4, b - a, L->a256);
+        }
+        return;
+    }
+    /* scaled: the frame's tables (cui__sw_layer_tables) */
+    ya = CUI_MAX(ya, L->ty0); yb = CUI_MIN(yb, L->ty0 + L->tny);
+    for (int y = ya; y < yb; y++) {
+        const int *t = L->trow + 4 * (y - L->ty0);
+        int a = CUI_MAX(xa, t[2]), b = CUI_MIN(xb, t[3]);
+        if (a >= b) continue;
+        const uint8_t *ra = L->px + (size_t)t[0] * bw;
+        int i = a - L->tx0;
+        cui__sw_blit_row(job->pixels + (size_t)y * (size_t)job->stride + (size_t)a * 4, ra, ra + bw, L->tcol + i, L->tw + i, b - a, t[1], L->a256);
+    }
+}
+
 typedef struct {
     cui_sw_renderer *r;
     const cui_draw_data *dd;
@@ -1450,7 +1915,7 @@ static void cui__sw_paint_job(void *ctx, int j) {
     const int *jb = r->jobs + (size_t)j * 5;
     int x0 = jb[0], y0 = jb[1], x1 = jb[2], y1 = jb[3], row = jb[4];
     cui_color cc = dd->clear_color;
-    uint8_t c4[4] = { cc.r, cc.g, cc.b, 255 };
+    uint8_t c4[4] = { cc.r, cc.g, cc.b, r->keep_alpha ? cc.a : 255 };
     if (f->fmt == CUI_SW_BGRA) { c4[0] = cc.b; c4[2] = cc.r; }
     /* The last shape that paints all of this part opaque whatever is under it (occ: the inside of an
      * opaque rectangle or of an opaque picture) hides the clear and everything drawn before it:
@@ -1479,6 +1944,7 @@ static void cui__sw_paint_job(void *ctx, int j) {
         const cui__sw_prim *p = &r->prims[r->row_items[i]];
         int cx0 = CUI_MAX(x0, p->cx0), cy0 = CUI_MAX(y0, p->cy0), cx1 = CUI_MIN(x1, p->cx1), cy1 = CUI_MIN(y1, p->cy1);
         if (cx0 >= cx1 || cy0 >= cy1 || p->bx1 + 1 < (float)cx0 || p->bx0 - 1 > (float)cx1) continue;
+        if (p->layer) { cui__sw_layer_blit(&job, &r->layers[p->layer - 1], cx0, cy0, cx1, cy1); continue; }
         const cui_draw_cmd *cmd = &dd->commands[p->cmd];
         cui_texture tid = cmd->texture ? cmd->texture : dd->font_atlas;
         int slot = (int)tid - 1;
@@ -1630,6 +2096,7 @@ void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, in
         r->what = cui__sw_xrealloc(r->what, (size_t)nt);
         r->last_px = NULL;
     }
+    cui__sw_layers_prepare(r, dd, fmt);
     cui__sw_build(r, dd, tw, th);
     bool full = !r->incremental || pixels != r->last_px || width != r->last_w || height != r->last_h || stride != r->last_stride ||
                 fmt != r->last_fmt || r->changed_overflow;

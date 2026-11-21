@@ -1,6 +1,7 @@
 /* What a popover costs the software renderer: one floating shadow, a full-window picture under it,
- * and a real popover opened and closed with its animation, at 1200x800, 1900x1000 and 3800x2000.
- * Prints milliseconds; checks nothing. Usage: cui_bench_sw_shadow [--threads N] [--reps N] */
+ * and a real popover opened and closed with its animation, at 1200x800, 1900x1000 and 3800x2000,
+ * also with the layer cache (cui_set_layer_cache). Prints milliseconds; checks nothing.
+ * Usage: cui_bench_sw_shadow [--threads N] [--reps N] */
 #include "../src/cui_internal.h"
 #include <cui/cui_render.h>
 #include <stdio.h>
@@ -139,9 +140,27 @@ int main(int argc, char **argv) {
         pop_cycle(ui, px, &fr, &ms, true, true);
         pop_cycle(ui, px, &fr, &ms_ns, true, false);
         pop_cycle(ui, px, &fr, &ms_np, false, true);
+        /* the same open and close, plain and with the layer cache, best of 5 each, taken in turns */
+        double best_plain = 1e30, best_cache = 1e30;
+        int fr_cache = 0, ras0, ras1;
+        size_t held, peak;
+        cui_sw_layer_stats(g_sw, &ras0, NULL, NULL);
+        for (int rep = 0; rep < 5; rep++) {
+            double m;
+            cui_set_layer_cache(ui, false);
+            pop_cycle(ui, px, &fr, &m, true, true);
+            if (m < best_plain) best_plain = m;
+            cui_set_layer_cache(ui, true);
+            pop_cycle(ui, px, &fr_cache, &m, true, true);
+            if (m < best_cache) best_cache = m;
+        }
+        cui_set_layer_cache(ui, false);
+        cui_sw_layer_stats(g_sw, &ras1, &held, &peak);
         char name[32];
         snprintf(name, sizeof name, "%dx%d", pw, ph);
         printf("%-11s %8.2f %8.2f %8.2f %8.2f %10.2f | %d, %.1f; %.1f; %.1f\n", name, bg, sh, sh - body, pic1, all, fr, ms, ms_ns, ms_np);
+        printf("%-11s layer cache: open+close %.1f ms (%d frames) against %.1f plain; %.1f bitmaps a cycle, %zu bytes at most, %zu held after\n",
+               "", best_cache, fr_cache, best_plain, (ras1 - ras0) / 5.0, peak, held);
         cui_image_destroy(ui, g_pic);
         cui_destroy(ui);
         free(pic); free(px);

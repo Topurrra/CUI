@@ -263,6 +263,7 @@ void cui_destroy(cui_ctx *ui) {
     cui__free(ui, ui->dl.vtx);
     cui__free(ui, ui->dl.idx);
     cui__free(ui, ui->dl.cmd);
+    cui__groups_free(ui);
     ui->arena_used = 0;
     cui__frame_arena_reset(ui);
     cui__free(ui, ui->arena);
@@ -1033,6 +1034,7 @@ void cui_end_frame(cui_ctx *ui) {
     dd->height_px = (int)(ui->vh * ui->scale + 0.5f);
     dd->clear_color = ui->theme.colors[CUI_TOKEN_BACKGROUND];
     dd->font_atlas = ui->atlas_tex;
+    cui__groups_publish(ui, dd);
     ui->in_frame = false;
 }
 

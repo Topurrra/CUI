@@ -12,6 +12,7 @@ typedef struct cui_draw_data {
     int width_px, height_px;                         /* framebuffer size */
     cui_color clear_color;                           /* the theme background */
     cui_texture font_atlas;
+    const cui_draw_group *groups; int group_count;   /* cui_set_layer_cache only, see below */
 } cui_draw_data;
 
 typedef struct cui_draw_cmd {
@@ -22,6 +23,12 @@ typedef struct cui_draw_cmd {
 ```
 
 Draw commands in order. Each command changes at most the scissor and the texture, so a typical frame is a handful of draw calls.
+
+### Groups (the layer cache)
+
+With `cui_set_layer_cache(ui, true)` a popover, menu, dialog, sheet or command palette that is opening or closing is also listed in `groups`. A renderer that ignores them draws everything right: the group's commands (`command_offset`, `command_count`) are ordinary commands, already moved, scaled and faded. Beside them each group carries the same content at rest, before its transform: `rest_vertices`, `rest_indices` (counted from `rest_vertices`) and `rest_commands` (`index_offset` counted from `rest_indices`, clips in rest pixels). A point `p` at rest is at `p * scale + (dx, dy)` on screen, the group's `opacity` applies to the group as a whole, and `clip` (screen pixels) bounds what it may cover. `id` stays the same over the frames of one animation.
+
+The software renderer draws the rest content once into a bitmap (with a clear border, in the frame's pixel format, premultiplied) and, on each frame of the animation, blends that bitmap in place of the group's commands: copied when the group is unscaled (it is then put on whole pixels), resampled bilinearly when scaled, faded by the opacity. It draws the bitmap again when the rest content changes (a hash of the rest vertices, indices and commands, or a texture they sample being written), draws a group whose content changes on consecutive frames the plain way every other frame, and lets the bitmap go on the first frame without the group. At most four groups have a bitmap at once, each up to 4,194,304 pixels and 8,388,608 together (32 MB); others are drawn the plain way. `cui_sw_layer_stats` reports how many bitmaps were drawn and the bytes held now and at most. Fading the bitmap fades the panel as a whole: where its body covers its own shadow, the shadow no longer shows through as it does when each shape is faded on its own. Text in a scaled bitmap is resampled once more than text drawn scaled, so its edges differ by a little (`tests/test_layer_cache.c` measures both). The OpenGL renderer draws the commands.
 
 ## Vertex format (64 bytes)
 
