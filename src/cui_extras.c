@@ -323,7 +323,7 @@ static bool cui__otp_input_body(cui_ctx *ui, const char *id_str, char *code, int
             code[len] = 0;
         }
         if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) ui->focus = 0;
-        cui__wakeup_after(ui, 0.53f);
+        cui__caret_wakeup(ui);
     }
     cui__tween(ui, &st->focus, focused ? 1.0f : 0.0f, CUI__T_FOCUS);
     /* boxes are 44 points wide when there is room and give way down to 30 on a phone */
@@ -351,7 +351,7 @@ static bool cui__otp_input_body(cui_ctx *ui, const char *id_str, char *code, int
             char ch[2] = { code[k], 0 };
             int t = cui__text_node(ui, ch, 1, CUI_FONT_DISPLAY, cui__fs(ui, 22), CUI_C(ui, FOREGROUND), false);
             ui->nodes[t].line_height = 1.0f;
-        } else if (current && (phase < 0.5 || fmod(phase, 1.06) < 0.6)) {
+        } else if (current && (phase < 0.5 || fmod(phase, 1.06) < 0.6 || !cui__caret_blinks(ui, phase))) {
             int caret = cui__leaf(ui, 0, CUI_PX(1.5f), CUI_PX(22));
             ui->nodes[caret].bg = accent;
         }

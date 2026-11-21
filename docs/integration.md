@@ -40,7 +40,7 @@ Double-click timing uses the clock advanced by `cui_begin_frame`, so the first
 click after an idle interval is timed in the frame that receives it. Forward each
 press and release, including quick taps collected before the same frame.
 
-An idle CUI app costs nothing: with no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that blink or wait (the caret, tooltips, toasts) set `cui_next_wakeup`. When your own content changes on a timer, such as a clock, a poll or messages arriving, call `cui_request_wakeup(ui, seconds)` during the frame. The loop then wakes for it instead of redrawing continuously. `cui_request_redraw` asks for the next frame right away, for things that change every frame.
+An idle CUI app costs nothing: with no input and nothing animating, `cui_needs_redraw` is false and the loop sleeps. Components that blink or wait (the caret, tooltips, toasts) set `cui_next_wakeup`; a focused text field asks for a frame about twice a second while its caret blinks, and `cui_set_caret_blink(ui, 5)` stops the blink 5 seconds after the caret last moved (as Windows does), or `-1` never blinks, so a focused field at rest draws nothing. When your own content changes on a timer, such as a clock, a poll or messages arriving, call `cui_request_wakeup(ui, seconds)` during the frame. The loop then wakes for it instead of redrawing continuously. `cui_request_redraw` asks for the next frame right away, for things that change every frame.
 
 ### Input reference
 

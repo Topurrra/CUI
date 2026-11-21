@@ -993,7 +993,7 @@ void cui_end_frame(cui_ctx *ui) {
 
     ui->edit_prev = ui->edit != NULL;
     /* caret blink, tooltips and toasts ask for wakeups through ui->wakeup */
-    if (ui->edit) cui__wake_in(ui, 0.53f - (float)fmod(ui->time - ui->caret_time, 0.53));
+    if (ui->edit) cui__caret_wakeup(ui);
 
     /* clear per frame input */
     for (int i = 0; i < 3; i++) { ui->mpressed[i] = false; ui->mreleased[i] = false; }
@@ -1028,4 +1028,19 @@ void cui_end_frame(cui_ctx *ui) {
 const cui_draw_data *cui_get_draw_data(cui_ctx *ui) { return &ui->draw_data; }
 
 void cui__wakeup_after(cui_ctx *ui, float seconds) { cui__wake_in(ui, seconds); }
+
+void cui_set_caret_blink(cui_ctx *ui, float seconds) { if (ui) ui->caret_blink_s = seconds; }
+
+bool cui__caret_blinks(cui_ctx *ui, double phase) {
+    float s = ui->caret_blink_s;
+    return s == 0 || (s > 0 && phase < (double)s);
+}
+
+void cui__caret_wakeup(cui_ctx *ui) {
+    double phase = ui->time - ui->caret_time;
+    if (!cui__caret_blinks(ui, phase)) return;
+    double next = 0.53 - fmod(phase, 0.53);
+    if (ui->caret_blink_s > 0 && (double)ui->caret_blink_s - phase < next) next = (double)ui->caret_blink_s - phase + 0.001;   /* the frame that shows it on for good */
+    cui__wake_in(ui, (float)next);
+}
 void cui_request_wakeup(cui_ctx *ui, float seconds) { if (ui) cui__wake_in(ui, seconds); }

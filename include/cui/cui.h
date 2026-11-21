@@ -243,6 +243,11 @@ CUI_API void cui_request_redraw(cui_ctx *ui);
  * while it is needed; an idle app then sleeps until the soonest one instead
  * of redrawing continuously. */
 CUI_API void cui_request_wakeup(cui_ctx *ui, float seconds);
+/* How long the text caret blinks after it last moved or the text changed. 0, the default, blinks for as long as a field
+ * has the focus, which asks for a frame about twice a second. > 0 blinks that many seconds, then the caret stays on and
+ * asks for no more frames, as Windows does after 5 seconds; typing, moving the caret or focusing a field starts it again.
+ * < 0 never blinks: always on, no frames for it. For text fields, text areas, the code editor and code boxes. */
+CUI_API void cui_set_caret_blink(cui_ctx *ui, float seconds);
 CUI_API double cui_time(cui_ctx *ui);
 CUI_API float cui_delta_time(cui_ctx *ui);   /* seconds since the last frame */
 CUI_API uint64_t cui_frame_count(cui_ctx *ui);

@@ -523,6 +523,10 @@ cui_interact cui__interact(cui_ctx *ui, cui_id id, int flags);
 void cui__mark_interactive(cui_ctx *ui, int node, int flags);
 void cui__set_cursor(cui_ctx *ui, cui_cursor c);
 void cui__wakeup_after(cui_ctx *ui, float seconds);
+/* The text caret, phase seconds after it last moved: whether it still blinks (cui_set_caret_blink), and the wakeup for its next
+ * step while it does (none once it stays on). */
+bool cui__caret_blinks(cui_ctx *ui, double phase);
+void cui__caret_wakeup(cui_ctx *ui);
 bool cui__is_layer_open(cui_ctx *ui, cui_id layer);
 
 /* ---- popups ---- */
@@ -722,6 +726,7 @@ struct cui_ctx {
     struct cui_edit_state *edit;   /* edit state of the focused text field */
     cui_id tab_owner;              /* the focused control types Tab instead of moving focus (code editor); set every frame */
     double caret_time;
+    float caret_blink_s;           /* cui_set_caret_blink: 0 blinks while focused, > 0 that many seconds, < 0 never */
     /* scope stacks */
     cui__popup_build pb_stack[16]; int pb_depth;
     cui__modal_build mb_stack[8]; int mb_depth;

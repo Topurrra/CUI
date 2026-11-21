@@ -859,6 +859,49 @@ static void test_empty_field_caret(void) {
     cui_destroy(ui);
 }
 
+/* cui_set_caret_blink: blinking stops after the time given (the caret stays on, no wakeups); typing starts it again; < 0
+ * never blinks. */
+static void test_caret_blink_option(void) {
+    printf("text input: cui_set_caret_blink stops the blink and its wakeups\n");
+    cui_ctx *ui = new_ctx();
+    blank_ctx e;
+    memset(&e, 0, sizeof e);
+    cui_set_caret_blink(ui, 1.0f);
+    run(ui, build_blank_field, &e, 2);
+    cui_vec2 c = center(rect_of(ui, e.id));
+    click_at(ui, build_blank_field, &e, c.x, c.y);
+    int lo = -1, hi = 0;
+    for (int i = 0; i < 50; i++) {   /* still blinking in the first second */
+        run(ui, build_blank_field, &e, 1);
+        int dark = dark_pixels(ui);
+        if (lo < 0 || dark < lo) lo = dark;
+        if (dark > hi) hi = dark;
+    }
+    CHECK(hi > lo + 8);
+    CHECK(cui_next_wakeup(ui) >= 0);
+    int on = hi;
+    run(ui, build_blank_field, &e, 20);   /* past one second: on for good */
+    lo = -1; hi = 0;
+    for (int i = 0; i < 80; i++) {
+        run(ui, build_blank_field, &e, 1);
+        int dark = dark_pixels(ui);
+        if (lo < 0 || dark < lo) lo = dark;
+        if (dark > hi) hi = dark;
+    }
+    CHECK(hi == lo && lo >= on - 2);   /* steady, and the bar is there */
+    CHECK(cui_next_wakeup(ui) < 0);   /* nothing asks for a frame */
+    cui_input_text(ui, "a");          /* typing: blinking again */
+    run(ui, build_blank_field, &e, 1);
+    CHECK(cui_next_wakeup(ui) >= 0);
+    cui_set_caret_blink(ui, -1.0f);   /* never */
+    run(ui, build_blank_field, &e, 1);
+    CHECK(cui_next_wakeup(ui) < 0);
+    cui_set_caret_blink(ui, 0.0f);    /* the default: blinks while focused */
+    run(ui, build_blank_field, &e, 200);
+    CHECK(cui_next_wakeup(ui) >= 0);
+    cui_destroy(ui);
+}
+
 typedef struct { char buf[512]; char other[32]; int flags; cui_id id, other_id; } area_ctx;
 static void build_area(cui_ctx *ui, void *u) {
     area_ctx *a = u;
@@ -14757,6 +14800,7 @@ int main(void) {
     test_text_input();
     test_disabled_password_reveal();
     test_empty_field_caret();
+    test_caret_blink_option();
     test_textarea_and_clear();
     test_textarea_ime_caret();
     test_nested_textarea_wheel();

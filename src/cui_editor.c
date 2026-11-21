@@ -3198,7 +3198,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
     /* caret */
     if (p->focused && p->caret_line >= p->first && p->caret_line < p->first + p->count) {
         float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
-        float a = (blink > 0.35f || p->caret_phase < 0.5) ? 1.0f : 0.0f;
+        float a = (blink > 0.35f || p->caret_phase < 0.5 || !cui__caret_blinks(ui, p->caret_phase)) ? 1.0f : 0.0f;
         float y = r.y + CUI__ED_INSET + (float)((double)(p->wrap ? p->caret_row : p->caret_line) * p->lh - p->sy);
         float cx = x0 + (float)(p->caret_col - p->cb) * p->cw;
         cui_draw_rect(ui, (cui_rect){ roundf(cx * ui->scale) / ui->scale - 0.75f, y + ty, 1.5f, fh }, CUI_CORNERS(0.75f), cui_alpha(p->caret, a));
@@ -4558,7 +4558,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     if (o->ghost) cui__edf_ghost(&f);   /* after the keys: what this frame draws */
     cui__edf_follow_caret(&f);
     cui__edf_build_lines(&f, &L, json, dark);
-    if (f.focused) cui__wakeup_after(ui, 0.53f);
+    if (f.focused) cui__caret_wakeup(ui);
     {
         cui_rect cr = { f.gx + CUI__ED_GAP + (float)((double)f.caret_vcol * f.cw - st->sx),
                         f.br.y + CUI__ED_INSET + (float)((double)(E.wrap ? f.caret_row : f.caret_line) * f.lh - st->sy), 1, f.lh };
