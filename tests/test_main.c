@@ -8197,6 +8197,8 @@ typedef struct {
     bool streaming, no_front_matter, no_select, plain, keep_ws, fit;
     const char *base_dir;
     const char *(*resolve)(const char *src, void *user);
+    bool (*pixels)(const char *src, void *user, int *w, int *h, const void **rgba);
+    int pixel_asks;
     cui_markdown_result res;
     int links, toggles;
     char last_link[128];
@@ -8206,6 +8208,7 @@ static void build_md(cui_ctx *ui, void *u) {
     cui_column(ui, .pad = 20, .width = CUI_PX(m->width > 0 ? m->width + 40 : 640)) {
         m->res = cui_markdown(ui, "md", m->text, .length = m->length, .streaming = m->streaming, .no_front_matter = m->no_front_matter,
                                 .base_dir = m->base_dir, .resolve_image = m->resolve, .resolve_user = m,
+                                .resolve_pixels = m->pixels, .pixels_user = m,
                                 .no_select = m->no_select, .plain = m->plain, .preserve_whitespace = m->keep_ws, .fit_content = m->fit);
     }
     if (m->res.link) { m->links++; snprintf(m->last_link, sizeof m->last_link, "%s", m->res.link); }
@@ -8423,6 +8426,15 @@ static const char *md_resolve_pic(const char *src, void *user) {
     if (strcmp(src, "https://example.com/fetched.png?v=2") == 0) return "cui_md_big.png";   /* the app's downloaded copy */
     return strcmp(src, "pic.png") == 0 ? "cui_md_big.png" : NULL;
 }
+static bool md_pixels_pic(const char *src, void *user, int *w, int *h, const void **rgba) {
+    static unsigned char big[400 * 200 * 4], small[40 * 20 * 4];
+    md_test *m = user;
+    m->pixel_asks++;
+    if (strcmp(src, "https://example.com/mem.png") == 0) { memset(big, 200, sizeof big); *w = 400; *h = 200; *rgba = big; return true; }
+    if (strcmp(src, "https://example.com/small-mem.png") == 0) { memset(small, 90, sizeof small); *w = 40; *h = 20; *rgba = small; return true; }
+    return false;
+}
+
 static void test_markdown_images(void) {
     printf("markdown: images\n");
     md_png("cui_md_big.png", 400, 200);
@@ -8451,6 +8463,23 @@ static void test_markdown_images(void) {
     float pending = md_height_of(ui, &m, "![w](https://example.com/not-yet.png)");
     CHECK(pending > 10 && pending < 40);
     m.resolve = NULL;
+    /* pictures held in memory (resolve_pixels): a web source the app has decoded draws at its size (scaled to the column, never up), one it
+     * has not stays the quiet line; no file is read, and the callback is asked only until the texture exists */
+    {
+        m.pixels = md_pixels_pic;
+        m.pixel_asks = 0;
+        CHECK_NEAR(md_height_of(ui, &m, "![m](https://example.com/mem.png)"), 150, 0.5);
+        int asks = m.pixel_asks;
+        CHECK(asks >= 1);
+        md_frames(ui, &m, 4);
+        CHECK(m.pixel_asks == asks);                         /* the texture is kept: no more asking */
+        CHECK_NEAR(md_height_of(ui, &m, "![s](https://example.com/small-mem.png)"), 20, 0.5);
+        float none = md_height_of(ui, &m, "![n](https://example.com/unknown.png)");
+        CHECK(none > 10 && none < 40);                       /* the app has nothing for it: the placeholder */
+        CHECK_NEAR(md_height_of(ui, &m, "![d](data:image/png;base64,AAAA)"), none, 0.5);   /* a data: source is asked too, and has no picture */
+        CHECK(md_height_of(ui, &m, "![[local-note.png]]") < 40);   /* a local name never goes to the callback */
+        m.pixels = NULL;
+    }
     /* a missing file, an unsupported source and a remote image show a quiet line, not a picture */
     float line = md_height_of(ui, &m, "![a missing one](nothing_here.png)");
     CHECK(line > 10 && line < 40);

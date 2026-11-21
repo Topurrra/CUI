@@ -976,6 +976,8 @@ typedef struct {
     const char *base_dir;
     const char *(*resolve_image)(const char *src, void *user);
     void *resolve_user;
+    bool (*resolve_pixels)(const char *src, void *user, int *w, int *h, const void **rgba);
+    void *pixels_user;
     cui_id leaf_id;              /* id for the next inline block's node (headings: their position) */
     cui_id root_id;
     const md_line *lines;        /* every line of the text, for line numbers */
@@ -1404,6 +1406,26 @@ static md_img_state *md_img_tex(cui_ctx *ui, const char *path) {
     return t;
 }
 
+/* A picture the app holds decoded in memory (cui_markdown_opts.resolve_pixels), for a web or data: source. One texture per source in CUI
+ * state, made on the first frame the callback hands pixels over; asked again every frame until then (a lookup, not a decode). */
+static md_img_state *md_img_mem(md_ctx *c, const md_img *m) {
+    cui_ctx *ui = c->ui;
+    if (m->src_len <= 0) return NULL;
+    const char *src = cui__frame_strdup(ui, m->src, m->src_len);
+    cui_id id = cui__hash(src, (size_t)m->src_len, 0x1A6E6u);
+    md_img_state *t = cui_state(ui, id, sizeof *t);
+    cui__state_set_dtor(ui, id, md_img_free);
+    if (!t->tex) {
+        int w = 0, h = 0;
+        const void *px = NULL;
+        if (c->resolve_pixels(src, c->pixels_user, &w, &h, &px) && px && w > 0 && h > 0) {
+            t->tex = cui_image_create(ui, w, h, px);
+            t->w = w; t->h = h;
+        }
+    }
+    return t;
+}
+
 typedef struct { cui_texture tex; } md_img_paint;
 static void md_paint_img(cui_ctx *ui, cui_node *n, void *data) {
     md_img_paint *p = data;
@@ -1418,8 +1440,11 @@ static float md_image_block(md_ctx *c, const md_img *m, float W) {
         if (m->link_len > 0) c->link_seq++;
         return 0;
     }
-    const char *path = md_image_path(c, m);
-    md_img_state *t = path ? md_img_tex(ui, path) : NULL;
+    md_img_state *t = c->resolve_pixels && md_is_remote(m->src, m->src_len) ? md_img_mem(c, m) : NULL;
+    if (!t || !t->tex) {
+        const char *path = md_image_path(c, m);
+        t = path ? md_img_tex(ui, path) : NULL;
+    }
     bool ok = t && t->tex;
     cui_id id = 0;
     float *st = NULL;
@@ -3467,6 +3492,7 @@ cui_markdown_result cui_markdown_ex(cui_ctx *ui, const char *id_str, const char 
     c.streaming = o->streaming; c.compact = o->compact; c.fit = o->fit_content; c.keep_ws = o->plain && o->preserve_whitespace;
     c.wrap_code = o->wrap_code && !o->fit_content; c.fit_tables = o->fit_tables;
     c.base_dir = o->base_dir; c.resolve_image = o->resolve_image; c.resolve_user = o->resolve_user;
+    c.resolve_pixels = o->resolve_pixels; c.pixels_user = o->pixels_user;
     c.body = o->size > 0 ? o->size : ui->theme.text_body;
     c.u = c.body / 13.0f;
     c.content_end = len;

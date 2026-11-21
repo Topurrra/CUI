@@ -2056,6 +2056,12 @@ typedef struct cui_markdown_opts {
     bool wrap_code;            /* code blocks wrap their long lines (cui_code_opts.wrap) instead of scrolling sideways: narrow panels, chat */
     bool fit_tables;           /* a table wider than the view lets its columns shrink further (their cells wrap) before it scrolls
                                 * sideways: down to a few characters a column, the header's own width included */
+    /* Pictures the app already holds decoded, for http, https and data: sources (never read from disk or fetched here). Asked every frame
+     * while a picture is not on screen, so keep it a lookup: return true with its size and straight RGBA pixels (w * h * 4 bytes, valid until
+     * the call returns: CUI makes its own texture once, kept in CUI state like the file pictures) or false for the placeholder line.
+     * Set, a remote source asks here first and then .resolve_image. */
+    bool (*resolve_pixels)(const char *src, void *user, int *w, int *h, const void **rgba);
+    void *pixels_user;         /* passed to resolve_pixels */
 } cui_markdown_opts;
 typedef struct cui_markdown_heading {
     int level;                 /* 1 to 6 (ATX and setext) */
