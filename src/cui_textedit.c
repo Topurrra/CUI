@@ -92,7 +92,7 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
         if (p->focused && s1 == s0) {
             float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
             float a = blink > 0.35f ? 1.0f : 0.0f;
-            if (p->caret_phase < 0.5) a = 1;
+            if (p->caret_phase < 0.5 || !cui__caret_blinks(ui, p->caret_phase)) a = 1;
             float cx = x + cui__x_at(ui, p, p->buf, p->len, p->cursor);
             if (p->cursor == 0) cx -= 1.0f;   /* stand clear of the first glyph or the placeholder */
             cui_rect cr = { roundf(cx * ui->scale) / ui->scale - 0.5f, r.y + (r.h - fh) * 0.5f, 1.5f, fh };
@@ -128,7 +128,7 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
                 if (k + 1 < p->line_count && p->cursor == p->lines[k + 1].start && p->cursor == L->end) here = false;
                 if (here) {
                     float blink = 0.5f + 0.5f * cosf((float)p->caret_phase * 2.0f * CUI_PI / 1.06f);
-                    float a = (blink > 0.35f || p->caret_phase < 0.5) ? 1.0f : 0.0f;
+                    float a = (blink > 0.35f || p->caret_phase < 0.5 || !cui__caret_blinks(ui, p->caret_phase)) ? 1.0f : 0.0f;
                     float cx = r.x + cui__text_width(ui, p->font, p->size, line, p->cursor - L->start, false);
                     cui_rect cr = { roundf(cx * ui->scale) / ui->scale - 0.5f, ty, 1.5f, fh };
                     cui_draw_rect(ui, cr, CUI_CORNERS(0.75f), cui_alpha(p->caret, a));
@@ -744,7 +744,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     }
     an_->paint = multiline && !disabled ? cui__paint_scrollable_edit : cui__paint_edit;
     an_->paint_data = p;
-    if (p->focused) cui__wakeup_after(ui, 0.53f);
+    if (p->focused) cui__caret_wakeup(ui);
 
     if (o->suffix) {
         int st_ = cui__text_node(ui, o->suffix, -1, CUI_FONT_BODY, size, CUI_C(ui, TEXT_MUTED), false);
