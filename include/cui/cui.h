@@ -274,6 +274,7 @@ typedef enum cui_key {
     CUI_KEY_F1, CUI_KEY_F2, CUI_KEY_F3, CUI_KEY_F4, CUI_KEY_F5, CUI_KEY_F6,
     CUI_KEY_F7, CUI_KEY_F8, CUI_KEY_F9, CUI_KEY_F10, CUI_KEY_F11, CUI_KEY_F12,
     CUI_KEY_BACKSLASH, CUI_KEY_GRAVE,   /* ` and ~ */
+    CUI_KEY_INSERT,
     CUI_KEY_COUNT
 } cui_key;
 
@@ -2161,6 +2162,10 @@ CUI_API cui_text_doc *cui_text_doc_new(const char *text, int len);
 /* a document over text[0, len) itself, no copy: it must not change afterwards, and it is given
  * back with release(text, user) (NULL: free()) when the document and its snapshots let go */
 CUI_API cui_text_doc *cui_text_doc_adopt(char *text, int len, void (*release)(char *text, void *user), void *user);
+/* as cui_text_doc_adopt, for bytes that are not lines (a binary file in a hex editor): no line break
+ * index is kept, so memory stays at the bytes plus the edits however many 0x0A bytes there are, and
+ * the line functions see one line. Edits, undo and snapshots work as for any document. */
+CUI_API cui_text_doc *cui_text_doc_adopt_bytes(char *bytes, int len, void (*release)(char *bytes, void *user), void *user);
 CUI_API void cui_text_doc_free(cui_text_doc *doc);
 /* replaces the whole text (a copy, or adopted as above) and clears the undo history; editors
  * showing the document start over as with a new text */
@@ -4627,7 +4632,40 @@ CUI_API const char *cui_emoji_picker_ex(cui_ctx *ui, const char *id, const cui_e
  * Ctrl+Shift+C as ASCII (other bytes as '.'), up to 4 MiB of bytes.
  *
  * With .edit set the view is editable: typing hex digits overwrites the byte
- * at the cursor, high digit first, then moves on. Edits never change the size. */
+ * at the cursor, high digit first, then moves on. Edits never change the size.
+ *
+ * A hex editor over data that is not in one piece (a piece table, a big
+ * file): pass data NULL and .read, which the view asks for the rows in view
+ * and for what it copies, and .on_edit, which it calls for every change
+ * (the app applies it and keeps the undo history):
+ *
+ *     cui_hex_view(ui, "hex", NULL, size, &sel, .read = my_read, .on_edit = my_edit, .user = doc);
+ *
+ * With .on_edit, hex digits overwrite in the hex column and typed text in
+ * the text column (click a column, or Tab, to type into it); Insert toggles
+ * insert mode, where typing inserts bytes; Delete removes the selection or
+ * the byte at the cursor and Backspace the byte before it; Ctrl+V pastes
+ * (hex digits in the hex column, else the text's bytes) and Ctrl+X cuts;
+ * Ctrl+C copies as the column shows it (Ctrl+Shift+C the other way).
+ * The cursor can also sit just after the last byte, to add bytes at the end.
+ * .fixed_size keeps the size: overwrite only. */
+/* One change an editing view (.on_edit) asks for. */
+typedef enum cui_hex_edit_kind {
+    CUI_HEX_EDIT_OVERWRITE = 1,   /* bytes[0, n) over [offset, offset + n); past the end the data grows */
+    CUI_HEX_EDIT_INSERT,          /* bytes[0, n) put before offset */
+    CUI_HEX_EDIT_DELETE           /* [offset, offset + n) removed (bytes is NULL) */
+} cui_hex_edit_kind;
+typedef struct cui_hex_edit {
+    cui_hex_edit_kind kind;
+    size_t offset, n;
+    const uint8_t *bytes;
+    bool merge;                   /* finishes the edit before it (the low digit of a byte whose high digit was just
+                                   * typed, at the same offset): an app with undo makes the two one step */
+} cui_hex_edit;
+/* .read: copy bytes [offset, offset + n) to dst; returns how many it copied (fewer only at the end) */
+typedef size_t (*cui_hex_read_fn)(void *user, size_t offset, uint8_t *dst, size_t n);
+/* .on_edit: apply the change; returns the data's size after it */
+typedef size_t (*cui_hex_edit_fn)(void *user, const cui_hex_edit *edit);
 typedef struct cui_hex_range {
     size_t offset, length;
     cui_tone tone;             /* tints the range's background */
@@ -4653,6 +4691,11 @@ typedef struct cui_hex_view_opts {
     bool no_ascii;             /* hide the ASCII column */
     bool no_header;            /* hide the column header (00 01 .. 0F) */
     float size;                /* font size, default 12 */
+    cui_hex_read_fn read;      /* the bytes come from read(user, ...) instead of data (pass NULL): only the rows in view and what is copied are read */
+    cui_hex_edit_fn on_edit;   /* an editor: every change goes to on_edit(user, ...); see above */
+    void *user;                /* given to read and on_edit */
+    bool fixed_size;           /* with on_edit: overwrite only, never insert or delete */
+    bool *insert;              /* with on_edit: insert mode, yours (Insert toggles it; show it, or set it from a button); NULL: the view keeps it */
 } cui_hex_view_opts;
 typedef struct cui_hex_result {
     cui_hex_selection selection;   /* after this frame (the same as *sel when you pass one) */
@@ -4662,6 +4705,9 @@ typedef struct cui_hex_result {
     size_t edit_length;            /* with `edited`: bytes from `edit_offset` up to the last one overwritten */
     int64_t hovered;               /* byte under the pointer, or -1 */
     bool copied;                   /* Ctrl+C or Ctrl+Shift+C put the selection on the clipboard */
+    bool text_column;              /* with on_edit: the keys type into the text column (Ctrl+C copies as text there) */
+    bool insert_mode;              /* with on_edit: typing inserts bytes */
+    size_t size;                 /* the data's size after this frame's edits (on_edit's last answer), else the size given */
 } cui_hex_result;
 /* sel may be NULL: the view then keeps the selection itself. */
 CUI_API cui_hex_result cui_hex_view_ex(cui_ctx *ui, const char *id, const uint8_t *data, size_t size, cui_hex_selection *sel, const cui_hex_view_opts *opts);
@@ -4669,6 +4715,11 @@ CUI_API cui_hex_result cui_hex_view_ex(cui_ctx *ui, const char *id, const uint8_
  * becomes the selection and it scrolls into view (to the middle when it was
  * out of sight). Wire a "Go to" field to it; it is safe to call every frame. */
 CUI_API void cui_hex_view_goto(cui_ctx *ui, const char *id, size_t offset);
+/* the view with this id has the keyboard (id as given to cui_hex_view, in the same id scope): an app that
+ * handles keys for it (undo, find) checks this first */
+CUI_API bool cui_hex_view_focused(cui_ctx *ui, const char *id);
+/* gives the view the keyboard (after a "Go to" or "Find" field has used it), its cursor shown */
+CUI_API void cui_hex_view_focus(cui_ctx *ui, const char *id);
 /* ---- Flame graph ---- */
 
 /* Flame graph / profiler timeline: time runs left to right, call depth top to

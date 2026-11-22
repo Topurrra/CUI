@@ -328,7 +328,56 @@ static void test_prepared(void) {
     free(r.s); free(past.s);
 }
 
+/* cui_text_doc_adopt_bytes: every byte kept as given (0x0A, 0x0D, 0x00 alike), no line index however many line
+ * breaks, and edits, undo and snapshots against the reference string */
+static void test_bytes(void) {
+    printf("bytes documents (no line index)\n");
+    int n = 4 << 20;
+    char *nl = malloc((size_t)n), *rb = malloc((size_t)n);
+    memset(nl, '\n', (size_t)n);
+    cui_text_doc *lines = cui_text_doc_new(nl, n);
+    cui_text_doc *bytes = cui_text_doc_adopt_bytes(nl, n, NULL, NULL);   /* takes nl */
+    CHECK(cui_text_doc_line_count(lines) == n + 1 && cui_text_doc_line_count(bytes) == 1);
+    CHECK(cui_text_doc_memory(bytes) < (size_t)n + 64 * 1024);           /* the bytes, not 4 more per line break */
+    CHECK(cui_text_doc_memory(lines) > (size_t)n * 4);
+    cui_text_doc_free(lines);
+    for (int i = 0; i < n; i++) rb[i] = (char)(rnd() & 0xFF);
+    ref r = { 0 };
+    ref_set(&r, rb, n);
+    cui_text_doc_set(bytes, rb, n);
+    free(rb);
+    for (int step = 0; step < 900; step++) {   /* within the 1000 undo steps kept */
+        int len = r.n, a = len ? (int)(rnd() % (unsigned)(len + 1)) : 0, b = a + (int)(rnd() % 9);
+        if (b > len) b = len;
+        char t[8];
+        int k = (int)(rnd() % 8);
+        for (int i = 0; i < k; i++) t[i] = (char)"\n\r\0\xff" "ab\x0a\x0d"[rnd() % 8];
+        if (a == b && k == 0) continue;
+        CHECK(cui_text_doc_replace(bytes, a, b, t, k));
+        ref_replace(&r, a, b, t, k);
+    }
+    CHECK(cui_text_doc_length(bytes) == r.n && cui_text_doc_line_count(bytes) == 1);
+    char *c = cui_text_doc_copy(bytes, 0, -1, NULL);
+    CHECK(c && memcmp(c, r.s, (size_t)r.n) == 0);
+    free(c);
+    cui_text_snap *snap = cui_text_doc_snapshot(bytes);
+    for (int i = 0; i < 3000 && cui_text_doc_undo(bytes, NULL); i++) {}
+    CHECK(cui_text_doc_length(bytes) == n);
+    int total = 0, same_bytes = 1;
+    for (int i = 0; i < cui_text_snap_chunks(snap); i++) {
+        int cl = 0;
+        const char *p = cui_text_snap_chunk(snap, i, &cl);
+        if (cl > 0 && memcmp(p, r.s + total, (size_t)cl)) same_bytes = 0;
+        total += cl;
+    }
+    CHECK(total == r.n && same_bytes);   /* the snapshot kept the edited bytes while the doc was undone */
+    cui_text_snap_free(snap);
+    cui_text_doc_free(bytes);
+    free(r.s);
+}
+
 int main(void) {
+    test_bytes();
     test_prepared();
     test_random_edits();
     test_undo();

@@ -8188,6 +8188,175 @@ static void test_hex_view(void) {
     cui_destroy(ui);
 }
 
+/* a hex editor over bytes the app keeps (.read, .on_edit): a plain array here, with a log of the edits */
+typedef struct {
+    uint8_t b[256];
+    size_t n;
+    int edits, merges, last_kind;
+    cui_hex_selection sel;
+    cui_hex_result res;
+    bool insert, fixed, focused;
+    size_t gen_size;   /* > 0: read-only bytes made by a formula (i * 7), never in memory */
+} hexed;
+static size_t hexed_read(void *u, size_t off, uint8_t *dst, size_t n) {
+    hexed *h = u;
+    if (h->gen_size) {
+        if (off >= h->gen_size) return 0;
+        if (n > h->gen_size - off) n = h->gen_size - off;
+        for (size_t i = 0; i < n; i++) dst[i] = (uint8_t)((off + i) * 7u);
+        return n;
+    }
+    if (off >= h->n) return 0;
+    if (n > h->n - off) n = h->n - off;
+    memcpy(dst, h->b + off, n);
+    return n;
+}
+static size_t hexed_edit(void *u, const cui_hex_edit *e) {
+    hexed *h = u;
+    h->edits++;
+    h->merges += e->merge;
+    h->last_kind = e->kind;
+    if (e->kind == CUI_HEX_EDIT_DELETE) {
+        size_t n = e->offset + e->n > h->n ? h->n - e->offset : e->n;
+        memmove(h->b + e->offset, h->b + e->offset + n, h->n - e->offset - n);
+        h->n -= n;
+    } else if (e->kind == CUI_HEX_EDIT_INSERT) {
+        memmove(h->b + e->offset + e->n, h->b + e->offset, h->n - e->offset);
+        memcpy(h->b + e->offset, e->bytes, e->n);
+        h->n += e->n;
+    } else {
+        memcpy(h->b + e->offset, e->bytes, e->n);
+        if (e->offset + e->n > h->n) h->n = e->offset + e->n;
+    }
+    return h->n;
+}
+static void build_hexed(cui_ctx *ui, void *u) {
+    hexed *h = u;
+    cui_column(ui, .pad = 20, .width = CUI_FILL) {
+        if (h->gen_size) h->res = cui_hex_view(ui, "hex", NULL, h->gen_size, &h->sel, .height = 300, .read = hexed_read, .user = h);
+        else h->res = cui_hex_view(ui, "hex", NULL, h->n, &h->sel, .height = 300, .read = hexed_read, .on_edit = hexed_edit,
+                                   .user = h, .insert = &h->insert, .fixed_size = h->fixed);
+        h->focused = cui_hex_view_focused(ui, "hex");
+    }
+}
+static void hexed_type(cui_ctx *ui, hexed *h, const char *s) { cui_input_text(ui, s); run(ui, build_hexed, h, 1); }
+
+static void test_hex_edit(void) {
+    printf("hex editor: read and on_edit, both columns, insert mode, delete, cut and paste\n");
+    cui_ctx *ui = new_ctx();
+    g_hex_cw = cui_measure_text(ui, CUI_FONT_MONO, 12, "0000000000000000", 16).width / 16;
+    g_hex_digits = 4;
+    static hexed h;
+    memset(&h, 0, sizeof h);
+    run(ui, build_hexed, &h, 3);
+    CHECK(!h.focused && h.res.size == 0);
+    cui_hex_view_focus(ui, "hex");   /* the keyboard from code (after a Go to field) */
+    run(ui, build_hexed, &h, 2);
+    CHECK(h.focused);
+    /* an empty file: the cell after the end takes the first byte */
+    cui_vec2 p = hex_cell(ui, 0, 0, false);
+    click_at(ui, build_hexed, &h, p.x, p.y);
+    CHECK(h.focused && h.sel.cursor == 0 && h.sel.length == 0);
+    hexed_type(ui, &h, "4");
+    CHECK(h.n == 1 && h.b[0] == 0x40 && h.last_kind == CUI_HEX_EDIT_INSERT && h.merges == 0 && h.sel.cursor == 0);
+    hexed_type(ui, &h, "1");
+    CHECK(h.n == 1 && h.b[0] == 0x41 && h.merges == 1 && h.last_kind == CUI_HEX_EDIT_OVERWRITE && h.sel.cursor == 1 && h.sel.length == 0);
+    CHECK(h.res.edited && h.res.size == 1);
+    hexed_type(ui, &h, "42");
+    CHECK(h.n == 2 && h.b[1] == 0x42 && h.merges == 2);
+    /* Tab: the text column; typed text goes in as bytes */
+    key(ui, build_hexed, &h, CUI_KEY_TAB, 0);
+    CHECK(h.res.text_column && h.focused);
+    hexed_type(ui, &h, "xyz");
+    CHECK(h.n == 5 && !memcmp(h.b, "ABxyz", 5) && h.sel.cursor == 5);
+    key(ui, build_hexed, &h, CUI_KEY_HOME, CUI_MOD_CTRL);
+    hex_mods(ui, 0);
+    hexed_type(ui, &h, "Q");   /* overwrite */
+    CHECK(h.n == 5 && !memcmp(h.b, "QBxyz", 5) && h.sel.cursor == 1);
+    key(ui, build_hexed, &h, CUI_KEY_INSERT, 0);
+    CHECK(h.insert && h.res.insert_mode);
+    hexed_type(ui, &h, "!");
+    CHECK(h.n == 6 && !memcmp(h.b, "Q!Bxyz", 6) && h.sel.cursor == 2);
+    key(ui, build_hexed, &h, CUI_KEY_TAB, 0);
+    CHECK(!h.res.text_column);
+    hexed_type(ui, &h, "ff");   /* insert mode in the hex column: a new byte, finished by its low digit */
+    CHECK(h.n == 7 && !memcmp(h.b, "Q!\xff" "Bxyz", 7) && h.sel.cursor == 3);
+    /* Delete takes the byte at the cursor, Backspace the one before */
+    key(ui, build_hexed, &h, CUI_KEY_DELETE, 0);
+    CHECK(h.n == 6 && !memcmp(h.b, "Q!\xff" "xyz", 6) && h.sel.cursor == 3);
+    key(ui, build_hexed, &h, CUI_KEY_BACKSPACE, 0);
+    CHECK(h.n == 5 && !memcmp(h.b, "Q!xyz", 5) && h.sel.cursor == 2);
+    /* copy follows the column, cut removes */
+    key(ui, build_hexed, &h, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    key(ui, build_hexed, &h, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    CHECK(h.sel.start == 2 && h.sel.length == 3);
+    key(ui, build_hexed, &h, CUI_KEY_C, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "78 79 7A") == 0);
+    key(ui, build_hexed, &h, CUI_KEY_C, CUI_MOD_PRIMARY | CUI_MOD_SHIFT);
+    CHECK(strcmp(g_clip, "xyz") == 0);
+    key(ui, build_hexed, &h, CUI_KEY_X, CUI_MOD_PRIMARY);
+    CHECK(strcmp(g_clip, "78 79 7A") == 0 && h.n == 2 && h.sel.cursor == 2 && h.res.copied);
+    /* paste: a hex list in the hex column; overwrite mode at the end adds the bytes */
+    hex_mods(ui, 0);
+    key(ui, build_hexed, &h, CUI_KEY_INSERT, 0);
+    CHECK(!h.insert);
+    snprintf(g_clip, sizeof g_clip, "de ad,0xBE EF");
+    key(ui, build_hexed, &h, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(h.n == 6 && !memcmp(h.b, "Q!\xde\xad\xbe\xef", 6) && h.sel.cursor == 6);
+    /* overwrite paste over the middle; text that is no hex list goes in as its bytes */
+    key(ui, build_hexed, &h, CUI_KEY_HOME, CUI_MOD_CTRL);
+    snprintf(g_clip, sizeof g_clip, "hi!");
+    key(ui, build_hexed, &h, CUI_KEY_V, CUI_MOD_PRIMARY);
+    CHECK(h.n == 6 && !memcmp(h.b, "hi!\xad\xbe\xef", 6) && h.sel.cursor == 3);
+    /* a selection: Delete removes it */
+    key(ui, build_hexed, &h, CUI_KEY_RIGHT, CUI_MOD_SHIFT);
+    hex_mods(ui, 0);
+    key(ui, build_hexed, &h, CUI_KEY_DELETE, 0);
+    CHECK(h.n == 4 && !memcmp(h.b, "hi!\xef", 4) && h.sel.cursor == 3);
+    /* the cursor reaches the cell after the end, and Ctrl+A selects only bytes */
+    key(ui, build_hexed, &h, CUI_KEY_END, CUI_MOD_CTRL);
+    CHECK(h.sel.cursor == 4 && h.sel.length == 0);
+    key(ui, build_hexed, &h, CUI_KEY_A, CUI_MOD_PRIMARY);
+    CHECK(h.sel.start == 0 && h.sel.length == 4);
+    /* fixed size: overwrite only */
+    h.fixed = true;
+    hex_mods(ui, 0);
+    key(ui, build_hexed, &h, CUI_KEY_END, CUI_MOD_CTRL);
+    CHECK(h.sel.cursor == 3);
+    hex_mods(ui, 0);
+    key(ui, build_hexed, &h, CUI_KEY_INSERT, 0);
+    CHECK(!h.insert);
+    key(ui, build_hexed, &h, CUI_KEY_DELETE, 0);
+    key(ui, build_hexed, &h, CUI_KEY_BACKSPACE, 0);
+    CHECK(h.n == 4 && h.sel.cursor == 2);
+    int before = h.edits;
+    hexed_type(ui, &h, "0102");
+    CHECK(h.n == 4 && !memcmp(h.b, "hi\x01\x02", 4) && h.edits == before + 4 && h.sel.cursor == 3);
+    cui_destroy(ui);
+
+    /* .read alone: 64 MiB that never sits in memory, read only for the rows in view and for a copy */
+    ui = new_ctx();
+    memset(&h, 0, sizeof h);
+    h.gen_size = (size_t)64 << 20;
+    g_hex_digits = 8;
+    run(ui, build_hexed, &h, 3);
+    p = hex_cell(ui, 0, 0, false);
+    click_at(ui, build_hexed, &h, p.x, p.y);
+    key(ui, build_hexed, &h, CUI_KEY_END, CUI_MOD_CTRL);
+    CHECK(h.sel.cursor == h.gen_size - 1);
+    hex_mods(ui, 0);
+    key(ui, build_hexed, &h, CUI_KEY_LEFT, CUI_MOD_SHIFT);
+    key(ui, build_hexed, &h, CUI_KEY_C, CUI_MOD_PRIMARY);
+    char want[8];
+    snprintf(want, sizeof want, "%02X %02X", (unsigned)(uint8_t)((h.gen_size - 2) * 7u), (unsigned)(uint8_t)((h.gen_size - 1) * 7u));
+    CHECK(strcmp(g_clip, want) == 0);
+    hex_mods(ui, 0);
+    hexed_type(ui, &h, "00");   /* no on_edit: read only */
+    CHECK(!h.res.edited);
+    g_hex_digits = 4;
+    cui_destroy(ui);
+}
+
 /* markdown view ---------------------------------------------------------- */
 
 typedef struct {
@@ -10560,6 +10729,7 @@ static void test_code_editor_mdwrite(void) {
     /* small API pieces that go with it */
     CHECK(strcmp(cui_key_name(CUI_KEY_BACKSLASH), "\\") == 0);
     CHECK(strcmp(cui_key_name(CUI_KEY_GRAVE), "`") == 0);
+    CHECK(strcmp(cui_key_name(CUI_KEY_INSERT), "Insert") == 0);
     c.ro = false; c.lang = "md";
     ced_text(&c, "a");
     ced_sel(ui, &c, 0, 0);
@@ -14880,6 +15050,7 @@ int main(void) {
     test_tree_table();
     test_tools();
     test_hex_view();
+    test_hex_edit();
     test_markdown();
     test_markdown_vault();
     test_markdown_callouts();

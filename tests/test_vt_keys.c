@@ -94,6 +94,7 @@ static void test_table(void) {
         { CUI_KEY_PAGE_UP, 0, NULL, 33, 73, 0, ENH, "PageUp" },
         { CUI_KEY_PAGE_DOWN, 0, NULL, 34, 81, 0, ENH, "PageDown" },
         { CUI_KEY_DELETE, 0, NULL, 46, 83, 0, ENH, "Delete" },
+        { CUI_KEY_INSERT, 0, NULL, 45, 82, 0, ENH, "Insert" },
         { CUI_KEY_F1, 0, NULL, 112, 59, 0, 0, "F1" },
         { CUI_KEY_F5, 0, NULL, 116, 63, 0, 0, "F5" },
         { CUI_KEY_F5, CUI_MOD_CTRL, NULL, 116, 63, 0, CT, "Ctrl+F5" },
