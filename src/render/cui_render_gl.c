@@ -215,7 +215,7 @@ static GLuint_ cui__gl_shader(cui_gl_renderer *r, GLenum_ type, const char *src)
 
 #define CUI__LOAD(name) do { *(void **)(&r->gl.name) = loader("gl" #name); if (!r->gl.name) { missing = "gl" #name; } } while (0)
 
-cui_gl_renderer *cui_gl_create(cui_gl_loader loader) {
+CUI__COLD cui_gl_renderer *cui_gl_create(cui_gl_loader loader) {
     if (!loader) return NULL;
     cui_gl_renderer *r = calloc(1, sizeof *r);
     if (!r) return NULL;

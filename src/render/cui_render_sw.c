@@ -2512,6 +2512,12 @@ void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, in
 
 /* ---- PNG writer ---- */
 
+/* Screenshots, never a frame: compiled for size even where the renderer is built for speed (GCC). */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+#endif
+
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #if defined(__GNUC__) || defined(__clang__)
@@ -2542,3 +2548,7 @@ void *cui_png_encode(const void *rgba, int width, int height, int stride, int *l
     if (len) *len = p ? n : 0;
     return p;
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif

@@ -226,9 +226,9 @@ static void cui__ed_wrap_splice(cui__ed *E, int la, int lb, int k);
 static void cui__ed_wrap_sync(cui__ed *E);
 static void cui__ed_job_drop(cui__ed_job **J);
 typedef struct cui__ed_q cui__ed_q;
-static void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with);
+static CUI__COLD void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with);
 static bool cui__ed_cjob_step(cui__ed *E, const cui__ed_q *Q);
-static void cui__ed_fjob_start(cui__ed *E, const cui__ed_q *Q, int from, int dir);
+static CUI__COLD void cui__ed_fjob_start(cui__ed *E, const cui__ed_q *Q, int from, int dir);
 static void cui__ed_fjob_step(cui__ed *E);
 static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k);
 static void cui__ed_fc_splice(cui__ed_fc *fc, int a, int b0, int b1);
@@ -1045,7 +1045,7 @@ static void cui__ed_mc_free(cui_ctx *ui, cui__ed_state *st) {
     cui__sq_free(ui, &st->mc->st); cui__free(ui, st->mc);
     st->mc = NULL;
 }
-static void cui__ed_dtor(cui_ctx *ui, void *data) {
+static CUI__COLD void cui__ed_dtor(cui_ctx *ui, void *data) {
     cui__ed_state *st = data;
     cui__ed_wc_free(ui, st); cui__ed_mc_free(ui, st);
     cui__edm_free(ui, st);
@@ -2003,7 +2003,7 @@ static int cui__ed_rall(const cui__ed *E, const cui__ed_q *Q, const char *with, 
 
 /* Replace: the selected match (then on to the next), or when the selection is not a match,
  * just on to the next one. */
-static void cui__ed_replace_one(cui__ed *E, const char *with) {
+static CUI__COLD void cui__ed_replace_one(cui__ed *E, const char *with) {
     if (E->ro) return;
     cui__ed_q Q = cui__ed_q_of(E->st);
     cui_edit_state *e = &E->st->ed;
@@ -2022,7 +2022,7 @@ static void cui__ed_replace_one(cui__ed *E, const char *with) {
 
 /* Replace all, as one undo step; if the result does not fit the buffer nothing changes. The new
  * text is the edit's own: a big one becomes the undo record's (or the document's) as it is. */
-static void cui__ed_replace_all(cui__ed *E, const char *with) {
+static CUI__COLD void cui__ed_replace_all(cui__ed *E, const char *with) {
     cui__ed_q Q = cui__ed_q_of(E->st);
     int first = 0, last = 0, cnt = 0;
     char *t = NULL;
@@ -2565,7 +2565,7 @@ static void cui__ed_job_go(cui__ed_job *J) {
 /* The states of lines [v, upto) go to a job, which reads a snapshot of them (a document) or a copy
  * (a buffer: at most cui__ed_copy_bytes bytes, and the next job goes on from there). False when it
  * could not be made (no memory): the states are then found here. */
-static bool cui__ed_sjob_start(cui__ed *E, const cui__lang *L, int v, int upto) {
+static CUI__COLD bool cui__ed_sjob_start(cui__ed *E, const cui__lang *L, int v, int upto) {
     cui_ctx *ui = E->ui;
     cui__ed_state *st = E->st;
     cui__ed_mc *mc = st->mc;
@@ -2692,7 +2692,7 @@ static void cui__ed_rjob_apply(cui__ed *E, cui__ed_job *J) {
 }
 
 /* At the start of a frame: the job is dropped if the text changed or the bar closed, applied if done. */
-static void cui__ed_rjob_take(cui__ed *E, bool ro) {
+static CUI__COLD void cui__ed_rjob_take(cui__ed *E, bool ro) {
     cui__ed_state *st = E->st;
     cui__ed_job *J = st->rjob;
     if (!E->doc || ro || st->mode != 1 || cui_text_doc_revision(E->doc) != J->rev || cui__doc_serial(E->doc) != J->serial) {
@@ -2704,7 +2704,7 @@ static void cui__ed_rjob_take(cui__ed *E, bool ro) {
     cui__ed_job_drop(&st->rjob);
 }
 
-static void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with) {
+static CUI__COLD void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with) {
     cui__ed_state *st = E->st;
     cui__ed_job *J = calloc(1, sizeof *J);
     if (!J) return;
@@ -2815,7 +2815,7 @@ static bool cui__ed_cjob_step(cui__ed *E, const cui__ed_q *Q) {
  * is selected when it is done, if the query and the selection are still the ones it began with. An edit meanwhile starts
  * it again over the text as it is (from where the selection is now); a new query, a selection moved by the user, another
  * document or closing the bar drops it. */
-static void cui__ed_fjob_start(cui__ed *E, const cui__ed_q *Q, int from, int dir) {
+static CUI__COLD void cui__ed_fjob_start(cui__ed *E, const cui__ed_q *Q, int from, int dir) {
     cui__ed_state *st = E->st;
     cui__ed_job_drop(&st->fjob);
     if (!E->doc || Q->qn <= 0 || Q->qn > 127) return;
@@ -4214,7 +4214,7 @@ static void cui__edf_bar_keys(cui__edf *f) {
 
 /* a press: on a scrollbar it grabs the thumb; in the gutter it selects lines; in the code it
  * places the caret, and a double or triple click selects a word or a line */
-static void cui__edf_press(cui__edf *f, int line, double col) {
+static CUI__COLD void cui__edf_press(cui__edf *f, int line, double col) {
     cui__ed *E = f->E;
     cui__ed_state *st = E->st;
     cui_edit_state *e = &st->ed;

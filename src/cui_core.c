@@ -214,7 +214,7 @@ uint32_t cui__hash_str(const char *s, uint32_t seed) {
 /* Context                                                                  */
 /* ------------------------------------------------------------------------ */
 
-cui_ctx *cui_create(const cui_ctx_desc *desc) {
+CUI__COLD cui_ctx *cui_create(const cui_ctx_desc *desc) {
     cui_ctx_desc d;
     memset(&d, 0, sizeof d);
     if (desc) d = *desc;
@@ -240,7 +240,7 @@ cui_ctx *cui_create(const cui_ctx_desc *desc) {
     return ui;
 }
 
-void cui_destroy(cui_ctx *ui) {
+CUI__COLD void cui_destroy(cui_ctx *ui) {
     if (!ui) return;
     if (ui->emoji_hook) ui->emoji_hook(ui, 2);
     if (ui->sysfont_hook) ui->sysfont_hook(ui, 2, -1, 0, NULL);

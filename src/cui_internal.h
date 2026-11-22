@@ -1093,7 +1093,9 @@ int cui__code_sel_hit(cui_ctx *ui, const cui__code_sel *sel, const char *code, i
 
 /* ---- code editor folding and minimap (cui_fold.c, cui_minimap.c) ----
  * Both read the editor's text through a cui__lines and follow its edits (lines [la, lb] became [la, la + k]). Their
- * glue in cui_editor.c (compiled for speed in apps' size builds) is CUI__COLD: kept small, out of the hot paths. */
+ * glue in cui_editor.c (compiled for speed in apps' size builds) is CUI__COLD: kept small, out of the hot paths.
+ * CUI__COLD also marks other code that runs once (create, destroy, a job's start) or per click or command in the files
+ * apps compile for speed: GCC compiles it for size and keeps it apart. */
 #if defined(__GNUC__) || defined(__clang__)
 #define CUI__COLD __attribute__((cold, noinline))
 #else
