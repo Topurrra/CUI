@@ -297,6 +297,7 @@ static void test_view(void) {
     key(ui, &s, CUI_KEY_UP, 0); CHECK(got(&s, "\x1b[A"));
     key(ui, &s, CUI_KEY_LEFT, CUI_MOD_CTRL); CHECK(got(&s, "\x1b[1;5D"));
     key(ui, &s, CUI_KEY_DELETE, 0); CHECK(got(&s, "\x1b[3~"));
+    key(ui, &s, CUI_KEY_INSERT, 0); CHECK(got(&s, "\x1b[2~"));
     key(ui, &s, CUI_KEY_PAGE_UP, 0); CHECK(got(&s, "\x1b[5~"));
     key(ui, &s, CUI_KEY_F5, 0); CHECK(got(&s, "\x1b[15~"));
     key(ui, &s, CUI_KEY_F1, 0); CHECK(got(&s, "\x1bOP"));

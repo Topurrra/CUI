@@ -179,6 +179,7 @@ struct cui_text_doc {
     int hmaxlen, hmaxcnt;       /* with maxskip in an edit: the longest line of the new text (a prepared one, set whole) */
     bool maxstale;              /* an edit replaced too many lines to count them out: measure all again */
     bool maxskip;               /* the edit under way knows the longest line already (undo, a prepared text): no counting */
+    bool bytes;                 /* cui_text_doc_adopt_bytes: no line break index, one line */
     cui__tsplice log[CUI__DOC_LOG];
     cui__trec *h; int hn, hcap, hpos;
     int hmax;                   /* undo groups kept */
@@ -220,8 +221,9 @@ static int cui__td_buf_take(cui_text_doc *d, char *p, int len, int cap, void (*r
     if (!b->k->p) abort();
     b->k->release = release; b->k->user = user; b->k->refs = 1;
     b->len = len; b->cap = p ? len : cap;
-    if (nl) { b->nl = nl; b->nn = b->ncap = nn; }
-    else if (len > 0) {   /* its line breaks, in blocks so the index grows by what is read */
+    if (nl && d->bytes) free(nl);
+    else if (nl) { b->nl = nl; b->nn = b->ncap = nn; }
+    else if (len > 0 && !d->bytes) {   /* its line breaks, in blocks so the index grows by what is read */
         for (int a = 0; a < len; a += 1 << 16) {
             int e = CUI_MIN(len, a + (1 << 16));
             CUI__TD_GROW(b->nl, b->nn, b->ncap, e - a);
@@ -259,10 +261,12 @@ static int cui__td_place(cui_text_doc *d, const char *t, int n, char *own, void 
         cui__tbuf *b = &d->b[bi];
         *start = b->len;
         memcpy(b->k->p + b->len, t, (size_t)n);
-        CUI__TD_GROW(b->nl, b->nn, b->ncap, (int)cui__count_byte(t, (size_t)n, '\n'));
-        int k = cui__fill_nl(b->k->p, b->len, b->len + n, b->nl + b->nn);
-        for (int i = 0; i < k; i++) b->nl[b->nn + i]--;
-        b->nn += k;
+        if (!d->bytes) {
+            CUI__TD_GROW(b->nl, b->nn, b->ncap, (int)cui__count_byte(t, (size_t)n, '\n'));
+            int k = cui__fill_nl(b->k->p, b->len, b->len + n, b->nl + b->nn);
+            for (int i = 0; i < k; i++) b->nl[b->nn + i]--;
+            b->nn += k;
+        }
         b->len += n;
         d->added += n;
     }
@@ -587,7 +591,7 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
     if (n < 0) n = 0;
     if (!own && nl) { free(nl); nl = NULL; }
     if ((long long)len - (b - a) + n > INT_MAX - 2 || (a == b && n == 0)) { if (own) { if (release) release(own, user); else free(own); } free(nl); return false; }
-    int nlc = nl ? nn : n > 0 ? (int)cui__count_byte(t, (size_t)n, '\n') : 0;
+    int nlc = d->bytes ? 0 : nl ? nn : n > 0 ? (int)cui__count_byte(t, (size_t)n, '\n') : 0;
     int start = 0, bi = -1;
     if (n > 0) bi = cui__td_place(d, t, n, own, release, user, &start, nl, nn);
     else { free(nl); if (own) { if (release) release(own, user); else free(own); } }   /* a removal: nothing to keep */
@@ -797,6 +801,13 @@ cui_text_doc *cui_text_doc_new(const char *text, int len) {
 cui_text_doc *cui_text_doc_adopt(char *text, int len, void (*release)(char *text, void *user), void *user) {
     cui_text_doc *d = cui__td_alloc();
     cui__td_set(d, text, text, cui__td_len_of(text, len), release, user);
+    return d;
+}
+
+cui_text_doc *cui_text_doc_adopt_bytes(char *bytes, int len, void (*release)(char *bytes, void *user), void *user) {
+    cui_text_doc *d = cui__td_alloc();
+    d->bytes = true;
+    cui__td_set(d, bytes, bytes, cui__td_len_of(bytes, len), release, user);
     return d;
 }
 

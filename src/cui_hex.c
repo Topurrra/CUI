@@ -18,6 +18,7 @@ typedef struct {
     float bar_t, bar_grab;
     cui_id tip;                         /* tooltip anchor last asked for */
     bool goto_pending, dragging, bar_drag, nibble;
+    bool text_col, own_insert;          /* .on_edit: the keys type into the text column; insert mode without .insert */
 } cui__hex_state;
 
 typedef struct {
@@ -103,12 +104,22 @@ static int64_t cui__hex_hit(const cui__hex_geom *g, float x, size_t row, size_t 
     return (int64_t)b;
 }
 
-static void cui__hex_copy(cui_ctx *ui, const uint8_t *bytes, size_t start, size_t len, bool ascii) {
+/* bytes [off, off + n) into dst, from the caller's memory or its .read; how many */
+static size_t cui__hex_fetch(const cui_hex_view_opts *o, const uint8_t *bytes, size_t off, uint8_t *dst, size_t n) {
+    if (!o->read) { memcpy(dst, bytes + off, n); return n; }
+    size_t got = o->read(o->user, off, dst, n);
+    if (got < n) memset(dst + got, 0, n - got);
+    return got;
+}
+
+static void cui__hex_copy(cui_ctx *ui, const cui_hex_view_opts *o, const uint8_t *bytes, size_t start, size_t len, bool ascii) {
     if (!ui->platform.set_clipboard || len == 0) return;
     if (len > CUI__HEX_COPY_MAX) len = CUI__HEX_COPY_MAX;
     size_t cap = ascii ? len + 1 : len * 3;
     char *out = cui__alloc(ui, cap);
-    if (!out) return;
+    uint8_t *tmp = o->read ? cui__alloc(ui, len) : NULL;   /* read through .read once, then formatted */
+    if (!out || (o->read && !tmp)) { cui__free(ui, out); cui__free(ui, tmp); return; }
+    if (tmp) { cui__hex_fetch(o, NULL, start, tmp, len); bytes = tmp; start = 0; }
     static const char hx[] = "0123456789ABCDEF";
     size_t n = 0;
     for (size_t i = 0; i < len; i++) {
@@ -123,6 +134,7 @@ static void cui__hex_copy(cui_ctx *ui, const uint8_t *bytes, size_t start, size_
     out[n] = 0;
     ui->platform.set_clipboard(ui->platform.user, out);
     cui__free(ui, out);
+    cui__free(ui, tmp);
 }
 
 /* ---- painting ---- */
@@ -140,6 +152,7 @@ typedef struct {
     const uint8_t *bytes;                      /* a copy of those rows */
     uint64_t base;
     bool header, empty, has_sel, bar_big, show_cursor, nibble;
+    bool editing, text_col, insert;            /* .on_edit: the column typed into is marked, insert mode is a bar */
     size_t sel_lo, sel_hi, cursor;
     int64_t hover;
     const cui__hex_mark *marks; int nmarks;
@@ -162,6 +175,25 @@ static void cui__hex_cell_rects(const cui__hex_paint *p, cui_rect r, float y, in
     const cui__hex_geom *g = &p->g;
     *hex = (cui_rect){ r.x + cui__hex_cell_x(g, col) - 3, y + 1, 2.0f * g->cw + 6, p->row_h - 2 };
     *asc = (cui_rect){ r.x + g->x_ascii + (float)col * g->cw - 1, y + 1, g->cw + 2, p->row_h - 2 };
+}
+
+/* an editing view's cursor: a box in the column typed into and a quieter one in the other; in insert mode a bar
+ * before the byte instead */
+static void cui__hex_edit_cursor(cui_ctx *ui, const cui__hex_paint *p, cui_rect r, float y, int col) {
+    const cui__hex_geom *g = &p->g;
+    cui_rect hr, ar;
+    cui__hex_cell_rects(p, r, y, col, &hr, &ar);
+    cui_color on = p->bar, off = cui_alpha(p->bar, 0.45f);
+    cui_color hc = p->text_col ? off : on, ac = p->text_col ? on : off;
+    if (p->insert) {
+        cui_draw_rect(ui, (cui_rect){ hr.x, hr.y + 1, 2, hr.h - 2 }, CUI_CORNERS(1), hc);
+        if (g->ascii) cui_draw_rect(ui, (cui_rect){ ar.x - 1, ar.y + 1, 2, ar.h - 2 }, CUI_CORNERS(1), ac);
+    } else {
+        cui_draw_rect_border(ui, hr, CUI_CORNERS(4), CUI_TRANSPARENT, hc, p->text_col ? 1.0f : 1.5f);
+        if (g->ascii) cui_draw_rect_border(ui, ar, CUI_CORNERS(3), CUI_TRANSPARENT, ac, p->text_col ? 1.5f : 1.0f);
+    }
+    if (p->nibble)   /* the high digit is typed: a block over the low one, which is next */
+        cui_draw_rect(ui, (cui_rect){ r.x + cui__hex_cell_x(g, col) + g->cw, y + 4, g->cw, p->row_h - 8 }, CUI_CORNERS(2), cui_alpha(p->bar, 0.28f));
 }
 
 static void cui__paint_hex(cui_ctx *ui, cui_node *n, void *data) {
@@ -213,17 +245,17 @@ static void cui__paint_hex(cui_ctx *ui, cui_node *n, void *data) {
     for (size_t k = 0; k < p->row_count; k++) {
         size_t row = p->first_row + k;
         size_t b0 = row * (size_t)g->bpr;
-        int ncols = (int)CUI_MIN((size_t)g->bpr, p->size_bytes - b0);
+        int ncols = b0 < p->size_bytes ? (int)CUI_MIN((size_t)g->bpr, p->size_bytes - b0) : 0;   /* 0: the row of the cell after the end */
         float y = area.y + CUI__HEX_INSET + (float)((double)row - p->pos) * p->row_h;
         size_t b1 = b0 + (size_t)ncols - 1;
         /* highlighted ranges, then the selection over them */
-        for (int m = 0; m < p->nmarks; m++) {
+        for (int m = 0; ncols > 0 && m < p->nmarks; m++) {
             const cui__hex_mark *mk = &p->marks[m];
             if (mk->b <= b0 || mk->a > b1) continue;
             int a = (int)(CUI_MAX(mk->a, b0) - b0), b = (int)(CUI_MIN(mk->b - 1, b1) - b0);
             cui__hex_run(ui, p, r, y, a, b, mk->tint);
         }
-        if (p->has_sel && p->sel_hi >= b0 && p->sel_lo <= b1) {
+        if (ncols > 0 && p->has_sel && p->sel_hi >= b0 && p->sel_lo <= b1) {
             int a = (int)(CUI_MAX(p->sel_lo, b0) - b0), b = (int)(CUI_MIN(p->sel_hi, b1) - b0);
             cui__hex_run(ui, p, r, y, a, b, p->sel);
         }
@@ -233,7 +265,9 @@ static void cui__paint_hex(cui_ctx *ui, cui_node *n, void *data) {
             cui_draw_rect(ui, hr, CUI_CORNERS(4), p->hover_c);
             if (g->ascii) cui_draw_rect(ui, ar, CUI_CORNERS(3), p->hover_c);
         }
-        if (p->show_cursor && p->cursor >= b0 && p->cursor <= b1) {
+        bool cur_here = p->show_cursor && p->cursor >= b0 && p->cursor - b0 < (size_t)g->bpr;
+        if (cur_here && p->editing) cui__hex_edit_cursor(ui, p, r, y, (int)(p->cursor - b0));
+        else if (cur_here) {
             int col = (int)(p->cursor - b0);
             cui__hex_cell_rects(p, r, y, col, &hr, &ar);
             cui_draw_rect_border(ui, hr, CUI_CORNERS(4), CUI_TRANSPARENT, p->bar, 1.5f);
@@ -243,7 +277,7 @@ static void cui__paint_hex(cui_ctx *ui, cui_node *n, void *data) {
         }
         /* text */
         cui__hex_digits(buf, p->base + (uint64_t)b0, g->digits);
-        bool here = row == hover_row || (p->show_cursor && p->cursor >= b0 && p->cursor <= b1);
+        bool here = row == hover_row || cur_here;
         cui__draw_text_line(ui, CUI_FONT_MONO, size, r.x + g->x_off, y + ty, here ? p->secondary : p->muted, buf, g->digits, true);
         const uint8_t *src = p->bytes + k * (size_t)g->bpr;
         for (int i = 0; i < ncols; i++) {
@@ -285,6 +319,9 @@ void cui_hex_view_goto(cui_ctx *ui, const char *id_str, size_t offset) {
     ui->animating = true;
 }
 
+bool cui_hex_view_focused(cui_ctx *ui, const char *id_str) { return ui->focus && ui->focus == (cui_make_id(ui, id_str) ^ 0x4E5B0D1u); }
+void cui_hex_view_focus(cui_ctx *ui, const char *id_str) { cui_focus_set(ui, cui_make_id(ui, id_str) ^ 0x4E5B0D1u, true); }
+
 static int cui__hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -311,6 +348,9 @@ typedef struct {
     cui__hex_state *s;
     cui_hex_selection *sel;
     const uint8_t *bytes; size_t size;
+    size_t ncur;                        /* places the cursor can be: the bytes, and with on_edit (not fixed_size) the cell after them */
+    bool *insert;                       /* on_edit: insert mode (the caller's, or the state's) */
+    size_t elo, ehi;                    /* bytes this frame's edits touched */
     float fsize, row_h, cw;             /* text size, row height, column width */
     int bpr_req;                        /* bytes per row asked for */
     bool header; float header_h;
@@ -336,11 +376,12 @@ static void cui__hxf_press(cui__hxf *f, float lx, double row_f) {
         s->bar_grab = ui->my >= thumb_y && ui->my <= thumb_y + thumb_h ? ui->my - thumb_y : thumb_h * 0.5f;
         s->bar_drag = true;
     } else if (ui->my >= f->rows_top) {
-        int64_t b = row_f >= 0 && row_f < (double)f->rows ? cui__hex_hit(&f->g, lx, (size_t)row_f, f->size, true) : -1;
+        int64_t b = row_f >= 0 && row_f < (double)f->rows ? cui__hex_hit(&f->g, lx, (size_t)row_f, f->ncur, true) : -1;
         if (b >= 0) {
             size_t anchor = (ui->mods & CUI_MOD_SHIFT) ? cui__hex_anchor(f->sel) : (size_t)b;
             cui__hex_select(f->sel, anchor, (size_t)b);
             s->dragging = true;
+            if (f->o->on_edit && !(ui->mods & CUI_MOD_SHIFT)) s->text_col = f->g.ascii && lx >= (cui__hex_hex_end(&f->g) + f->g.x_ascii) * 0.5f;
         } else f->sel->length = 0;
     }
 }
@@ -359,7 +400,7 @@ static void cui__hxf_drag_select(cui__hxf *f, float lx, double row_f) {
     double lo = floor(s->pos), hi = CUI_MAX(lo, ceil(s->pos + f->view_rows) - 1);
     double rf = CUI_MAX(lo, CUI_MIN(hi, row_f));
     rf = CUI_MAX(0.0, CUI_MIN((double)f->rows - 1, rf));
-    int64_t b = cui__hex_hit(&f->g, lx, (size_t)rf, f->size, true);
+    int64_t b = cui__hex_hit(&f->g, lx, (size_t)rf, f->ncur, true);
     if (b >= 0 && (size_t)b != f->sel->cursor) cui__hex_select(f->sel, cui__hex_anchor(f->sel), (size_t)b);
 }
 
@@ -370,7 +411,7 @@ static void cui__hxf_pointer(cui__hxf *f) {
     cui_rect br = f->br;
     f->lr = cui__interact(ui, f->lid, CUI_IF_FOCUSABLE | CUI_IF_DRAG);
     f->over_bar = f->has_rect && f->max_top > 0 && ui->mx >= br.x + br.w - CUI__HEX_BAR;
-    if (f->has_rect && f->size > 0) {
+    if (f->has_rect && f->ncur > 0) {
         float lx = ui->mx - br.x;
         double row_f = s->pos + (double)(ui->my - f->rows_top - CUI__HEX_INSET) / f->row_h;
         if (f->lr.hovered && ui->mpressed[0]) cui__hxf_press(f, lx, row_f);
@@ -383,7 +424,7 @@ static void cui__hxf_pointer(cui__hxf *f) {
         }
         if (s->dragging && f->lr.active && ui->mdown[0]) cui__hxf_drag_select(f, lx, row_f);
         if (f->lr.hovered && !f->lr.active && !f->over_bar && ui->my >= f->rows_top && row_f >= 0 && row_f < (double)f->rows)
-            f->res->hovered = cui__hex_hit(&f->g, lx, (size_t)row_f, f->size, false);
+            f->res->hovered = f->size ? cui__hex_hit(&f->g, lx, (size_t)row_f, f->size, false) : -1;
     }
     if (!ui->mdown[0]) s->dragging = s->bar_drag = false;
     if (ui->scroll_target == f->sid && ui->scroll_dy != 0 && f->max_top > 0) {
@@ -430,6 +471,182 @@ static void cui__hxf_type(cui__hxf *f, size_t last) {
     }
 }
 
+/* ---- editing through .on_edit ---- */
+
+/* what follows the size: the cursor's places, rows and the scroll range (again after an edit changed it) */
+static void cui__hxf_size(cui__hxf *f) {
+    const cui_hex_view_opts *o = f->o;
+    f->ncur = f->size + (o->on_edit && !o->fixed_size ? 1 : 0);
+    f->rows = f->ncur ? (f->ncur - 1) / f->bpr + 1 : 0;
+    float content_h = (float)f->rows * f->row_h + 2 * CUI__HEX_INSET;
+    f->height = o->height > 0 ? o->height : CUI_MIN(320.0f, f->header_h + (f->ncur ? content_h : 96.0f) + 2);
+    f->rows_h = (f->has_rect ? f->br.h : f->height - 2) - f->header_h;
+    f->view_rows = CUI_MAX(1.0, (double)(f->rows_h - 2 * CUI__HEX_INSET) / f->row_h);
+    f->max_top = CUI_MAX(0.0, (double)f->rows - f->view_rows);
+}
+
+/* the selection kept to the bytes (the cell after the end is a place, not a byte) */
+static void cui__hxf_clamp_sel(cui__hxf *f) {
+    cui_hex_selection *sel = f->sel;
+    if (f->ncur == 0) { memset(sel, 0, sizeof *sel); return; }
+    if (sel->cursor >= f->ncur) sel->cursor = f->ncur - 1;
+    if (sel->start >= f->size) sel->length = 0;
+    else if (sel->length > f->size - sel->start) sel->length = f->size - sel->start;
+}
+
+static void cui__hxf_put_cursor(cui__hxf *f, size_t at) {
+    f->sel->start = f->sel->cursor = at;
+    f->sel->length = 1;
+    cui__hxf_clamp_sel(f);
+}
+
+static void cui__hxf_apply(cui__hxf *f, cui_hex_edit_kind kind, size_t off, const uint8_t *bytes, size_t n, bool merge) {
+    if (n == 0) return;
+    cui_hex_edit e = { kind, off, n, kind == CUI_HEX_EDIT_DELETE ? NULL : bytes, merge };
+    f->size = f->o->on_edit(f->o->user, &e);
+    f->elo = CUI_MIN(f->elo, off);
+    f->ehi = CUI_MAX(f->ehi, off + n);
+    f->res->edited = true;
+    cui__hxf_size(f);
+}
+
+static void cui__hxf_delete_sel(cui__hxf *f) {
+    size_t a = f->sel->start;
+    cui__hxf_apply(f, CUI_HEX_EDIT_DELETE, a, NULL, f->sel->length, false);
+    cui__hxf_put_cursor(f, a);
+}
+
+static void cui__hxf_typed(cui__hxf *f) {
+    cui_ctx *ui = f->ui;
+    ui->text_in_len = 0;
+    ui->text_in[0] = 0;
+    ui->focus_visible = true;   /* typing is keyboard use: show the cursor */
+    f->reveal = true;
+}
+
+/* typing: hex digits in the hex column (high digit first, the low one finishes the byte), text in the text column;
+ * insert mode, and the cell after the end, insert */
+static void cui__hxf_type_cb(cui__hxf *f) {
+    cui_ctx *ui = f->ui;
+    cui__hex_state *s = f->s;
+    cui_hex_selection *sel = f->sel;
+    bool ins = *f->insert && !f->o->fixed_size, used = false;
+    if (s->nibble && s->nibble_at != sel->cursor) s->nibble = false;
+    if (s->text_col) {
+        uint8_t buf[sizeof ui->text_in];
+        size_t n = 0, at = sel->cursor;
+        for (int i = 0; i < ui->text_in_len; i++) {
+            uint8_t c = (uint8_t)ui->text_in[i];
+            if (c >= 0x20 && c != 0x7F) buf[n++] = c;
+        }
+        if (n && f->o->fixed_size) n = at < f->size ? CUI_MIN(n, f->size - at) : 0;
+        if (n) {
+            cui__hxf_apply(f, ins || at >= f->size ? CUI_HEX_EDIT_INSERT : CUI_HEX_EDIT_OVERWRITE, at, buf, n, false);
+            cui__hxf_put_cursor(f, at + n);
+            used = true;
+        }
+        s->nibble = false;
+    } else {
+        for (int i = 0; i < ui->text_in_len; i++) {
+            int v = cui__hex_value(ui->text_in[i]);
+            if (v < 0) continue;
+            size_t at = sel->cursor;
+            uint8_t old = 0, b;
+            if (!s->nibble) {
+                if (at >= f->size && f->o->fixed_size) break;
+                if (ins || at >= f->size) {
+                    b = (uint8_t)(v << 4);
+                    cui__hxf_apply(f, CUI_HEX_EDIT_INSERT, at, &b, 1, false);
+                } else {
+                    cui__hex_fetch(f->o, f->bytes, at, &old, 1);
+                    b = (uint8_t)((v << 4) | (old & 0x0F));
+                    cui__hxf_apply(f, CUI_HEX_EDIT_OVERWRITE, at, &b, 1, false);
+                }
+                s->nibble = true;
+                s->nibble_at = at;
+                cui__hxf_put_cursor(f, at);
+            } else {
+                cui__hex_fetch(f->o, f->bytes, at, &old, 1);
+                b = (uint8_t)((old & 0xF0) | v);
+                cui__hxf_apply(f, CUI_HEX_EDIT_OVERWRITE, at, &b, 1, true);
+                s->nibble = false;
+                cui__hxf_put_cursor(f, at + 1);
+            }
+            used = true;
+        }
+    }
+    if (used) cui__hxf_typed(f);
+}
+
+/* clipboard text as bytes: in the hex column hex digit pairs ("89 50 4E 47", "0x89,0x50"), else (or when it is no
+ * such list) the text's own bytes; *n of them, allocated (cui__free) */
+static uint8_t *cui__hex_paste_bytes(cui_ctx *ui, const char *t, bool hex, size_t *n) {
+    size_t len = strlen(t), k = 0;
+    if (len > 4 * CUI__HEX_COPY_MAX) len = 4 * CUI__HEX_COPY_MAX;
+    uint8_t *out = cui__alloc(ui, len ? len : 1);
+    *n = 0;
+    if (!out) return NULL;
+    bool ok = hex;
+    int hi = -1;
+    for (size_t i = 0; ok && i < len; i++) {
+        char c = t[i];
+        int v = cui__hex_value(c);
+        if (c == '0' && hi < 0 && i + 1 < len && (t[i + 1] == 'x' || t[i + 1] == 'X')) { i++; continue; }
+        if (v >= 0) { if (hi < 0) hi = v; else { out[k++] = (uint8_t)(hi << 4 | v); hi = -1; } }
+        else if (hi >= 0 || !(c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',' || c == ';')) ok = false;
+    }
+    if (!ok || hi >= 0 || k == 0) { memcpy(out, t, len); k = len; }
+    *n = k;
+    return out;
+}
+
+/* the editing keys: Insert, Tab (the other column), Delete, Backspace, Ctrl+X, Ctrl+V */
+static void cui__hxf_edit_keys(cui__hxf *f) {
+    cui_ctx *ui = f->ui;
+    cui__hex_state *s = f->s;
+    cui_hex_selection *sel = f->sel;
+    int mods = ui->mods;
+    bool prim = (mods & CUI_MOD_PRIMARY) != 0, plain = !(mods & (CUI_MOD_CTRL | CUI_MOD_SUPER | CUI_MOD_ALT));
+    bool sized = !f->o->fixed_size, before = f->res->edited;
+    if (plain && sized && cui_key_pressed(ui, CUI_KEY_INSERT)) { *f->insert = !*f->insert; s->nibble = false; }
+    if (!(mods & CUI_MOD_CTRL) && f->g.ascii && cui_key_pressed(ui, CUI_KEY_TAB)) {
+        s->text_col = !s->text_col;
+        s->nibble = false;
+        ui->kpressed[CUI_KEY_TAB] = 0;
+    }
+    if (plain && sized && cui_key_pressed(ui, CUI_KEY_DELETE) && sel->length > 0) cui__hxf_delete_sel(f);
+    if (plain && cui_key_pressed(ui, CUI_KEY_BACKSPACE)) {
+        if (sized && sel->length > 1) cui__hxf_delete_sel(f);
+        else if (sel->cursor > 0) {
+            size_t a = sel->cursor - 1;
+            if (sized) cui__hxf_apply(f, CUI_HEX_EDIT_DELETE, a, NULL, 1, false);
+            cui__hxf_put_cursor(f, a);
+        }
+    }
+    if (prim && sized && cui_key_pressed(ui, CUI_KEY_X) && sel->length > 0) {
+        cui__hex_copy(ui, f->o, f->bytes, sel->start, sel->length, s->text_col);
+        f->res->copied = true;
+        cui__hxf_delete_sel(f);
+    }
+    const char *clip = prim && cui_key_pressed(ui, CUI_KEY_V) ? cui_get_clipboard_text(ui) : NULL;
+    if (clip && clip[0]) {
+        size_t n = 0;
+        uint8_t *b = cui__hex_paste_bytes(ui, clip, !s->text_col, &n);
+        bool many = sel->length > 1;
+        size_t at = many ? sel->start : sel->cursor;
+        if (b && *f->insert && sized) {
+            if (many) cui__hxf_delete_sel(f);
+            cui__hxf_apply(f, CUI_HEX_EDIT_INSERT, at, b, n, false);
+        } else if (b) {
+            if (!sized) n = at < f->size ? CUI_MIN(n, f->size - at) : 0;
+            cui__hxf_apply(f, at >= f->size ? CUI_HEX_EDIT_INSERT : CUI_HEX_EDIT_OVERWRITE, at, b, n, false);
+        }
+        if (b && n) cui__hxf_put_cursor(f, at + n);
+        cui__free(ui, b);
+    }
+    if (f->res->edited && !before) { s->nibble = false; f->reveal = true; }
+}
+
 /* keys while focused: arrows, pages, Home and End move the cursor (Shift selects), Ctrl+A,
  * Ctrl+C copies (Shift: as text), Escape clears the selection, hex digits edit */
 static void cui__hxf_keys(cui__hxf *f) {
@@ -440,7 +657,7 @@ static void cui__hxf_keys(cui__hxf *f) {
     int mods = ui->mods;
     bool shift = (mods & CUI_MOD_SHIFT) != 0, prim = (mods & CUI_MOD_PRIMARY) != 0;
     bool whole = (mods & (CUI_MOD_CTRL | CUI_MOD_PRIMARY)) != 0;
-    size_t cur = sel->cursor, to = cur, last = f->size - 1;
+    size_t cur = sel->cursor, to = cur, last = f->ncur - 1;
     size_t page = (size_t)CUI_MAX(1.0, floor(f->view_rows) - 1) * bpr;
     bool moved = false;
     if (cui_key_pressed(ui, CUI_KEY_LEFT)) { to = to > 0 ? to - 1 : 0; moved = true; }
@@ -453,12 +670,13 @@ static void cui__hxf_keys(cui__hxf *f) {
     if (cui_key_pressed(ui, CUI_KEY_END)) { to = whole ? last : CUI_MIN(last, to - to % bpr + bpr - 1); moved = true; }
     if (moved) {
         cui__hex_select(sel, shift ? cui__hex_anchor(sel) : to, to);
+        cui__hxf_clamp_sel(f);
         s->nibble = false;
         f->reveal = true;
     }
-    if (prim && cui_key_pressed(ui, CUI_KEY_A)) cui__hex_select(sel, 0, last);
+    if (prim && cui_key_pressed(ui, CUI_KEY_A) && f->size > 0) cui__hex_select(sel, 0, f->size - 1);
     if (prim && cui_key_pressed(ui, CUI_KEY_C) && sel->length > 0) {
-        cui__hex_copy(ui, f->bytes, sel->start, sel->length, shift);
+        cui__hex_copy(ui, f->o, f->bytes, sel->start, sel->length, f->o->on_edit ? s->text_col != shift : shift);
         f->res->copied = true;
     }
     if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && sel->length > 0) {
@@ -466,7 +684,11 @@ static void cui__hxf_keys(cui__hxf *f) {
         s->nibble = false;
         ui->kpressed[CUI_KEY_ESCAPE] = 0;
     }
-    if (f->o->edit && ui->text_in_len > 0 && !(mods & (CUI_MOD_CTRL | CUI_MOD_SUPER | CUI_MOD_ALT))) cui__hxf_type(f, last);
+    bool typing = ui->text_in_len > 0 && !(mods & (CUI_MOD_CTRL | CUI_MOD_SUPER | CUI_MOD_ALT));
+    if (f->o->on_edit) {
+        cui__hxf_edit_keys(f);
+        if (typing) cui__hxf_type_cb(f);
+    } else if (f->o->edit && typing) cui__hxf_type(f, last);
 }
 
 /* bring the cursor into view, then glide the scroll to its target; the scrollbar shows while
@@ -475,7 +697,7 @@ static void cui__hxf_scroll(cui__hxf *f) {
     cui_ctx *ui = f->ui;
     cui__hex_state *s = f->s;
     double view_rows = f->view_rows, max_top = f->max_top;
-    if (f->reveal && f->size > 0) {
+    if (f->reveal && f->ncur > 0) {
         double row = (double)(f->sel->cursor / f->bpr);
         if (f->center && (row < s->target || row + 1 > s->target + view_rows)) s->target = row - view_rows * 0.5 + 0.5;
         else if (row < s->target) s->target = row;
@@ -509,9 +731,9 @@ static void cui__hxf_visible(cui__hxf *f, cui__hex_paint *p, cui_color fg, bool 
     size_t first = (size_t)floor(pos);
     size_t last_row = (size_t)CUI_MIN((double)f->rows, ceil(pos + f->view_rows + (double)(2 * CUI__HEX_INSET) / f->row_h) + 1);
     if (first > last_row) first = last_row;
-    size_t nb = CUI_MIN(size - first * bpr, (last_row - first) * bpr);
+    size_t nb = first * bpr < size ? CUI_MIN(size - first * bpr, (last_row - first) * bpr) : 0;
     uint8_t *copy = cui__frame_alloc(ui, nb ? nb : 1);
-    if (nb) memcpy(copy, f->bytes + first * bpr, nb);
+    if (nb) cui__hex_fetch(o, f->bytes, first * bpr, copy, nb);
     p->bytes = copy;
     p->first_row = first;
     p->row_count = last_row - first;
@@ -548,13 +770,16 @@ static int cui__hxf_build_rows(cui__hxf *f, cui_color bg, bool dark) {
     p->size = f->fsize; p->row_h = f->row_h; p->header_h = f->header_h; p->header = f->header;
     p->pos = s->pos; p->max_top = f->max_top; p->view_rows = f->view_rows;
     p->bar_t = s->bar_t; p->bar_big = f->bar_hover || s->bar_drag;
-    p->size_bytes = f->size; p->base = f->o->base; p->empty = f->size == 0;
+    p->size_bytes = f->size; p->base = f->o->base; p->empty = f->ncur == 0;
     p->hover = f->res->hovered;
     p->has_sel = sel->length > 0;
     p->sel_lo = sel->start; p->sel_hi = sel->start + (sel->length ? sel->length - 1 : 0);
     p->cursor = sel->cursor;
-    p->show_cursor = ui->focus == f->lid && ui->focus_visible && f->size > 0;
+    p->show_cursor = ui->focus == f->lid && ui->focus_visible && f->ncur > 0;
     p->nibble = s->nibble && s->nibble_at == sel->cursor;
+    p->editing = f->o->on_edit != NULL;
+    p->text_col = p->editing && s->text_col && f->g.ascii;
+    p->insert = p->editing && *f->insert && !f->o->fixed_size;
     cui_color fg = CUI_C(ui, FOREGROUND);
     p->fg = fg;
     p->muted = CUI_C(ui, TEXT_MUTED);
@@ -563,7 +788,7 @@ static int cui__hxf_build_rows(cui__hxf *f, cui_color bg, bool dark) {
     p->hover_c = cui_alpha(fg, dark ? 0.14f : 0.09f);
     p->bar = ui->accent == CUI_ACCENT_NEUTRAL ? fg : CUI_C(ui, ACCENT);
     p->line = CUI_C(ui, BORDER);
-    if (f->size > 0) cui__hxf_visible(f, p, fg, dark);
+    if (f->ncur > 0) cui__hxf_visible(f, p, fg, dark);
     bn->paint = cui__paint_hex;
     bn->paint_data = p;
     return body;
@@ -579,7 +804,7 @@ static void cui__hxf_tooltip(cui__hxf *f, int body) {
         size_t at = (size_t)f->res->hovered;
         for (int i = o->range_count - 1; i >= 0; i--) {
             const cui_hex_range *rg = &o->ranges[i];
-            if (!rg->label || !rg->label[0] || at < rg->offset || at - rg->offset >= rg->length) continue;
+            if (!rg->label || !rg->label[0] || at < rg->offset || at - rg->offset >= rg->length || rg->offset >= f->size) continue;
             tip = f->lid ^ (0x9E3779B1u * (cui_id)(i + 1));
             size_t row = at / f->bpr;
             int col = (int)(at % f->bpr);
@@ -603,23 +828,20 @@ static cui_hex_result cui__hex_view_ex_body(cui_ctx *ui, const char *id_str, con
     cui_hex_result res;
     memset(&res, 0, sizeof res);
     res.hovered = -1;
-    const uint8_t *bytes = o->edit ? o->edit : data;
-    if (!bytes) size = 0;
+    const uint8_t *bytes = o->edit && !o->on_edit ? o->edit : data;
+    if (!bytes && !o->read) size = 0;
     cui__hxf f;
     memset(&f, 0, sizeof f);
     f.ui = ui; f.o = o; f.res = &res; f.bytes = bytes; f.size = size;
+    f.elo = SIZE_MAX;
+    f.ncur = size + (o->on_edit && !o->fixed_size ? 1 : 0);
     f.id = cui_make_id(ui, id_str);
     f.lid = f.id ^ 0x4E5B0D1u; f.sid = f.id ^ 0x4E5C011u;
     cui__hex_state *s = f.s = cui_state(ui, f.id ^ CUI__HEX_SALT, sizeof *s);
+    f.insert = o->insert ? o->insert : &s->own_insert;
     if (!sel) sel = &s->own;
     f.sel = sel;
-    /* keep the caller's selection inside the data */
-    if (size == 0) memset(sel, 0, sizeof *sel);
-    else {
-        if (sel->cursor >= size) sel->cursor = size - 1;
-        if (sel->start >= size) sel->length = 0;
-        else if (sel->length > size - sel->start) sel->length = size - sel->start;
-    }
+    cui__hxf_clamp_sel(&f);   /* keep the caller's selection inside the data */
     cui_hex_selection before = *sel;
 
     /* geometry */
@@ -628,12 +850,12 @@ static cui_hex_result cui__hex_view_ex_body(cui_ctx *ui, const char *id_str, con
     f.cw = cui__text_width(ui, CUI_FONT_MONO, f.fsize, "0000000000000000", 16, true) / 16.0f;
     f.bpr_req = o->bytes_per_row == 8 || o->bytes_per_row == 32 ? o->bytes_per_row : 16;
     /* offset digits: enough for the last address, at least 4, an even count */
-    uint64_t last_addr = o->base + (size ? (uint64_t)size - 1 : 0);
+    uint64_t last_addr = o->base + (f.ncur ? (uint64_t)f.ncur - 1 : 0);
     if (last_addr < o->base) last_addr = UINT64_MAX;   /* wrapped */
     int digits = 1;
     for (uint64_t v = last_addr >> 4; v; v >>= 4) digits++;
     digits = CUI_MAX(4, (digits + 1) & ~1);
-    f.header = !o->no_header && size > 0;
+    f.header = !o->no_header && f.ncur > 0;
     f.header_h = f.header ? f.row_h + 1 : 0;
     f.br = cui__prev_rect(ui, f.lid);
     bool known = cui__has_prev_rect(ui, f.lid);
@@ -641,25 +863,27 @@ static cui_hex_result cui__hex_view_ex_body(cui_ctx *ui, const char *id_str, con
     if (!known) ui->animating = true;   /* lay out again once the width is known */
     f.g = cui__hex_fit(f.cw, digits, f.bpr_req, !o->no_ascii, f.has_rect ? f.br.w : 0);
     f.bpr = (size_t)f.g.bpr;
-    f.rows = size ? (size - 1) / f.bpr + 1 : 0;
-    float content_h = (float)f.rows * f.row_h + 2 * CUI__HEX_INSET;
-    f.height = o->height > 0 ? o->height : CUI_MIN(320.0f, f.header_h + (size ? content_h : 96.0f) + 2);
-    f.rows_h = (f.has_rect ? f.br.h : f.height - 2) - f.header_h;
-    f.view_rows = CUI_MAX(1.0, (double)(f.rows_h - 2 * CUI__HEX_INSET) / f.row_h);
-    f.max_top = CUI_MAX(0.0, (double)f.rows - f.view_rows);
+    cui__hxf_size(&f);
     f.rows_top = f.br.y + f.header_h;
 
     /* input */
     cui__hxf_pointer(&f);
-    if (s->goto_pending && size > 0) {   /* a go to from code */
-        size_t off = CUI_MIN(s->goto_off, size - 1);
+    if (s->goto_pending && f.ncur > 0) {   /* a go to from code */
+        size_t off = CUI_MIN(s->goto_off, size ? size - 1 : 0);
         cui__hex_select(sel, off, off);
+        cui__hxf_clamp_sel(&f);
         s->nibble = false;
         f.center = true;
     }
     s->goto_pending = false;
     f.reveal = f.center;
-    if (ui->focus == f.lid && size > 0) cui__hxf_keys(&f);
+    if (ui->focus == f.lid && f.ncur > 0) cui__hxf_keys(&f);
+    if (o->on_edit && ui->focus == f.lid && f.g.ascii) ui->tab_owner = f.lid;   /* Tab switches the column typed into */
+    if (o->on_edit && f.res->edited) {
+        res.edit_offset = f.elo;
+        res.edit_length = f.ehi > f.elo ? f.ehi - f.elo : 0;
+        cui_request_redraw(ui);
+    }
     cui__hxf_scroll(&f);
 
     /* build */
@@ -682,5 +906,8 @@ static cui_hex_result cui__hex_view_ex_body(cui_ctx *ui, const char *id_str, con
 
     res.selection = *sel;
     res.selection_changed = memcmp(&before, sel, sizeof before) != 0;
+    res.size = f.size;
+    res.text_column = o->on_edit && s->text_col && f.g.ascii;
+    res.insert_mode = o->on_edit && *f.insert && !o->fixed_size;
     return res;
 }
