@@ -170,6 +170,7 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     if (!ui->platform.set_clipboard) { pi.set_clipboard = cui__app_set_clip; pi.get_clipboard = cui__app_get_clip; }
     else pi = ui->platform;
     cui_set_platform(ui, &pi);
+    if (d->follow_system_caret) cui_set_caret_blink(ui, cui_system_caret_blink());   /* the caret rests as the system's does */
     app->running = true;
     app->last_time = cui__plat_now();
     app->screenshot_path = getenv("CUI_SCREENSHOT");

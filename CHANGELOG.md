@@ -155,6 +155,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 - The voice orb (`cui_voice_orb`) is deprecated in favor of the voice components. It keeps working, but it has left the gallery and the docs site.
 
 ### Fixed
+- `cui_app_desc.follow_system_caret` now takes effect: `cui_app_create` never applied it, so the caret kept blinking (and an idle window drawing about twice a second) with it on. It calls `cui_set_caret_blink(ui, cui_system_caret_blink())` as documented; `cui_test_fullscreen` checks that a focused field at rest asks for no frame.
 - Menus and popovers taller than 420 px no longer draw their last items outside the panel: a popup is now as tall as its content, up to the window, and clips past that.
 
 - The file sidebar highlights one enclosing place or volume, so Home and its drive no longer appear selected together. Double-clicks after an idle interval use the receiving frame's time, fixing missed folder opens in an event-driven app.
