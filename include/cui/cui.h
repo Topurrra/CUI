@@ -2328,6 +2328,16 @@ typedef struct cui_code_editor_opts {
     int mark_count;            /* number of `marks` */
     bool borderless;           /* no border, corners or focus ring, on the window background: an editor that fills a pane */
     bool plain;                /* no syntax colors and no bracket matching, whatever `lang` says: for huge files */
+    bool multi_cursor;         /* several carets and selections at once, and column (box) selection. Alt+click adds a caret
+                                * (Alt+click on a caret takes it away), Ctrl+Alt+Up and Down add one on the line above or
+                                * below, Ctrl+D selects the word at the caret, then adds the next match of the selection,
+                                * Ctrl+Shift+L selects every match (at most 10 000), Alt+Shift+drag and Alt+Shift+arrows
+                                * select a column (Cmd+Alt+Shift+arrows on macOS), Esc goes back to one caret. Typing,
+                                * Backspace, Delete, Enter (with its indentation and list items), Tab, the arrows, Home,
+                                * End, word moves, cut, copy and paste (one line per caret when the counts match) work at
+                                * every caret, each key one undo step (typing on joins it, as with one caret), and undo
+                                * brings the carets back; selections that overlap become one. The keys are in .keys
+                                * (CUI_EDK_CURSOR_ABOVE...). Off: nothing changes. */
     const char *find_extra_icon;      /* an icon button in the find bar after the .* toggle (NULL none): see find_extra_clicked */
     const char *find_extra_tooltip;   /* its tooltip */
     int revision;              /* big files: nonzero promises the text changes only through the editor while it stays the same,
@@ -2374,6 +2384,8 @@ typedef struct cui_code_editor_result {
     int cursor, anchor;        /* caret and the other end of the selection, byte offsets */
     int line, column;          /* the caret, 1 based; columns count tabs to their stop */
     int line_count, length;    /* lines, and bytes of text */
+    int cursor_count;          /* carets, 1 but with .multi_cursor (cursor and anchor are the primary one's; all of them:
+                                * cui_code_editor_selections) */
     int bracket, bracket_match;   /* the bracket beside the caret and its partner, byte offsets, or -1 */
     int find_matches, find_index; /* with the find bar open: matches, and which one is selected (1 based, 0 none) */
     bool find_case, find_word, find_regex;   /* the find bar's toggles: match case, whole word, regular expression */
@@ -2418,6 +2430,12 @@ CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, c
 CUI_API void cui_code_editor_goto(cui_ctx *ui, const char *id, int line, int column);
 /* On the next frame: select bytes anchor..cursor, focus and scroll there. */
 CUI_API void cui_code_editor_select(cui_ctx *ui, const char *id, int anchor, int cursor);
+/* .multi_cursor: on the next frame (after a select, goto or edit asked for in this one), add a selection anchor..cursor,
+ * which becomes the primary one; the others stay. An editor without .multi_cursor, or not drawn yet, ignores it. */
+CUI_API void cui_code_editor_add_selection(cui_ctx *ui, const char *id, int anchor, int cursor);
+/* Every selection as of the editor's last frame, in order of position: up to cap of them into anchors[] and cursors[]
+ * (either may be NULL). Returns how many there are (1 without .multi_cursor). */
+CUI_API int cui_code_editor_selections(cui_ctx *ui, const char *id, int *anchors, int *cursors, int cap);
 /* On the editor's next frame: replace bytes [start, end) with text as ONE undoable edit
  * (through the editor's own edit path), then select [sel_anchor, sel_cursor] in the new text;
  * both negative puts the caret after the inserted text; one negative takes the other's value.
@@ -3938,9 +3956,14 @@ typedef struct cui_key_combo { int mods; cui_key key; } cui_key_combo;
 /* The code editor's own commands, rebindable through cui_code_editor_opts.keys: two combinations each (a key of
  * CUI_KEY_NONE is unused), matched with cui_shortcut (the modifiers exactly). */
 enum { CUI_EDK_UNDO, CUI_EDK_REDO, CUI_EDK_CUT, CUI_EDK_COPY, CUI_EDK_PASTE, CUI_EDK_SELECT_ALL, CUI_EDK_FIND,
-       CUI_EDK_REPLACE, CUI_EDK_GOTO_LINE, CUI_EDK_COUNT };
+       CUI_EDK_REPLACE, CUI_EDK_GOTO_LINE,
+       /* with cui_code_editor_opts.multi_cursor: add a caret above, below; Ctrl+D; every match; a column up, down, left, right */
+       CUI_EDK_CURSOR_ABOVE, CUI_EDK_CURSOR_BELOW, CUI_EDK_ADD_NEXT, CUI_EDK_SELECT_MATCHES,
+       CUI_EDK_COLUMN_UP, CUI_EDK_COLUMN_DOWN, CUI_EDK_COLUMN_LEFT, CUI_EDK_COLUMN_RIGHT,
+       CUI_EDK_COUNT };
 typedef struct cui_editor_keys { cui_key_combo combo[CUI_EDK_COUNT][2]; } cui_editor_keys;
-/* The usual ones: Ctrl+Z; Ctrl+Y and Ctrl+Shift+Z; Ctrl+X; Ctrl+C; Ctrl+V; Ctrl+A; Ctrl+F; Ctrl+H; Ctrl+G (Cmd on macOS). */
+/* The usual ones: Ctrl+Z; Ctrl+Y and Ctrl+Shift+Z; Ctrl+X; Ctrl+C; Ctrl+V; Ctrl+A; Ctrl+F; Ctrl+H; Ctrl+G (Cmd on macOS);
+ * Ctrl+Alt+Up and Down; Ctrl+D; Ctrl+Shift+L; Alt+Shift+arrows (Cmd+Alt+Shift+arrows on macOS). */
 CUI_API void cui_editor_keys_default(cui_editor_keys *k);
 typedef struct cui_shortcut_recorder_opts { int _; const char *placeholder; cui_size width; } cui_shortcut_recorder_opts;
 CUI_API bool cui_shortcut_recorder_ex(cui_ctx *ui, const char *id, cui_key_combo *combo, const cui_shortcut_recorder_opts *opts);
