@@ -23,6 +23,7 @@
  *   shared widget pieces             cui_widgets.c, cui_controls.c, cui_overlay.c...
  *   text editing primitives          cui_textedit.c (shared with the code editor)
  *   syntax highlighting              cui_code.c (code block, code editor, diff viewer), cui_code_langs.c
+ *   code editor folding and minimap  cui_fold.c, cui_minimap.c
  *   layered graph layout             cui_graph.c (dependency graph, mermaid flowcharts)
  *   cell grid                        cui_cellgrid.c (the pure parts: column search, selection keys; see below)
  *   mermaid diagrams                 cui_mermaid.c (fenced mermaid blocks in markdown)
@@ -1089,6 +1090,89 @@ typedef struct cui__code_sel {
 void cui__code_block_sel(cui_ctx *ui, const char *id, const char *code, const cui_code_opts *o, cui__code_sel *sel);
 /* The byte of code nearest the point (x, y), in the block's latest layout. */
 int cui__code_sel_hit(cui_ctx *ui, const cui__code_sel *sel, const char *code, int len, float x, float y);
+
+/* ---- code editor folding and minimap (cui_fold.c, cui_minimap.c) ----
+ * Both read the editor's text through a cui__lines and follow its edits (lines [la, lb] became [la, la + k]). Their
+ * glue in cui_editor.c (compiled for speed in apps' size builds) is CUI__COLD: kept small, out of the hot paths. */
+#if defined(__GNUC__) || defined(__clang__)
+#define CUI__COLD __attribute__((cold, noinline))
+#else
+#define CUI__COLD
+#endif
+#define CUI__LINES_CAP 256   /* a cui__lines gives at most this many bytes of a line: enough for its indentation and look */
+typedef struct cui__lines {
+    const char *(*line)(void *u, int i, int *ls, int *le);   /* line i's first bytes as q[*ls, *le) of the q returned (NULL past the end) */
+    int (*state)(void *u, int i);                            /* the highlighting state before line i, -1 not known (NULL: none) */
+    void *u;
+    int nl, tab;
+} cui__lines;
+/* Folds: lines h[i] + 1 to e[i] are hidden, h sorted. The hidden runs are their union, [va[j], vb[j]] with vp[j] hidden
+ * lines above run j (vp[vn]: all). chg0..chg1: lines that were shown and are hidden now, or the other way, since the
+ * editor last looked (it keeps their wrapped rows). */
+typedef struct cui__fold {
+    int *h, *e; int n, cap;
+    int *va, *vb, *vp; int vn, vcap;
+    int hidden;
+    int chg0, chg1;
+} cui__fold;
+void cui__fold_free(cui_ctx *ui, cui__fold *F);
+void cui__fold_clear(cui__fold *F);
+int cui__fold_at(const cui__fold *F, int h);                         /* the fold with header h, or -1 */
+bool cui__fold_set(cui_ctx *ui, cui__fold *F, int h, int e);         /* fold lines h + 1 to e (false: no change) */
+bool cui__fold_unset(cui_ctx *ui, cui__fold *F, int h);
+bool cui__fold_reveal(cui_ctx *ui, cui__fold *F, int line);          /* open every fold that hides line */
+void cui__fold_splice(cui_ctx *ui, cui__fold *F, int la, int lb, int k);
+int cui__fold_all(cui_ctx *ui, cui__fold *F, const cui__lines *L, bool md);   /* fold every block (reads the whole text) */
+/* blocks: whether line h starts one (looks at the next lines that are not blank), its last line (-1: none), and the
+ * innermost one holding a line that is not folded (its header, -1 none). md: by markdown headings, else indentation. */
+bool cui__fold_starts(const cui__lines *L, bool md, int h);
+int cui__fold_end(const cui__lines *L, bool md, int h);
+int cui__fold_around(const cui__lines *L, bool md, const cui__fold *F, int line, int *end);
+/* rows with the hidden lines taken out (no wrap): a line's row (a hidden line: the row of the next line shown), the line
+ * shown at a row (rows past the end go on past the last line), the first line shown at or after a line, at or before,
+ * and the first hidden line at or after a line (INT_MAX: none). F may be NULL: no folds. */
+bool cui__fold_hidden(const cui__fold *F, int line);
+int cui__fold_row(const cui__fold *F, int line);
+int cui__fold_line(const cui__fold *F, int row);
+int cui__fold_next(const cui__fold *F, int line);
+int cui__fold_prev(const cui__fold *F, int line);
+int cui__fold_gap(const cui__fold *F, int line);
+#define CUI__FOLD_W 14.0f        /* the fold markers' lane, at the right of the gutter */
+#define CUI__FOLD_BOX_COLS 2.6f  /* the box after a folded line, in columns */
+/* What the editor's paint draws of the folds: lines in view with a marker, dy their tops from the editor's top, kind 1
+ * a block (its marker shows while the pointer is over the gutter) or 2 folded (its box goes after column col of the row
+ * by from the top: wrapped, the line's last row). */
+typedef struct cui__fold_paint {
+    int n; const float *dy, *by; const uint8_t *kind; const int *col;
+    float lh, cw, fw; int cb;
+    bool hover;
+    cui_color mark, mark_on, box, box_edge, dots;
+} cui__fold_paint;
+void cui__fold_draw(cui_ctx *ui, const cui__fold_paint *fp, cui_rect r, float gx, float x0, int part);   /* part 0 the gutter, 1 the boxes */
+/* Minimap bars, one a line: indentation and length in columns, token kind, and the line state it is for + 1 (0: not made). */
+typedef struct { uint8_t ind, len, kind, st; } cui__mini_bar;
+typedef struct cui__minimap {
+    cui__mini_bar *b; int n, cap;
+    bool drag; float grab;       /* a press on the strip is held, at grab points from the top of the box of the rows in view */
+} cui__minimap;
+#define CUI__MINI_W ((float)CUI_MM_WIDTH)   /* the strip's width */
+#define CUI__MINI_ROW 2.0f         /* a row's height on it */
+#define CUI__MINI_COLS 80          /* columns that fit across it */
+void cui__mini_free(cui_ctx *ui, cui__minimap *M);
+void cui__mini_reset(cui__minimap *M);
+void cui__mini_lines(cui_ctx *ui, cui__minimap *M, int nl);
+void cui__mini_splice(cui_ctx *ui, cui__minimap *M, int la, int lb, int k);
+const cui__mini_bar *cui__mini_bar_of(cui_ctx *ui, cui__minimap *M, const cui__lines *L, const cui__lang *lang, bool json, int i);
+typedef struct { double top, k; float rh, vy, vh; } cui__mini_geo;   /* the text's row at the strip's top; the box of the view */
+void cui__mini_geo_of(cui__mini_geo *g, float h, int rows, double lh, double sy, double max_sy, double view_h);
+typedef struct cui__mini_paint {
+    int n; const float *y; const cui__mini_bar *b;   /* the rows on the strip: tops from its top, and bars */
+    float rh, cw, vy, vh;
+    bool hot;
+    cui_color colors[CUI__TK_COUNT], fg, view, view_hot, edge;
+    cui_id sid;                  /* the editor's scroll: the wheel over the strip scrolls the text */
+} cui__mini_paint;
+void cui__mini_paint_fn(cui_ctx *ui, cui_node *n, void *data);
 
 /* ---- layered graph layout (cui_graph.c): the dependency graph's layout, for other diagrams too ---- */
 typedef struct { float x, y, w, h; int layer; } cui__layer_box;

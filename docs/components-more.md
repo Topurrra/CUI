@@ -1027,6 +1027,21 @@ Its first line goes inline after the caret (the rest of the line moves right); f
 cui_code_editor(ui, "code", buf, cap, .lang = "c", .eol_hint = blame_text, .eol_hint_line = caret_line);
 ```
 
+#### Folding and the minimap
+
+`.folding` folds blocks: a line whose next lines that are not blank are indented deeper starts one, and in markdown a heading does, down to the next heading of its level or above (headings in fenced code are code). A marker in a lane at the right of the gutter, shown while the pointer is over the gutter, folds the block to that one line; a folded line keeps its marker and ends in a box, and a click on either opens it. Folded lines take no rows: drawing, scrolling, wrapping and the caret skip them (Up and Down step over them, Right at the end of a folded line goes on to the next line shown). A fold opens when the caret or a find match goes inside it, or an edit touches its hidden lines; typing on the folded line itself keeps it, and a new text opens them all. The editor has no keys of its own for it: bind the app's to `cui_code_editor_fold`, which folds or opens at the caret's line (or a line you name), folds every block, or opens them all. Only the lines in view are looked at; folding every block reads the whole text once (about 10 ms for 10 MB).
+
+`.minimap` adds a strip of `CUI_MM_WIDTH` points at the right edge: a bar a row in the colour of most of its text, and a box around the rows in view. A press on it centres the box there and a drag moves it, scrolling the text; the wheel over it scrolls too. A line's bar is made when it first shows on the strip and kept, and an edit makes only the lines it touched again, so the strip costs its own rows a frame. Folded lines are left out of it too.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-editor-fold-dark.png"><img src="images/components/code-editor-fold.png" alt="A code editor with line 3, a function, folded to one line that ends in a box with three dots, a chevron beside it in the gutter, and a minimap strip at the right edge"></picture>
+
+```c
+cui_code_editor_result r = cui_code_editor(ui, "code", buf, cap, .lang = "c", .folding = true, .minimap = show_minimap);
+if (fold_key_pressed) cui_code_editor_fold(ui, "code", CUI_FOLD_TOGGLE, 0);   /* 0: the caret's line */
+if (fold_all_pressed) cui_code_editor_fold(ui, "code", CUI_FOLD_ALL, 0);
+/* r.fold_count blocks are folded, hiding r.hidden_lines lines */
+```
+
 #### Rebinding the editor's own keys
 
 The editor handles undo, redo, cut, copy, paste, select all, find, replace and go to line itself. To let people rebind them, pass `.keys`: a `cui_editor_keys` with two combinations per command (`CUI_EDK_UNDO` ... `CUI_EDK_GOTO_LINE`). With a table each command runs on its combinations only, so a default that was moved away does nothing; `cui_editor_keys_default` fills in the usual ones (Ctrl+Z; Ctrl+Y and Ctrl+Shift+Z; Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A, Ctrl+F, Ctrl+H, Ctrl+G; Cmd on macOS). Without `.keys` nothing changes.
