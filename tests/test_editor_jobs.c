@@ -27,8 +27,10 @@ static unsigned g_rng = 4242u;
 static unsigned rnd(void) { g_rng = g_rng * 1664525u + 1013904223u; return g_rng >> 8; }
 
 /* the limits: everything on jobs (and a buffer copied a few kilobytes a job), or all at once */
-static void jobs_on(void) { cui__ed_sync_bytes = 1; cui__ed_rall_bytes = 0; cui__ed_copy_bytes = 3000; cui__ed_count_bytes = 0; }
-static void jobs_off(void) { cui__ed_sync_bytes = 1 << 30; cui__ed_rall_bytes = 1 << 30; cui__ed_copy_bytes = 1 << 30; cui__ed_count_bytes = 1 << 30; }
+static void jobs_on(void) { cui__ed_sync_bytes = 1; cui__ed_rall_bytes = 0; cui__ed_copy_bytes = 3000; cui__ed_count_bytes = 0; cui__ed_find_bytes = 64; }
+static void jobs_off(void) {
+    cui__ed_sync_bytes = 1 << 30; cui__ed_rall_bytes = 1 << 30; cui__ed_copy_bytes = 1 << 30; cui__ed_count_bytes = 1 << 30; cui__ed_find_bytes = 1 << 30;
+}
 
 static cui_ctx *new_ctx(void) {
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw) });
@@ -459,6 +461,101 @@ static void test_count(void) {
     jobs_off();
 }
 
+/* Enter (or Shift Enter) in the find bar's field */
+static void enter2(cui_ctx *ua, cui_ctx *ub, bool shift) {
+    int m = shift ? CUI_MOD_SHIFT : 0;
+    cui_input_key(ua, CUI_KEY_ENTER, true, m); cui_input_key(ua, CUI_KEY_ENTER, false, m);
+    cui_input_key(ub, CUI_KEY_ENTER, true, m); cui_input_key(ub, CUI_KEY_ENTER, false, m);
+}
+
+/* The find bar's search on a job (a document longer than cui__ed_find_bytes with no match close to the caret) next to
+ * one searched at once: the same match selected, forward, backward and around the ends; none for a query with no match;
+ * edits while it runs (searched again over the new text); the selection moved while it runs (dropped: the selection
+ * stays); a new query while it runs; the bar closed while it runs (dropped at once). */
+static void test_find(void) {
+    printf("the find bar's search on a job: the same match as found at once\n");
+    int n;
+    char *base = big_text(3, &n);
+    size_t cap = (size_t)n + 64, k = 0;
+    char *t = malloc(cap);
+    int at[3], prev = 0;
+    for (int i = 0; i < 3; i++) {   /* "needle" on lines of their own, 20%, 60% and 90% down */
+        int p = (int)((long long)n * (i == 0 ? 2 : i == 1 ? 6 : 9) / 10);
+        while (base[p - 1] != '\n') p++;
+        memcpy(t + k, base + prev, (size_t)(p - prev)); k += (size_t)(p - prev);
+        at[i] = (int)k;
+        memcpy(t + k, "needle\n", 7); k += 7;
+        prev = p;
+    }
+    memcpy(t + k, base + prev, (size_t)(n - prev) + 1);
+    for (int how = 0; how < 6; how++) {
+        ej A, B;
+        ej_make(&A, t, true, "text"); ej_make(&B, t, true, "text");
+        cui_ctx *ua = new_ctx(), *ub = new_ctx();
+        for (int i = 0; i < 2; i++) frame2(ua, &A, ub, &B);
+        /* the bar open first: B's match is centred in the frame that opens the bar, on the height of the view without it */
+        cui_code_editor_find(ua, "ed", ""); cui_code_editor_find(ub, "ed", "");
+        for (int i = 0; i < 2; i++) frame2(ua, &A, ub, &B);
+        const char *q = how == 1 ? "zzq" : "needle";
+        cui_code_editor_find(ua, "ed", how == 4 ? "zzq" : q); cui_code_editor_find(ub, "ed", how == 4 ? "zzq" : q);
+        frame2(ua, &A, ub, &B);
+        CHECK(A.r.working && A.r.cursor == 0);   /* no match within 64 bytes: on a job, nothing selected yet */
+        if (how == 2) {   /* edits while it runs, away from the first needle */
+            for (int e = 0; e < 5; e++) {
+                int len = cui_text_doc_length(A.doc), p = (int)(rnd() % (unsigned)(len - 200));
+                if (p > at[0] - 100 && p < at[0] + 100) p = at[0] + 150;
+                cui_text_doc_replace(A.doc, p, p, "x", 1); cui_text_doc_replace(B.doc, p, p, "x", 1);
+                frame2(ua, &A, ub, &B);
+            }
+        } else if (how == 3) {   /* the selection moved meanwhile: the search is dropped, the selection stays */
+            cui_code_editor_select(ua, "ed", 5, 5); cui_code_editor_select(ub, "ed", 5, 5);
+            CHECK(settle2(ua, &A, ub, &B, NULL));
+            for (int i = 0; i < 10; i++) { nap_ms(2); frame2(ua, &A, ub, &B); }
+            CHECK(A.r.anchor == 5 && A.r.cursor == 5 && !A.r.working);
+        } else if (how == 4) {   /* a new query meanwhile */
+            cui_code_editor_find(ua, "ed", q); cui_code_editor_find(ub, "ed", q);
+            frame2(ua, &A, ub, &B);
+        } else if (how == 5) {   /* the bar closed meanwhile: dropped at once */
+            cui_code_editor_find(ua, "ed", NULL); cui_code_editor_find(ub, "ed", NULL);
+            frame2(ua, &A, ub, &B);
+            CHECK(!A.r.working);
+            for (int i = 0; i < 10; i++) { nap_ms(2); frame2(ua, &A, ub, &B); }
+            CHECK(A.r.cursor == 0 && A.r.anchor == 0);
+        }
+        if (how == 3 || how == 5) {
+            cui_destroy(ua); cui_destroy(ub);
+            ej_free(&A); ej_free(&B);
+            continue;
+        }
+        CHECK(settle2(ua, &A, ub, &B, NULL));
+        /* B counts a megabyte a frame, and A scrolled to its match a few frames later: its scrollbar fades a little later */
+        for (int i = 0; i < 90; i++) frame2(ua, &A, ub, &B);
+        const char *d = differs(ua, &A, ub, &B);
+        if (d) printf("  case %d: %s differs (A %d-%d, B %d-%d)\n", how, d, A.r.anchor, A.r.cursor, B.r.anchor, B.r.cursor);
+        CHECK(d == NULL);
+        if (how == 1) CHECK(A.r.cursor == 0 && A.r.anchor == 0 && A.r.find_matches == 0);
+        if (how == 0) {
+            CHECK(A.r.anchor == at[0] && A.r.cursor == at[0] + 6);
+            /* next, next, around the end to the first, then back twice: around the start to the last */
+            const bool shifts[] = { false, false, false, true, true };
+            const int want[] = { at[1], at[2], at[0], at[2], at[1] };
+            for (int s = 0; s < 5; s++) {
+                enter2(ua, ub, shifts[s]);
+                frame2(ua, &A, ub, &B);
+                CHECK(settle2(ua, &A, ub, &B, NULL));
+                for (int i = 0; i < 90; i++) frame2(ua, &A, ub, &B);
+                d = differs(ua, &A, ub, &B);
+                if (d || A.r.anchor != want[s]) printf("  step %d: %s (A %d-%d, B %d-%d, want %d)\n", s, d ? d : "place", A.r.anchor, A.r.cursor, B.r.anchor, B.r.cursor, want[s]);
+                CHECK(d == NULL && A.r.anchor == want[s]);
+            }
+        }
+        cui_destroy(ua); cui_destroy(ub);
+        ej_free(&A); ej_free(&B);
+    }
+    free(t); free(base);
+    jobs_off();
+}
+
 /* ---- very long lines ---- */
 
 static void frame_long(cui_ctx *ua, ej *A, cui_ctx *ub, ej *B) {   /* A reads only what is in view of a long line, B all of it */
@@ -687,12 +784,15 @@ int main(void) {
     test_prepared();
     test_long_lines();
     int sync_bytes = cui__ed_sync_bytes, rall_bytes = cui__ed_rall_bytes, copy_bytes = cui__ed_copy_bytes, count_bytes = cui__ed_count_bytes;
+    int find_bytes = cui__ed_find_bytes;
     test_states();
     test_replace();
     test_stale();
     test_count();
+    test_find();
     test_freed();
     cui__ed_sync_bytes = sync_bytes; cui__ed_rall_bytes = rall_bytes; cui__ed_copy_bytes = copy_bytes; cui__ed_count_bytes = count_bytes;
+    cui__ed_find_bytes = find_bytes;
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

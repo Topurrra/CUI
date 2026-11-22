@@ -14,6 +14,7 @@
  *     cui_bench_editor --shared-doc [MB ...]   two editors on one cui_text_doc
  *     cui_bench_editor --replace-doc [A B]     --replace on a cui_text_doc
  *     cui_bench_editor --count [MB]       the find bar's match count of a document (default 100 MB)
+ *     cui_bench_editor --find-type [MB]   typing a query into the find bar of a document, a key every 100 ms (100 MB)
  *     cui_bench_editor --long [MB]        one line of MB (default 40): idle, sideways, End, typing, wrapped
  *     cui_bench_editor --replace-prepared [A B]   --replace-doc with cui_text_prepare (as on a worker) and
  *                                        cui_code_editor_edit_prepared
@@ -672,6 +673,75 @@ static void long_bench(size_t mb, const char *lang, bool wrap) {
     cui_text_doc_free(b.doc);
 }
 
+/* Typing a query into the find bar of a document of mb MB, a character every 100 ms with frames at 60 a second between
+ * them: the worst frame, and how long after the last character the selection settled on the match (or stayed: none)
+ * and the count was right. The caret starts at the top. */
+static void find_type_one(size_t mb, cui_ctx *ui, bench_ed *b, const char *query) {
+    cui_code_editor_find(ui, "ed", "");
+    for (int i = 0; i < 3; i++) frames(ui, b, 1, 0);
+    double worst = 0, t_last = 0;
+    int over = 0;
+    for (const char *c = query; *c; c++) {
+        char one[2] = { *c, 0 };
+        cui_input_text(ui, one);
+        t_last = now();
+        for (int i = 0; i < 6; i++) {
+            double f0 = now();
+            frames(ui, b, 1, 0);
+            double ft = (now() - f0) * 1000;
+            if (ft > worst) worst = ft;
+            if (ft > 16) over++;
+            nap(1.0 / 60.0 - (now() - f0));
+        }
+    }
+    double sel_at = -1, count_at = -1;
+    int last_c = -1, last_a = -1, last_m = -1;
+    for (int i = 0, same = 0; i < 6000 && same < 30; i++) {
+        double f0 = now();
+        frames(ui, b, 1, 0);
+        double ft = (now() - f0) * 1000;
+        if (ft > worst) worst = ft;
+        if (ft > 16) over++;
+        if (b->r.cursor != last_c || b->r.anchor != last_a) { last_c = b->r.cursor; last_a = b->r.anchor; sel_at = (now() - t_last) * 1000; }
+        if (b->r.find_matches != last_m || b->r.working) { last_m = b->r.find_matches; same = 0; count_at = (now() - t_last) * 1000; }
+        else same++;
+        nap(1.0 / 60.0 - (now() - f0));
+    }
+    printf("find bar %zu MB, typing %-9s | worst frame %7.2f ms, over 16 ms %d | selection %d-%d (settled %7.1f ms after the last key) | %8d matches, right after %7.1f ms\n",
+           mb, query, worst, over, b->r.anchor, b->r.cursor, sel_at, b->r.find_matches, count_at);
+    fflush(stdout);
+}
+
+static void find_type_bench(size_t mb) {
+    size_t size = mb * 1024 * 1024;
+    char *t = malloc(size + 8192);
+    size_t len = gen(t, size, false, "text");
+    bench_ed b;
+    memset(&b, 0, sizeof b);
+    b.lang = "text";
+    b.doc = cui_text_doc_adopt(t, (int)len, NULL, NULL);
+    cui_sw_renderer *sw = cui_sw_create();
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+    cui_set_viewport(ui, 1200, 800, 1);
+    cui_set_reduced_motion(ui, true);
+    frames(ui, &b, 3, 0);
+    find_type_one(mb, ui, &b, "zqxj");      /* no match: the first letter is in no line */
+    find_type_one(mb, ui, &b, "workerz");   /* matches near the top, then none */
+    find_type_one(mb, ui, &b, "retry");     /* a match near the caret */
+    int at = (int)(len / 10 * 9), cn = 0;
+    char *around = cui_text_doc_copy(b.doc, at, at + 400, &cn);
+    char *nl = around ? memchr(around, '\n', (size_t)cn) : NULL;
+    if (nl) at += (int)(nl - around) + 1;   /* a line start */
+    free(around);
+    cui_text_doc_replace(b.doc, at, at, "farneedle\n", -1);
+    frames(ui, &b, 2, 0);
+    find_type_one(mb, ui, &b, "farneedle");  /* one match, 90% down */
+    printf("  (farneedle is at %d)\n", at);
+    cui_destroy(ui);
+    cui_sw_destroy(sw);
+    cui_text_doc_free(b.doc);
+}
+
 static void count_bench(size_t mb) {
     size_t size = mb * 1024 * 1024;
     char *t = malloc(size + 8192);
@@ -702,6 +772,10 @@ int main(int argc, char **argv) {
         long_bench(mb, "c", false);   /* a language with line states (block comments) */
         long_bench(mb, "markdown", false);   /* states down to the last line in view */
         long_bench(mb, "json", true);
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "--find-type")) {   /* --find-type [MB] */
+        find_type_bench(argc > 2 ? (size_t)atoi(argv[2]) : 100);
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "--count")) {   /* --count [MB] */
