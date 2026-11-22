@@ -79,6 +79,8 @@ For a build system other than CMake, or to vendor CUI into a large codebase, use
 
 **The includes differ.** This guide writes `#include <cui/cui.h>` and `#include <cui/cui_app.h>`. With the single-file distribution both are one header beside your code, so write `#include "cui.h"` (or `"cui_single.h"`) in their place and leave the second line out.
 
+**What it leaves out.** The OpenGL and software renderers and the Win32, Cocoa, X11, SDL2 and GLFW window layers are in; the GPU renderers are built with CMake only ([Platforms](platform.md)).
+
 `cui.c` is the whole library, about 78,000 lines, and takes around half a minute to compile. Compile it once and link the object file; your own files then build in a moment:
 
 ```sh
@@ -94,7 +96,8 @@ The window layer for your system is picked by the preprocessor. Before the imple
 
 | CMake option | Default | Meaning |
 |---|---|---|
-| `CUI_PLATFORM` | `auto` | `win32`, `cocoa`, `x11`, `sdl2` or `glfw` |
+| `CUI_PLATFORM` | `auto` | `win32`, `cocoa`, `x11`, `wayland`, `sdl2` or `glfw`. One backend per build; `auto` is `x11` on Linux ([Platforms](platform.md)) |
+| `CUI_D3D12`, `CUI_VULKAN`, `CUI_METAL` | `OFF` | The platform's GPU renderer (`cui_gpu_*`): Direct3D 12 on Windows, Vulkan on Linux, Metal on macOS. Each configures on its own platform only. OpenGL and the software renderer are always built |
 | `CUI_WITH_APP` | `ON` | Build the window layer. Turn off to use only the core in your engine |
 | `CUI_DEFAULT_FONTS` | `ON` | Embed Inter, Geist and Lucide (about 180 KB) |
 | `CUI_STB_IMAGE` | `ON` | PNG and JPEG loading for `cui_image_load` |
@@ -223,6 +226,8 @@ if (!cui_wants_keyboard(ui)) {                          /* skip while the user t
 }
 ```
 
+For a multi-pane workspace, wrap each pane's controls in `cui_focus_scope(ui, pane_id, is_active)` using a stable nonzero ID. Tab and Shift+Tab use the active pane from the last built frame. An inactive pane and its nested scopes are skipped, not disabled: their controls still take clicks. With no active pane, Tab visits unscoped controls; an open modal keeps Tab inside the modal instead.
+
 ## 7. Files and links
 
 ```c
@@ -242,6 +247,11 @@ Any CUI app can save a screenshot and exit, which is handy for docs and visual t
 ```sh
 CUI_SCREENSHOT=out.png CUI_SCREENSHOT_FRAMES=60 ./my_app
 ```
+
+To capture from code, call `cui_app_screenshot` with an RGBA buffer large enough
+for the frame. Each capture draws the entire image, even when reusing the
+buffer. [The app screenshot test](../tests/test_app_screenshot.c) checks that a
+second software capture fills the buffer after it has been cleared.
 
 For unit tests, skip the window entirely: create a context with the software renderer, feed input with `cui_input_*` and render into memory. `tests/test_main.c` shows the pattern.
 
@@ -285,7 +295,7 @@ Android and iOS are not supported yet. Each needs its own platform layer (an `an
 |---|---|
 | CMake says `Could NOT find X11` | Install the X11 headers: `libx11-dev` (Debian, Ubuntu), `libX11-devel` (Fedora), `libx11` (Arch) |
 | `undefined reference to XOpenDisplay` (building without CMake) | Put `-lX11 -ldl -lm -lpthread` after the source files on the command line |
-| No window on Wayland without XWayland | Configure with `-DCUI_PLATFORM=sdl2` or `-DCUI_PLATFORM=glfw` (install `libsdl2-dev` or `libglfw3-dev`) |
+| No window on Wayland without XWayland | Configure with `-DCUI_PLATFORM=wayland` (SDL2 2.0.22+) or `-DCUI_PLATFORM=glfw` (install `libsdl2-dev` or `libglfw3-dev`) |
 | Black or empty window, OpenGL errors (virtual machines, remote desktop, old drivers) | CUI falls back to its software renderer when OpenGL 3.3 cannot start; to force it, run with `CUI_RENDERER=software` |
 | Everything looks too small or too large | Run with `CUI_SCALE=1.5` (or any scale) to override what the display reports |
 | A console window opens next to the app (Windows) | Call `cui_app_target(my_app)` in your `CMakeLists.txt`. Without CMake: `-mwindows` (MinGW), or `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` (MSVC) |
@@ -303,6 +313,7 @@ Still stuck? [Open an issue](https://github.com/yappologistic/CUI/issues) with y
 |---|---|
 | `CUI_RENDERER=software` | Use the software renderer even when OpenGL is available |
 | `CUI_RENDERER=opengl` | Keep OpenGL even when it is drawn on the CPU (without it, X11 and Win32 apps on a machine with no GPU switch to the software renderer, which costs several times less there) |
+| `CUI_RENDERER=gpu` | Draws with the platform's GPU renderer (built with `CUI_D3D12`, `CUI_VULKAN` or `CUI_METAL`); its name works too (`d3d12`, `vulkan`, `metal`). `CUI_GPU=nvidia` (part of an adapter's name) picks the GPU, and the renderer says which on stderr. [Performance](performance.md#direct3d-12-vulkan-and-metal-against-opengl) |
 | `CUI_SCALE=2` | Override the display scale |
 | `CUI_THEME=dark` | Start in the dark (or `light`) theme, whatever the app asks for |
 | `CUI_ACCENT=blue` | Start with another accent: `neutral`, `violet`, `blue`, `green`, `amber`, `orange`, `coral`, `rose` |

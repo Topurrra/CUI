@@ -316,7 +316,7 @@ void cui_set_reduced_motion(cui_ctx *ui, bool reduced) {
 void cui__theme_update(cui_ctx *ui) {
     if (ui->theme_t >= 1) return;
     float dur = 0.32f * (ui->theme.motion > 0 ? ui->theme.motion : 0);
-    ui->theme_t = dur > 0 ? CUI_MIN(1.0f, ui->theme_t + ui->dt / dur) : 1.0f;
+    ui->theme_t = dur > 0 ? CUI_MIN(1.0f, ui->theme_t + ui->step / dur) : 1.0f;
     float t = ui->theme_t;
     t = 1 - (1 - t) * (1 - t) * (1 - t);   /* ease out */
     for (int i = 0; i < CUI_TOKEN_COUNT; i++)

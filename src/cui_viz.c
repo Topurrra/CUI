@@ -2179,7 +2179,7 @@ int cui_candlestick_ex(cui_ctx *ui, const char *id_str, const cui_candle *candle
     /* zoom around a point (0..1 across the plot) */
 #define CUI__CS_ZOOM(f, at) do { double m_ = st->first + (at) * st->span; st->span = CUI_CLAMP(st->span * (f), min_span, max_span); st->first = m_ - (at) * st->span; } while (0)
     if (!cui_is_disabled(ui) && ui->scroll_target == wid && (ui->scroll_dy != 0 || ui->scroll_dx != 0) && pr.w > 0) {
-        float at = cui__clampf((ui->mx - g.plot.x) / g.plot.w, 0, 1);
+        float at = cui__clampf((cui__wheel_point(ui, wid).x - g.plot.x) / g.plot.w, 0, 1);
         if (ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT)) st->first -= (ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy) * st->span * 0.06;
         else CUI__CS_ZOOM(pow(1.18, -ui->scroll_dy), at);
         ui->scroll_dx = ui->scroll_dy = 0;

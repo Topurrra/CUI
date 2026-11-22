@@ -78,6 +78,14 @@ static bool cui__sdl_on_screen(int x, int y, int w) {
 }
 
 bool cui__plat_init(cui_app *app) {
+#ifdef CUI_SDL_WAYLAND_ONLY
+    /* Request one driver, not SDL's automatic list. A conflicting environment
+     * hint is an initialization failure, not permission to use XWayland. */
+    if (!SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland")) {
+        const char *hint = SDL_GetHint(SDL_HINT_VIDEODRIVER);
+        if (!hint || strcmp(hint, "wayland") != 0) return false;
+    }
+#endif
     /* The app ID becomes WM_CLASS (X11) and the app_id (Wayland). SDL2 reads it
      * from these variables in SDL_Init, Wayland falling back to the X11 one;
      * SDL3 under sdl2-compat reads the SDL_APP_ID hint, which SDL_Quit clears.
@@ -99,6 +107,14 @@ bool cui__plat_init(cui_app *app) {
     if (set_wayland) unsetenv("SDL_VIDEO_WAYLAND_WMCLASS");
 #endif
     if (init != 0) return false;
+#ifdef CUI_SDL_WAYLAND_ONLY
+    /* An embedding application may already have initialized SDL video. */
+    const char *driver = SDL_GetCurrentVideoDriver();
+    if (!driver || strcmp(driver, "wayland") != 0) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
+        return false;
+    }
+#endif
     cui__sdl *s = calloc(1, sizeof *s);
     if (!s) return false;
     app->plat = s;

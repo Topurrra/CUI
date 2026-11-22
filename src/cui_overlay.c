@@ -92,6 +92,7 @@ bool cui__popup_begin(cui_ctx *ui, cui_id id, cui_id anchor, int placement, floa
     cui_popup *p = cui__popup_get(ui, id, false);
     if (!p) return false;
     p->last_frame = ui->frame;
+    p->parent_layer = ui->current_layer;
     if (p->open) {
         bool top = cui__popup_is_topmost(ui, p);
         if (top && cui_key_pressed(ui, CUI_KEY_ESCAPE)) { p->open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
@@ -823,16 +824,15 @@ static bool cui__modal_begin(cui_ctx *ui, cui_id id, const char *title, bool *op
     int z = st->z ? st->z : 1000 + ++ui->layer_seq;
     st->z = z;
     /* Esc and click outside: only the topmost modal reacts, and only when no popup inside it is open */
-    bool topmost = ui->prev_modal_layer == 0 || ui->prev_modal_layer == id;
+    bool topmost = ui->prev_modal.id == 0 || ui->prev_modal.id == id;
     for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open) topmost = false;
     if (is_open && !persistent && topmost) {
         /* while a text field has focus, the first Esc leaves the field */
         if (cui_key_pressed(ui, CUI_KEY_ESCAPE) && !ui->edit_prev) { *open = false; ui->kpressed[CUI_KEY_ESCAPE] = 0; }
         if (ui->mreleased[0] && ui->hot == scrim_id && ui->active == scrim_id) *open = false;
     }
-    if (is_open && (!ui->modal_layer || z > ui->modal_z)) {
-        ui->modal_layer = id;
-        ui->modal_z = z;
+    if (is_open && (!ui->modal.id || z > ui->modal.z)) {
+        ui->modal = (cui_modal_layer){ id, z };
         /* move keyboard focus into the dialog when it opens */
         if (st->opened == ui->frame && ui->focus_visible) ui->focus = 0;
     }
@@ -1758,7 +1758,7 @@ int cui_command_palette(cui_ctx *ui, bool *open, const cui_command *cmds, int co
     }
     is_open = open && *open && !cui_is_disabled(ui);
     cui__interact(ui, scrim_id, 0);
-    if (is_open) { ui->modal_layer = id; ui->modal_z = 0x7FFF0000; }
+    if (is_open) ui->modal = (cui_modal_layer){ id, 0x7FFF0000 };
     int root = cui__float_begin(ui, id, 0x7FFF0000, 0, CUI__PLACE_FULL, 0);
     cui_node *rn = &ui->nodes[root];
     rn->id = scrim_id;

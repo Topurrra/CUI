@@ -40,7 +40,8 @@ typedef struct cui_app cui_app;
 typedef enum cui_renderer_kind {
     CUI_RENDERER_AUTO = 0,     /* OpenGL, or software when there is no GPU (CPU-drawn OpenGL, X11 and Win32) */
     CUI_RENDERER_OPENGL,
-    CUI_RENDERER_SOFTWARE
+    CUI_RENDERER_SOFTWARE,
+    CUI_RENDERER_GPU           /* the platform's GPU renderer, in builds that have it: Direct3D 12 on Windows (CUI_D3D12), Vulkan on Linux (CUI_VULKAN), Metal on macOS (CUI_METAL). Also CUI_RENDERER=gpu, or its name */
 } cui_renderer_kind;
 
 /* How the window is shown. */
@@ -285,8 +286,8 @@ CUI_API int cui_app_file_dialog_multi(cui_app *app, const cui_file_dialog_opts *
 /* Opens a URL or file with the system's default handler. */
 CUI_API bool cui_app_open_url(const char *url);
 
-/* Renders the current UI into an RGBA buffer (any backend). Handy for
- * screenshots and tests. Returns false when the buffer is too small. */
+/* Renders the entire current UI into an RGBA buffer (any backend).
+ * The buffer can be empty or reused. Returns false when it is too small. */
 CUI_API bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height);
 
 /* ---- The caret and idle frames: opt-in costs saved at rest ---- */

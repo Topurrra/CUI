@@ -1,6 +1,7 @@
 /* Core components: text, buttons, badges, avatars, cards, feedback,
  * scroll areas, split views and custom canvases. */
 #include "cui_internal.h"
+#include <limits.h>
 
 /* ------------------------------------------------------------------------ */
 /* Shared helpers                                                           */
@@ -1122,6 +1123,22 @@ cui_texture cui_image_create(cui_ctx *ui, int w, int h, const void *rgba) {
     return ui->renderer.texture_create(ui->renderer.user, w, h, CUI_TEXTURE_RGBA8, rgba);
 }
 
+void cui_image_update(cui_ctx *ui, cui_texture tex, int x, int y, int w, int h, const void *rgba, int stride) {
+    if (!ui || !tex || !rgba || w <= 0 || w > INT_MAX / 4 || h <= 0 || !ui->renderer.texture_update) return;
+    int packed = w * 4;
+    if (stride <= 0) stride = packed;
+    if (stride < packed) return;
+    if (stride % 4 == 0) {
+        ui->renderer.texture_update(ui->renderer.user, tex, x, y, w, h, rgba, stride);
+    } else {
+        /* GL unpack row length counts pixels, so start each byte-padded row explicitly. */
+        const uint8_t *src = rgba;
+        for (int row = 0; row < h; row++)
+            ui->renderer.texture_update(ui->renderer.user, tex, x, y + row, w, 1, src + (size_t)row * (size_t)stride, packed);
+    }
+    cui_request_redraw(ui);
+}
+
 void cui_image_destroy(cui_ctx *ui, cui_texture tex) {
     if (tex && ui->renderer.texture_destroy) ui->renderer.texture_destroy(ui->renderer.user, tex);
 }
@@ -1159,15 +1176,28 @@ static void cui__paint_canvas(cui_ctx *ui, cui_node *n, void *data) {
 }
 
 cui_canvas_result cui_canvas(cui_ctx *ui, const char *id_str, cui_size w, cui_size h, cui_paint_fn paint, const void *user, size_t user_size) {
+    return cui_canvas_ex(ui, id_str, w, h, paint, user, user_size, NULL);
+}
+
+bool cui_focus_visible(cui_ctx *ui, cui_id id) {
+    return id && ui->focus == id && ui->focus_visible;
+}
+
+cui_canvas_result cui_canvas_ex(cui_ctx *ui, const char *id_str, cui_size w, cui_size h, cui_paint_fn paint, const void *user, size_t user_size, const cui_canvas_opts *opts) {
     cui_canvas_result res;
     memset(&res, 0, sizeof res);
     cui_id id = cui_make_id(ui, id_str ? id_str : "canvas");
-    cui_interact r = cui__interact(ui, id, CUI_IF_DRAG);
+    int flags = CUI_IF_DRAG;
+    if (opts && opts->focusable) {
+        flags |= CUI_IF_FOCUSABLE;
+        if (opts->component_input) flags |= CUI_IF_COMPONENT_INPUT | CUI_IF_TEXT;
+    }
+    cui_interact r = cui__interact(ui, id, flags);
     res.rect = cui__prev_rect(ui, id);
     res.hovered = r.hovered; res.pressed = r.pressed; res.clicked = r.clicked;
     res.mouse.x = ui->mx - res.rect.x; res.mouse.y = ui->my - res.rect.y;
     int i = cui__leaf(ui, id, w, h);
-    cui__mark_interactive(ui, i, 0);
+    cui__mark_interactive(ui, i, flags);
     if (paint) {
         cui__canvas_paint *p = cui__frame_alloc(ui, sizeof *p);
         p->fn = paint;

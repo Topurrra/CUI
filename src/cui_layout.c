@@ -1119,6 +1119,8 @@ static void cui__paint_node(cui_ctx *ui, int i, cui_rect clip) {
 
 void cui__paint_add_hit(cui_ctx *ui, cui_id id, cui_rect r, uint32_t flags) { cui__add_hit(ui, id, r, flags); }
 
+#define CUI__WHEEL_XFORM 0x5E1F0A2Du   /* salts the id of a wheel area's recorded transform */
+
 void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r) {
     cui_rect clip = ui->dl.clip_stack[ui->dl.clip_depth - 1];
     float s = ui->scale;
@@ -1127,7 +1129,18 @@ void cui__paint_wheel_hit(cui_ctx *ui, cui_id id, cui_rect r) {
     cui_scroll_state *ss = cui_state(ui, id, sizeof *ss);
     ss->view_w = r.w; ss->view_h = r.h;
     ss->content_w = r.w + 1e6f; ss->content_h = r.h + 1e6f;
-    cui__add_hit(ui, id, cui__rect_intersect(r, cp), CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y);
+    cui__add_hit(ui, id, cui__rect_intersect(cui__xform_rect(ui, r), cp), CUI_NF_SCROLL_X | CUI_NF_SCROLL_Y);
+    /* the transform it was drawn with, for cui__wheel_point while the wheel is handled next frame */
+    cui_xform x = ui->dl.xform_stack[ui->dl.xform_depth - 1];
+    cui_xform *wx = cui_state(ui, id ^ CUI__WHEEL_XFORM, sizeof *wx);
+    *wx = (cui_xform){ .scale = x.scale, .ox = x.ox / s, .oy = x.oy / s };
+}
+
+cui_vec2 cui__wheel_point(cui_ctx *ui, cui_id id) {
+    cui_vec2 p = ui->building.screen_pointer ? *ui->building.screen_pointer : cui_mouse_pos(ui);
+    const cui_xform *wx = cui_state(ui, id ^ CUI__WHEEL_XFORM, sizeof *wx);
+    if (!(wx->scale > 0)) return p;   /* not painted yet: no transform known */
+    return (cui_vec2){ (p.x - wx->ox) / wx->scale, (p.y - wx->oy) / wx->scale };
 }
 
 void cui_wheel_region(cui_ctx *ui, cui_id id, cui_rect rect) {

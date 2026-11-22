@@ -527,6 +527,20 @@ static void test_veil(void) {
     image cdone = render(ui);
     CHECK(!same(a, b));
     CHECK(same(b, cdone));
+    /* Covering the idle, fully revealed panel starts with a sparse layer of dots. */
+    CHECK(!cui_needs_redraw(ui));
+    c.shown = false;
+    g_dt = 1.0f;
+    run(ui, build_veil, &c, 1);
+    g_dt = 1.0f / 60.0f;
+    image first = render(ui);
+    r = cui_get_rect(ui, c.veil);
+    int covered = 0;
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 32; x++)
+            if (memcmp(at(first, r.x + 8 + x, r.y + 8 + y), at(cdone, r.x + 8 + x, r.y + 8 + y), 3)) covered++;
+    CHECK(covered > 0 && covered < 32 * 16 / 4);
+    free(first.px);
     free(a.px); free(b.px); free(cdone.px);
     cui_destroy(ui);
 }

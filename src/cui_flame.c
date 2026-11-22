@@ -1548,7 +1548,8 @@ static void cui__trf_wheel(cui__trf *f) {
     cui_trace_view *v = f->v;
     if (!(ui->scroll_target == f->wid && ui->hot_layer == ui->current_layer && (ui->scroll_dx != 0 || ui->scroll_dy != 0))) return;
     double range = v->end - v->start;
-    if (f->mx < f->R.x + f->c.gutter) v->scroll -= ui->scroll_dy * 40;
+    const float mx = cui__wheel_point(ui, f->wid).x;   /* the pointer in layout space */
+    if (mx < f->R.x + f->c.gutter) v->scroll -= ui->scroll_dy * 40;
     else if (ui->scroll_dx != 0 || (ui->mods & CUI_MOD_SHIFT)) {
         float dl = ui->scroll_dx != 0 ? ui->scroll_dx : ui->scroll_dy;
         double dt = (double)dl * 40.0 / f->c.plot_w * range;
@@ -1556,7 +1557,7 @@ static void cui__trf_wheel(cui__trf *f) {
     } else {
         double z = pow(1.12, (double)ui->scroll_dy);
         double nr = CUI_MIN(range / z, f->c.dmax - f->c.dmin);
-        double u = CUI_CLAMP((double)(f->mx - f->c.plot_x) / f->c.plot_w, 0.0, 1.0);
+        double u = CUI_CLAMP((double)(mx - f->c.plot_x) / f->c.plot_w, 0.0, 1.0);
         double tm = v->start + u * range;
         v->start = tm - u * nr; v->end = v->start + nr;
     }

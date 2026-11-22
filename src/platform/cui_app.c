@@ -25,6 +25,26 @@ static bool cui__env_is(const char *name, const char *value) {
     return v && strcmp(v, value) == 0;
 }
 
+/* The platform's GPU renderer (cui_gpu_*), in builds that have it */
+#if defined(CUI_D3D12) && defined(_WIN32)
+#define CUI__APP_GPU 1
+#define CUI__APP_GPU_NAME "d3d12"
+#elif defined(CUI_METAL) && defined(__APPLE__)
+#define CUI__APP_GPU 1
+#define CUI__APP_GPU_NAME "metal"
+#elif defined(CUI_VULKAN) && defined(__linux__)
+#define CUI__APP_GPU 1
+#define CUI__APP_GPU_NAME "vulkan"
+#else
+#define CUI__APP_GPU 0
+#endif
+
+#if CUI__APP_GPU && defined(__linux__)
+/* The X11 backend's window as cui_gpu_create takes it, with its current size; the
+ * other Linux backends (GLFW, SDL) do not have one. */
+extern cui_x11_window *cui__plat_x11_window(cui_app *app) __attribute__((weak));
+#endif
+
 static void cui__app_make_software(cui_app *app) {
     if (!app->sw) app->sw = cui_sw_create();
     cui_sw_set_incremental(app->sw, true);   /* only what changed is drawn again */
@@ -143,6 +163,24 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
         free(app);
         return NULL;
     }
+#if CUI__APP_GPU
+    /* the platform's GPU renderer (Direct3D 12, Vulkan or Metal), when asked for:
+     * CUI_RENDERER_GPU, or CUI_RENDERER=gpu or its name (d3d12, vulkan, metal) */
+    if (d->renderer == CUI_RENDERER_GPU || cui__env_is("CUI_RENDERER", "gpu") || cui__env_is("CUI_RENDERER", CUI__APP_GPU_NAME)) {
+#if defined(__linux__)
+        void *gpu_window = cui__plat_x11_window ? cui__plat_x11_window(app) : NULL;   /* only the X11 backend lends its window */
+#else
+        void *gpu_window = cui__plat_native(app);
+#endif
+        const char *plat = cui__plat_name();
+        if (gpu_window && (!strcmp(plat, "win32") || !strcmp(plat, "cocoa") || !strcmp(plat, "x11")))
+            app->gpu = cui_gpu_create(gpu_window, !d->no_vsync);
+        if (!app->gpu) fprintf(stderr, "cui: the %s renderer is unavailable\n", CUI__APP_GPU_NAME);
+    }
+#endif
+#if CUI__APP_GPU
+    if (app->gpu) want_gl = false;
+#endif
     if (!app->gl_starting && want_gl && cui__plat_gl_create(app, !d->no_vsync)) {
         app->gl = cui_gl_create(cui__plat_gl_proc);
         /* OpenGL drawn on the CPU (a virtual machine, a remote session) costs several times
@@ -155,6 +193,12 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
             cui__plat_gl_release(app);
         }
     }
+#if CUI__APP_GPU
+    if (app->gpu) {
+        cui_renderer_iface iface = cui_gpu_iface(app->gpu);
+        cui_set_renderer(app->ui, &iface);
+    } else
+#endif
     if (app->gl) {
         cui_renderer_iface iface = cui_gl_iface(app->gl);
         cui_set_renderer(app->ui, &iface);
@@ -193,6 +237,10 @@ void cui_app_destroy(cui_app *app) {
     cui_set_renderer(app->ui, NULL);
     if (app->gl) cui_gl_destroy(app->gl);
     app->gl = NULL;
+#if CUI__APP_GPU
+    if (app->gpu) cui_gpu_destroy(app->gpu);   /* its textures went with cui_set_renderer above */
+    app->gpu = NULL;
+#endif
     /* close the window before the UI context goes away: the OS may still
      * deliver focus and size messages while the window is destroyed */
     cui__plat_shutdown(app);
@@ -272,6 +320,14 @@ void cui__app_render(cui_app *app) {
     int w = dd->width_px, h = dd->height_px;
     if (w <= 0 || h <= 0) return;
     CUI__PROBE(CUI_PROBE_RENDER);
+#if CUI__APP_GPU
+    if (app->gpu) {
+#if defined(__linux__)
+        cui__plat_x11_window(app);   /* the renderer reads the window's size from it */
+#endif
+        cui_gpu_render(app->gpu, dd);
+    } else
+#endif
     if (app->gl) {
         cui_gl_render(app->gl, dd, true);
         CUI__PROBE(CUI_PROBE_PRESENT);
@@ -360,7 +416,7 @@ static double cui__app_plan(cui_app *app, double *pace_until) {
             app->hz = hz >= 24 && hz <= 1000 ? hz : 60;
             app->hz_checked = now;
         }
-        if (app->gl && !app->desc.no_vsync && !app->vsync_off) {
+        if ((app->gl || app->gpu) && !app->desc.no_vsync && !app->vsync_off && !app->present_fast) {
             /* two runs of 20 frames in a row faster than the display: the swap does not wait
              * (one is not enough: after a pause a driver may queue a few frames without waiting) */
             if (app->pace_frames++ == 0) app->pace_start = app->last_present;
@@ -371,7 +427,7 @@ static double cui__app_plan(cui_app *app, double *pace_until) {
                 app->pace_frames = 0;
             }
         }
-        if (app->presented_once && (!app->gl || app->desc.no_vsync || app->vsync_off)) {
+        if (app->presented_once && ((!app->gl && !app->gpu) || app->desc.no_vsync || app->vsync_off || app->present_fast)) {
             /* one frame per period, counted from when the last one began; events that come
              * in the meantime are taken in but do not start the frame early */
             *pace_until = app->last_time + 1.0 / (app->desc.no_vsync && app->hz < 120 ? 120 : app->hz);
@@ -501,9 +557,26 @@ int cui_app_run(const cui_app_desc *desc, void (*frame)(cui_ctx *ui, void *user)
     return 0;
 }
 
+/** Renders a complete screenshot of the current UI. */
 bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height) {
     const cui_draw_data *dd = cui_get_draw_data(app->ui);
     if (width < dd->width_px || height < dd->height_px || !rgba) return false;
+#if CUI__APP_GPU
+    if (app->gpu) {   /* the capture draws and presents the frame itself: once, not twice */
+        if (app->in_frame) {
+            cui_end_frame(app->ui);
+            app->in_frame = false;
+        }
+        dd = cui_get_draw_data(app->ui);
+#if defined(__linux__)
+        cui__plat_x11_window(app);   /* the renderer reads the window's size from it */
+#endif
+        if (dd->width_px <= 0 || dd->height_px <= 0 || !cui_gpu_render_capture(app->gpu, dd, rgba)) return false;
+        app->presented_once = true;
+        app->last_present = cui__plat_now();
+        return true;
+    }
+#endif
     if (app->in_frame) cui__app_render(app);
     dd = cui_get_draw_data(app->ui);
     int w = dd->width_px, h = dd->height_px;
@@ -512,7 +585,8 @@ bool cui_app_screenshot(cui_app *app, void *rgba, int width, int height) {
         cui_gl_render(app->gl, dd, true);
         cui_gl_read_pixels(app->gl, w, h, rgba);
     } else {
-        cui_sw_render(app->sw, dd, rgba, w, h, width * 4, CUI_SW_RGBA);
+        /* The caller may have cleared or reallocated the buffer at the same address. */
+        cui__sw_render_screenshot(app->sw, dd, rgba, width * 4);
     }
     return true;
 }

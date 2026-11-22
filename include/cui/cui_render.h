@@ -2,15 +2,17 @@
  * CUI renderers.
  *
  * CUI produces a plain list of vertices, indices and draw commands
- * (cui_draw_data). Two renderers ship with the library:
+ * (cui_draw_data). The renderers that ship with the library:
  *
  *   - OpenGL 3.3 core / OpenGL ES 3.0 (cui_gl_*)
+ *   - Direct3D 12 on Windows, Vulkan on Linux and Metal on macOS (cui_gpu_*),
+ *     in builds with CUI_D3D12, CUI_VULKAN or CUI_METAL
  *   - A portable software rasterizer (cui_sw_*) that renders into any 32 bit
  *     pixel buffer. It needs no GPU, which makes it useful for tests,
  *     screenshots, servers and as a fallback.
  *
- * Writing your own renderer (Vulkan, Metal, Direct3D, WebGPU, sokol, bgfx)
- * takes one shader. See docs/rendering.md.
+ * Writing your own renderer (WebGPU, sokol, bgfx) takes one shader. See
+ * docs/rendering.md.
  */
 #ifndef CUI_RENDER_H
 #define CUI_RENDER_H
@@ -77,6 +79,33 @@ CUI_API void cui_gl_read_pixels(cui_gl_renderer *r, int width, int height, void 
  * like, as in virtual machines and remote sessions). CUI's own software renderer,
  * which redraws only what changed, is then much cheaper. */
 CUI_API bool cui_gl_is_software(const cui_gl_renderer *r);
+
+/* ---- Direct3D 12, Vulkan and Metal (built with CUI_D3D12, CUI_VULKAN, CUI_METAL) ---- */
+
+/* The platform's GPU renderer: the draw data the OpenGL renderer takes (vertices, indices,
+ * commands), drawn the same way with the same shader, into the window's own swapchain or
+ * layer. One per platform: Direct3D 12 on Windows, Vulkan on Linux, Metal on
+ * macOS. */
+typedef struct cui_gpu_renderer cui_gpu_renderer;
+
+/* Linux: the window cui_gpu_create takes. The app keeps width and height
+ * (pixels) current and keeps it alive as long as the renderer. */
+typedef struct cui_x11_window {
+    void *display;              /* Display * */
+    unsigned long window;       /* Window (X11) */
+    int width, height;
+} cui_x11_window;
+
+/* window: an HWND, on Linux a cui_x11_window *, on macOS an NSWindow * (its
+ * content view gets a CAMetalLayer). NULL when the device or window cannot be set up. CUI_GPU
+ * set to part of an adapter's name (e.g. "nvidia") picks the GPU. */
+CUI_API cui_gpu_renderer *cui_gpu_create(void *window, bool vsync);
+CUI_API void cui_gpu_destroy(cui_gpu_renderer *r);
+CUI_API cui_renderer_iface cui_gpu_iface(cui_gpu_renderer *r);
+/* Draws and presents. */
+CUI_API void cui_gpu_render(cui_gpu_renderer *r, const cui_draw_data *dd);
+/* Draws, reads the frame back into rgba (width_px * height_px * 4, top-down) and presents. */
+CUI_API bool cui_gpu_render_capture(cui_gpu_renderer *r, const cui_draw_data *dd, void *rgba);
 
 #ifdef __cplusplus
 }

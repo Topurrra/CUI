@@ -791,7 +791,7 @@ bool cui_veil_begin_ex(cui_ctx *ui, const char *id_str, bool *revealed, const cu
     float target = shown ? 1.0f : 0.0f;
     if (ui->theme.motion <= 0) st->q = target;
     else if (st->q != target) {
-        float step = ui->dt / (CUI__VEIL_T * CUI_MAX(1.0f, ui->theme.motion));
+        float step = ui->step / (CUI__VEIL_T * CUI_MAX(1.0f, ui->theme.motion));
         st->q = target > st->q ? CUI_MIN(target, st->q + step) : CUI_MAX(target, st->q - step);
         ui->animating = true;
     }

@@ -436,6 +436,8 @@ cui_dialog(ui, "Edit profile", &open, .description = "Changes are visible to you
 }
 ```
 
+Tab and Shift-Tab cycle through the dialog and its open popovers, including nested popovers.
+
 Modal: the scrim blocks everything behind it. Esc, the close button or a click on the scrim close it, unless `persistent`. Options: `description`, `width` (440), `no_close_button`, `persistent`, `draggable`, `resizable`. Opens with a fade and a scale from 0.96, closes faster than it opens.
 
 `draggable` lets the user move the dialog by its header, and `resizable` lets them resize it by its edges and corners. Both keep the dialog inside the window; a resized dialog stops at 240 by 120 points and clips its content when that no longer fits. A grab that ends outside the panel is not a click on the scrim, so the dialog stays open. The position and size belong to the dialog, not to your code: it opens centred at its own size every time. The corners use the horizontal resize cursor, since CUI has no diagonal one. Moving and resizing take the pointer; the keyboard does not move or resize a dialog.
@@ -770,6 +772,8 @@ cui_image_destroy(ui, tex);
 ```
 
 `cui_image_load` returns a `cui_texture`, or 0 when the file cannot be read or decoded. Call it once, not on every frame, keep the texture for as long as you draw it, and free it with `cui_image_destroy`. `cui_image_create` takes `w * h` pixels of four bytes each, red, green, blue and alpha, and copies them. `cui_image` returns nothing and stretches the texture over the box given by `width` and `height`, 64 by 64 points when they are not set, so work the height out from the pixel size to keep the proportions.
+
+For a live preview, keep the same texture and call `cui_image_update(ui, tex, x, y, w, h, rgba, stride)` when new pixels arrive. The destination rectangle must fit in the texture. Pass the byte distance between source rows, or 0 for tightly packed RGBA8. The update requests a redraw; pixels outside the rectangle are unchanged.
 
 PNG and JPEG are decoded out of the box. Image paths are UTF-8, including on Windows. Configure with `-DCUI_IMAGE_ALL_FORMATS=ON` to add BMP, GIF and TGA, or `-DCUI_STB_IMAGE=OFF` to leave decoding out and upload your own pixels with `cui_image_create`.
 

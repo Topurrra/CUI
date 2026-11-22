@@ -28,6 +28,12 @@
 
 <sub>Every image on this page is drawn by CUI, from plain C.</sub>
 
+<br><br>
+
+<a href="https://buymeacoffee.com/e_gurl">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Support CUI on Buy Me a Coffee" width="217" height="60">
+</a>
+
 </div>
 
 CUI is an immediate-mode UI library written in C99. You describe the screen with function calls every frame. CUI lays it out, handles the mouse and keyboard, and draws it with OpenGL or its own software renderer, in a window on Windows, macOS or Linux, or in a browser through WebAssembly.
@@ -317,7 +323,7 @@ To use CUI inside an engine with your own window and renderer, see [Integration]
 - **The keyboard does not reach everything.** Most components work from the keyboard and each one's page lists its keys. Some parts still need a pointer: the rating, the histogram slider's handles, swipe actions, the reorderable list, the JSON viewer, the agent plan's steps, blame, the time histogram, and the choices inside the open time picker and color picker.
 - **Complex scripts are partial.** Text is UTF-8 with kerning and font fallback, and layouts mirror for right-to-left languages. Arabic-script shaping and bidirectional text are an optional, experimental build option for static text ([details](docs/integration.md#optional-arabic-script-text-shaping)). CJK works once you add a fallback font.
 - **Input methods compose in the system's window.** Committed text arrives; the text being composed is not drawn inline. The window opens at the caret on Windows, macOS, X11, SDL2 and the docs site, but not yet on the GLFW backend.
-- **No native Wayland backend.** Use the SDL2 or GLFW backend, or XWayland.
+- **Native Wayland via SDL2.** Configure with `-DCUI_PLATFORM=wayland` to require SDL2 (2.0.22 or newer) with its Wayland video driver. Window creation fails if native Wayland is unavailable; it never falls back to X11. `sdl2` leaves driver selection to SDL, and `auto` still selects X11 on Linux.
 - **No Android or iOS.** Layouts adapt to phone widths and touch, and apps run in mobile browsers, but there is no platform layer for phones.
 - **It is new.** Version 1.0 was released in November 2026, so it has little real-world use behind it yet. The [changelog](CHANGELOG.md) lists what each release changed.
 

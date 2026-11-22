@@ -61,6 +61,7 @@ CUI's look is deliberate. These are the rules every component follows, and they 
 | Any floating layer leaving | 160 ms |
 
 - Disabled is one opacity everywhere (45%).
+- After an idle pause, a newly started transition advances by one animation frame. This also applies when a veil covers its content again or the user scrolls the hex view. The application clock still counts the full pause.
 - Exits are faster than entrances. Everything is interruptible because everything is a spring.
 - Every animation has a reduced motion path that keeps the final state and the feedback.
 

@@ -523,6 +523,58 @@ static void build_gv(cui_ctx *ui, void *u) {
     c->r = cui_graph_view(ui, "deps", c->nodes, c->n, c->edges, c->e, .selected = &c->sel, .height = 360, .top_down = c->td);
     if (c->r.activated >= 0) c->activated = c->r.activated;
 }
+typedef struct { cui_node_view view; float x, y; cui_id card; int hovered; } hosted_graph;
+
+static void build_hosted_graph(cui_ctx *ui, void *user) {
+    hosted_graph *g = user;
+    static const cui_graph_node nodes[] = { { "anchor" } };
+    if (cui_node_editor_begin(ui, "editor", &g->view, .height = CUI_PX(450))) {
+        cui_node_begin(ui, 1, &g->x, &g->y, "Graph", .width = 400);
+        g->card = cui_last_id(ui);
+        cui_node_content(ui) {
+            g->hovered = cui_graph_view(ui, "graph", nodes, 1, NULL, 0, .height = 240).hovered;
+        }
+        cui_node_end(ui);
+        cui_node_editor_end(ui);
+    }
+}
+
+/* Measure the drawn node through its public hover result, not private zoom/pan state. */
+static cui_rect hosted_graph_bounds(cui_ctx *ui, hosted_graph *g, cui_rect card, float x, float y) {
+    cui_rect r = { 0 };
+    for (float px = ceilf(card.x); px < card.x + card.w; px++) {
+        move(ui, build_hosted_graph, g, px, y);
+        if (g->hovered == 0) { if (r.w == 0) r.x = px; r.w++; }
+    }
+    for (float py = ceilf(card.y); py < card.y + card.h; py++) {
+        move(ui, build_hosted_graph, g, x, py);
+        if (g->hovered == 0) { if (r.h == 0) r.y = py; r.h++; }
+    }
+    return r;
+}
+
+static void test_hosted_graph_anchor(void) {
+    printf("dependency graph: wheel zoom in a half-scale node card stays anchored under the pointer\n");
+    cui_ctx *ui = new_ctx(800, 500);
+    hosted_graph g = { .view = { .zoom = 0.5f }, .x = 100, .y = 80, .hovered = -1 };
+    run(ui, build_hosted_graph, &g, 4);
+    float x, y;
+    cui_rect card = cui_get_rect(ui, g.card);
+    bool found = find(ui, build_hosted_graph, &g, card, &g.hovered, 0, &x, &y);
+    CHECK(found);
+    if (found) {
+        cui_rect before = hosted_graph_bounds(ui, &g, card, x, y);
+        x = before.x + before.w / 2; y = before.y + before.h / 2;
+        move(ui, build_hosted_graph, &g, x, y);
+        cui_input_scroll(ui, 0, 4); run(ui, build_hosted_graph, &g, 2);
+        cui_rect after = hosted_graph_bounds(ui, &g, card, x, y);
+        CHECK(g.view.zoom == 0.5f);                         /* the graph, not its host, took the wheel */
+        CHECK(after.w > before.w && after.h > before.h);   /* zoom really happened */
+        CHECK(fabsf(after.x + after.w / 2 - x) <= 1);
+        CHECK(fabsf(after.y + after.h / 2 - y) <= 1);
+    }
+    cui_destroy(ui);
+}
 static void test_graph(void) {
     printf("dependency graph: every node reachable, click, keys, cycles, bad edges, top down, 400 nodes\n");
     static const cui_graph_node nodes[] = { { "app" }, { "ui", "libcui" }, { "net" }, { "tls" }, { "zlib" }, { "platform" } };
@@ -1689,6 +1741,7 @@ int main(void) {
     test_keymap();
     test_commits();
     test_graph();
+    test_hosted_graph_anchor();
     test_waterfall();
     test_trace();
     test_trace_links();

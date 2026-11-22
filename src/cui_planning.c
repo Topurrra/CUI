@@ -338,7 +338,7 @@ bool cui_kanban_end(cui_ctx *ui, cui_kanban_move *move) {
 /* Week calendar                                                            */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { int drag; int mode; float grab; bool moved; float press_x, press_y; } cui__week_state;   /* mode 1 move, 2 resize */
+typedef struct { int drag, last_count; int mode; float grab; bool moved, read_only; float press_x, press_y; } cui__week_state;   /* mode 1 move, 2 resize; read_only as it was at the press */
 
 typedef struct { float h0, h1, hh, gutter, dw; int today; float now; cui_color line, faint, label, now_c; } cui__week_paint;
 
@@ -411,8 +411,11 @@ static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date 
     localtime_r(&tn, &lt);
 #endif
     float now = lt.tm_hour + lt.tm_min / 60.0f;
+    /* When the list shrinks, the old index can now point to another event. */
+    if (st->drag > 0 && (count < st->last_count || cui_is_disabled(ui) || st->read_only != o->read_only)) st->drag = 0;
+    st->last_count = count;
     /* drag in progress */
-    if (st->drag > 0 && st->drag <= count) {
+    if (st->drag > 0) {
         cui_cal_event *e = &ev[st->drag - 1];
         /* Motion and release can arrive before the same frame: measure up to the release,
          * not motion after it */
@@ -552,7 +555,7 @@ static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date 
         cui_rect er = cui__prev_rect(ui, eid);
         if (r.hovered && ui->mpressed[0] && st->drag == 0) {
             /* the press event's position: the pointer may have moved on before this frame */
-            st->drag = k + 1; st->moved = false; st->press_x = ui->press_x; st->press_y = ui->press_y;
+            st->drag = k + 1; st->moved = false; st->read_only = o->read_only; st->press_x = ui->press_x; st->press_y = ui->press_y;
             st->mode = (!o->read_only && st->press_y > er.y + er.h - 7) ? 2 : 1;
             st->grab = st->press_y - er.y;
         }
@@ -632,7 +635,7 @@ static int cui__week_calendar_ex_body(cui_ctx *ui, const char *id_str, cui_date 
 /* Gantt                                                                    */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { int drag; int mode; int grab_day; int orig_start, orig_end; float press_x; bool moved; } cui__gantt_state;   /* mode 1 move, 2 left, 3 right */
+typedef struct { int drag, last_count; int mode; int grab_day; int orig_start, orig_end; float press_x; bool moved, read_only; } cui__gantt_state;   /* mode 1 move, 2 left, 3 right; read_only as it was at the press */
 
 typedef struct {
     cui_gantt_task *tasks;
@@ -791,7 +794,10 @@ static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *t
     cui__gantt_state *st = cui_state(ui, id, sizeof *st);
     int clicked = -1;
     cui_rect br = cui__prev_rect(ui, body_id);
-    if (st->drag > 0 && st->drag <= count) {
+    /* When the list shrinks, the old index can now point to another task. */
+    if (st->drag > 0 && (count < st->last_count || cui_is_disabled(ui) || st->read_only != o->read_only)) st->drag = 0;
+    st->last_count = count;
+    if (st->drag > 0) {
         cui_gantt_task *t = &tasks[st->drag - 1];
         if (ui->mdown[0]) {
             if (fabsf(ui->mx - st->press_x) > 3) st->moved = true;
@@ -954,7 +960,7 @@ static int cui__gantt_ex_body(cui_ctx *ui, const char *id_str, cui_gantt_task *t
         cui_rect tr = cui__prev_rect(ui, tid);
         bool near_l = r.hovered && ui->mx < tr.x + 7 && !t->milestone, near_r = r.hovered && ui->mx > tr.x + tr.w - 7 && !t->milestone;
         if (r.hovered && ui->mpressed[0] && st->drag == 0) {
-            st->drag = k + 1; st->moved = false; st->press_x = ui->mx;
+            st->drag = k + 1; st->moved = false; st->read_only = o->read_only; st->press_x = ui->mx;
             st->orig_start = t->start; st->orig_end = t->end;
             st->mode = near_l ? 2 : near_r ? 3 : 1;
         }

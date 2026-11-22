@@ -22,6 +22,8 @@ Other options: `--storm` (a new window size and display scale every 10 frames), 
 
 A 30 second headless run of the Notes example is part of `ctest`.
 
+`cui_gpu_bench` (`tests/gpu_bench.c`) compares renderers in a real window. On each page of the gallery the pointer hovers over a control, clicks two others and scrolls the content, with one idle frame after each action. Every other page the window jumps to a new size, and four pages drag it over a second as if the corner were held. A pass is about 12 seconds, held to 60 frames a second (`--fps N`, `--fps 0` for the display's rate). `--renderer gpu|opengl|software` picks the renderer and `--uncapped` stops it waiting for the display. It reports frame times, the resize calls, CPU time, peak memory, and how many moves and clicks landed on controls. It cannot see the GPU's or the compositor's load; the [GPU comparison](#direct3d-12-vulkan-and-metal-against-opengl) samples them from outside. ctest does not run it.
+
 ## Results
 
 All numbers come from Linux on a shared cloud machine (x86-64, `-O2`). Times vary with the machine; memory and allocation counts do not.
@@ -31,7 +33,7 @@ All numbers come from Linux on a shared cloud machine (x86-64, `-O2`). Times var
 Each app ran 60 simulated minutes with the software renderer at 1280×800 and the window changing size along the way. "Library memory" is everything CUI allocated through the context allocator: state, buffers, fonts and the glyph atlas, not the app's own data or textures.
 
 | App | Frames built | Library memory after the first minute | Peak | Allocations per frame | Incremental checks | Bytes left after `cui_destroy` |
-|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|
 | Notes | 62,649 | 1.59 to 1.97 MB | 1.97 MB | 0.036 | 41, 0 differ | 0 |
 | Mail | 61,408 | 1.66 to 5.03 MB | 6.05 MB | 0.025 | 40, 0 differ | 0 |
 | Settings | 54,129 | 1.66 to 4.86 MB | 5.87 MB | 0.026 | 36, 0 differ | 0 |
@@ -195,3 +197,63 @@ Each call is the start of the phase it names and the end of the one before: `CUI
 - **State lives as long as it is useful.** Every node with an id keeps last frame's rectangle; such entries go after 30 frames unused, state with data after about five seconds. Hover fades and buttons take no state until they are touched, and the table packs itself after a burst.
 - **Buffers come back down.** The glyph atlas moves the glyphs drawn lately into a smaller atlas when they fit; the emoji texture goes when no emoji has been drawn for 600 frames; and the per-frame buffers (vertices, indices, commands, nodes, the frame arena) shrink when they have been four times bigger than needed for 600 frames.
 - **Steady frames allocate almost nothing.** After warm-up the apps above make a few hundredths of an allocation per frame, mostly new state for things that came into view.
+
+## Direct3D 12, Vulkan and Metal against OpenGL
+
+The GPU renderers (`cui_gpu_*`: Direct3D 12 on Windows, Vulkan on Linux, Metal on macOS) draw the same vertices with the same shader as the OpenGL renderer. What differs is how the picture reaches the system compositor.
+
+**How it was run.** `cui_gpu_bench` (see [How it is measured](#how-it-is-measured)) runs the gallery in a visible window starting at 1240×820 points, held to 60 frames a second: all 30 pages with hovers, clicks, scrolling, 13 jumps to a new window size and 4 one-second corner drags, one idle frame after each action. On each machine pod was not running and the machine was otherwise idle. With no warm-up, the software renderer ran 100 times in a row, then the GPU renderer 100 times, then OpenGL 100 times. A table cell is the mean of those 100 runs. The GPU and memory figures are sampled from outside, about every second on Windows and every 0.2 s on Linux, and are the bench process's own: on Windows the busiest engine in the GPU Engine counters and the Dedicated Usage counter, on Linux the DRM `fdinfo` of the process (GPU time over wall time, and its VRAM or resident GPU memory) plus `nvidia-smi pmon` on NVIDIA. macOS has no per-process counter, so its GPU busy figure is the whole GPU's utilization and its GPU memory is not given. `CUI_GPU=<part of an adapter's name>` picks the adapter for Direct3D 12 and Vulkan.
+
+**Results** (mean of 100 runs)
+
+| Machine | Renderer | App CPU % | GPU busy % | Peak RAM MB | GPU memory MB | Board power W |
+|---|---|---|---|---|---|---|
+| 14900KS-4090-Win | Software | 14.7 | 0.0 | 37.0 | 0.0 | 75.6 |
+| | Direct3D 12 | 5.7 | 0.2 | 94.5 | 35.1 | 76.2 |
+| | OpenGL | 7.4 | 0.2 | 99.6 | 28.7 | 75.1 |
+| 5950X-6650XT-Win | Software | 20.8 | 0.0 | 33.5 | 0.0 | n/a |
+| | Direct3D 12 | 4.9 | 2.0 | 69.9 | 16.0 | n/a |
+| | OpenGL | 6.7 | 2.4 | 107.8 | 42.6 | n/a |
+| 12900KF-2080Ti-Win | Software | 26.8 | 0.0 | 39.0 | 0.0 | 49.0 |
+| | Direct3D 12 | 5.1 | 2.4 | 96.9 | 41.7 | 48.8 |
+| | OpenGL | 9.8 | 0.5 | 94.2 | 45.4 | 48.7 |
+| HX370-890M-Arch | Software | 46.8 | 0.0 | 53.8 | 0.0 | n/a |
+| | Vulkan | 3.9 | 3.7 | 113.9 | 27.4 | n/a |
+| | OpenGL | 4.4 | 3.7 | 169.1 | 38.9 | n/a |
+| HX370-5070-Ubuntu | Software | 26.1 | 0.0 | 34.4 | 0.0 | n/a |
+| | Vulkan | 10.3 | 7.2 | 231.1 | 22.6 | n/a |
+| | OpenGL | 8.7 | 6.9 | 94.0 | 13.6 | n/a |
+| HX370-890M-Ubuntu | Software | 26.1 | 0.0 | 34.4 | 0.0 | n/a |
+| | Vulkan | 3.9 | 2.4 | 143.0 | 16.4 | n/a |
+| | OpenGL | 4.6 | 2.5 | 127.4 | 9.0 | n/a |
+| 7800X3D-7900XTX-Arch | Software | 17.7 | 0.0 | 34.2 | 0.0 | n/a |
+| | Vulkan | 3.1 | 1.5 | 80.8 | 24.1 | n/a |
+| | OpenGL | 2.4 | 1.6 | 119.0 | 37.0 | n/a |
+| M5-M5-macOS | Software | 69.8 | 5.7 | 272.5 | n/a | n/a |
+| | Metal | 18.7 | 20.0 | 114.2 | n/a | n/a |
+| | OpenGL | 22.0 | 27.0 | 124.8 | n/a | n/a |
+| M4Max-M4Max-macOS | Software | 85.0 | 0.1 | 271.4 | n/a | n/a |
+| | Metal | 20.9 | 0.2 | 113.7 | n/a | n/a |
+| | OpenGL | 23.3 | 0.9 | 124.6 | n/a | n/a |
+| SC8280XP-A690-Arch | Software | 20.4 | 0.0 | 33.0 | 0.0 | n/a |
+| | Vulkan | 10.8 | 1.8 | 25.6 | 16.1 | n/a |
+| | OpenGL | 7.3 | 1.8 | 56.0 | 24.1 | n/a |
+| X2-X2-85-Arch | Software | 23.9 | 0.0 | 51.1 | 0.0 | n/a |
+| | Vulkan | 6.7 | 2.8 | 25.4 | 23.6 | n/a |
+| | OpenGL | 4.2 | 2.4 | 62.2 | 30.7 | n/a |
+| 8EliteG5-A840-Arch | Software | 47.2 | 0.0 | 83.3 | 0.0 | n/a |
+| | Vulkan | 1.8 | 17.7 | 49.0 | 54.1 | n/a |
+| | OpenGL | 1.8 | 11.7 | 103.6 | 66.1 | n/a |
+
+CPU is a share of one core. Board power is the NVIDIA board's, read on the two Windows machines that have one.
+
+**Summary**
+
+- Software rendering costs 15% to 85% of a core; every GPU renderer costs far less (1.8% to 23%).
+- Between the GPU paths there is no single winner: Direct3D 12 and Metal beat OpenGL on CPU, Vulkan wins on the Radeon 890M and loses on the Adreno GPUs and 7800X3D-7900XTX-Arch, and OpenGL wins on the RTX 5070.
+- The GPU renderer uses less RAM than OpenGL except Vulkan on HX370-5070-Ubuntu and HX370-890M-Ubuntu, and Direct3D 12 on 12900KF-2080Ti-Win (97 MB against 94).
+- Board power does not separate the renderers (75 W, and 49 W on 12900KF-2080Ti-Win). macOS GPU busy is the whole GPU's, so it includes the compositor.
+
+To add a machine, run each renderer as above (`cui_gpu_bench --renderer software|opengl|gpu --quiet`), sample the GPU, and add its description and rows. `CUI_GPU=<part of an adapter's name>` picks the adapter for Direct3D 12 and Vulkan; OpenGL uses the driver's choice.
+
+What was tried on top of this and did not lower the cost (instanced shapes, partial redraw, scroll copy and others) is in [Failed performance experiments](performance-experiments.md).

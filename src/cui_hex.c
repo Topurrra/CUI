@@ -709,7 +709,7 @@ static void cui__hxf_scroll(cui__hxf *f) {
     float motion = ui->theme.motion;
     if (motion <= 0 || ui->frame <= 1) s->pos = s->target;
     else {
-        double a = 1.0 - exp(-(double)ui->dt * 4.6 / (0.14 * (double)motion));
+        double a = 1.0 - exp(-(double)ui->step * 4.6 / (0.14 * (double)motion));
         s->pos += (s->target - s->pos) * a;
         if (fabs(s->pos - s->target) < 0.01) s->pos = s->target;
         else ui->animating = true;

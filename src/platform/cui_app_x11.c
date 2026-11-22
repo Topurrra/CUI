@@ -10,6 +10,7 @@
 #include <X11/cursorfont.h>
 #include <X11/Xresource.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <locale.h>
 #include <sys/select.h>
 #include <time.h>
@@ -54,6 +55,7 @@ typedef struct {
     Display *dpy;
     int screen;
     Window win;
+    cui_x11_window gpu_window;   /* the window as cui_gpu_create takes it (Vulkan) */
     Colormap cmap;
     Visual *visual;
     int depth;
@@ -511,6 +513,15 @@ void cui__plat_set_size(cui_app *app, int w, int h) {
 void *cui__plat_native(cui_app *app) { return (void *)(uintptr_t)cui__x(app)->win; }
 bool cui__plat_window_op(cui_app *app, int op) { (void)app; (void)op; return false; }   /* system title bar only */
 
+cui_x11_window *cui__plat_x11_window(cui_app *app) {
+    cui__x11 *x = cui__x(app);
+    x->gpu_window.display = x->dpy;
+    x->gpu_window.window = x->win;
+    x->gpu_window.width = x->width;
+    x->gpu_window.height = x->height;
+    return &x->gpu_window;
+}
+
 /* Where the content's top-left corner is on the root window. */
 static void cui__x11_content_origin(cui__x11 *x, int *px, int *py) {
     Window child;
@@ -864,18 +875,25 @@ static void cui__x11_event(cui_app *app, XEvent *ev) {
 void cui__plat_wait(cui_app *app, double timeout) {
     cui__x11 *x = cui__x(app);
     XFlush(x->dpy);
-    if (timeout != 0 && !XPending(x->dpy)) {
-        int fd = ConnectionNumber(x->dpy);
+    /* The connection also carries events that Xlib leaves to others: Mesa takes the Present
+     * events of each OpenGL swap. They wake select without an event for the app, and a frame
+     * for them would swap again and bring the next one, so the wait goes on until an event is
+     * the app's or the time is up. */
+    double until = timeout > 0 ? cui__plat_now() + timeout : 0;
+    int fd = ConnectionNumber(x->dpy);
+    while (timeout != 0 && !XPending(x->dpy)) {
+        struct timeval tv, *ptv = NULL;
+        if (timeout > 0) {
+            double left = until - cui__plat_now();
+            if (left <= 0) break;
+            tv.tv_sec = (long)left;
+            tv.tv_usec = (long)((left - (double)tv.tv_sec) * 1e6);
+            ptv = &tv;
+        }
         fd_set set;
         FD_ZERO(&set);
         FD_SET(fd, &set);
-        struct timeval tv, *ptv = NULL;
-        if (timeout > 0) {
-            tv.tv_sec = (long)timeout;
-            tv.tv_usec = (long)((timeout - (double)tv.tv_sec) * 1e6);
-            ptv = &tv;
-        }
-        select(fd + 1, &set, NULL, NULL, ptv);
+        if (select(fd + 1, &set, NULL, NULL, ptv) < 0 && errno != EINTR) break;
     }
     while (XPending(x->dpy)) {
         XEvent ev;

@@ -54,6 +54,29 @@ An idle CUI app costs nothing: with no input and nothing animating, `cui_needs_r
 | `cui_input_text(ui, utf8)` | Typed characters after keyboard layout and IME processing |
 | `cui_input_focus(ui, focused)` | Window focus changes |
 
+### Component input
+
+`cui_set_input_hook` delivers events synchronously before CUI batches them.
+An observer can handle pointer motion, buttons, scrolling and focus changes
+while returning false so CUI controls still receive the same input. A hook
+that returns true owns delivery. Copy any text kept beyond the callback.
+
+A host that queues input can replay its pointer events through the normal
+entry points. For key, text and focus events, call `cui_dispatch_input` after
+`cui_begin_frame` and before submitting components. A route can handle an
+event or let CUI apply its default action. Unregister capture during replay.
+Submit a [focusable canvas](custom-components.md#keyboard-focus) with
+`.component_input = true` to receive keys through that route. On each event,
+use `cui_component_has_input(ui, id)` to check window and canvas focus and
+whether an overlay covers the canvas. Check on every event because a Tab
+you pass to CUI can move focus before the next event in the same batch.
+
+Inside the route, `cui_input_repeated` identifies repeated key-down events.
+`cui_key_down` reports the physical state. `cui_key_action_down` excludes
+keys whose presses were handled by the route. Committed text arrives as a
+separate event even if the route handled the preceding key press.
+Use `cui_focused_id` and `cui_window_focused` to inspect focus directly.
+
 ### Platform services
 
 ```c
@@ -69,6 +92,10 @@ cui_set_platform(ui, &(cui_platform_iface){
 CUI calls `set_text_input_rect` every frame a text field has focus, with the caret in window points (top-left origin, one line tall). Place the input method's composition and candidate windows there; the built-in Win32, Cocoa, X11 and SDL2 backends and the docs site do.
 
 Useful queries for your app: `cui_wants_keyboard` (a text field has focus), `cui_wants_mouse` (the pointer is over the UI), `cui_get_cursor`.
+
+A custom component can request a cursor with `cui_set_cursor` during submission
+or painting. The platform receives the last cursor requested that frame.
+The next frame starts with the arrow cursor.
 
 ## Using the built-in backends with your loop
 
@@ -158,6 +185,17 @@ cui_sw_render(sw, cui_get_draw_data(ui), pixels, width, height, stride_bytes, CU
 
 Renders into any 32 bit buffer, using several threads. Output matches the GPU renderer to within a fraction of a percent. Great for servers, tests, thumbnails and embedded framebuffers. `cui_write_png` saves a buffer.
 
+### Direct3D 12, Vulkan, Metal
+
+```c
+cui_gpu_renderer *gpu = cui_gpu_create(window, true);   /* an HWND, a cui_x11_window *, an NSWindow * */
+cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_gpu_iface(gpu) });
+...
+cui_gpu_render(gpu, cui_get_draw_data(ui));              /* draws and presents */
+```
+
+With `CUI_D3D12` (Windows), `CUI_VULKAN` (Linux) or `CUI_METAL` (macOS): the OpenGL renderer's shader, drawing into a swapchain or layer of its own on the window. The app layer picks it with `CUI_RENDERER_GPU`; [Performance](performance.md#direct3d-12-vulkan-and-metal-against-opengl) has the comparison.
+
 ### Your own renderer
 
 You need two things:
@@ -165,7 +203,7 @@ You need two things:
 1. **Textures.** Implement the three callbacks in `cui_renderer_iface`: create (R8 for the font atlas, RGBA8 for images), update a sub-rectangle, destroy. Return any nonzero handle.
 2. **One draw call per command.** For each `cui_draw_cmd` set the scissor rectangle to `clip` (pixels, top left origin), bind `texture` (0 means `font_atlas`) and draw `index_count` indices starting at `index_offset` as triangles. Blend with premultiplied alpha: `src * 1 + dst * (1 - src_alpha)`.
 
-The vertex format and the reference shader are in [rendering.md](rendering.md). Porting them to Vulkan, Metal, Direct3D 11/12, WebGPU, sokol or bgfx is mostly syntax.
+The vertex format and the reference shader are in [rendering.md](rendering.md). Porting them to WebGPU, sokol, bgfx or Direct3D 11 is mostly syntax; the Direct3D 12, Vulkan and Metal renderers in `src/render/` are three such ports.
 
 ## Threads
 

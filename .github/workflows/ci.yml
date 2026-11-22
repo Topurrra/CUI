@@ -72,6 +72,28 @@ jobs:
       - name: Tests
         run: ctest --test-dir build --output-on-failure
 
+  optional:
+    # optional parts the jobs above do not build: compiled with warnings as errors, not run
+    # (the Vulkan renderer needs a GPU, the Wayland platform a compositor)
+    name: Linux (${{ matrix.name }}, compile only)
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Vulkan renderer, packages: libvulkan-dev, flags: -DCUI_VULKAN=ON, targets: cui cui_gpu_bench }
+          - { name: Wayland via SDL2, packages: libsdl2-dev, flags: -DCUI_PLATFORM=wayland, targets: cui }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        timeout-minutes: 15
+        run: sh .github/apt-install.sh ninja-build libx11-dev libgl-dev ${{ matrix.packages }}
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }} -DCMAKE_C_FLAGS=-Werror
+          cmake --build build --target ${{ matrix.targets }}
+
   amalgamation:
     name: Single-file distribution (${{ matrix.cc }})
     timeout-minutes: 45

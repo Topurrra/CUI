@@ -2451,6 +2451,13 @@ static int cui__sw_plan(cui_sw_renderer *r, int tw, int th, int width, int heigh
     return njobs;
 }
 
+/** Paints the entire screenshot without changing the window's incremental render state. */
+void cui__sw_render_screenshot(cui_sw_renderer *r, const cui_draw_data *dd, void *rgba, int stride) {
+    int width = dd->width_px, height = dd->height_px;
+    if (!r || width <= 0 || height <= 0) return;
+    cui__sw_paint_rect(r, dd, rgba, width, height, stride, CUI_SW_RGBA, 0, 0, width, height);
+}
+
 void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt) {
     if (!r || !dd || !pixels || width <= 0 || height <= 0) return;
 #if defined(CUI__SW_AVX2)

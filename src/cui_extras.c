@@ -499,7 +499,7 @@ bool cui_hold_button_ex(cui_ctx *ui, const char *label, const cui_hold_opts *o) 
     cui_id id = cui_make_id(ui, label);
     cui__hold_state *st = cui_state(ui, id ^ 0x401Du, sizeof *st);
     bool held = ui->active == id && ui->mdown[0] && ui->hot == id;
-    if (ui->focus == id && ui->focus_visible && (cui_key_down(ui, CUI_KEY_SPACE) || cui_key_down(ui, CUI_KEY_ENTER))) held = true;
+    if (ui->focus == id && ui->focus_visible && (cui_key_action_down(ui, CUI_KEY_SPACE) || cui_key_action_down(ui, CUI_KEY_ENTER))) held = true;
     bool fire = false;
     if (held && !st->fired) {
         st->progress += ui->dt / duration;

@@ -23,7 +23,7 @@ CUI is immediate mode: the app describes its whole interface every frame, and CU
    - `cui__layout` (`cui_layout.c`) measures and places every node, resolves the reading direction, and records each id's rectangle for the next frame;
    - `cui__paint` (`cui_layout.c`) walks the tree and turns it into triangles in the draw list (`cui_draw.c`), calling paint callbacks for anything custom;
    - per-frame input is cleared, unused state is collected (`cui__state_gc`), new glyphs are uploaded.
-4. **The renderer** draws the draw list: OpenGL (`src/render/cui_render_gl.c`), CUI's own software rasterizer (`src/render/cui_render_sw.c`), or yours. CUI only emits textured, colored triangles with a few shading modes.
+4. **The renderer** draws the draw list: OpenGL (`src/render/cui_render_gl.c`), a GPU API (`cui_render_d3d12.c`, `_vulkan.c` or `_metal.m`, when built in), CUI's own software rasterizer (`src/render/cui_render_sw.c`), or yours. CUI only emits textured, colored triangles with a few shading modes.
 5. **The app loop** (`src/platform/cui_app.c` and one backend file) presents the frame and sleeps until the next event, wakeup or animation frame.
 
 Nothing is retained between frames except what is in `cui_state` and the previous frame's rectangles. That is why components can be plain function calls, and why a component never has to be "removed": when the app stops calling it, its state is collected a few frames later.
