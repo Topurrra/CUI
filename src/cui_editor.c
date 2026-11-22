@@ -175,6 +175,7 @@ typedef struct {
     cui__ed_job *sjob;          /* the line states being found on another thread, or NULL */
     cui__ed_job *rjob;          /* Replace all being worked out on another thread, or NULL */
     cui__ed_job *cjob;          /* the find bar's match count of a big document, counted on another thread, or NULL */
+    cui__ed_job *fjob;          /* the find bar's search of a big document past what a frame searches, on another thread, or NULL */
     cui__ed_lci lc[CUI__ED_LC_N];   /* very long lines' column indexes */
     unsigned lc_tick;
     float hov_mx, hov_my;       /* where the pointer rests over the text, and since when (the result's hover) */
@@ -222,6 +223,8 @@ static void cui__ed_job_drop(cui__ed_job **J);
 typedef struct cui__ed_q cui__ed_q;
 static void cui__ed_rjob_start(cui__ed *E, const cui__ed_q *Q, const char *with);
 static bool cui__ed_cjob_step(cui__ed *E, const cui__ed_q *Q);
+static void cui__ed_fjob_start(cui__ed *E, const cui__ed_q *Q, int from, int dir);
+static void cui__ed_fjob_step(cui__ed *E);
 static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k);
 static void cui__ed_fc_splice(cui__ed_fc *fc, int a, int b0, int b1);
 static void cui__ed_lc_splice(cui__ed_state *st, int a, int b0, int b1);
@@ -1023,6 +1026,7 @@ static void cui__ed_dtor(cui_ctx *ui, void *data) {
     cui__ed_wc_free(ui, st); cui__ed_mc_free(ui, st);
     cui__ed_job_drop(&st->rjob);   /* a job still running only hears that it may stop: it frees itself */
     cui__ed_job_drop(&st->cjob);
+    cui__ed_job_drop(&st->fjob);
     for (int i = 0; i < CUI__ED_LC_N; i++) free(st->lc[i].cc);
     for (int i = 0; i < st->hist.n; i++) cui__ed_rec_free(ui, &st->hist.r[i]);
     cui__free(ui, st->hist.r);
@@ -1823,10 +1827,37 @@ static int cui__ed_count(cui__ed *E, const cui__ed_q *Q, int s0, int s1, int *in
     return fc->total;
 }
 
+/* cui__ed_find's first pass, only as far as about lim bytes from `from` (no wrapping): 1 and the match, 0 none there,
+ * -1 a bad pattern */
+static int cui__ed_find_near(const cui__ed *E, const cui__ed_q *Q, int from, int dir, int lim, int *a, int *b) {
+    from = CUI_CLAMP(from, 0, E->len);
+    int fline = cui__ed_line_of(E, from), r = 0, ls, le;
+    if (dir > 0) {
+        cui__ed_lw w = cui__ed_lw_at(E, cui__ed_ls(E, fline));
+        for (const char *s; (s = cui__ed_lw_next(&w, &ls, &le)) != NULL;)
+            if ((r = cui__ed_q_line(Q, s, ls, le, from, a, b, NULL)) != 0 || le >= E->len || le - from >= lim) break;
+        cui__ed_lw_done(&w);
+        return r;
+    }
+    for (int line = fline; line >= 0; line--) {
+        const char *s = cui__ed_line(E, line, &ls, &le);
+        if ((r = cui__ed_q_last(Q, s, ls, le, from, a, b)) != 0 || from - ls >= lim) break;
+    }
+    return r;
+}
+
+/* Selects the next match from `from` (dir > 0) or the one before it. On a big document only about cui__ed_find_bytes
+ * around it are searched here; when no match is there the rest goes to a job (cui__ed_fjob_start), whose match is
+ * selected when it is done, so a query with no match in 100 MB costs a frame no more than a match close by. */
 static bool cui__ed_find_go(cui__ed *E, int from, int dir) {
     cui__ed_q Q = cui__ed_q_of(E->st);
     int a, b;
-    if (cui__ed_find(E, &Q, from, dir, &a, &b, NULL) <= 0) return false;
+    cui__ed_job_drop(&E->st->fjob);   /* a search still at work is for an older query or place */
+    if (E->doc && E->len > cui__ed_find_bytes && Q.qn > 0 && !cui__ed_q_bad(&Q)) {
+        int r = cui__ed_find_near(E, &Q, from, dir, Q.rx ? cui__ed_find_bytes / 4 : cui__ed_find_bytes, &a, &b);
+        if (r == 0) { cui__ed_fjob_start(E, &Q, from, dir); return false; }
+        if (r < 0) return false;
+    } else if (cui__ed_find(E, &Q, from, dir, &a, &b, NULL) <= 0) return false;
     E->st->ed.anchor = a;
     E->st->ed.cursor = b;
     E->reveal = E->center = true;
@@ -2160,12 +2191,14 @@ int cui__ed_rall_bytes = 1 << 20;
 int cui__ed_count_bytes = 1 << 20;
 /* bytes of a buffer a job for line states copies, at most (more: another job after it) */
 int cui__ed_copy_bytes = 8 << 20;
+/* a document longer than this has the find bar search this many bytes from the caret in the frame, the rest on another thread */
+int cui__ed_find_bytes = 1 << 20;
 #define CUI__ED_PART_MIN 4096         /* text between matches shorter than this is copied, not pointed at */
 
 typedef struct { int s, e, count; } cui__ed_fb3;   /* a counted block: its bytes and matches */
 struct cui__ed_job {
     volatile long refs, cancel, done, progress;
-    int kind;                         /* 1 line states, 2 replace all, 3 the match count */
+    int kind;                         /* 1 line states, 2 replace all, 3 the match count, 4 the find bar's search */
     cui_text_snap *snap;              /* the text it reads: a snapshot of the document's [ta, tb), */
     char *copy;                       /* or a copy of the buffer's (copy[0] is byte ta) */
     int ta, tb;
@@ -2188,6 +2221,9 @@ struct cui__ed_job {
     /* the match count: the blocks [cr[2i], cr[2i + 1]) to count (whole lines, as the find bar's cui__ed_fc), and what came out */
     int *cr, ncr;
     cui__ed_fb3 *res; int nres, rescap;
+    /* the find bar's search (kind 4): from `from` in direction dir over text of tlen bytes (from's line is [fl, fle]),
+     * the selection [sa, sc] it began at, and the match found (found 1) [fa, fb) */
+    int from, dir, fl, fle, tlen, sa, sc, fa, fb, found;
 };
 
 static long cui__ed_atomic(volatile long *p, long add) {   /* the value after adding (0: a read) */
@@ -2398,9 +2434,41 @@ static void cui__ed_job_count(cui__ed_job *J) {
     }
 }
 
+/* One pass of the search over the lines from ta to the one that reaches `stop`: the first match at or after `from`, or
+ * (last) the last one that starts before `limit`. 1 and [fa, fb) when there is one. */
+static int cui__ed_jfind(cui__ed_job *J, const cui__ed_q *Q, int ta, int stop, int from, int limit, bool last) {
+    J->ta = ta; J->tb = J->tlen;
+    cui__ed_jw w;
+    cui__ed_jw_init(&w, J);
+    int ls, le, r = 0, lines = 0;
+    for (const char *s; !J->err && (s = cui__ed_jw_next(&w, &ls, &le)) != NULL;) {
+        if ((++lines & 255) == 0 && cui__ed_job_stopped(J)) { J->err = 2; break; }
+        int x, y, k = last ? cui__ed_q_last(Q, s, ls, le, limit, &x, &y) : cui__ed_q_line(Q, s, ls, le, from, &x, &y, NULL);
+        if (k < 0) J->err = 1;
+        else if (k > 0) { J->fa = x; J->fb = y; r = 1; if (!last) break; }
+        if (le >= stop) break;
+    }
+    free(w.scr);
+    return r;
+}
+
+/* The find bar's search, as cui__ed_find does it on the editor's text: forward from `from` to the end, then from the top
+ * to from's line; backward the last match before `from`, else the last one from from's line to the end. */
+static void cui__ed_job_find(cui__ed_job *J) {
+    cui__ed_q Q = { J->q, J->qn, J->cs, J->word, J->rx };
+    if (J->dir > 0) {
+        J->found = cui__ed_jfind(J, &Q, J->fl, J->tlen, J->from, 0, false);
+        if (!J->found && !J->err) J->found = cui__ed_jfind(J, &Q, 0, J->fle, 0, 0, false);
+    } else {
+        J->found = cui__ed_jfind(J, &Q, 0, J->fle, 0, J->from, true);
+        if (!J->found && !J->err) J->found = cui__ed_jfind(J, &Q, J->fl, J->tlen, 0, J->tlen + 1, true);
+    }
+}
+
 static void cui__ed_job_work(cui__ed_job *J) {
     if (J->kind == 1) cui__ed_job_states(J);
     else if (J->kind == 3) cui__ed_job_count(J);
+    else if (J->kind == 4) cui__ed_job_find(J);
     else cui__ed_job_rall(J);
     cui__ed_atomic(&J->done, 1);
     cui__ed_job_release(J);
@@ -2677,6 +2745,58 @@ static bool cui__ed_cjob_step(cui__ed *E, const cui__ed_q *Q) {
     cui__ed_job_go(J);
     if (cui__ed_job_done(J)) return cui__ed_cjob_step(E, Q);   /* it ran here: no thread */
     return true;
+}
+
+/* ---- the find bar's search on another thread ----
+ * On a big document cui__ed_find_go searches only about cui__ed_find_bytes from the caret in the frame; when no match is
+ * there the whole search (cui__ed_find over a snapshot) goes to a job, and the frames meanwhile cost nothing. Its match
+ * is selected when it is done, if the query and the selection are still the ones it began with. An edit meanwhile starts
+ * it again over the text as it is (from where the selection is now); a new query, a selection moved by the user, another
+ * document or closing the bar drops it. */
+static void cui__ed_fjob_start(cui__ed *E, const cui__ed_q *Q, int from, int dir) {
+    cui__ed_state *st = E->st;
+    cui__ed_job_drop(&st->fjob);
+    if (!E->doc || Q->qn <= 0 || Q->qn > 127) return;
+    cui__ed_job *J = calloc(1, sizeof *J);
+    if (!J) return;
+    J->kind = 4;
+    J->qn = Q->qn;
+    memcpy(J->q, Q->q, (size_t)Q->qn);
+    J->cs = Q->cs; J->word = Q->word; J->rx = Q->rx;
+    J->rev = cui_text_doc_revision(E->doc); J->serial = cui__doc_serial(E->doc);
+    from = CUI_CLAMP(from, 0, E->len);
+    int line = cui__ed_line_of(E, from);
+    J->from = from; J->dir = dir; J->fl = cui__ed_ls(E, line); J->fle = cui__ed_end(E, line); J->tlen = E->len;
+    J->sa = st->ed.anchor; J->sc = st->ed.cursor;
+    J->snap = cui__doc_snapshot_range(E->doc, 0, E->len);
+    if (!J->snap) { J->refs = 1; cui__ed_job_release(J); return; }
+    st->fjob = J;
+    cui__ed_job_go(J);
+    if (cui__ed_job_done(J)) cui__ed_fjob_step(E);   /* it ran here: no thread */
+    else cui__wakeup_after(E->ui, 1.0f / 60.0f);
+}
+
+/* once a frame, before the keys: a finished search selects its match */
+static void cui__ed_fjob_step(cui__ed *E) {
+    cui__ed_state *st = E->st;
+    cui__ed_job *J = st->fjob;
+    if (!J) return;
+    cui__ed_q Q = cui__ed_q_of(st);
+    if (st->mode != 1 || !E->doc || cui__doc_serial(E->doc) != J->serial || J->cs != Q.cs || J->word != Q.word || J->rx != Q.rx ||
+        J->qn != Q.qn || memcmp(J->q, Q.q, (size_t)Q.qn) != 0) { cui__ed_job_drop(&st->fjob); return; }
+    if (cui_text_doc_revision(E->doc) != J->rev) {   /* the text changed under it: again, from the selection as the edits moved it */
+        int skip = J->from - CUI_MIN(J->sa, J->sc), dir = J->dir;
+        cui__ed_fjob_start(E, &Q, CUI_MIN(st->ed.cursor, st->ed.anchor) + skip, dir);
+        return;
+    }
+    if (st->ed.cursor != J->sc || st->ed.anchor != J->sa) { cui__ed_job_drop(&st->fjob); return; }   /* the user went elsewhere */
+    if (!cui__ed_job_done(J)) { cui__wakeup_after(E->ui, 1.0f / 60.0f); return; }
+    if (J->found > 0 && !J->err) {
+        st->ed.anchor = J->fa; st->ed.cursor = J->fb;
+        E->reveal = E->center = true;
+        st->pref_col = -1;
+    }
+    cui__ed_job_drop(&st->fjob);
 }
 
 /* An edit replaced lines [la, lb] with lines [la, la + k]: the states below them are kept,
@@ -4476,7 +4596,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
         if (st->rjob) cui__ed_rjob_take(&E, o->read_only);   /* Replace all, done on another thread: applied now, before the frame lays out the text */
         E.wrap = false; E.wcols = 0;
     } else {
-        if (st->doc) { st->doc = NULL; st->ix.ok = false; cui__ed_job_drop(&st->rjob); cui__ed_job_drop(&st->cjob); }   /* was on a document: everything is made again */
+        if (st->doc) { st->doc = NULL; st->ix.ok = false; cui__ed_job_drop(&st->rjob); cui__ed_job_drop(&st->cjob); cui__ed_job_drop(&st->fjob); }   /* was on a document: everything is made again */
         E.buf = buf; E.cap = cap;
         cui__ed_take_splice(ui, st, buf, cap, o->revision);
         E.len = cui__ed_text_sync(ui, st, buf, cap, o->revision);
@@ -4491,6 +4611,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     e->anchor = CUI_CLAMP(e->anchor, 0, E.len);
     st->drag_a = CUI_CLAMP(st->drag_a, 0, E.len);   /* the text may change during a drag */
     st->drag_b = CUI_CLAMP(st->drag_b, 0, E.len);
+    if (st->fjob) cui__ed_fjob_step(&E);   /* the find bar's search on another thread: its match, selected before the keys */
     const char *lang = o->plain ? "text" : o->lang;   /* plain: no colors, whatever the language */
     f.lang_kind = cui__ed_lang_kind(lang);
     bool json = lang && !strcmp(lang, "json");
@@ -4578,7 +4699,8 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     res.splice_inserted = E.rep_on ? E.rep_b1 - E.rep_a : 0;
     res.refused = E.refused;
     if (st->cjob && st->mode != 1) cui__ed_job_drop(&st->cjob);   /* the bar closed: its count is not wanted */
-    res.working = st->sjob || st->rjob || st->cjob;
+    if (st->fjob && st->mode != 1) cui__ed_job_drop(&st->fjob);   /* nor its search */
+    res.working = st->sjob || st->rjob || st->cjob || st->fjob;
     res.bar_open = st->mode != 0;
     res.focused = ui->focus == f.lid || ui->focus == f.fid || ui->focus == f.rid || ui->focus == f.gid;
     res.cursor = e->cursor; res.anchor = e->anchor;

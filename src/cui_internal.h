@@ -1034,6 +1034,8 @@ int cui__snap_pieces(const cui_text_snap *s);
  * the bytes left to count from which the find bar counts on a thread, and the length from which a line is "very long"
  * (only what is in view of it is read) */
 extern int cui__ed_sync_bytes, cui__ed_rall_bytes, cui__ed_copy_bytes, cui__ed_count_bytes, cui__ed_long_bytes;
+/* the document length from which the find bar searches only that many bytes from the caret in a frame (the rest on a thread) */
+extern int cui__ed_find_bytes;
 /* the markdown view's limits (tests lower them): the length from which a text takes the big path (only the
  * blocks near the window are built), the length from which its blocks are cut on another thread, and the
  * first part of such a text cut at once meanwhile */

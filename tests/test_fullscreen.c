@@ -36,6 +36,19 @@ static void pump(cui_app *app, int n) {
 static int ticks;
 static void tick(void *user) { (void)user; ticks++; }
 
+/* A focused text field and frames a second apart (driven here, not by the clock) for `seconds`: the wakeup CUI asks for
+ * afterwards (< 0: none). */
+static float caret_wakeup_after(cui_app *app, int seconds) {
+    cui_ctx *ui = cui_app_ui(app);
+    static char buf[32];
+    for (int i = 0; i <= seconds; i++) {
+        cui_begin_frame(ui, 1.0f);
+        cui_column(ui, .pad = 16) { cui_input(ui, "field", buf, sizeof buf, .autofocus = true); }
+        cui_end_frame(ui);
+    }
+    return cui_next_wakeup(ui);
+}
+
 int main(void) {
     float sys = cui_system_caret_blink();
     expect(sys != 0.0f, "cui_system_caret_blink is a time or -1, never 0");
@@ -116,7 +129,15 @@ int main(void) {
     expect(cui_app_fullscreen_strip(app) == 0, "no strip");
     expect(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION, "the caption is back");
 
+    /* ---- follow_system_caret: a focused field at rest asks for no frame once the system's timeout went by ---- */
+    expect(caret_wakeup_after(app, 12) < 0 || sys > 12.0f, "follow_system_caret: no caret wakeup 12 s after the last input");
     cui_app_destroy(app);
+    cui_app *plain = cui_app_create(&(cui_app_desc){ .title = "cui caret test", .width = 320, .height = 200, .hidden = true,
+                                                     .renderer = CUI_RENDERER_SOFTWARE });
+    if (plain) {
+        expect(caret_wakeup_after(plain, 12) >= 0, "without it the caret still blinks 12 s later");
+        cui_app_destroy(plain);
+    }
     printf("%s\n", failures ? "FAILED" : "PASSED");
     return failures ? 1 : 0;
 }
