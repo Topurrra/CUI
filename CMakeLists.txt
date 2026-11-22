@@ -53,6 +53,8 @@ set(CUI_CORE_SOURCES
     src/cui_markdown.c
     src/cui_mermaid.c
     src/cui_editor.c
+    src/cui_fold.c
+    src/cui_minimap.c
     src/cui_completion.c
     src/cui_textdoc.c
     src/cui_diff.c

@@ -1404,6 +1404,27 @@ SCENE(code_editor_eol) {
     cui_code_editor(ui, "eol-editor", text, sizeof text, .lang = "c", .read_only = true, .height = 120,
                     .eol_hint = "Ada Lovelace, 3 days ago \xC2\xB7 Fix the parser for empty input", .eol_hint_line = 2);
 }
+/* folding and the minimap: a folded function with its box, the strip at the right edge */
+static char edf_src[4096] =
+    "#include <stdio.h>\n\n"
+    "static int clamp(int v, int lo, int hi) {\n    if (v < lo) return lo;\n    if (v > hi) return hi;\n    return v;\n}\n\n"
+    "/* reads one record; returns its size, or -1 at the end */\n"
+    "static int read_record(FILE *f, char *buf, int cap) {\n    int n = 0, c;\n    while ((c = fgetc(f)) != EOF) {\n"
+    "        if (c == '\\n') break;\n        if (n + 1 < cap) buf[n++] = (char)c;\n    }\n    buf[n] = 0;\n"
+    "    return c == EOF && n == 0 ? -1 : n;\n}\n\n"
+    "int main(int argc, char **argv) {\n    FILE *f = argc > 1 ? fopen(argv[1], \"r\") : stdin;\n    char line[256];\n"
+    "    int count = 0, longest = 0;\n    for (int n; (n = read_record(f, line, sizeof line)) >= 0; count++) {\n"
+    "        longest = clamp(n > longest ? n : longest, 0, 255);\n    }\n"
+    "    printf(\"%d records, the longest %d bytes\\n\", count, longest);\n    return 0;\n}\n";
+static void body_code_editor_fold(cui_ctx *ui);
+static void scene_code_editor_fold(cui_ctx *ui, int f) {
+    if (f == -3) cui_code_editor_fold(ui, "fold-editor", CUI_FOLD_CLOSE, 3);   /* clamp() */
+    if (f < 0) return;
+    frame_wrap(ui, body_code_editor_fold);
+}
+static void body_code_editor_fold(cui_ctx *ui) {
+    cui_code_editor(ui, "fold-editor", edf_src, sizeof edf_src, .lang = "c", .height = 260, .folding = true, .minimap = true);
+}
 /* ---- tool panels ---- */
 SCENE(inspector) {
     static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 }, scale[3] = { 1, 1, 1 };
@@ -5137,6 +5158,7 @@ int main(int argc, char **argv) {
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
         { "code-editor-text", scene_code_editor_text, 620, 264, true }, { "code-editor-eol", scene_code_editor_eol, 760, 170, true },
+        { "code-editor-fold", scene_code_editor_fold, 760, 310, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
         { "markdown-select-all", scene_markdown_select_all, 560, 340, true },

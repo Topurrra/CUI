@@ -2347,7 +2347,22 @@ typedef struct cui_code_editor_opts {
     const struct cui_editor_keys *keys;   /* NULL: the usual keys. Else the editor's own commands (undo, redo, cut, copy,
                                 * paste, select all, find, replace, go to line) run on these combinations only, so an app
                                 * can rebind them; see cui_editor_keys_default */
+    bool folding;              /* code folding: a line that starts a block (the next lines that are not blank are indented
+                                * deeper; in markdown a heading, down to the next heading of its level or above) gets a
+                                * marker in a lane at the right of the gutter (shown while the pointer is over the gutter)
+                                * that folds the block to that one line, and back. Folded lines are skipped by drawing,
+                                * scrolling, the caret (Up, Down, Left, Right step over them) and wrapping; a folded line
+                                * shows a marker and a box after its text, and a click on either opens it. A fold opens
+                                * when the caret or a find match goes inside it, or an edit touches its hidden lines (typing
+                                * on the folded line keeps it); a new text opens them all. Keys are the app's: see
+                                * cui_code_editor_fold. Off: nothing changes. On: the lines in view are looked at, nothing more. */
+    bool minimap;              /* an overview strip at the right edge (CUI_MM_WIDTH points): a bar a row, coloured by its
+                                * text, the rows in view in a box; a press or a drag on it scrolls there, the wheel over it
+                                * scrolls the text. A line's bar is made when it first shows on the strip and kept, an edit
+                                * makes only the lines it touched again: meant for texts of a few megabytes (an app turns it
+                                * off for its huge files, as it does colours). Off: nothing changes. */
 } cui_code_editor_opts;
+#define CUI_MM_WIDTH 84   /* the minimap's width, points */
 typedef struct cui_code_editor_result {
     bool changed;              /* the text changed this frame */
     bool refused;              /* an edit did not fit in the capacity and was dropped */
@@ -2393,6 +2408,8 @@ typedef struct cui_code_editor_result {
     int context_line;          /* with it: the line, 1 based */
     int context_offset;        /* with it: the byte under the pointer on the text, -1 in the gutter */
     float context_x, context_y;   /* with it: the pointer, in window points (where the menu opens) */
+    int fold_count;            /* with .folding: the blocks folded now */
+    int hidden_lines;          /* with .folding: the lines they hide */
 } cui_code_editor_result;
 CUI_API cui_code_editor_result cui_code_editor_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_code_editor_opts *opts);
 /* On the editor's next frame: put the caret at a line and column (1 based),
@@ -2440,6 +2457,13 @@ CUI_API bool cui_code_editor_find_state(cui_ctx *ui, const char *id, char *query
 /* Opens the find bar with the replace row, query and replacement filled in
  * (either may be NULL to keep what is there); a read only editor shows find only. */
 CUI_API void cui_code_editor_replace(cui_ctx *ui, const char *id, const char *query, const char *with);
+/* Folding (an editor with .folding), on its next frame: CUI_FOLD_CLOSE folds the innermost block around `line` (1 based;
+ * 0: the caret's line) that is not folded yet, CUI_FOLD_OPEN opens the fold on that line, CUI_FOLD_TOGGLE does one or the
+ * other, CUI_FOLD_ALL folds every block (it reads the whole text once: keep it for texts of a few megabytes) and
+ * CUI_FOLD_OPEN_ALL opens them all. A caret inside what gets folded goes to the end of the folded line. Bind keys to it
+ * as the app likes (the editor has none of its own). */
+enum { CUI_FOLD_TOGGLE = 1, CUI_FOLD_CLOSE, CUI_FOLD_OPEN, CUI_FOLD_ALL, CUI_FOLD_OPEN_ALL };
+CUI_API void cui_code_editor_fold(cui_ctx *ui, const char *id, int action, int line);
 #ifndef __cplusplus
 #define cui_code_editor(ui, id, buf, cap, ...) cui_code_editor_ex((ui), (id), (buf), (cap), CUI__OPTS(cui_code_editor_opts, __VA_ARGS__))
 #endif
