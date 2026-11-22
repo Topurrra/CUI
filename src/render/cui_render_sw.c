@@ -2455,7 +2455,11 @@ static int cui__sw_plan(cui_sw_renderer *r, int tw, int th, int width, int heigh
 void cui__sw_render_screenshot(cui_sw_renderer *r, const cui_draw_data *dd, void *rgba, int stride) {
     int width = dd->width_px, height = dd->height_px;
     if (!r || width <= 0 || height <= 0) return;
-    cui__sw_paint_rect(r, dd, rgba, width, height, stride, CUI_SW_RGBA, 0, 0, width, height);
+    bool inc = r->incremental;
+    r->incremental = false;   /* every tile painted: the buffer may have been cleared or be another one at the same address */
+    cui_sw_render(r, dd, rgba, width, height, stride, CUI_SW_RGBA);
+    r->incremental = inc;
+    r->last_px = NULL;        /* the window's next frame paints in full too (its pixels are not these) */
 }
 
 void cui_sw_render(cui_sw_renderer *r, const cui_draw_data *dd, void *pixels, int width, int height, int stride, cui_sw_format fmt) {

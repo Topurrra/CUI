@@ -489,6 +489,8 @@ static bool cui__win32_dt_register(cui_app *app, HWND hwnd) {
     dt->app = app;
     if (RegisterDragDrop(hwnd, &dt->iface) != S_OK) { free(dt); return false; }
     return true;   /* the registration holds the other reference; RevokeDragDrop releases it */
+}
+
 /* Maximize, minimize and restore play a DWM animation that holds the swap chain: a vsync swap
  * inside it blocks the message loop for the whole animation, about a second. Present without
  * vsync while it runs, so frames keep coming and DWM animates the latest one; the first swap
@@ -603,6 +605,10 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             UINT c = (UINT)(wp & 0xFFF0);
             if (c == SC_MAXIMIZE || c == SC_MOVE || c == SC_SIZE) return 0;   /* fullscreen: not the system's to move or size */
         }
+        {   /* the title bar's buttons and double-click, the taskbar: DefWindowProc runs the command */
+            UINT cmd = (UINT)wp & 0xFFF0;
+            if (cmd == SC_MAXIMIZE || cmd == SC_MINIMIZE || cmd == SC_RESTORE) cui__win32_transition(app);
+        }
         break;
     case WM_SIZE:
         if (w && wp != SIZE_MINIMIZED) cui__win32_fs_post(app, w);   /* restored from minimized: a pending fullscreen goes on */
@@ -614,11 +620,6 @@ static LRESULT CALLBACK cui__win32_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         }
         return 0;
     case WM_ENTERSIZEMOVE: if (w) w->in_size_move = true; return 0;
-    case WM_SYSCOMMAND: {   /* the title bar's buttons and double-click, the taskbar */
-        UINT cmd = (UINT)wp & 0xFFF0;
-        if (cmd == SC_MAXIMIZE || cmd == SC_MINIMIZE || cmd == SC_RESTORE) cui__win32_transition(app);
-        break;   /* DefWindowProc runs the command */
-    }
     case WM_EXITSIZEMOVE: if (w) w->in_size_move = false; return 0;
     case WM_PAINT: {
         PAINTSTRUCT ps;

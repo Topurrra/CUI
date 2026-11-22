@@ -38,25 +38,25 @@ int main(void) {
     frame(ui);
     frame(ui);
     cui_id c0 = cui_make_id(ui, "c0"), c2 = cui_make_id(ui, "c2");
-    CHECK(cui_focus_get(ui) == 0 && !cui_focus_visible(ui));
+    CHECK(cui_focus_get(ui) == 0 && !cui_focus_visible(ui, cui_focus_get(ui)));
 
     key(ui, CUI_KEY_TAB);                       /* Tab: the first card, from the keyboard */
     CHECK(cui_focus_get(ui) == c0);
-    CHECK(cui_focus_visible(ui));
+    CHECK(cui_focus_visible(ui, cui_focus_get(ui)));
 
     cui_focus_set(ui, c2, true);                /* the app moves it */
     frame(ui);
-    CHECK(cui_focus_get(ui) == c2 && cui_focus_visible(ui));
+    CHECK(cui_focus_get(ui) == c2 && cui_focus_visible(ui, cui_focus_get(ui)));
     key(ui, CUI_KEY_ENTER);                     /* Enter clicks the card that has it */
     CHECK(g_clicked[2] == 1 && g_clicked[0] == 0 && g_clicked[1] == 0);
 
     cui_focus_set(ui, c0, false);               /* as a click gives it: no ring, Enter does nothing */
     frame(ui);
-    CHECK(cui_focus_get(ui) == c0 && !cui_focus_visible(ui));
+    CHECK(cui_focus_get(ui) == c0 && !cui_focus_visible(ui, cui_focus_get(ui)));
 
     cui_focus_set(ui, 0, true);                 /* 0 drops it */
     frame(ui);
-    CHECK(cui_focus_get(ui) == 0 && !cui_focus_visible(ui));
+    CHECK(cui_focus_get(ui) == 0 && !cui_focus_visible(ui, cui_focus_get(ui)));
 
     cui_destroy(ui);
     cui_sw_destroy(sw);
