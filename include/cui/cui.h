@@ -342,6 +342,12 @@ CUI_API const char *cui_get_clipboard_text(cui_ctx *ui);
 CUI_API bool cui_key_pressed(cui_ctx *ui, cui_key key);          /* pressed this frame (with repeat) */
 CUI_API bool cui_key_down(cui_ctx *ui, cui_key key);
 CUI_API void cui_key_consume(cui_ctx *ui, cui_key key);       /* takes this frame's press away from whatever reads keys after this call (an app handling a key its editor would also act on) */
+/* What this frame's components will read, for an app that records or filters input (a keyboard macro): how many
+ * times a key was pressed (with repeat, 0 to 255), and the text typed (NUL terminated, *len its bytes; control
+ * characters are never in it). cui_typed_text_consume takes the text away, as cui_key_consume does for a key. */
+CUI_API int cui_key_presses(cui_ctx *ui, cui_key key);
+CUI_API const char *cui_typed_text(cui_ctx *ui, int *len);
+CUI_API void cui_typed_text_consume(cui_ctx *ui);
 CUI_API bool cui_shortcut(cui_ctx *ui, int mods, cui_key key);   /* e.g. cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_K) */
 CUI_API int cui_key_mods(cui_ctx *ui);
 CUI_API cui_vec2 cui_mouse_pos(cui_ctx *ui);
