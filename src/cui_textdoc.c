@@ -575,12 +575,20 @@ static void cui__td_pcs_add(cui__tpc **arr, int *n, int *cap, cui__tpc p, bool f
     (*n)++;
 }
 
+/* Keeps hmax groups: the oldest go first. Only a done group can go from the front (the text has it); with the text
+ * before the oldest group (all undone, after cui_text_doc_set_history), the redo groups farthest from it go instead. */
 static void cui__td_trim(cui_text_doc *d) {
     while (d->hn > 0 && d->h[d->hn - 1].group - d->h[0].group + 1 > d->hmax) {
         int g = d->h[0].group, k = 0;
-        while (k < d->hn && d->h[k].group == g) { d->base_state = d->h[k].after; cui__td_rec_free(&d->h[k++]); }
-        memmove(d->h, d->h + k, sizeof *d->h * (size_t)(d->hn - k));
-        d->hn -= k; d->hpos -= k;
+        while (k < d->hn && d->h[k].group == g) k++;
+        if (k <= d->hpos) {
+            for (int i = 0; i < k; i++) { d->base_state = d->h[i].after; cui__td_rec_free(&d->h[i]); }
+            memmove(d->h, d->h + k, sizeof *d->h * (size_t)(d->hn - k));
+            d->hn -= k; d->hpos -= k;
+        } else {
+            g = d->h[d->hn - 1].group;
+            while (d->hn > d->hpos && d->h[d->hn - 1].group == g) cui__td_rec_free(&d->h[--d->hn]);
+        }
     }
 }
 
@@ -595,7 +603,9 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
     int start = 0, bi = -1;
     if (n > 0) bi = cui__td_place(d, t, n, own, release, user, &start, nl, nn);
     else { free(nl); if (own) { if (release) release(own, user); else free(own); } }   /* a removal: nothing to keep */
-    /* the history: redo steps go, then the edit joins the last record or starts one */
+    /* the history: redo steps go, then the edit joins the last record or starts one. After an undo it is a step of its
+     * own even when merged: the step before the undone ones was finished, and joining it would undo both at once */
+    if (d->hpos < d->hn) merge = false;
     for (int i = d->hpos; i < d->hn; i++) cui__td_rec_free(&d->h[i]);
     d->hn = d->hpos;
     cui__trec *q = NULL;
