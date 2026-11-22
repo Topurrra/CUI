@@ -2233,6 +2233,13 @@ CUI_API cui_text_prepared *cui_text_prepare(char *text, size_t len);
 CUI_API void cui_text_prepared_free(cui_text_prepared *prep);
 CUI_API int cui_text_prepared_length(const cui_text_prepared *prep);
 CUI_API const char *cui_text_prepared_text(const cui_text_prepared *prep);   /* its bytes (not NUL terminated) */
+/* As cui_text_prepare, for a text the caller shares (an index of the same bytes): its bytes are kept as they are,
+ * carriage returns too (as cui_text_doc_adopt keeps them), and never freed: a document that takes the prepared text
+ * reads text[0, len) where it lies and calls release(text, user) (NULL: free()) once the document and its snapshots
+ * let go of it; a text under 64 KB is copied and released at once. Every path that drops the prepared text unused
+ * calls release too, as does a failure here (then NULL). text must not change until released. A code editor
+ * without a document copies the bytes in as any edit's (dropping carriage returns). Call it on any thread. */
+CUI_API cui_text_prepared *cui_text_prepare_adopt(char *text, size_t len, void (*release)(char *text, void *user), void *user);
 /* replaces bytes [start, end) with the prepared text as one undo step, as cui_text_doc_replace does;
  * takes prep. A replace of the whole text is O(pieces): even the longest line comes with it. */
 CUI_API bool cui_text_doc_replace_prepared(cui_text_doc *doc, int start, int end, cui_text_prepared *prep);

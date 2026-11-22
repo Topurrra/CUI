@@ -1027,6 +1027,8 @@ cui_text_snap *cui__doc_snapshot_range(const cui_text_doc *d, int a, int b);
 bool cui__doc_edit_prepared(cui_text_doc *d, int a, int b, cui_text_prepared *t, int caret);
 /* takes a prepared text apart: its bytes (returned), length, line breaks and longest line; t is freed */
 char *cui__prepared_take(cui_text_prepared *t, int *len, int **nl, int *nn, int *maxlen, int *maxcnt);
+/* true for cui_text_prepare_adopt's: its bytes are given back with *release(p, *user), never freed */
+bool cui__prepared_adopted(const cui_text_prepared *t, void (**release)(char *, void *), void **user);
 const char *cui__snap_piece(const cui_text_snap *s, int i, int *a, int *b);
 int cui__snap_pieces(const cui_text_snap *s);
 /* the code editor's limits (tests lower them): line states found on the UI thread in a frame (bytes of text), the

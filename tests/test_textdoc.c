@@ -328,12 +328,68 @@ static void test_prepared(void) {
     free(r.s); free(past.s);
 }
 
+/* a shared prepared text (cui_text_prepare_adopt): read where it lies with its carriage returns, through undo and redo;
+ * given back once, when the document and its snapshots have let go; a small one copied and given back at once; every
+ * path that does not use it gives it back too */
+typedef struct { int calls; const char *last; } give_back;
+static void gb_release(char *p, void *u) { give_back *g = (give_back *)u; g->calls++; g->last = p; free(p); }
+
+static void test_prepared_adopt(void) {
+    printf("text doc: shared prepared texts\n");
+    give_back g = { 0 };
+    int n = 200000;
+    char *t = malloc((size_t)n);
+    random_text(t, n);
+    for (int i = 5; i < n; i += 37) t[i] = '\r';
+    ref r = { 0 };
+    ref_set(&r, t, n);
+    cui_text_doc *d = cui_text_doc_new("old text\nhere", -1);
+    cui_text_prepared *p = cui_text_prepare_adopt(t, (size_t)n, gb_release, &g);
+    CHECK(p && cui_text_prepared_length(p) == n && cui_text_prepared_text(p) == t);
+    CHECK(cui_text_doc_replace_prepared(d, 0, cui_text_doc_length(d), p));
+    CHECK(g.calls == 0 && same(d, &r, false));
+    cui_text_doc_iter it = cui_text_doc_iter_at(d, 0, -1);
+    CHECK(cui_text_doc_iter_next(&it) && it.p == t && it.len == n);   /* in place: no copy */
+    CHECK(cui_text_doc_undo(d, NULL) && cui_text_doc_length(d) == 13 && g.calls == 0);
+    CHECK(cui_text_doc_redo(d, NULL) && g.calls == 0 && same(d, &r, true));
+    cui_text_snap *s = cui_text_doc_snapshot(d);
+    cui_text_doc_free(d);
+    CHECK(g.calls == 0);   /* the snapshot still reads it */
+    char head[16];
+    CHECK(cui_text_snap_read(s, 0, 16, head) == 16 && memcmp(head, r.s, 16) == 0);
+    cui_text_snap_free(s);
+    CHECK(g.calls == 1 && g.last == t);
+
+    /* a small text: copied in, given back at once; the bytes stay right */
+    g.calls = 0;
+    char *small = malloc(6);
+    memcpy(small, "a\r\nb\r\n", 6);
+    d = cui_text_doc_new("x", -1);
+    CHECK(cui_text_doc_replace_prepared(d, 0, 1, cui_text_prepare_adopt(small, 6, gb_release, &g)));
+    CHECK(g.calls == 1 && cui_text_doc_length(d) == 6 && cui_text_doc_char(d, 1) == '\r' && cui_text_doc_line_count(d) == 3);
+    /* not used: freed, refused, a removal, no change; a NULL release frees it */
+    cui_text_prepared_free(cui_text_prepare_adopt(malloc(10), 10, gb_release, &g));
+    CHECK(g.calls == 2);
+    CHECK(!cui_text_doc_replace_prepared(NULL, 0, 0, cui_text_prepare_adopt(malloc(10), 10, gb_release, &g)));
+    CHECK(g.calls == 3);
+    CHECK(cui_text_doc_replace_prepared(d, 0, 3, cui_text_prepare_adopt(malloc(1), 0, gb_release, &g)));
+    CHECK(g.calls == 4 && cui_text_doc_length(d) == 3);
+    CHECK(!cui_text_doc_replace_prepared(d, 1, 1, cui_text_prepare_adopt(malloc(1), 0, gb_release, &g)));
+    CHECK(g.calls == 5);
+    CHECK(cui_text_doc_replace_prepared(d, 0, 0, cui_text_prepare_adopt(calloc(70000, 1), 70000, NULL, NULL)));
+    CHECK(cui_text_doc_length(d) == 70003);
+    CHECK(cui_text_prepare_adopt(NULL, 5, gb_release, &g) == NULL && g.calls == 5);
+    cui_text_doc_free(d);
+    free(r.s);
+}
+
 int main(void) {
     test_prepared();
     test_random_edits();
     test_undo();
     test_snapshot();
     test_big();
+    test_prepared_adopt();
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }
