@@ -1479,6 +1479,15 @@ static bool cui__ed_replace_prepared(cui__ed *E, int a, int b, cui_text_prepared
     if (E->ro) { cui_text_prepared_free(t); return false; }
     if (!E->doc) {
         int n, *nl, nn;
+        void (*release)(char *, void *);
+        void *user;
+        if (cui__prepared_adopted(t, &release, &user)) {   /* shared bytes, carriage returns kept: copied in, then given back */
+            char *p = cui__prepared_take(t, &n, &nl, &nn, NULL, NULL);
+            free(nl);
+            bool ok = cui__ed_replace_x(E, a, b, p, n, 3, NULL);
+            release(p, user);
+            return ok;
+        }
         char *own = cui__prepared_take(t, &n, &nl, &nn, NULL, NULL);
         free(nl);
         E->hint_cr = 1; E->hint_nl = nn + 1;   /* no carriage returns left; its line breaks counted */

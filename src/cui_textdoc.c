@@ -590,7 +590,7 @@ bool cui__doc_edit(cui_text_doc *d, int a, int b, const char *t, int n, char *ow
     int nlc = nl ? nn : n > 0 ? (int)cui__count_byte(t, (size_t)n, '\n') : 0;
     int start = 0, bi = -1;
     if (n > 0) bi = cui__td_place(d, t, n, own, release, user, &start, nl, nn);
-    else free(nl);
+    else { free(nl); if (own) { if (release) release(own, user); else free(own); } }   /* a removal: nothing to keep */
     /* the history: redo steps go, then the edit joins the last record or starts one */
     for (int i = d->hpos; i < d->hn; i++) cui__td_rec_free(&d->h[i]);
     d->hn = d->hpos;
@@ -902,14 +902,22 @@ struct cui_text_prepared {
     char *p; int len;
     int *nl, nn;                /* its line breaks (offsets of the line feeds) */
     int maxlen, maxcnt;         /* its longest line, and how many are that long */
+    void (*release)(char *p, void *user);   /* cui_text_prepare_adopt: how p is given back (NULL: free()) */
+    void *user;
 };
 
-cui_text_prepared *cui_text_prepare(char *text, size_t len) {
+static void cui__prep_give_back(char *p, void (*release)(char *, void *), void *user) {
+    if (release) release(p, user);
+    else free(p);
+}
+
+static cui_text_prepared *cui__prepare(char *text, size_t len, bool keep_cr, void (*release)(char *, void *), void *user) {
     if (!text) return NULL;
     cui_text_prepared *t = calloc(1, sizeof *t);
-    if (!t || len > (size_t)INT_MAX - 2) { free(t); free(text); return NULL; }
+    if (!t || len > (size_t)INT_MAX - 2) { free(t); cui__prep_give_back(text, release, user); return NULL; }
+    t->release = release; t->user = user;
     /* carriage returns out, in place (the code editor never keeps them) */
-    const char *cr = cui__find_byte(text, len, '\r');
+    const char *cr = keep_cr ? NULL : cui__find_byte(text, len, '\r');
     if (cr) {
         char *w = text + (cr - text);
         for (const char *q = cr; q < text + len; q++) if (*q != '\r') *w++ = *q;
@@ -917,7 +925,7 @@ cui_text_prepared *cui_text_prepare(char *text, size_t len) {
     }
     int n = (int)len, k = (int)cui__count_byte(text, len, '\n');
     t->nl = malloc(sizeof(int) * (size_t)(k > 0 ? k : 1));
-    if (!t->nl) { free(t); free(text); return NULL; }
+    if (!t->nl) { free(t); cui__prep_give_back(text, release, user); return NULL; }
     t->nn = cui__fill_nl(text, 0, n, t->nl);
     int m = 0, cnt = 0, last = 0;
     for (int i = 0; i < t->nn; i++) {
@@ -930,9 +938,16 @@ cui_text_prepared *cui_text_prepare(char *text, size_t len) {
     return t;
 }
 
+cui_text_prepared *cui_text_prepare(char *text, size_t len) { return cui__prepare(text, len, false, NULL, NULL); }
+
+cui_text_prepared *cui_text_prepare_adopt(char *text, size_t len, void (*release)(char *text, void *user), void *user) {
+    return cui__prepare(text, len, true, release, user);
+}
+
 void cui_text_prepared_free(cui_text_prepared *t) {
     if (!t) return;
-    free(t->p); free(t->nl); free(t);
+    cui__prep_give_back(t->p, t->release, t->user);
+    free(t->nl); free(t);
 }
 int cui_text_prepared_length(const cui_text_prepared *t) { return t ? t->len : 0; }
 const char *cui_text_prepared_text(const cui_text_prepared *t) { return t && t->p ? t->p : ""; }
@@ -946,13 +961,21 @@ char *cui__prepared_take(cui_text_prepared *t, int *len, int **nl, int *nn, int 
     return p;
 }
 
+bool cui__prepared_adopted(const cui_text_prepared *t, void (**release)(char *, void *), void **user) {
+    if (release) *release = t->release;
+    if (user) *user = t->user;
+    return t->release != NULL;
+}
+
 bool cui__doc_edit_prepared(cui_text_doc *d, int a, int b, cui_text_prepared *t, int caret) {
     int len = TN(d->root).sl, n, *nl, nn, mx, mc;
     a = CUI_CLAMP(a, 0, len); b = CUI_CLAMP(b, a, len);
+    void (*release)(char *, void *) = t->release;
+    void *user = t->user;
     char *p = cui__prepared_take(t, &n, &nl, &nn, &mx, &mc);
     bool whole = a == 0 && b == len;   /* the new text is all of it: its longest line is the text's */
     if (whole) { d->maxskip = true; d->hmaxlen = mx; d->hmaxcnt = mc; }
-    bool ok = cui__doc_edit(d, a, b, p, n, p, NULL, NULL, caret, false, nl, nn);
+    bool ok = cui__doc_edit(d, a, b, p, n, p, release, user, caret, false, nl, nn);
     d->maxskip = false;
     return ok;
 }

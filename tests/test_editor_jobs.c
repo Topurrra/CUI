@@ -635,6 +635,8 @@ static void test_long_lines(void) {
  * documents and buffers, wrapped or not, whole and partial replaces; the same text, caret, size and drawing, one undo
  * step back to the old text, and redo. */
 static void frame_off(cui_ctx *ua, ej *A, cui_ctx *ub, ej *B) { jobs_off(); frame1(ua, A); frame1(ub, B); }   /* nothing on jobs */
+static int g_released;
+static void count_release(char *p, void *u) { (void)u; g_released++; free(p); }
 static void test_prepared(void) {
     printf("code editor: a prepared text against the same text given whole\n");
     jobs_off();
@@ -656,7 +658,10 @@ static void test_prepared(void) {
         int sel = round % 2 ? -1 : 10;
         char *own = malloc(n1 + 1);
         memcpy(own, t1, n1 + 1);
-        cui_code_editor_edit_prepared(ua, "ed", a, b, cui_text_prepare(own, n1), sel, sel);
+        /* every third round a shared text (cui_text_prepare_adopt), without carriage returns on a document (it keeps them) */
+        bool adopt = round % 3 == 2 && (!doc || round % 4 != 1);
+        int released = g_released;
+        cui_code_editor_edit_prepared(ua, "ed", a, b, adopt ? cui_text_prepare_adopt(own, n1, count_release, NULL) : cui_text_prepare(own, n1), sel, sel);
         cui_code_editor_edit(ub, "ed", a, b, t1, sel, sel);
         for (int i = 0; i < 3; i++) frame_off(ua, &A, ub, &B);
         const char *why = differs(ua, &A, ub, &B);
@@ -678,6 +683,7 @@ static void test_prepared(void) {
         }
         cui_destroy(ua); cui_destroy(ub);
         ej_free(&A); ej_free(&B);
+        if (adopt) CHECK(g_released == released + 1);   /* given back once: by the buffer at once, by the document at its end */
         free(t0); free(t1);
     }
 }
