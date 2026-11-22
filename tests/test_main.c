@@ -10448,6 +10448,111 @@ static void test_log_view_scan(void) {
     cui_destroy(ui);
 }
 
+/* A buffer over the app's own lines (cui_log_init_source): nothing copied, the view asks for each line. */
+static int g_src_calls;
+static bool src_big_line(void *user, uint64_t seq, cui_log_line *out, const char **text) {
+    static char t[64];
+    (void)user;
+    g_src_calls++;
+    if (seq >= 1000000) return false;
+    out->len = (uint32_t)lv_line(seq, t, sizeof t);
+    out->level = (uint8_t)(seq % 5);
+    *text = t;   /* valid until the next call */
+    return true;
+}
+static const char *g_src_small[8];
+static int g_src_small_n;
+static bool src_small_line(void *user, uint64_t seq, cui_log_line *out, const char **text) {
+    (void)user;
+    if (seq >= (uint64_t)g_src_small_n) return false;
+    out->len = (uint32_t)strlen(g_src_small[seq]);
+    out->level = seq == 0 ? CUI_LOG_WARN : CUI_LOG_INFO;
+    *text = g_src_small[seq];
+    return true;
+}
+static void test_log_source(void) {
+    printf("log view: lines kept by the app (cui_log_init_source)\n");
+    enum { N = 1000000 };
+    static cui_log_buffer lb;
+    cui_log_init_source(&lb, src_big_line, NULL);
+    for (int i = 0; i < N; i++) cui_log_source_push(&lb, (cui_log_level)(i % 5));
+    CHECK(lb.count == N && lb.total == (uint64_t)N && lb.lines == NULL && lb.text == NULL);
+    CHECK(lb.level_count[CUI_LOG_WARN] == N / 5 && lb.level_count[CUI_LOG_TRACE] == N / 5);
+    CHECK(cui_log_get(&lb, 0, NULL) == NULL);
+    cui_log_append(&lb, CUI_LOG_INFO, "ignored");   /* no storage of its own */
+    CHECK(lb.count == N && lb.total == (uint64_t)N);
+
+    cui_ctx *ui = new_ctx();
+    logv_ctx a = { &lb, false, 0 };
+    char head[96], want_head[96];
+    int rows;
+    uint64_t per;
+    /* nothing hidden: no scan, only the lines in view are asked for, and copy all is every line */
+    uint64_t c0 = cui__logv_scan_rows;
+    g_src_calls = 0;
+    lv_settle(ui, &a, &per, 50);
+    CHECK(cui__logv_scan_rows == c0 && g_src_calls > 0 && g_src_calls < 2000);
+    size_t want = lv_expect(&lb, 31u, "", want_head, sizeof want_head, &rows);
+    size_t got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0);
+    /* a level off and a filter: the same rows as a buffer holding these lines, a slice a frame */
+    click_at(ui, build_logv, &a, 35, 24);   /* Trace */
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    int fr = lv_settle(ui, &a, &per, 400);
+    CHECK(fr >= 4 && per < (uint64_t)N / 4);
+    want = lv_expect(&lb, 30u, "", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(got == want && strcmp(head, want_head) == 0);
+    lv_type_filter(ui, &a, "slow");
+    lv_settle(ui, &a, &per, 800);
+    want = lv_expect(&lb, 30u, "slow", want_head, sizeof want_head, &rows);
+    got = lv_copy_all(ui, &a, head, sizeof head);
+    CHECK(rows > 0 && got == want && strcmp(head, want_head) == 0);
+    cui_destroy(ui);
+
+    /* raw bytes: control characters show, copy and match as spaces; a line still being written is popped and
+     * pushed again; Clear empties the view and later lines show */
+    static cui_log_buffer sb;
+    g_src_small[0] = "alpha\tone";
+    g_src_small[1] = "beta\x01two";
+    g_src_small[2] = "gamma";
+    g_src_small_n = 3;
+    cui_log_init_source(&sb, src_small_line, NULL);
+    for (int i = 0; i < 3; i++) cui_log_source_push(&sb, i == 0 ? CUI_LOG_WARN : CUI_LOG_INFO);
+    ui = new_ctx();
+    logv_ctx sa = { &sb, false, 0 };
+    lv_settle(ui, &sa, &per, 50);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(strcmp(g_clip, "warn  alpha one\ninfo  beta two\ninfo  gamma") == 0);
+    cui_log_source_pop(&sb, CUI_LOG_INFO);
+    CHECK(sb.count == 2 && sb.total == 2 && sb.level_count[CUI_LOG_INFO] == 1);
+    g_src_small[2] = "gamma three";
+    cui_log_source_push(&sb, CUI_LOG_INFO);
+    lv_settle(ui, &sa, &per, 50);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(strcmp(g_clip, "warn  alpha one\ninfo  beta two\ninfo  gamma three") == 0);
+    lv_type_filter(ui, &sa, "A O");   /* the tab matches a space */
+    lv_settle(ui, &sa, &per, 50);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(strcmp(g_clip, "warn  alpha one") == 0);
+    lv_type_filter(ui, &sa, "");
+    cui_log_source_shift(&sb, CUI_LOG_WARN);   /* the app keeps fewer lines: the oldest goes */
+    CHECK(sb.count == 2 && sb.total == 3 && sb.level_count[CUI_LOG_WARN] == 0 && sb.level_count[CUI_LOG_INFO] == 2);
+    lv_settle(ui, &sa, &per, 50);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(strcmp(g_clip, "info  beta two\ninfo  gamma three") == 0);
+    cui_log_clear(&sb);
+    CHECK(sb.count == 0 && sb.total == 3 && sb.level_count[CUI_LOG_WARN] == 0);
+    g_src_small[3] = "delta";
+    g_src_small_n = 4;
+    cui_log_source_push(&sb, CUI_LOG_INFO);
+    lv_settle(ui, &sa, &per, 50);
+    got = lv_copy_all(ui, &sa, head, sizeof head);
+    CHECK(sb.count == 1 && strcmp(g_clip, "info  delta") == 0);
+    (void)got;
+    cui_destroy(ui);
+}
+
 
 static void test_code_editor_mdwrite(void) {
     printf("code editor: markdown list continuation, Tab in lists, cui_code_editor_edit\n");
@@ -14905,6 +15010,7 @@ int main(void) {
     test_code_editor_mdwrite();
     test_log_view_settles();
     test_log_view_scan();
+    test_log_source();
     test_code_editor_big();
     test_code_editor_replace_all();
     test_code_editor_shared();

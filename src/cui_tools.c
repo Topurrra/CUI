@@ -530,17 +530,68 @@ void cui_log_clear(cui_log_buffer *b) {
 }
 
 const cui_log_line *cui_log_get(const cui_log_buffer *b, int i, const char **text) {
-    if (!b || i < 0 || i >= b->count) { if (text) *text = NULL; return NULL; }
+    if (!b || b->source || i < 0 || i >= b->count) { if (text) *text = NULL; return NULL; }
     const cui_log_line *l = &b->lines[(b->first + i) % b->line_cap];
     if (text) *text = b->text + l->offset;
     return l;
 }
 
-/* line number (total - count .. total - 1) to its record */
-static const cui_log_line *cui__log_at(const cui_log_buffer *b, uint64_t seq) {
+void cui_log_init_source(cui_log_buffer *b, cui_log_source_fn line, void *user) {
+    if (!b) return;
+    memset(b, 0, sizeof *b);
+    b->source = line;
+    b->source_user = user;
+}
+
+void cui_log_source_push(cui_log_buffer *b, cui_log_level level) {
+    if (!b || !b->source || b->count >= 0x7FFFFFFF) return;
+    if ((unsigned)level >= CUI_LOG_LEVEL_COUNT) level = CUI_LOG_INFO;
+    b->count++;
+    b->total++;
+    b->level_count[level]++;
+}
+
+void cui_log_source_pop(cui_log_buffer *b, cui_log_level level) {
+    if (!b || !b->source || b->total == 0) return;
+    if ((unsigned)level >= CUI_LOG_LEVEL_COUNT) level = CUI_LOG_INFO;
+    if (b->count > 0) {   /* else it was cleared from the view already */
+        b->count--;
+        if (b->level_count[level] > 0) b->level_count[level]--;
+    }
+    b->total--;
+}
+
+void cui_log_source_shift(cui_log_buffer *b, cui_log_level level) {
+    if (!b || !b->source || b->count <= 0) return;
+    if ((unsigned)level >= CUI_LOG_LEVEL_COUNT) level = CUI_LOG_INFO;
+    b->count--;   /* the line numbers stay: the oldest one is now total - count */
+    if (b->level_count[level] > 0) b->level_count[level]--;
+}
+
+/* Line number (total - count .. total - 1) to its record and its text. A source buffer's line is
+ * filled in *tmp and its text is the app's: valid until the next call, not terminated, control
+ * characters as they are (see cui__log_blank). NULL when it is not there. */
+static const cui_log_line *cui__log_at(const cui_log_buffer *b, uint64_t seq, cui_log_line *tmp, const char **text) {
     uint64_t oldest = b->total - (uint64_t)b->count;
     if (seq < oldest || seq >= b->total) return NULL;
-    return &b->lines[(b->first + (int)(seq - oldest)) % b->line_cap];
+    if (b->source) {
+        const char *t = NULL;
+        memset(tmp, 0, sizeof *tmp);
+        if (!b->source(b->source_user, seq, tmp, &t)) return NULL;
+        if (!t) { t = ""; tmp->len = 0; }
+        if (tmp->len > 0x7FFFFFFFu) tmp->len = 0x7FFFFFFFu;
+        if (tmp->level >= CUI_LOG_LEVEL_COUNT) tmp->level = CUI_LOG_INFO;
+        *text = t;
+        return tmp;
+    }
+    const cui_log_line *l = &b->lines[(b->first + (int)(seq - oldest)) % b->line_cap];
+    *text = b->text + l->offset;
+    return l;
+}
+
+/* a source line's bytes as a buffer of its own keeps them: control characters as spaces */
+static void cui__log_blank(char *s, size_t n) {
+    for (size_t i = 0; i < n; i++) if ((unsigned char)s[i] < 0x20 || s[i] == 0x7F) s[i] = ' ';
 }
 
 /* ======================================================================== */
@@ -583,6 +634,18 @@ static int cui__ci_find(const char *h, int hn, const char *q, int qn) {
     for (int i = 0; i + qn <= hn; i++) {
         int k = 0;
         while (k < qn && cui__ascii_lower((unsigned char)h[i + k]) == cui__ascii_lower((unsigned char)q[k])) k++;
+        if (k == qn) return i;
+    }
+    return -1;
+}
+
+/* the same over a source line's raw bytes, which match as shown: a control character as a space */
+static inline int cui__log_fold(unsigned char c) { return c < 0x20 || c == 0x7F ? ' ' : cui__ascii_lower(c); }
+static int cui__ci_find_raw(const char *h, int hn, const char *q, int qn) {
+    if (qn <= 0) return 0;
+    for (int i = 0; i + qn <= hn; i++) {
+        int k = 0;
+        while (k < qn && cui__log_fold((unsigned char)h[i + k]) == cui__ascii_lower((unsigned char)q[k])) k++;
         if (k == qn) return i;
     }
     return -1;
@@ -644,17 +707,20 @@ static int cui__logv_refresh(cui_ctx *ui, cui__logv_state *s, const cui_log_buff
     uint64_t budget = CUI__LOGV_SCAN_BUDGET;
     uint64_t seq = s->scanned;
     for (; seq < b->total && budget > 0; seq++) {
-        const cui_log_line *l = cui__log_at(b, seq);
+        cui_log_line tmp;
+        const char *tx = NULL;
+        const cui_log_line *l = cui__log_at(b, seq, &tmp, &tx);
         uint64_t cost = CUI__LOGV_LINE_COST;
         if (l && qn && (mask & (1u << l->level))) cost += l->len;
         budget = cost >= budget ? 0 : budget - cost;
         cui__logv_scan_rows++;
         if (!l || !(mask & (1u << l->level))) continue;
-        if (qn && cui__ci_find(b->text + l->offset, (int)l->len, s->applied, qn) < 0) continue;
+        if (qn && (b->source ? cui__ci_find_raw(tx, (int)l->len, s->applied, qn) : cui__ci_find(tx, (int)l->len, s->applied, qn)) < 0) continue;
         if (s->nrows >= s->cap) {
-            /* at most one entry per line the buffer can hold */
+            /* at most one entry per line the buffer can hold (a source buffer: per line it has) */
             int ncap = s->cap ? s->cap * 2 : 256;
-            if (ncap > b->line_cap) ncap = b->line_cap;
+            int most = b->source ? b->count : b->line_cap;
+            if (ncap > most) ncap = most;
             if (ncap <= s->nrows) ncap = s->nrows + 1;
             s->rows = cui__realloc(ui, s->rows, sizeof(uint64_t) * (size_t)ncap);
             s->cap = ncap;
@@ -688,14 +754,16 @@ static void cui__logv_copy(cui_ctx *ui, const cui__logv_state *s, const cui_log_
     if (s->has_sel) { lo = CUI_MIN(s->anchor, s->cursor); hi = CUI_MAX(s->anchor, s->cursor); }
     int a = cui__logv_lower(s, lo), e = s->nrows;
     size_t total = 1;
+    cui_log_line tmp;
+    const char *tx = NULL;
     for (int i = a; i < e && cui__logv_at(s, i) <= hi; i++) {
-        const cui_log_line *l = cui__log_at(b, cui__logv_at(s, i));
+        const cui_log_line *l = cui__log_at(b, cui__logv_at(s, i), &tmp, &tx);
         if (l) total += l->len + 20;
     }
     char *out = cui__alloc(ui, total);
     size_t n = 0;
     for (int i = a; i < e && cui__logv_at(s, i) <= hi; i++) {
-        const cui_log_line *l = cui__log_at(b, cui__logv_at(s, i));
+        const cui_log_line *l = cui__log_at(b, cui__logv_at(s, i), &tmp, &tx);
         if (!l) continue;
         char head[24];
         int hn;
@@ -707,7 +775,9 @@ static void cui__logv_copy(cui_ctx *ui, const cui__logv_state *s, const cui_log_
         if (hn < 0) hn = 0;
         if (n + (size_t)hn + l->len + 2 > total) break;
         memcpy(out + n, head, (size_t)hn); n += (size_t)hn;
-        memcpy(out + n, b->text + l->offset, l->len); n += l->len;
+        memcpy(out + n, tx, l->len);
+        if (b->source) cui__log_blank(out + n, l->len);
+        n += l->len;
         out[n++] = '\n';
     }
     if (n > 0) n--;   /* no newline after the last line */
@@ -1024,14 +1094,16 @@ static void cui__lvf_build_rows(cui__lvf *f, cui__logv_common *c, int first, int
     bool show_cursor = ui->focus == f->lid && ui->focus_visible && s->has_cursor;
     for (int i = first; i < last; i++) {
         uint64_t seq = cui__logv_at(s, i);
-        const cui_log_line *l = cui__log_at(b, seq);
+        cui_log_line tmp;
+        const char *src = NULL;
+        const cui_log_line *l = cui__log_at(b, seq, &tmp, &src);
         if (!l) continue;
         cui__logv_row *p = cui__frame_alloc(ui, sizeof *p);
         memset(p, 0, sizeof *p);
         p->c = c;
-        const char *src = b->text + l->offset;
         int len = cui__utf8_cut(src, (int)l->len, CUI__LOG_DRAW_MAX);
         p->text = cui__frame_strdup(ui, src, len);
+        if (b->source) cui__log_blank((char *)p->text, (size_t)len);
         p->len = len;
         p->more = (int)l->len - len;
         p->level = l->level;

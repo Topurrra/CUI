@@ -1187,6 +1187,27 @@ The app owns the storage: an array of line records and a byte buffer for the tex
 
 Each line shows its level as a quiet tag (warnings and errors also tint their row), an optional `HH:MM:SS.mmm` time and the text in the code font. The toolbar filters by level (warning and error counts appear on their toggles, which shorten to initials when the console is narrow), searches as you type (matches are marked and the field counts the lines found), and Follow keeps the newest line in view: scrolling up turns it off, coming back to the bottom turns it on. Copy takes the selected lines or, with no selection, every line shown; Clear empties the buffer. Click a line to select it, drag or Shift+click for a range. With the list focused, the arrows move through lines, Shift+arrows extend the selection, Page Up, Page Down and Home jump, End returns to following, Ctrl+A selects all, Ctrl+C copies and Esc clears the selection.
 
+#### Lines the app already has
+
+A big file the app has read (a log, a document's text) need not be copied into the buffer. `cui_log_init_source` makes a buffer that holds no lines: the app tells it a line is there with `cui_log_source_push(&log, level)` (line number `log.total`), and the view calls back for each line it draws, searches or copies, by that number. The callback fills the line's length and level and points at its bytes where they lie, valid until the next call (not terminated; control characters show, match and copy as spaces).
+
+```c
+static bool my_line(void *user, uint64_t seq, cui_log_line *out, const char **text) {
+    const my_index *ix = user;
+    if (seq >= ix->count) return false;
+    out->len = ix->line[seq].len;
+    out->level = ix->line[seq].level;
+    *text = ix->text + ix->line[seq].start;
+    return true;
+}
+
+cui_log_init_source(&log, my_line, &index);                  /* once */
+for (...) cui_log_source_push(&log, level);                  /* each line the app indexed */
+cui_log_view(ui, "log", &log, .height = -1);
+```
+
+`cui_log_source_pop` takes back the newest line (a line still being written, pushed again when it is complete) and `cui_log_source_shift` drops the oldest, for an app that shows a limited number. Filters, search, follow, selection, copy and Clear work as for a buffer of its own; the appends do nothing on such a buffer and `cui_log_get` returns NULL.
+
 ### Terminal
 
 Output over an input line, for build logs, a game console or a REPL.
