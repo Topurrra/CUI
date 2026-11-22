@@ -1404,6 +1404,24 @@ SCENE(code_editor_eol) {
     cui_code_editor(ui, "eol-editor", text, sizeof text, .lang = "c", .read_only = true, .height = 120,
                     .eol_hint = "Ada Lovelace, 3 days ago \xC2\xB7 Fix the parser for empty input", .eol_hint_line = 2);
 }
+/* several cursors: every "sum" selected (as Ctrl+Shift+L does), each with its caret */
+static char edm_src[] = "int total(const int *v, int n) {\n    int sum = 0;\n    for (int i = 0; i < n; i++) sum += v[i];\n    return sum;\n}\n";
+static void body_code_editor_multi(cui_ctx *ui);
+static void scene_code_editor_multi(cui_ctx *ui, int f) {
+    if (f < 0) {
+        if (-f - 1 == 3)
+            for (const char *at = strstr(edm_src, "sum"); at; at = strstr(at + 3, "sum")) {
+                int pos = (int)(at - edm_src);
+                if (at == strstr(edm_src, "sum")) cui_code_editor_select(ui, "editor-multi", pos, pos + 3);
+                else cui_code_editor_add_selection(ui, "editor-multi", pos, pos + 3);
+            }
+        return;
+    }
+    frame_wrap(ui, body_code_editor_multi);
+}
+static void body_code_editor_multi(cui_ctx *ui) {
+    cui_code_editor(ui, "editor-multi", edm_src, sizeof edm_src, .lang = "c", .height = 150, .multi_cursor = true, .autofocus = true);
+}
 /* ---- tool panels ---- */
 SCENE(inspector) {
     static float pos[3] = { 12.5f, 0.0f, -4.25f }, rot[3] = { 0, 45, 0 }, scale[3] = { 1, 1, 1 };
@@ -5137,6 +5155,7 @@ int main(int argc, char **argv) {
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-wrap", scene_code_editor_wrap, 520, 290, true },
         { "code-editor-text", scene_code_editor_text, 620, 264, true }, { "code-editor-eol", scene_code_editor_eol, 760, 170, true },
+        { "code-editor-multi", scene_code_editor_multi, 640, 200, true },
         { "diff-view", scene_diff_view, 900, 480, true },
         { "markdown-select", scene_markdown_select, 560, 340, true },
         { "markdown-select-all", scene_markdown_select_all, 560, 340, true },

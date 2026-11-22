@@ -158,6 +158,7 @@ typedef struct {
     float focus_t;
     cui__ed_wc *wc;             /* wrap cache, only while `.wrap` is on */
     cui__ed_mc *mc;             /* line states, for the languages with a state (markdown, yaml, xml...) and those with block comments */
+    struct cui__edm *mcur;      /* the other cursors, only with `.multi_cursor` (cui_editor_multi.h) */
     int aff_pos;                /* a caret at this byte, on a row boundary, shows at the end of the row above (End, a click past the end) */
     cui__ed_ix ix;
     cui__ed_hist hist;
@@ -198,6 +199,7 @@ typedef struct {
     int tab;
     bool use_tabs, ro;
     bool changed, refused, reveal, center;
+    bool mjoin;                 /* several cursors: the next edit joins the undo step under way (cui_editor_multi.h) */
     bool wrap;                  /* soft wrapping on; wcols is the row width in columns */
     int wcols;
     int hint_cr, hint_nl;       /* for the next replace of cui_code_editor_edit's text, read while it was copied: 1 no carriage returns, 2 some; line breaks + 1 (0: not known) */
@@ -226,6 +228,18 @@ static void cui__ed_mc_splice(cui_ctx *ui, cui__ed_mc *mc, int la, int lb, int k
 static void cui__ed_fc_splice(cui__ed_fc *fc, int a, int b0, int b1);
 static void cui__ed_lc_splice(cui__ed_state *st, int a, int b0, int b1);
 static void cui__ed_lc_clear(cui__ed_state *st);
+/* multiple cursors (`.multi_cursor`): cui_editor_multi.h, included at the end of this file */
+typedef struct cui__edm cui__edm;
+struct cui__edm_pv;
+static void cui__edm_spliced(cui__ed_state *st, int a, int b0, int b1, bool whole);   /* [a, b0) became [a, b1); whole: forget them */
+static void cui__edm_free(cui_ctx *ui, cui__ed_state *st);
+static int cui__edm_count(const cui__ed_state *st);   /* the other cursors */
+static void cui__edm_requests(cui__ed_state *st);
+static void cui__edm_keys_default(cui_editor_keys *k);
+static void cui__edm_paint_sel(cui_ctx *ui, const struct cui__edm_pv *v, const char *s, int als, int ale, int ls, int le, int c0, bool last,
+                               int cb, int tab, float cw, float x0, float y, float lh, cui_color col);
+static void cui__edm_paint_carets(cui_ctx *ui, const struct cui__edm_pv *v, float x0, float top, double sy, float ty, float fh, int cb,
+                                  float cw, float lh, cui_color c, double phase);
 
 /* ---- numbers per line, in blocks (cui__sq) ----
  * No block is empty (but the only one), and slots past nb hold no storage. */
@@ -681,6 +695,7 @@ static void cui__ed_rebuild(cui_ctx *ui, cui__ed_state *st, const char *buf, int
     if (st->mc) st->mc->ok = false;
     st->fc.on = false;
     cui__ed_lc_clear(st);
+    if (st->mcur) cui__edm_spliced(st, 0, 0, 0, true);   /* another text: one cursor */
     cui__ed_hist *h = &st->hist;
     for (int i = 0; i < h->n; i++) cui__ed_rec_free(ui, &h->r[i]);
     h->n = h->pos = 0; h->bytes = 0;
@@ -1021,6 +1036,7 @@ static void cui__ed_mc_free(cui_ctx *ui, cui__ed_state *st) {
 static void cui__ed_dtor(cui_ctx *ui, void *data) {
     cui__ed_state *st = data;
     cui__ed_wc_free(ui, st); cui__ed_mc_free(ui, st);
+    cui__edm_free(ui, st);
     cui__ed_job_drop(&st->rjob);   /* a job still running only hears that it may stop: it frees itself */
     cui__ed_job_drop(&st->cjob);
     for (int i = 0; i < CUI__ED_LC_N; i++) free(st->lc[i].cc);
@@ -1239,6 +1255,7 @@ static void cui__ed_doc_sync(cui__ed *E, bool own) {
         if (st->mc) st->mc->ok = false;
         st->fc.on = false;
         cui__ed_lc_clear(st);
+        if (st->mcur) cui__edm_spliced(st, 0, 0, 0, true);
         st->doc = d; st->doc_serial = cui__doc_serial(d); st->doc_seen = rev; st->doc_mine = 0;
         st->gen++;
         e->cursor = CUI_CLAMP(e->cursor, 0, E->len); e->anchor = CUI_CLAMP(e->anchor, 0, E->len);
@@ -1276,6 +1293,7 @@ static void cui__ed_doc_sync(cui__ed *E, bool own) {
         if (top >= 0 && !whole) top = top < s->la ? top : top > s->lb ? top + s->k - (s->lb - s->la) : s->la;
         cui__ed_fc_splice(&st->fc, s->a, s->b0, s->b1);
         cui__ed_lc_splice(st, s->a, s->b0, s->b1);
+        if (st->mcur) cui__edm_spliced(st, s->a, s->b0, s->b1, whole);
     }
     /* old lines [la, lb0) are new lines [la, lb1) */
     int old_nl = E->nl - (lb1 - lb0), lb = lb0 - 1, k = lb1 - 1 - la;
@@ -1304,6 +1322,7 @@ static void cui__ed_splice(cui__ed *E, int a, int b, const char *t, int n) {
     E->len += n - (b - a);
     cui__ed_reindex(E, a, b, n, t);
     cui__ed_span_add(&E->rep_on, &E->rep_a, &E->rep_b0, &E->rep_b1, a, b - a, n);
+    if (E->st->mcur) cui__edm_spliced(E->st, a, b, a + n, false);
 }
 
 /* ---- undo ---- */
@@ -1329,6 +1348,7 @@ static char *cui__ed_record(cui__ed *E, int a, int b, int m, int kind, char *own
     cui__ed_hist *h = &E->st->hist;
     cui_edit_state *e = &E->st->ed;
     bool merge = !own && ui->time - e->last_edit < 1.0 && h->pos > 0 && !h->r[h->pos - 1].ins && h->pos == h->n && kind == e->last_kind && kind != 3 && e->cursor == e->last_cursor;
+    if (E->mjoin && !own && h->pos > 0 && h->pos == h->n && !h->r[h->pos - 1].ins) merge = true;   /* several cursors: one step */
     e->last_edit = ui->time;
     e->last_kind = kind;
     for (int i = h->pos; i < h->n; i++) { h->bytes -= (size_t)(h->r[i].del_n + h->r[i].ins_n); cui__ed_rec_free(ui, &h->r[i]); }
@@ -1432,6 +1452,7 @@ static bool cui__ed_replace_x(cui__ed *E, int a, int b, const char *t, int n, in
         unsigned rev = cui_text_doc_revision(E->doc);
         bool merge = ui->time - e->last_edit < 1.0 && kind == e->last_kind && kind != 3 && e->cursor == e->last_cursor &&
                      st->doc_mine == rev && st->doc_seen == rev;
+        if (E->mjoin) merge = true;   /* several cursors: one step */
         e->last_edit = ui->time;
         e->last_kind = kind;
         char *give = own && *own && t == *own && m >= CUI__ED_KEEP_BYTES ? *own : NULL;   /* a big text of the caller's own: the document takes it */
@@ -2727,6 +2748,7 @@ typedef struct {
     float bar_t;
     int bar_big;                /* 1 vertical thumb held or hovered, 2 horizontal */
     double caret_phase;
+    const struct cui__edm_pv *mx;   /* the other cursors' selections and carets in view (NULL: none) */
     cui_color colors[CUI__TK_COUNT];
     cui_color num, num_on, band, sel, match, match_edge, brk, brk_edge, caret, muted, line, bar;
     int vc0, vc1;               /* columns in view */
@@ -2954,6 +2976,7 @@ static void cui__ed_paint_wrap(cui_ctx *ui, const cui__ed_paint *p, cui_rect r, 
                 if (last && s1 > re) xb += p->cw * 0.6f;   /* the newline is selected too */
                 cui_draw_rect(ui, (cui_rect){ x0 + xa, y, xb - xa, p->lh }, CUI_CORNERS(2), p->sel);
             }
+            if (p->mx) cui__edm_paint_sel(ui, p->mx, s, rs, re, rs, re, rc0, last, 0, p->tab, p->cw, x0, y, p->lh, p->sel);
             for (int m = 0; m < p->nmarks; m++) {
                 const cui_text_mark *mk = &p->marks[m];
                 if (last ? mk->start > re : mk->start >= re) break;
@@ -3007,6 +3030,7 @@ void cui_editor_keys_default(cui_editor_keys *k) {
     k->combo[CUI_EDK_FIND][0] = (cui_key_combo){ p, CUI_KEY_F };
     k->combo[CUI_EDK_REPLACE][0] = (cui_key_combo){ p, CUI_KEY_H };
     k->combo[CUI_EDK_GOTO_LINE][0] = (cui_key_combo){ p, CUI_KEY_G };
+    cui__edm_keys_default(k);
 }
 
 /* one of the editor's own commands this frame: the usual test, or with .keys its two combinations (the keys they
@@ -3140,6 +3164,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
             if (s1 > ale) xb += p->cw * 0.6f;   /* the newline is selected too */
             cui_draw_rect(ui, (cui_rect){ x0 + xa, y, xb - xa, p->lh }, CUI_CORNERS(2), p->sel);
         }
+        if (p->mx) cui__edm_paint_sel(ui, p->mx, s, als, ale, ls, le, c0, true, p->cb, p->tab, p->cw, x0, y, p->lh, p->sel);
         /* the app's marks, behind the find matches */
         for (int m = 0; m < p->nmarks; m++) {
             const cui_text_mark *mk = &p->marks[m];
@@ -3203,6 +3228,7 @@ static void cui__paint_editor(cui_ctx *ui, cui_node *n, void *data) {
         float cx = x0 + (float)(p->caret_col - p->cb) * p->cw;
         cui_draw_rect(ui, (cui_rect){ roundf(cx * ui->scale) / ui->scale - 0.75f, y + ty, 1.5f, fh }, CUI_CORNERS(0.75f), cui_alpha(p->caret, a));
     }
+    if (p->mx && p->focused) cui__edm_paint_carets(ui, p->mx, x0, r.y + CUI__ED_INSET, p->sy, ty, fh, p->cb, p->cw, p->lh, p->caret, p->caret_phase);
     cui_pop_clip(ui);
     /* scrollbars */
     if (p->bar_t > 0.01f) {
@@ -3311,6 +3337,7 @@ static void cui__ed_take_splice(cui_ctx *ui, cui__ed_state *st, char *buf, size_
     st->drag_a = cui__ed_map_all(st->drag_a, sp, n);
     st->drag_b = cui__ed_map_all(st->drag_b, sp, n);
     st->aff_pos = -1;
+    for (int i = 0; i < n && st->mcur; i++) cui__edm_spliced(st, sp[i][0], sp[i][1], sp[i][2], false);
     for (int i = 0; i < n; i++) cui__ed_hist_splice(ui, &st->hist, sp[i][0], sp[i][1], sp[i][2]);
     if (!rev) ix->hash = cui__ed_hash_text(buf, (size_t)nlen);
 }
@@ -3473,6 +3500,14 @@ typedef struct {
     int g_len, g_lines, g_n1, g_wide;   /* found once a frame: its bytes, its line breaks, its first line's bytes, the widest other line's columns */
 } cui__edf;
 
+/* multiple cursors (cui_editor_multi.h): the frame's start, the keys (true: they moved or edited), a press and a drag
+ * (true: taken), what is in view */
+static void cui__edm_frame(cui__edf *f);
+static bool cui__edm_keys(cui__edf *f);
+static bool cui__edm_press(cui__edf *f, int line, double col);
+static bool cui__edm_drag(cui__edf *f, int line, double col, int pos);
+static const struct cui__edm_pv *cui__edm_view(cui__edf *f, int a, int b);
+
 /* ---- ghost text (cui_code_editor_opts.ghost) ---- */
 
 /* Whether the ghost shows now (the caret at ghost_at, no selection, the lines focused, not read only), and where. */
@@ -3483,6 +3518,7 @@ static void cui__edf_ghost(cui__edf *f) {
     cui__ed *E = f->E;
     cui_edit_state *e = &E->st->ed;
     if (!o->ghost[0] || E->ro || E->ui->focus != f->lid || e->cursor != e->anchor || e->cursor != o->ghost_at) return;
+    if (cui__edm_count(E->st)) return;   /* not with several cursors */
     if (!f->g_len) {
         const char *g = o->ghost;
         f->g_len = (int)CUI_MIN(strlen(g), (size_t)(INT_MAX / 2));
@@ -3551,6 +3587,7 @@ static void cui__edf_requests(cui__edf *f) {
     cui__ed_state *st = E->st;
     cui_edit_state *e = &st->ed;
     cui_ctx *ui = E->ui;
+    if (st->mcur) cui__edm_requests(st);   /* one cursor again, but for a select of the primary one */
     if (st->pend_edit) {
         int a = CUI_CLAMP(st->pend_es, 0, E->len), b = CUI_CLAMP(st->pend_ee, a, E->len);
         E->hint_cr = st->pend_cr ? 2 : 1; E->hint_nl = st->pend_nl + 1;
@@ -3670,6 +3707,7 @@ static void cui__edf_press(cui__edf *f, int line, double col) {
         int hit = line >= 0 ? cui__gm_hit(f->o->line_marks, f->o->line_mark_count, ln, top_half) : -1;
         if (hit >= 0) { f->res->line_mark_clicked = true; f->res->line_mark_index = hit; return; }
     }
+    if (st->mcur && cui__edm_press(f, line, col)) return;   /* Alt: a caret more, or a column */
     bool aff = false;
     int pos = E->wrap ? cui__ed_vpick(E, line, ui->mx < f->gx ? 0 : col, &aff) : cui__ed_pos(E, line, ui->mx < f->gx ? 0 : col);
     int clicks = ui->click_count;
@@ -3738,6 +3776,7 @@ static void cui__edf_drag_select(cui__edf *f) {
     int pos = E->wrap ? cui__ed_vpick(E, line, st->drag == 3 ? 0 : col, &aff) : cui__ed_pos(E, line, st->drag == 3 ? 0 : col);
     if (line < 0) pos = 0;
     if (line >= (E->wrap ? cui__ed_total_rows(E) : E->nl)) pos = E->len;
+    if (st->mcur && cui__edm_drag(f, line, col, pos)) return;   /* a column */
     int prev = e->cursor;
     if (st->drag == 1) { e->cursor = pos; st->aff_pos = aff && pos != 0 && pos != E->len ? pos : -1; }
     else {
@@ -3985,6 +4024,7 @@ static void cui__edf_keys(cui__edf *f) {
     for (int k = CUI_KEY_NONE + 1; k < CUI_KEY_COUNT; k++)
         if (ui->kpressed[k] && k != CUI_KEY_TAB && k != CUI_KEY_ESCAPE) st->tab_free = false;
     if (ui->text_in_len > 0) st->tab_free = false;
+    if (st->mcur && cui__edm_keys(f)) { before_c = e->cursor; before_a = e->anchor; ui->caret_time = ui->time; }   /* several cursors: their keys first */
     int vmove, vpage;
     cui__edf_move_keys(f, &vmove, &vpage);
     /* clipboard: without a selection, copy and cut take the whole line */
@@ -4332,6 +4372,7 @@ static void cui__edf_build_lines(cui__edf *f, const cui__lang *L, bool json, boo
         p->in_block = !L->multi && p->count > 0 && mst[0] > 0;
     }
     p->tab = E->tab;
+    if (st->mcur) p->mx = cui__edm_view(f, a, b);
     p->cursor = e->cursor; p->anchor = e->anchor;
     p->caret_line = f->caret_line; p->caret_col = f->caret_vcol;
     p->focused = focused;
@@ -4522,6 +4563,7 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     f.max_sy = CUI_MAX(0.0, f.content_h - f.view_h);
 
     cui__edf_requests(&f);   /* after the wrap width is known: an edit from code patches the wrap counts too */
+    cui__edm_frame(&f);      /* `.multi_cursor`: its state, the selections added from code */
     if (o->ghost) {   /* the ghost's rows, for the pointer: as they were drawn */
         cui__edf_ghost(&f);
         f.content_h += (double)f.g_n * f.lh;
@@ -4585,5 +4627,8 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     res.line = f.caret_line + 1; res.column = f.caret_col + 1;
     res.line_count = E.nl;
     res.length = E.len;
+    res.cursor_count = 1 + cui__edm_count(st);
     return res;
 }
+
+#include "cui_editor_multi.h"   /* multiple cursors and column selection: uses the functions above */

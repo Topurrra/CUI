@@ -21,6 +21,8 @@
  *                                        Ctrl+End in a fresh 640 000 line file and a format of it (colors
  *                                        settling), typing meanwhile, Replace all of 860 000 matches in 100 MB
  *                                        (BENCH_TRACE=1 prints every frame over 4 ms)
+ *     cui_bench_editor --multi [MB] [N]   N cursors (default 100) spread over a document of MB (default 10): typing,
+ *                                        Backspace, Enter, Right, Ctrl+D and undo at all of them, against one cursor
  *     cui_bench_editor --compare [MB ...]      buffer (with .revision) and document side by side:
  *                                        open, typing near the top, middle and end, Enter,
  *                                        scrolling, replace all and its undo, memory (default 1 10 100)
@@ -56,6 +58,7 @@ typedef struct {
     bool wrap, plain, big;
     int rev;                    /* the revision to give; 0: 1 with .big */
     cui_text_doc *doc;          /* edit this document instead of buf */
+    bool multi;                 /* .multi_cursor */
     cui_code_editor_result r;
 } bench_ed;
 
@@ -64,7 +67,8 @@ static void build(cui_ctx *ui, void *u) {
 #if defined(BENCH_BASELINE)   /* the library before .plain and .revision */
     b->r = cui_code_editor(ui, "ed", b->buf, b->cap, .lang = b->plain ? "text" : b->lang, .wrap = b->wrap, .height = -1);
 #else
-    if (b->doc) b->r = cui_code_editor(ui, "ed", NULL, 0, .doc = b->doc, .lang = b->lang, .wrap = b->wrap, .height = -1, .plain = b->plain);
+    if (b->doc) b->r = cui_code_editor(ui, "ed", NULL, 0, .doc = b->doc, .lang = b->lang, .wrap = b->wrap, .height = -1, .plain = b->plain,
+                                       .multi_cursor = b->multi);
     else b->r = cui_code_editor(ui, "ed", b->buf, b->cap, .lang = b->lang, .wrap = b->wrap, .height = -1,
                                 .plain = b->plain, .revision = b->rev ? b->rev : b->big ? 1 : 0);
 #endif
@@ -694,7 +698,74 @@ static void count_bench(size_t mb) {
     cui_text_doc_free(b.doc);
 }
 
+/* --multi [MB] [N]: N cursors spread evenly over a document of MB (plain, as an app shows a big file), a key a frame at
+ * all of them: typing, Backspace, Enter, Right, Ctrl+D, undo; first with one cursor, for the same keys alone */
+static void multi_key(cui_ctx *ui, bench_ed *b, cui_key k, int mods, const char *t, double *sum, double *worst) {
+    cui_input_key(ui, CUI_KEY_NONE, false, mods);
+    if (t) cui_input_text(ui, t);
+    else cui_input_key(ui, k, true, mods);
+    double t0 = now();
+    cui_begin_frame(ui, 1.0f / 60.0f);
+    build(ui, b);
+    cui_end_frame(ui);
+    double ms = (now() - t0) * 1000;
+    *sum += ms;
+    if (ms > *worst) *worst = ms;
+    if (!t) cui_input_key(ui, k, false, mods);
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    frames(ui, b, 1, 0);
+}
+
+static void multi_bench(size_t mb, int n, bool wrap) {
+    for (int pass = 0; pass < 3; pass++) {   /* without .multi_cursor (the editor as it was), with it and one cursor, with n */
+        int cn = pass == 2 ? n : 1;
+        size_t size = mb * 1024 * 1024;
+        bench_ed b;
+        memset(&b, 0, sizeof b);
+        char *text = malloc(size + 8192);
+        size_t len = gen(text, size, false, "text");
+        b.lang = "text"; b.plain = true; b.multi = pass > 0; b.wrap = wrap;
+        b.doc = cui_text_doc_adopt(text, (int)len, NULL, NULL);
+        cui_sw_renderer *sw = cui_sw_create();
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
+        cui_set_viewport(ui, 1200, 800, 1);
+        cui_set_reduced_motion(ui, true);
+        frames(ui, &b, 3, 0);
+        int nl = b.r.line_count, first = cui_text_doc_line_start(b.doc, 1) + 9;
+        cui_code_editor_select(ui, "ed", first, first);
+        frames(ui, &b, 1, 0);
+        for (int i = 1; i < cn; i++) {
+            int p = cui_text_doc_line_start(b.doc, 1 + (int)((long long)i * (nl - 3) / cn)) + 9;
+            cui_code_editor_add_selection(ui, "ed", p, p);
+        }
+        frames(ui, &b, 3, 0);
+        double m0 = mem_mb();
+        struct { const char *name; cui_key k; int mods; const char *t; int reps; } keys[] = {
+            { "type", CUI_KEY_NONE, 0, "a", 30 }, { "backspace", CUI_KEY_BACKSPACE, 0, NULL, 10 }, { "enter", CUI_KEY_ENTER, 0, NULL, 5 },
+            { "right", CUI_KEY_RIGHT, 0, NULL, 10 }, { "ctrl+d", CUI_KEY_D, CUI_MOD_PRIMARY, NULL, 3 }, { "undo", CUI_KEY_Z, CUI_MOD_PRIMARY, NULL, 5 },
+        };
+        printf("%3zu MB, %5d cursor%s%s%s:", mb, b.r.cursor_count, b.r.cursor_count == 1 ? " " : "s", pass ? "" : " (option off)", wrap ? ", wrapped" : "");
+        for (int k = 0; k < (int)(sizeof keys / sizeof keys[0]); k++) {
+            double sum = 0, worst = 0;
+            for (int i = 0; i < keys[k].reps; i++) multi_key(ui, &b, keys[k].k, keys[k].mods, keys[k].t, &sum, &worst);
+            printf("  %s %.2f ms (%.2f)", keys[k].name, sum / keys[k].reps, worst);
+        }
+        printf("  memory +%.1f MB\n", mem_mb() - m0);
+        fflush(stdout);
+        cui_destroy(ui);
+        cui_sw_destroy(sw);
+        cui_text_doc_free(b.doc);   /* (and the text it adopted) */
+    }
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--multi")) {   /* --multi [MB] [N] */
+        size_t mb = argc > 2 ? (size_t)atoi(argv[2]) : 10;
+        int n = argc > 3 ? atoi(argv[3]) : 100;
+        multi_bench(mb, n, false);
+        multi_bench(mb, n, true);
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "--long")) {   /* --long [MB] */
         size_t mb = argc > 2 ? (size_t)atoi(argv[2]) : 40;
         long_bench(mb, "json", false);

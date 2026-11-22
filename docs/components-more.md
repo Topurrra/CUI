@@ -1038,6 +1038,21 @@ keys.combo[CUI_EDK_UNDO][0] = (cui_key_combo){ CUI_MOD_ALT, CUI_KEY_U };
 cui_code_editor(ui, "code", buf, cap, .keys = &keys);
 ```
 
+#### Multiple cursors and column selection
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/code-editor-multi-dark.png"><img src="images/components/code-editor-multi.png" alt="A code editor with every sum selected, a caret after each"></picture>
+
+`.multi_cursor = true` lets people edit in many places at once. Alt+click adds a caret (Alt+click on a caret takes it away), Ctrl+Alt+Up and Down add one on the line above the first caret or below the last at its column, Ctrl+D selects the word at the caret and then adds the next match of the selection (whole words when it began at a caret; around past the end; matches already selected are skipped), and Ctrl+Shift+L selects every match at once (at most 10 000, from the caret on). Alt+Shift+drag and Alt+Shift+arrows (Cmd+Alt+Shift+arrows on macOS) select a column: the same columns on every line, a tab counting to its stop and a character of any width one column; a line that ends left of the column is left out, unless the column is only carets. Esc goes back to one caret, the primary one (the last added), which is also what the result's `cursor`, `anchor`, `line` and `column` report; `r.cursor_count` says how many there are and `cui_code_editor_selections(ui, id, anchors, cursors, cap)` gives them all, `cui_code_editor_add_selection(ui, id, anchor, cursor)` adds one from code. A plain click is one caret again.
+
+Every key then works at every caret as it does at one: typing, Backspace and Delete (by word with Ctrl), Enter with its indentation and markdown list items, Tab (spaces to the next stop at each caret, or with selections or in list items the lines, each once), Shift+Tab, the arrows, word moves, Home, End and pages. Copy and cut take each selection (or a caret's whole line, once a line) joined by line breaks; a paste of as many lines as there are carets puts one at each, and so does a paste of what was copied from as many selections. Each key is one undo step for all the carets, typing on joins the step as with one caret, and undo and redo put a caret back at every edit; selections that overlap or meet become one. Edits by the app, another editor or the find bar move the carets with the text. Keys go through `.keys` (`CUI_EDK_CURSOR_ABOVE`, `_BELOW`, `_ADD_NEXT`, `_SELECT_MATCHES`, `_COLUMN_UP` ... `_COLUMN_RIGHT`). A key costs one edit per caret: 100 carets on a 10 MB document type in about 0.2 ms a frame (one caret: 0.1 ms), Enter in 0.3 ms, 1000 carets in 1 to 3 ms (`cui_bench_editor --multi`). On a buffer each edit moves the bytes after it, so many carets in a big buffer cost what as many keys would; give big texts a document.
+
+```c
+cui_code_editor_result r = cui_code_editor(ui, "code", NULL, 0, .doc = doc, .multi_cursor = true);
+char note[32];
+snprintf(note, sizeof note, "%d cursors", r.cursor_count);
+if (r.cursor_count > 1) cui_status_bar_text(ui, note);
+```
+
 #### On a text document
 
 A buffer you own has one cost no cache can hide: an edit moves every byte after it, so near the top of 100 MB a key costs tens of milliseconds, and the buffer needs spare room for edits. For big files give the editor a `cui_text_doc` instead (`.doc = d`, with `buf` NULL and `cap` 0). A text document is a piece table: the bytes it was made from are never written (adopt a file you read, no copy), edits go to append-only buffers, and the text is a list of pieces of those in a balanced tree that knows the bytes and line breaks of every subtree. An edit costs the same at any size and anywhere in the text, there is no capacity (nothing is refused), and memory stays near the size of the text: no spare room and no second copy. Everything works as on a buffer, with the same results, colors, wrapping, find and replace (regex too), marks, brackets, go to line, `cui_code_editor_edit`, `.read_only` and `.plain`; a test drives an editor on a buffer and one on a document with the same random input and compares what they report and draw after every frame.
