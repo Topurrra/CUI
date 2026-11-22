@@ -138,7 +138,7 @@ static void cui__paint_edit(cui_ctx *ui, cui_node *n, void *data) {
             cui__ta_line_info(ui, p->font, p->size, p->buf, p->len, L->start, L->end, p->para_dir, r.w, &ta);
             bidi = ta.bidi; ox = ta.ox; rtl_line = ta.rtl;
 #endif
-            (void)rtl_line;
+            (void)rtl_line; (void)ox;
             if (p->focused && s1 > s0) {
                 int a0 = CUI_MAX(s0, L->start), a1 = CUI_MIN(s1, L->end);
                 bool extends = s1 > L->end && k < p->line_count - 1;

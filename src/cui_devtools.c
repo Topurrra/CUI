@@ -1571,7 +1571,7 @@ static bool cui__sc_number(cui_ctx *ui, const char *id, int *v, int lo, int hi, 
     double x = *v;
     cui_number_opts no;
     memset(&no, 0, sizeof no);
-    no.step = 1; no.width = CUI_PX(suffix ? 132 : 104); no.suffix = suffix;
+    no.step = 1; no.width = CUI_PX(suffix ? 168 : 104);   /* room for the value and a suffix such as "minutes" */ no.suffix = suffix;
     if (cui_number_ex(ui, id, &x, lo, hi, &no)) { *v = CUI_CLAMP((int)(x + 0.5), lo, hi); return true; }
     return false;
 }
