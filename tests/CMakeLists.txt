@@ -312,6 +312,9 @@ add_test(NAME cui_test_editor_keys COMMAND cui_test_editor_keys)
 add_executable(cui_test_editor_multi test_editor_multi.c)   # multiple cursors and column selection
 target_link_libraries(cui_test_editor_multi PRIVATE cui::cui)
 add_test(NAME cui_test_editor_multi COMMAND cui_test_editor_multi)
+add_executable(cui_test_editor_fold_multi test_editor_fold_multi.c)   # several cursors with folding and the minimap
+target_link_libraries(cui_test_editor_fold_multi PRIVATE cui::cui)
+add_test(NAME cui_test_editor_fold_multi COMMAND cui_test_editor_fold_multi)
 
 add_executable(cui_test_floating_layers test_floating_layers.c)
 target_link_libraries(cui_test_floating_layers PRIVATE cui::cui)

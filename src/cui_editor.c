@@ -1325,10 +1325,13 @@ static void cui__ed_doc_sync(cui__ed *E, bool own) {
         cui__ed_fc_splice(&st->fc, s->a, s->b0, s->b1);
         cui__ed_lc_splice(st, s->a, s->b0, s->b1);
         if (st->mcur) cui__edm_spliced(st, s->a, s->b0, s->b1, whole);
+        if (st->fold) cui__fold_splice(ui, st->fold, s->la, s->lb, s->k);   /* the folds edit by edit (at most the log's): one span
+                                                                              * over an undo step of edits at many cursors would take
+                                                                              * in the folded lines between them, and open them */
     }
     /* old lines [la, lb0) are new lines [la, lb1) */
     int old_nl = E->nl - (lb1 - lb0), lb = lb0 - 1, k = lb1 - 1 - la;
-    cui__ed_x_splice(E, la, lb, k);
+    if (st->mm) cui__mini_splice(ui, st->mm, la, lb, k);   /* the minimap's bars over the span, once */
     if (wc) {
         if (wc->n != old_nl || k > CUI__ED_BIG_LINES || lb - la > CUI__ED_BIG_LINES || !E->wcols) wc->ok = false;   /* counted again, as when opening */
         else cui__ed_wrap_splice(E, la, lb, k);
@@ -3696,6 +3699,8 @@ static bool cui__edm_keys(cui__edf *f);
 static bool cui__edm_press(cui__edf *f, int line, double col);
 static bool cui__edm_drag(cui__edf *f, int line, double col, int pos);
 static const struct cui__edm_pv *cui__edm_view(cui__edf *f, int a, int b);
+static void cui__edm_fold_out(cui__edf *f);       /* with folding: the other carets out of lines just folded */
+static bool cui__edm_fold_reveal(cui__edf *f);    /* the folds around the other carets open (true: some did) */
 
 /* ---- ghost text (cui_code_editor_opts.ghost) ---- */
 
@@ -3887,6 +3892,7 @@ static CUI__COLD void cui__edf_fold_act(cui__edf *f, int act, int line) {
         st->pref_col = st->aff_pos = -1;
         ui->caret_time = ui->time;
     } else if (cui__fold_hidden(F, cui__ed_line_of(E, e->anchor))) e->anchor = e->cursor;
+    if (st->mcur) cui__edm_fold_out(f);   /* the other carets the same way */
     bool shown = !cui__fold_hidden(F, top);
     top = cui__fold_prev(F, top);
     st->sy = CUI_MAX(0.0, (double)cui__ed_lrow(E, top) * f->lh + (shown ? off : 0));
@@ -3944,15 +3950,18 @@ static CUI__COLD void cui__edf_fold_skip(cui__edf *f, int before) {
 }
 
 /* before the view follows the caret: a caret or selection end inside folded lines (a find match, go to line, undo, a
- * selection from code) opens the folds around it. Select all keeps them. */
+ * selection from code) opens the folds around it, the other carets' too (.multi_cursor). Select all keeps them. */
 static CUI__COLD void cui__edf_fold_reveal(cui__edf *f) {
     cui__ed *E = f->E;
     cui_edit_state *e = &E->st->ed;
     cui__fold *F = E->st->fold;
-    if (!F->vn || (e->anchor == 0 && e->cursor == E->len)) return;
-    int lc = cui__ed_line_of(E, e->cursor), la = e->anchor == e->cursor ? lc : cui__ed_line_of(E, e->anchor);
-    bool a = cui__fold_reveal(E->ui, F, lc), b = la != lc && cui__fold_reveal(E->ui, F, la);
-    if (!a && !b) return;
+    if (!F->vn) return;
+    bool a = false, b = false, o = E->st->mcur && cui__edm_fold_reveal(f);
+    if (F->vn && !(e->anchor == 0 && e->cursor == E->len)) {
+        int lc = cui__ed_line_of(E, e->cursor), la = e->anchor == e->cursor ? lc : cui__ed_line_of(E, e->anchor);
+        a = cui__fold_reveal(E->ui, F, lc); b = la != lc && cui__fold_reveal(E->ui, F, la);
+    }
+    if (!a && !b && !o) return;
     f->fold_moved = true;
     cui__ed_fold_rows(E, false);
 }

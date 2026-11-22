@@ -42,9 +42,10 @@ struct cui__edm {
     uint32_t cp_hash; int cp_len, cp_n; /* the last copy of several selections: its text, and where each part is in it, */
     int *cp_cut; int cp_cap;            /* so a paste of it at as many cursors gives each its own */
     int *add; int add_n, add_cap;       /* cui_code_editor_add_selection: anchor, cursor pairs for the next frame */
+    uint32_t fold_sig;                  /* with .folding: the selections cui__edm_fold_reveal last looked at */
 };
 
-/* what is in view: the other selections that reach it (sorted), and their carets on its lines (row, column) */
+/* what is in view: the other selections that reach it (sorted), and their carets on its lines shown (row, column) */
 struct cui__edm_pv { const int *sa, *sb; int ns; const int *cl, *cc; int nc; };
 
 static void *cui__edm_grow(void *p, int *cap, int need, size_t elem) {
@@ -204,6 +205,53 @@ static void cui__edm_frame(cui__edf *f) {
     m->box = false;
     ui->focus = f->lid;
     E->reveal = true;
+}
+
+/* ---- with folding (.folding) ---- */
+
+/* Folds closed over other carets (cui__edf_fold_act): a caret folded away goes to the end of the line shown above it,
+ * a selection's other end folded away comes back to its caret, as the primary one does; carets that meet are one. */
+static void cui__edm_fold_out(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui__edm *m = st->mcur;
+    const cui__fold *F = st->fold;
+    if (!m || !m->n || !F || !F->vn) return;
+    bool moved = false;
+    for (int i = 0; i < m->n; i++) {
+        cui__edm_sel *x = &m->x[i];
+        int cl = cui__ed_line_of(E, CUI_CLAMP(x->cursor, 0, E->len));
+        if (cui__fold_hidden(F, cl)) { x->cursor = x->anchor = cui__ed_end(E, cui__fold_prev(F, cl)); x->pref = -1; moved = true; }
+        else if (x->anchor != x->cursor && cui__fold_hidden(F, cui__ed_line_of(E, CUI_CLAMP(x->anchor, 0, E->len)))) { x->anchor = x->cursor; moved = true; }
+    }
+    if (!moved) return;
+    int n;
+    cui__edm_sel *s = cui__edm_all(E->ui, st, E->len, &n, 0);
+    cui__edm_put(st, s, n);
+    m->box = false;
+}
+
+/* Other carets or selection ends inside folded lines (a cursor added there from code, Ctrl+D or Ctrl+Shift+L finding a
+ * folded match, undo putting carets back): the folds around them open, as common editors do and as for the primary
+ * one. Looks only when the selections changed since it last did (a fold closed over them moved them out). True: a fold
+ * opened. */
+static bool cui__edm_fold_reveal(cui__edf *f) {
+    cui__ed *E = f->E;
+    cui__ed_state *st = E->st;
+    cui__edm *m = st->mcur;
+    cui__fold *F = st->fold;
+    if (!m || !m->n || !F) return false;
+    uint32_t sig = cui__edm_sig(m->x, m->n);
+    if (sig == m->fold_sig) return false;
+    m->fold_sig = sig;
+    bool any = false;
+    for (int i = 0; i < m->n && F->vn; i++) {
+        int c = CUI_CLAMP(m->x[i].cursor, 0, E->len), a = CUI_CLAMP(m->x[i].anchor, 0, E->len);
+        int lc = cui__ed_line_of(E, c);
+        if (cui__fold_reveal(E->ui, F, lc)) any = true;
+        if (a != c) { int la = cui__ed_line_of(E, a); if (la != lc && cui__fold_reveal(E->ui, F, la)) any = true; }
+    }
+    return any;
 }
 
 /* ---- edits at every cursor ---- */
@@ -496,7 +544,8 @@ static void cui__edm_undo(cui__edf *f, bool redo) {
 
 /* ---- adding cursors ---- */
 
-/* Ctrl+Alt+Up and Down: a caret on the line above the first cursor, or below the last, at its column */
+/* Ctrl+Alt+Up and Down: a caret on the line above the first cursor, or below the last, at its column (the line shown
+ * there: folded lines are stepped over) */
 static void cui__edm_add_line(cui__edf *f, int dir) {
     cui__ed *E = f->E;
     cui__ed_state *st = E->st;
@@ -507,6 +556,8 @@ static void cui__edm_add_line(cui__edf *f, int dir) {
     const cui__edm_sel *src = dir < 0 ? &s[0] : &s[n - 1];
     int line = cui__ed_line_of(E, dir < 0 ? cui__edm_lo(src) : cui__edm_hi(src)) + dir;
     if (line < 0 || line >= E->nl) return;
+    line = dir < 0 ? cui__fold_prev(st->fold, line) : cui__fold_next(st->fold, line);
+    if (line < 0 || line >= E->nl) return;
     int col = src->pref >= 0 ? src->pref : cui__ed_caret_col(E, src->cursor);
     int pos = cui__ed_pos(E, line, col);
     for (int i = 0; i < n; i++) s[i].prim = 0;
@@ -516,7 +567,7 @@ static void cui__edm_add_line(cui__edf *f, int dir) {
 }
 
 /* a column selection: on each line from bl0 to bl1, columns bc0 to bc1; lines that end before it are left out (but
- * for a column of carets, and the line the column is being drawn to) */
+ * for a column of carets, and the line the column is being drawn to), and folded lines (nothing selected unseen) */
 static void cui__edm_box_apply(cui__edf *f) {
     cui__ed *E = f->E;
     cui__ed_state *st = E->st;
@@ -525,7 +576,7 @@ static void cui__edm_box_apply(cui__edf *f) {
     if (l1 - l0 >= CUI__EDM_MAX) { if (m->bl1 > m->bl0) l0 = l1 - CUI__EDM_MAX + 1; else l1 = l0 + CUI__EDM_MAX - 1; }   /* the lines next to the pointer */
     int lo = CUI_MIN(m->bc0, m->bc1), hi = CUI_MAX(m->bc0, m->bc1), c = 0;
     cui__edm_sel *s = cui__frame_alloc(E->ui, sizeof *s * (size_t)(l1 - l0 + 1));
-    for (int l = l0; l <= l1; l++) {
+    for (int l = cui__fold_next(st->fold, l0); l <= l1; l = cui__fold_next(st->fold, l + 1)) {
         if (lo != hi && l != m->bl1 && cui__ed_col_at(E, l, cui__ed_end(E, l)) < lo) continue;
         s[c++] = (cui__edm_sel){ cui__ed_pos(E, l, m->bc0), cui__ed_pos(E, l, m->bc1), m->bc1, l == m->bl1 };
     }
@@ -547,7 +598,9 @@ static void cui__edm_box_key(cui__edf *f, int dl, int dc) {
         m->bc1 = st->pref_col >= 0 ? st->pref_col : cui__ed_col_at(E, m->bl1, e->cursor);
         m->box = true;
     }
-    m->bl1 = CUI_CLAMP(m->bl1 + dl, 0, E->nl - 1);
+    int l = CUI_CLAMP(m->bl1 + dl, 0, E->nl - 1);   /* the next line shown that way (folded lines stepped over) */
+    l = dl > 0 ? cui__fold_next(st->fold, l) : cui__fold_prev(st->fold, l);
+    m->bl1 = l < E->nl ? l : m->bl1;
     m->bc1 = CUI_CLAMP(m->bc1 + dc, 0, 1 << 24);
     cui__edm_box_apply(f);
 }
@@ -705,8 +758,9 @@ static bool cui__edm_moves(cui__edf *f) {
         e->anchor = s[i].anchor; e->cursor = s[i].cursor;
         st->pref_col = s[i].pref;
         st->aff_pos = s[i].prim ? aff : -1;
-        int vm = 0, vp = 0;
+        int vm = 0, vp = 0, before = e->cursor;
         cui__edf_move_keys(f, &vm, &vp);
+        if (st->fold) cui__edf_fold_skip(f, before);   /* each caret steps over folded lines, as one caret does */
         s[i].anchor = e->anchor; s[i].cursor = e->cursor;
         s[i].pref = vm || vp ? st->pref_col : -1;
         if (s[i].prim) { psy = st->sy; paff = st->aff_pos; }
@@ -814,17 +868,18 @@ static bool cui__edm_keys(cui__edf *f) {
 
 /* ---- the pointer ---- */
 
-/* the line and column under the pointer, for a column selection (past a line's end the column goes on; wrapped, the
- * column of the byte picked) */
-static void cui__edm_at(cui__edf *f, int line, double col, int *l, int *c) {
+/* the line and column under the pointer on row `row`, for a column selection (past a line's end the column goes on;
+ * wrapped, the column of the byte picked; folded lines take no rows) */
+static void cui__edm_at(cui__edf *f, int row, double col, int *l, int *c) {
     cui__ed *E = f->E;
     if (E->wrap) {
         bool aff;
-        int pos = cui__ed_vpick(E, CUI_MAX(0, line), col, &aff);
+        int pos = cui__ed_vpick(E, CUI_MAX(0, row), col, &aff);
         *l = cui__ed_line_of(E, pos); *c = cui__ed_col_at(E, *l, pos);
         return;
     }
-    *l = CUI_CLAMP(line, 0, E->nl - 1);
+    int line = cui__ed_rline(E, CUI_MAX(0, row));
+    *l = line >= E->nl ? cui__fold_prev(E->st->fold, E->nl - 1) : line;   /* below the end: the last line shown */
     *c = (int)CUI_CLAMP(floor(col + 0.5), 0.0, (double)(1 << 24));
 }
 
@@ -849,7 +904,7 @@ static bool cui__edm_press(cui__edf *f, int line, double col) {
     }
     if (ui->click_count >= 2) return false;   /* Alt+double click: the word at the caret the first click added */
     bool aff = false;
-    int pos = E->wrap ? cui__ed_vpick(E, line, col, &aff) : cui__ed_pos(E, line, col);
+    int pos = cui__ed_rpick(E, line, col, &aff);   /* (line: the row on screen) */
     for (int i = 0; i < m->n; i++)
         if (m->x[i].anchor == pos && m->x[i].cursor == pos) {   /* a caret there goes */
             memmove(&m->x[i], &m->x[i + 1], sizeof *m->x * (size_t)(m->n - i - 1));
@@ -910,10 +965,11 @@ static const struct cui__edm_pv *cui__edm_view(cui__edf *f, int a, int b) {
         int s0 = cui__edm_lo(&x[i]), s1 = cui__edm_hi(&x[i]), c = x[i].cursor;
         if (s1 > s0) { sa[v->ns] = s0; sb[v->ns] = s1; v->ns++; }
         if (c < a || c > b) continue;
-        int col, line = cui__ed_line_of(E, c);
-        if (E->wrap) line = cui__ed_vrow(E, c, &col);
-        else col = cui__ed_col_at(E, line, c);
-        cl[v->nc] = line; cc[v->nc] = col; v->nc++;
+        int col, line = cui__ed_line_of(E, c), row;
+        if (cui__fold_hidden(st->fold, line)) continue;   /* folded away (not for long: cui__edm_fold_reveal) */
+        if (E->wrap) row = cui__ed_vrow(E, c, &col);
+        else { row = cui__ed_lrow(E, line); col = cui__ed_col_at(E, line, c); }   /* the row: folded lines above take none */
+        cl[v->nc] = row; cc[v->nc] = col; v->nc++;
     }
     v->sa = sa; v->sb = sb; v->cl = cl; v->cc = cc;
     return v;
