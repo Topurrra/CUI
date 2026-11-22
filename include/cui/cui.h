@@ -4327,6 +4327,8 @@ typedef struct cui_log_line {
     double time;               /* the timestamp it was appended with, in seconds */
     uint8_t level;             /* a `cui_log_level` */
 } cui_log_line;
+/* the app's line number seq for a buffer made by `cui_log_init_source` (see there) */
+typedef bool (*cui_log_source_fn)(void *user, uint64_t seq, cui_log_line *out, const char **text);
 typedef struct cui_log_buffer {
     double now;                /* timestamp given to the next appended line (seconds) */
     /* everything below is managed by cui_log_*; read it, do not write it */
@@ -4338,6 +4340,8 @@ typedef struct cui_log_buffer {
     uint32_t text_end;         /* where the next line's text goes */
     uint64_t total;            /* lines ever appended; line i of the buffer is number total - count + i */
     int level_count[CUI_LOG_LEVEL_COUNT];   /* lines of each level now in the buffer, indexed by `cui_log_level` */
+    cui_log_source_fn source;  /* `cui_log_init_source`: the lines are the app's; NULL: the buffer holds them */
+    void *source_user;
 } cui_log_buffer;
 CUI_API void cui_log_init(cui_log_buffer *buf, cui_log_line *lines, int line_cap, char *text, size_t text_cap);
 CUI_API void cui_log_append(cui_log_buffer *buf, cui_log_level level, const char *fmt, ...) CUI_PRINTF(3, 4);
@@ -4347,6 +4351,25 @@ CUI_API void cui_log_append_text(cui_log_buffer *buf, cui_log_level level, doubl
 CUI_API void cui_log_clear(cui_log_buffer *buf);
 /* Line i (0 = oldest), or NULL when out of range. *text is terminated (and len bytes long). */
 CUI_API const cui_log_line *cui_log_get(const cui_log_buffer *buf, int i, const char **text);
+/* Lines the app keeps (opt in): a buffer over text the app already holds (a file it has read, a document), so
+ * nothing is copied. Such a buffer has no storage: it counts the lines (count, total, level_count as for any
+ * buffer) and the view asks `line` for the one it needs, by line number seq (0: the first one pushed): its len,
+ * level and time go in *out (offset is not read) and *text points at its len bytes, valid until the next call
+ * (not terminated; control characters show as spaces). Return false for a line that is not there.
+ *
+ *     cui_log_init_source(&log, my_line, app);
+ *     cui_log_source_push(&log, CUI_LOG_WARN);     // the app's line number log.total is there now
+ *     cui_log_view(ui, "log", &log, .height = -1);
+ *
+ * The appends do nothing on it and cui_log_get returns NULL; Clear in the view empties it (lines pushed after
+ * show). Filter, search, follow, selection and copy work as for a buffer that holds its lines. */
+CUI_API void cui_log_init_source(cui_log_buffer *buf, cui_log_source_fn line, void *user);
+/* the app has one more line: number buf->total, of this level */
+CUI_API void cui_log_source_push(cui_log_buffer *buf, cui_log_level level);
+/* its newest line (number total - 1, of this level) is gone, to be pushed again changed (a line still being written) */
+CUI_API void cui_log_source_pop(cui_log_buffer *buf, cui_log_level level);
+/* its oldest line (number total - count, of this level) is gone: an app that keeps a limited number of lines */
+CUI_API void cui_log_source_shift(cui_log_buffer *buf, cui_log_level level);
 
 typedef struct cui_log_view_opts {
     int _;

@@ -4,7 +4,8 @@
 /* The log view over a big log: the build time (cui_begin_frame to cui_end_frame) of the frames
  * around its first appearance, a filter typed into it and a level turned off.
  *
- *     cui_bench_log [--lines N]     (default 1,100,000 lines, about 100 MB)
+ *     cui_bench_log [--lines N] [--source]     (default 1,100,000 lines, about 100 MB; --source: the same
+ *                                              lines shown through cui_log_init_source)
  */
 #include <cui/cui.h>
 #include <cui/cui_render.h>
@@ -52,16 +53,35 @@ static void phase(cui_ctx *ui, const char *name, int max_frames) {
     printf("%-26s first %7.2f ms  worst %7.2f ms  frames until idle %3d  total %8.2f ms\n", name, first, worst, n, total);
 }
 
+/* --source: the same lines kept by the "app" (the buffer below) and shown through cui_log_init_source */
+static cui_log_buffer g_own;
+static bool own_line(void *user, uint64_t seq, cui_log_line *out, const char **text) {
+    (void)user;
+    const cui_log_line *l = cui_log_get(&g_own, (int)seq, text);
+    if (!l) return false;
+    *out = *l;
+    return true;
+}
+
 int main(int argc, char **argv) {
     int lines = 1100000;
-    for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--lines")) lines = atoi(argv[i + 1]);
+    bool source = false;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--lines") && i + 1 < argc) lines = atoi(argv[i + 1]);
+        if (!strcmp(argv[i], "--source")) source = true;
+    }
     size_t tcap = (size_t)lines * 96 + 1024;
     char *text = malloc(tcap);
     cui_log_line *recs = malloc(sizeof(cui_log_line) * (size_t)(lines + 16));
     cui_log_init(&g_log, recs, lines + 16, text, tcap);
     for (int i = 0; i < lines; i++)
         cui_log_append(&g_log, (cui_log_level)(i % 5 == 4 ? 0 : 1 + i % 4), "%08d worker %d finished the job with status %s in %d ms", i, i % 16, i % 7 ? "ok" : "slow", i % 90);
-    printf("%d lines, %.1f MB of text\n", g_log.count, g_log.text_end / 1048576.0);
+    printf("%d lines, %.1f MB of text%s\n", g_log.count, g_log.text_end / 1048576.0, source ? ", through a source" : "");
+    if (source) {
+        g_own = g_log;
+        cui_log_init_source(&g_log, own_line, NULL);
+        for (int i = 0; i < g_own.count; i++) cui_log_source_push(&g_log, (cui_log_level)g_own.lines[i].level);
+    }
     cui_sw_renderer *sw = cui_sw_create();
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = CUI_THEME_DARK });
     cui_set_viewport(ui, 1180, 780, 1);
