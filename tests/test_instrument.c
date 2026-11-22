@@ -318,6 +318,96 @@ static void test_annotations(void) {
     cui_destroy(ui);
 }
 
+/* a line or bar chart of five flat points with one annotation, x either the index or 10..30 */
+typedef struct { cui_chart_annotation a[2]; int n; bool bars; double x_min, x_max; } ann_xy_case;
+static void build_ann_xy(cui_ctx *ui, void *u) {
+    ann_xy_case *c = u;
+    static float vals[5] = { 0, 0, 0, 0, 0 };
+    cui_series s[1] = { { "x", vals, 5, { 0 } } };
+    cui_chart_opts o = { .height = 200, .min = 0, .max = 100, .no_grid = true, .no_legend = true,
+                         .annotations = c->a, .annotation_count = c->n, .x_min = c->x_min, .x_max = c->x_max };
+    if (c->bars) cui_bar_chart_ex(ui, "xy", s, 1, &o);
+    else cui_line_chart_ex(ui, "xy", s, 1, &o);
+}
+
+/* the column of the one vertical line across the middle of the chart, or -1: the first
+ * pixel on that row that differs from the same chart drawn without annotations */
+static int ann_line_column(cui_ctx *ui, ann_xy_case *c, unsigned char rgb[3]) {
+    int n = c->n;
+    c->n = 0;
+    run(ui, build_ann_xy, c, 3);
+    image bare = render(ui);
+    c->n = n;
+    run(ui, build_ann_xy, c, 3);
+    cui_rect R = cui_get_rect(ui, cui_make_id(ui, "xy"));
+    image im = render(ui);
+    int y = (int)(R.y + R.h * 0.5f), found = -1;
+    for (int x = (int)R.x; x < (int)(R.x + R.w) && found < 0; x++)
+        if (abs(lum(im, x, y) - lum(bare, x, y)) > 20) found = x;
+    if (found >= 0 && rgb) memcpy(rgb, im.px + ((size_t)y * im.w + found) * 4, 3);
+    free(bare.px);
+    free(im.px);
+    return found;
+}
+
+static void test_annotation_color_and_range(void) {
+    printf("annotations: their own color, and x in the line and bar charts' own units\n");
+    cui_ctx *ui = new_ctx(480, 300, true);
+    static ann_xy_case c;
+    for (int bars = 0; bars < 2; bars++) {
+        /* x_min and x_max put 10 at the first point and 30 at the last, so 20 is the third point */
+        memset(&c, 0, sizeof c);
+        c.bars = bars;
+        c.n = 1;
+        c.a[0] = (cui_chart_annotation){ CUI_ANNOTATION_X, 2, 0, NULL, NULL, false };
+        int by_index = ann_line_column(ui, &c, NULL);
+        c.a[0].x = 4;
+        int last_by_index = ann_line_column(ui, &c, NULL);
+        c.x_min = 10, c.x_max = 30;
+        c.a[0].x = 20;
+        int by_units = ann_line_column(ui, &c, NULL);
+        c.a[0].x = 30;
+        int last_by_units = ann_line_column(ui, &c, NULL);
+        CHECK(by_index > 0);
+        CHECK(last_by_index > by_index);
+        CHECK_EQ(by_units, by_index);
+        CHECK_EQ(last_by_units, last_by_index);
+        /* in units, the index is out of range and draws nothing */
+        c.a[0].x = 2;
+        CHECK_EQ(ann_line_column(ui, &c, NULL), -1);
+    }
+    /* a color of its own wins over the muted line, and over accent */
+    memset(&c, 0, sizeof c);
+    c.n = 1;
+    unsigned char rgb[3];
+    cui_color danger = cui_color_of(ui, CUI_COLOR_DANGER);
+    for (int accent = 0; accent < 2; accent++) {
+        c.a[0] = (cui_chart_annotation){ CUI_ANNOTATION_X, 2, 0, NULL, NULL, accent, CUI_COLOR_DANGER };
+        CHECK(ann_line_column(ui, &c, rgb) > 0);
+        CHECK(abs(rgb[0] - danger.r) <= 2 && abs(rgb[1] - danger.g) <= 2 && abs(rgb[2] - danger.b) <= 2);
+    }
+    /* without one, nothing changes: muted, or the accent */
+    c.a[0] = (cui_chart_annotation){ CUI_ANNOTATION_X, 2, 0, NULL, NULL, false };
+    CHECK(ann_line_column(ui, &c, rgb) > 0);
+    cui_color muted = cui_color_of(ui, CUI_COLOR_TEXT_MUTED);
+    CHECK(abs(rgb[0] - muted.r) <= 2 && abs(rgb[1] - muted.g) <= 2 && abs(rgb[2] - muted.b) <= 2);
+    /* a point in its color: the dot's middle */
+    c.a[0] = (cui_chart_annotation){ CUI_ANNOTATION_POINT, 2, 50, NULL, NULL, false, CUI_COLOR_SUCCESS };
+    run(ui, build_ann_xy, &c, 3);
+    cui_rect R = cui_get_rect(ui, cui_make_id(ui, "xy"));
+    image im = render(ui);
+    cui_color ok = cui_color_of(ui, CUI_COLOR_SUCCESS);
+    int hits = 0;
+    for (int y = (int)R.y; y < (int)(R.y + R.h); y++)
+        for (int x = (int)R.x; x < (int)(R.x + R.w); x++) {
+            const unsigned char *p = im.px + ((size_t)y * im.w + x) * 4;
+            hits += abs(p[0] - ok.r) <= 2 && abs(p[1] - ok.g) <= 2 && abs(p[2] - ok.b) <= 2;
+        }
+    CHECK(hits >= 9);
+    free(im.px);
+    cui_destroy(ui);
+}
+
 /* ------------------------------------------------------------------------ */
 /* event track                                                              */
 
@@ -923,6 +1013,7 @@ int main(int argc, char **argv) {
     test_dot_chart();
     test_dot_pixels();
     test_annotations();
+    test_annotation_color_and_range();
     test_event_track();
     test_label_functions();
     test_alignment();

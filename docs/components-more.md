@@ -2343,13 +2343,16 @@ const cui_chart_annotation notes[] = {
     { CUI_ANNOTATION_Y, 0, 300, "SLO", NULL, true },                   /* a dashed line at a value */
     { CUI_ANNOTATION_X, 14.65, 0, "DEPLOY 4.12", "14:39", false },      /* a line at an x, labelled at its top */
     { CUI_ANNOTATION_POINT, 14.7, 515, "PEAK 515 MS", NULL, false },   /* a dot at x, y */
+    { CUI_ANNOTATION_X, 14.77, 0, "ROLLBACK", "14:46", false, CUI_COLOR_DANGER },   /* in a color of its own */
 };
 cui_dot_chart(ui, "wait", series, 1, 61, .x_min = 14, .x_max = 15, .x_units = CUI_AXIS_HOURS,
-              .min = 0, .max = 600, .annotations = notes, .annotation_count = 3);
-cui_line_chart(ui, "sales", lines, 2, .annotations = notes, .annotation_count = 3);   /* x is the point's index */
+              .min = 0, .max = 600, .annotations = notes, .annotation_count = 4);
+cui_line_chart(ui, "sales", lines, 2, .annotations = notes, .annotation_count = 4);   /* x is the point's index */
+cui_line_chart(ui, "wait", lines, 1, .x_min = 14, .x_max = 15,                      /* 61 points, x in hours */
+               .annotations = notes, .annotation_count = 4);
 ```
 
-The dot chart, the line chart and the bar chart take the same `annotations`. In the dot chart, x is in the chart's x units; in line and bar charts it is the point's index. The `label` is drawn in the foreground color and the `detail` under it in a muted one, both in the monospaced font, and `accent` draws the line and its label in the accent color.
+The dot chart, the line chart and the bar chart take the same `annotations`. In the dot chart, x is in the chart's x units. In line and bar charts it is the point's index, unless the chart sets `x_min` and `x_max`: then the first point stands for `x_min`, the last for `x_max`, and x is in those units, so a mark at 13.5 hours goes at 13.5 whatever the sampling. The points are taken as evenly spaced; for data with gaps, such as trading days, keep x as the index. The `label` is drawn in the foreground color and the `detail` under it in a muted one, both in the monospaced font, and `accent` draws the line and its label in the accent color. `color` gives an annotation a color of its own, a theme token such as `CUI_COLOR_SUCCESS` or any `cui_color`, for its line, dot and label; the detail stays muted, and without it `accent` decides as before.
 
 A vertical line's label sits at its top, right of the line. When it would cover a label placed before it, it tries the left of its line, then moves down a line at a time, and a label that ends up over the data gets the page's color behind it. Annotations earlier in the array choose their place first, so put the one that matters most first. The dot chart keeps room above the plot for labels; a threshold's label goes in the gutter on the right when it fits there and above its line when it does not. Annotations outside the range are skipped.
 

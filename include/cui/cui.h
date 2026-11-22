@@ -1099,11 +1099,12 @@ typedef enum cui_annotation_kind {
 } cui_annotation_kind;
 typedef struct cui_chart_annotation {
     cui_annotation_kind kind;
-    double x;                  /* in the chart's x units: the point's index for line and bar charts, x_min to x_max for the dot chart */
+    double x;                  /* in the chart's x units: x_min to x_max, or the point's index in a line or bar chart that sets neither */
     double y;                  /* a value, in the chart's value units */
     const char *label;         /* first line, e.g. "PEAK 203 MG"; `NULL` for a line with no label */
     const char *detail;        /* second line, muted, e.g. "13:06"; `NULL` for none */
     bool accent;               /* the line, dot and label in the accent color */
+    cui_color color;           /* the line, dot and label in this color, e.g. CUI_COLOR_SUCCESS; default: `accent` decides */
 } cui_chart_annotation;
 
 typedef struct cui_chart_opts {
@@ -1123,6 +1124,8 @@ typedef struct cui_chart_opts {
     int annotation_count;      /* number of `annotations` */
     bool dither;               /* line chart: every series filled with dots that thin out from its line to the
                                 * bottom of its band (implies `area`); with `stacked`, bands never mix colors */
+    double x_min, x_max;       /* line and bar charts: what the first and last point stand for, in annotation x units;
+                                * equal: annotation x is the point's index */
 } cui_chart_opts;
 CUI_API void cui_line_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const cui_chart_opts *opts);
 CUI_API void cui_bar_chart_ex(cui_ctx *ui, const char *id, const cui_series *series, int count, const cui_chart_opts *opts);

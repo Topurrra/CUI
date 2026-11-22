@@ -6,6 +6,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Added
 
+- Chart annotations take a `color` of their own, a theme token or any color, for the line, the dot and the label, so a low, a high and a target can each have theirs; without it `accent` decides as before. Line and bar charts take `.x_min` and `.x_max`, what the first and last point stand for, and then an annotation's x is in those units instead of the point's index, as in the dot chart. See [Chart annotations](docs/components-more.md#chart-annotations).
 - `CUI_PLATFORM=wayland` requires native Wayland through SDL2 without falling back to X11. Linux `auto` is unchanged.
 - `cui_image_update(ui, tex, x, y, w, h, rgba, stride)` updates a region of an existing RGBA8 image texture in place through the active renderer's `texture_update` hook (`stride == 0` defaults to `w * 4`), requesting a redraw without reallocating the texture for live video, camera previews, and dynamic bitmaps.
 - `cui_frame_alloc(ui, size)` and `cui_frame_strdup(ui, s)` expose CUI's frame-scoped arena so custom `cui_canvas` paint callbacks can safely capture temporary strings and slices that outlive the caller's stack frame until `cui_end_frame`.

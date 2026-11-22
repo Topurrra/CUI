@@ -3778,7 +3778,7 @@ SCENE(chart_annotations) {
     const cui_chart_annotation notes[] = {
         { CUI_ANNOTATION_Y, 0, 300, "SLO", NULL, true },
         { CUI_ANNOTATION_X, 14 + 39 / 60.0, 0, "DEPLOY 4.12", "14:39", false },
-        { CUI_ANNOTATION_X, 14 + 46 / 60.0, 0, "ROLLBACK", "14:46", false },
+        { CUI_ANNOTATION_X, 14 + 46 / 60.0, 0, "ROLLBACK", "14:46", false, CUI_COLOR_DANGER },
         { CUI_ANNOTATION_POINT, 14 + 42 / 60.0, 515, "PEAK 515 MS", NULL, false },
     };
     cui_dot_series series[1] = { { wait, "Wait", false } };
