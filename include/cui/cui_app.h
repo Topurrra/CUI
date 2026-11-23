@@ -149,7 +149,8 @@ CUI_API const char *cui_app_backend(cui_app *app);
 /* Native file dialogs. Blocking; returns true and writes the chosen path
  * (UTF-8) to out when the user confirms. On Linux this uses zenity or
  * kdialog when installed. Pass NULL as app to use the current app (handy in
- * cui_app_run callbacks). */
+ * cui_app_run callbacks). On Windows the folder chooser also works when the
+ * calling thread already uses a multithreaded COM apartment. */
 typedef enum cui_file_dialog_kind { CUI_FILE_OPEN = 0, CUI_FILE_SAVE, CUI_FILE_FOLDER } cui_file_dialog_kind;
 typedef struct cui_file_dialog_opts {
     cui_file_dialog_kind kind;

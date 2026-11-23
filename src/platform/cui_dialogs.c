@@ -31,6 +31,49 @@ static bool cui__w_append(WCHAR *buf, int cap, int *n, const char *s) {
     return true;
 }
 
+typedef struct {
+    HWND owner;
+    const WCHAR *title;
+    WCHAR *path;
+} cui__folder_dialog;
+
+/* Return S_OK for a filesystem selection, S_FALSE on cancel, or the COM failure. */
+static DWORD WINAPI cui__browse_folder(void *data) {
+    cui__folder_dialog *dialog = data;
+    HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(com)) return (DWORD)com;
+    BROWSEINFOW info = { 0 };
+    info.hwndOwner = dialog->owner;
+    info.lpszTitle = dialog->title;
+    info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    LPITEMIDLIST pidl = SHBrowseForFolderW(&info);
+    BOOL selected = FALSE;
+    if (pidl) {
+        selected = SHGetPathFromIDListW(pidl, dialog->path);
+        CoTaskMemFree(pidl);
+    }
+    CoUninitialize();
+    return selected ? S_OK : S_FALSE;
+}
+
+/* During the modal call the Shell sends synchronous messages to the owner.
+ * Dispatch those without consuming queued input or running the app's timers. */
+static bool cui__choose_folder(HWND owner, const WCHAR *title, WCHAR *path) {
+    cui__folder_dialog dialog = { owner, title, path };
+    DWORD result = cui__browse_folder(&dialog);
+    if (result != (DWORD)RPC_E_CHANGED_MODE) return result == S_OK;
+    HANDLE thread = CreateThread(NULL, 0, cui__browse_folder, &dialog, 0, NULL);
+    if (!thread) return false;
+    while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_SENDMESSAGE) == WAIT_OBJECT_0 + 1) {
+        MSG message;
+        PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+    }
+    WaitForSingleObject(thread, INFINITE);
+    BOOL finished = GetExitCodeThread(thread, &result);
+    CloseHandle(thread);
+    return finished && result == S_OK;
+}
+
 bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *out, size_t cap) {
     (void)app;
     HWND owner = GetActiveWindow();
@@ -38,21 +81,7 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
     cui__to_wide(o->title ? o->title : (o->kind == CUI_FILE_SAVE ? "Save" : "Open"), title, 256);
     WCHAR path[MAX_PATH * 4] = { 0 };
     if (o->kind == CUI_FILE_FOLDER) {
-        /* the new style folder dialog needs COM on this thread */
-        HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        BROWSEINFOW bi;
-        memset(&bi, 0, sizeof bi);
-        bi.hwndOwner = owner;
-        bi.lpszTitle = title;
-        bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-        LPITEMIDLIST pidl = SHBrowseForFolderW(&bi);
-        BOOL ok = FALSE;
-        if (pidl) {
-            ok = SHGetPathFromIDListW(pidl, path);
-            CoTaskMemFree(pidl);
-        }
-        if (SUCCEEDED(com)) CoUninitialize();
-        if (!ok) return false;
+        if (!cui__choose_folder(owner, title, path)) return false;
     } else {
         /* filter: "Images\0*.png;*.jpg\0All files\0*.*\0\0" */
         WCHAR filter[512];
