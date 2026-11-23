@@ -1572,8 +1572,8 @@ CUI_API cui_tree_table_events cui_tree_table_end(cui_ctx *ui);
 CUI_API int cui_tree_sort(cui_tree_node *nodes, int node_count, int root, int (*cmp)(void *user, int a, int b), void *user);
 /* Moves nodes, each with its subtree, before, into (after the last child) or
  * after target, keeping their order, and relinks the nodes. Returns the new
- * first top level node. A target that is one of the nodes or inside one
- * moves nothing. Flags stay as they are: open the target yourself if you
+ * first top level node. A target that is one of the nodes or inside one,
+ * or a node listed twice, moves nothing. Flags stay as they are: open the target yourself if you
  * want the moved nodes in view. */
 CUI_API int cui_tree_move(cui_tree_node *nodes, int node_count, int root, const int *move, int move_count, int target, int where);
 

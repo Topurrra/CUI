@@ -286,13 +286,13 @@ static void cui__tt_start_drag(cui_ctx *ui, cui__tt_build *b) {
 
 /* The drop under the pointer: before or after a row, or inside a folder
  * (its middle half). Below the last row is after the last top level node. */
-static void cui__tt_find_target(cui_ctx *ui, cui__tt_build *b, cui_rect view, float row0) {
+static void cui__tt_find_target(cui__tt_build *b, cui_rect view, float row0, float px, float py) {
     cui__tt_state *st = b->st;
     st->target = -1;
     st->mark = CUI__TT_MARK_NONE;
-    if (!cui__rect_contains(view, ui->mx, ui->my) || b->nrows == 0) return;
+    if (!cui__rect_contains(view, px, py) || b->nrows == 0) return;
     float rh = b->o.row_height;
-    int i = (int)floorf((ui->my - row0) / rh);
+    int i = (int)floorf((py - row0) / rh);
     if (i < 0) return;
     int t, where, mark, mrow, mdepth;
     if (i >= b->nrows) {
@@ -302,7 +302,7 @@ static void cui__tt_find_target(cui_ctx *ui, cui__tt_build *b, cui_rect view, fl
     } else {
         int n = b->rows[i].node;
         if (n < 0) return;   /* a loading row */
-        float f = (ui->my - (row0 + i * rh)) / rh;
+        float f = (py - (row0 + i * rh)) / rh;
         if (cui__tt_has_kids(b, n)) where = f < 0.25f ? CUI_TREE_DROP_BEFORE : f > 0.75f ? CUI_TREE_DROP_AFTER : CUI_TREE_DROP_INSIDE;
         else where = f < 0.5f ? CUI_TREE_DROP_BEFORE : CUI_TREE_DROP_AFTER;
         t = n; mrow = i; mdepth = b->rows[i].depth;
@@ -337,17 +337,24 @@ static void cui__tt_edge_scroll(cui_ctx *ui, cui__tt_build *b, cui_rect view) {
 static bool cui__tt_drag_input(cui_ctx *ui, cui__tt_build *b) {
     cui__tt_state *st = b->st;
     cui_id did = b->id ^ CUI__TT_GHOST;
-    if (st->pending && !ui->mdown[0]) st->pending = false;
+    if (cui_is_disabled(ui)) {   /* a disabled table drops nothing: the drag ends */
+        st->pending = st->dragging = false;
+        st->mark = CUI__TT_MARK_NONE;
+        return false;
+    }
+    /* a release counts where it happened: the pointer may have moved on before this frame */
+    bool released = !ui->mdown[0];
+    float px = ui->mreleased[0] ? ui->release_x : ui->mx, py = ui->mreleased[0] ? ui->release_y : ui->my;
     cui_rect view;
     float row0;
     bool geo = cui__grid_rows_at(ui, b->id, &view, &row0);
     if (st->pending) {
-        float dx = ui->mx - st->press_x, dy = ui->my - st->press_y;
+        float dx = px - st->press_x, dy = py - st->press_y;
         if (!cui__tt_ok(b, st->press_node)) st->pending = false;
         else if (geo && dx * dx + dy * dy > CUI__TT_DRAG_START * CUI__TT_DRAG_START) {
             st->pending = false;
-            cui__tt_start_drag(ui, b);
-        }
+            cui__tt_start_drag(ui, b);   /* also when it moved and let go between two frames: that drops */
+        } else if (released) st->pending = false;   /* a click */
     }
     cui__spring(ui, &st->lift, st->dragging ? 1.0f : 0.0f, CUI__SPRING_ENTER);
     if (!st->dragging) return false;
@@ -364,8 +371,8 @@ static bool cui__tt_drag_input(cui_ctx *ui, cui__tt_build *b) {
     for (int k = 0; k < st->drag_n; k++) b->drag_mark[st->drag[k]] = true;
     if (!geo) return false;
     b->view_w = view.w;
-    cui__tt_find_target(ui, b, view, row0);
-    if (!ui->mdown[0]) {
+    cui__tt_find_target(b, view, row0, px, py);
+    if (released) {
         if (st->target >= 0) {
             int *d = cui__frame_alloc(ui, sizeof(int) * (size_t)st->drag_n);
             memcpy(d, st->drag, sizeof(int) * (size_t)st->drag_n);
@@ -421,7 +428,7 @@ static void cui__tt_row_drag(cui_ctx *ui, cui__tt_build *b, int i, int node) {
     if (node >= 0 && !st->dragging && cui__grid_row_pressed(ui)) {
         st->pending = true;
         st->press_node = node;
-        st->press_x = ui->mx; st->press_y = ui->my;
+        st->press_x = ui->press_x; st->press_y = ui->press_y;   /* where the button went down */
     }
     if (!st->dragging || !b->drag_mark) return;
     int row = cui__current(ui);
@@ -832,7 +839,10 @@ static void cui__tt_link(cui_tree_node *nodes, int count, int *root, int n, int 
 int cui_tree_move(cui_tree_node *nodes, int count, int root, const int *move, int move_count, int target, int where) {
     if (!nodes || count <= 0 || !move || move_count <= 0 || target < 0 || target >= count) return root;
     if (where != CUI_TREE_DROP_BEFORE && where != CUI_TREE_DROP_INSIDE && where != CUI_TREE_DROP_AFTER) return root;
-    for (int k = 0; k < move_count; k++) if (move[k] < 0 || move[k] >= count) return root;
+    for (int k = 0; k < move_count; k++) {
+        if (move[k] < 0 || move[k] >= count) return root;
+        for (int j = 0; j < k; j++) if (move[j] == move[k]) return root;   /* twice: it would link after itself */
+    }
     /* the target may not be one of the nodes or inside one: that would make a loop */
     for (int a = target, guard = 0; a >= 0 && a < count && guard <= count; guard++, a = nodes[a].parent)
         for (int k = 0; k < move_count; k++) if (move[k] == a) return root;
