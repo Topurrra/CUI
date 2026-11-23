@@ -23,10 +23,13 @@ static void CALLBACK accept_name(HWND window, UINT msg, UINT_PTR timer, DWORD ti
 }
 
 int main(void) {
-    WCHAR temp[MAX_PATH], folder[MAX_PATH], path[MAX_PATH];
-    DWORD len = GetTempPathW(MAX_PATH, temp);
+    WCHAR raw_temp[MAX_PATH], temp[MAX_PATH], folder[MAX_PATH], path[MAX_PATH];
+    DWORD len = GetTempPathW(MAX_PATH, raw_temp);
+    if (!len || len >= MAX_PATH) return 1;
+    len = GetLongPathNameW(raw_temp, temp, MAX_PATH);
     if (!len || len + 75 >= MAX_PATH) return 1;
-    swprintf(folder, MAX_PATH, L"%lscui-save-%lu-%llu", temp, GetCurrentProcessId(),
+    if (len > 0 && temp[len - 1] == L'\\') temp[len - 1] = 0;
+    swprintf(folder, MAX_PATH, L"%ls\\cui-save-%lu-%llu", temp, GetCurrentProcessId(),
              (unsigned long long)GetTickCount64());
     swprintf(path, MAX_PATH, L"%ls\\notes-\u00e9.txt", folder);
     /* Deny FILE_ADD_FILE on this new directory only. The owner can remove it. */
@@ -53,7 +56,11 @@ int main(void) {
             cui_file_dialog_opts opts = { .kind = CUI_FILE_SAVE, .title = "Choose a destination",
                                           .default_name = expected };
             UINT_PTR timer = SetTimer(NULL, 0, 100, accept_name);
-            if (timer && WideCharToMultiByte(CP_UTF8, 0, path, -1, expected, sizeof expected, NULL, NULL)) {
+            if (!timer) {
+                fputs("Could not start the Save dialog acceptance timer\n", stderr);
+            } else if (!WideCharToMultiByte(CP_UTF8, 0, path, -1, expected, sizeof expected, NULL, NULL)) {
+                fputs("Could not convert the suggested path to UTF-8\n", stderr);
+            } else {
                 bool chosen = cui_app_file_dialog(app, &opts, actual, sizeof actual);
                 result = !(accepted && chosen && strcmp(expected, actual) == 0 &&
                            GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES);

@@ -88,9 +88,13 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
             if (wcspbrk(path, L"\\/")) {
                 WCHAR *name = NULL;
                 DWORD length = GetFullPathNameW(path, MAX_PATH * 4, directory, &name);
-                if (length && length < MAX_PATH * 4 && name) {
-                    wmemcpy(path, name, wcslen(name) + 1);
-                    *name = 0;
+                if (length && length < MAX_PATH * 4) {
+                    if (name) {
+                        wmemcpy(path, name, wcslen(name) + 1);
+                        *name = 0;
+                    } else {
+                        path[0] = 0;
+                    }
                     ofn.lpstrInitialDir = directory;
                 }
             }
