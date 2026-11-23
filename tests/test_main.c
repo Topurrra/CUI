@@ -9375,6 +9375,15 @@ static void test_month(void) {
     CHECK(c.month.year == 2027 && c.month.month == 1 && c.sel.day == 4);
     key(ui, build_mc, &c, CUI_KEY_HOME, 0);
     CHECK(c.month.year == 2026 && c.month.month == 11 && c.sel.day == 8);
+    /* The pointer stays on the 20th while the keyboard selects a different day. */
+    key(ui, build_mc, &c, CUI_KEY_RIGHT, 0);
+    key(ui, build_mc, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.r.day_clicked && c.r.day_activated && c.sel.day == 9);
+    key(ui, build_mc, &c, CUI_KEY_HOME, 0);
+    key(ui, build_mc, &c, CUI_KEY_SPACE, 0);
+    CHECK(c.r.day_clicked && !c.r.day_activated && c.sel.day == 8);
+    click_at(ui, build_mc, &c, c.gr.x + cw * 4.5f, c.gr.y + ch * 3 + 80);
+    CHECK(c.r.day_clicked && c.sel.day == 20);
     /* many events stay cheap: 5,000 in a month */
     enum { M = 5000 };
     cui_month_event *many = malloc(sizeof *many * M);

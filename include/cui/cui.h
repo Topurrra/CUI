@@ -2691,7 +2691,7 @@ CUI_API int cui_week_calendar_ex(cui_ctx *ui, const char *id, cui_date week_star
  *
  * With the grid focused the arrows move the selected day (into the next or
  * previous month), Page Up and Page Down change month, Home goes to today
- * and Enter activates the day. */
+ * and Enter activates the selected day even when the pointer rests on another day. */
 typedef struct cui_month_event {
     const char *title;         /* shown on the event's bar, or after the time of a timed event */
     cui_date start, end;       /* inclusive; an unset or earlier end means one day */
