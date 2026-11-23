@@ -3575,6 +3575,22 @@ static void test_tree_table_drag(void) {
     t.disabled = false;
     run(ui, build_ttab, &t, 2);
     CHECK(t.drops == 8 && nd[0].next_sibling == 6 && nd[6].next_sibling == 1);
+    /* let go and pressed again before the next frame: the first drop still lands where it was let go */
+    { int w[] = { 0, 6, 1, 2 }; CHECK(ttab_seq(&t, w, 4)); }
+    cui_input_mouse_move(ui, x, ttab_row_y(g, 3));   /* A2 */
+    run(ui, build_ttab, &t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_ttab, &t, 1);
+    for (int i = 1; i <= 4; i++) { cui_input_mouse_move(ui, x, ttab_row_y(g, 3) + (ttab_row_top(g, 0) + 4 - ttab_row_y(g, 3)) * i / 4); run(ui, build_ttab, &t, 1); }
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);   /* over the top of A */
+    cui_input_mouse_move(ui, x, ttab_row_y(g, 2));
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_ttab, &t, 1);
+    cui_input_mouse_move(ui, x, ttab_row_top(g, 2) - 4);   /* the second press goes on to after C */
+    run(ui, build_ttab, &t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_ttab, &t, 2);
+    CHECK(t.drops == 9 && t.dropped[0] == 2 && t.drop_target == 0 && t.drop_where == CUI_TREE_DROP_BEFORE && t.root == 2);
     cui_destroy(ui);
 
     /* the rows scroll while the drag rests near the bottom edge */

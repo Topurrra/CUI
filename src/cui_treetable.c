@@ -342,8 +342,9 @@ static bool cui__tt_drag_input(cui_ctx *ui, cui__tt_build *b) {
         st->mark = CUI__TT_MARK_NONE;
         return false;
     }
-    /* a release counts where it happened: the pointer may have moved on before this frame */
-    bool released = !ui->mdown[0];
+    /* a release counts where it happened: the pointer may have moved on, or pressed
+     * again, before this frame (the second press then belongs to the drop) */
+    bool released = ui->mreleased[0] || !ui->mdown[0];
     float px = ui->mreleased[0] ? ui->release_x : ui->mx, py = ui->mreleased[0] ? ui->release_y : ui->my;
     cui_rect view;
     float row0;
