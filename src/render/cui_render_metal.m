@@ -306,6 +306,10 @@ static void cui__mtl_layer(cui_gpu_renderer *r, CUIMetalWindow *w, int fw, int f
     /* a frame read back is blitted from; once one was, the drawables stay readable */
     if (capture) r->readable = true;
     if (layer.framebufferOnly != !r->readable) layer.framebufferOnly = !r->readable;
+    /* while the window is dragged to a new size, the frame joins the Core Animation transaction
+     * that resizes the window: drawn for the new size and shown with it, not a refresh later */
+    BOOL sync = w.window.inLiveResize;
+    if (layer.presentsWithTransaction != sync) layer.presentsWithTransaction = sync;
 }
 
 /* The next slot of vertex and index buffers, once its last reader is done. */
@@ -423,8 +427,15 @@ static bool cui__mtl_render(cui_gpu_renderer *r, const cui_draw_data *dd, void *
 
         id<MTLBuffer> readback = nil;
         if (rgba && tw == fw && th == fh) readback = cui__mtl_copy_out(w, cmd, drawable, fw, fh);
-        [cmd presentDrawable:drawable];
-        [cmd commit];
+        if (w.layer.presentsWithTransaction) {
+            /* the drawable must be scheduled on the GPU before it is presented in the transaction */
+            [cmd commit];
+            [cmd waitUntilScheduled];
+            [drawable present];
+        } else {
+            [cmd presentDrawable:drawable];
+            [cmd commit];
+        }
         slot.reader = cmd;
         w.last = cmd;
         if (!readback) return !rgba;

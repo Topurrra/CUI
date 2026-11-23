@@ -70,6 +70,7 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- macOS Metal renderer: the window's content no longer jitters while the window is dragged to a new size. Each frame drawn during the drag is shown together with the new window size, as the software renderer's already are.
 - Windows: maximizing, minimizing or restoring a window no longer freezes it for about a second with vsync on. The window keeps presenting, without vsync, while DWM animates the change, and vsync comes back right after ([#117](https://github.com/yappologistic/CUI/issues/117)).
 - Repeated software screenshots capture the whole frame when the destination buffer is reused ([#101](https://github.com/yappologistic/CUI/issues/101)).
 - A week calendar or Gantt drag ends when the list shrinks, the component is disabled or `read_only` changes. A held mouse button can no longer resume that drag or move the item that took its place ([#109](https://github.com/yappologistic/CUI/issues/109)).
