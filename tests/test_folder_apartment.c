@@ -38,21 +38,23 @@ static bool choose(cui_app *app, const WCHAR *folder, const char *expected) {
     HANDLE driver = CreateThread(NULL, 0, answer, &input, 0, NULL);
     if (!driver) return false;
     cui_file_dialog_opts opts = { .kind = CUI_FILE_FOLDER, .title = "Choose a test folder" };
-    char actual[MAX_PATH * 4];
+    char actual[MAX_PATH * 4] = { 0 };
     bool chosen = cui_app_file_dialog(app, &opts, actual, sizeof actual);
     DWORD status = 1;
     WaitForSingleObject(driver, INFINITE);
     GetExitCodeThread(driver, &status);
     CloseHandle(driver);
     bool ok = !status && (expected ? chosen && strcmp(actual, expected) == 0 : !chosen);
-    if (!ok) fprintf(stderr, "Folder dialog returned %d, path '%s', driver %lu\n",
-                     (int)chosen, actual, status);
+    if (!ok) fprintf(stderr, "Folder dialog returned %d, path '%s', expected '%s', driver %lu\n",
+                     (int)chosen, actual, expected ? expected : "(cancel)", status);
     return ok;
 }
 
 int main(int argc, char **argv) {
-    WCHAR folder[MAX_PATH];
-    DWORD n = GetTempPathW(MAX_PATH, folder);
+    WCHAR raw_folder[MAX_PATH], folder[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, raw_folder);
+    if (!n || n >= MAX_PATH) return 1;
+    n = GetLongPathNameW(raw_folder, folder, MAX_PATH);
     if (!n || n >= MAX_PATH) return 1;
     if (n > 3 && folder[n - 1] == L'\\') folder[n - 1] = 0;
     char expected[MAX_PATH * 4];
