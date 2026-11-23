@@ -1173,6 +1173,77 @@ static int files_list(void *user, const char *path, cui_file_entry *out, int cap
     return 6;
 }
 
+/* A made-up project whose files you drag between folders. */
+#define GT_N 14
+static const struct { const char *name; int parent; const char *size, *kind; } gt_files[GT_N] = {
+    { "src", -1, "", "Folder" },               { "core.c", 0, "24 KB", "C source" },        { "layout.c", 0, "31 KB", "C source" },
+    { "widgets.c", 0, "54 KB", "C source" },   { "render", 0, "", "Folder" },             { "software.c", 4, "34 KB", "C source" },
+    { "opengl.c", 4, "21 KB", "C source" },    { "docs", -1, "", "Folder" },              { "guide.md", 7, "18 KB", "Markdown" },
+    { "components.md", 7, "77 KB", "Markdown" }, { "assets", -1, "", "Folder" },          { "logo.png", 10, "12 KB", "PNG image" },
+    { "README.md", -1, "6 KB", "Markdown" },   { "LICENSE", -1, "1 KB", "Text" },
+};
+static cui_tree_node gt_nodes[GT_N];
+static int gt_root, gt_cursor = -1;
+static char gt_status[160] = "Drag files and folders to move them. Hold over a closed folder to open it.";
+
+static const char *gt_label(void *user, int n) { (void)user; return gt_files[n].name; }
+static bool gt_folder(int n) { return (gt_nodes[n].flags & CUI_TREE_HAS_CHILDREN) != 0; }
+
+static void gt_init(void) {
+    int last[GT_N + 1];   /* the last child linked so far, per parent (the top level at GT_N) */
+    for (int k = 0; k <= GT_N; k++) last[k] = -1;
+    gt_root = 0;
+    for (int k = 0; k < GT_N; k++) {
+        int p = gt_files[k].parent;
+        gt_nodes[k] = (cui_tree_node){ p, -1, -1, strcmp(gt_files[k].kind, "Folder") ? 0u : CUI_TREE_HAS_CHILDREN };
+        int *l = &last[p >= 0 ? p : GT_N];
+        if (*l >= 0) gt_nodes[*l].next_sibling = k;
+        else if (p >= 0) gt_nodes[p].first_child = k;
+        *l = k;
+    }
+    gt_nodes[0].flags |= CUI_TREE_OPEN;
+    gt_nodes[7].flags |= CUI_TREE_OPEN;
+}
+
+static void gt_tree(cui_ctx *ui) {
+    static bool init;
+    if (!init) { gt_init(); init = true; }
+    static const cui_grid_column cols[] = {
+        { "Name", 240, CUI_TEXT_LEFT, false, false, 0 }, { "Size", 90, CUI_TEXT_RIGHT, false, false, 1 }, { "Kind", 120, CUI_TEXT_LEFT, false, false, 2 },
+    };
+    cui_tree_table_begin(ui, "project", cols, 3, gt_nodes, GT_N, .height = CUI_PX(400), .root = gt_root, .cursor = &gt_cursor,
+                         .guides = true, .label = gt_label, .draggable = true);
+    int n;
+    while ((n = cui_tree_table_row(ui)) >= 0) {
+        const char *icon = !gt_folder(n) ? CUI_ICON_FILE : (gt_nodes[n].flags & CUI_TREE_OPEN) ? CUI_ICON_FOLDER_OPEN : CUI_ICON_FOLDER;
+        cui_tree_table_name(ui, gt_files[n].name, icon);
+        cui_data_grid_cell_text(ui, gt_files[n].size);
+        cui_data_grid_cell_text(ui, gt_files[n].kind);
+    }
+    cui_tree_table_events ev = cui_tree_table_end(ui);
+    /* every child is linked already: a folder that asks for more (one emptied by a move) has none */
+    for (int k = 0; k < ev.load_count; k++) gt_nodes[ev.load[k]].flags &= ~(uint32_t)CUI_TREE_LOADING;
+    if (ev.drop_count > 0) {
+        int t = ev.drop_target;
+        gt_root = cui_tree_move(gt_nodes, GT_N, gt_root, ev.dropped, ev.drop_count, t, ev.drop_where);
+        int parent = ev.drop_where == CUI_TREE_DROP_INSIDE ? t : gt_nodes[t].parent;
+        if (parent >= 0) gt_nodes[parent].flags |= CUI_TREE_OPEN;   /* keep the moved nodes in view */
+        const char *what = ev.drop_count == 1 ? gt_files[ev.dropped[0]].name : NULL;
+        char many[32];
+        snprintf(many, sizeof many, "%d items", ev.drop_count);
+        if (parent >= 0) snprintf(gt_status, sizeof gt_status, "Moved %s into %s.", what ? what : many, gt_files[parent].name);
+        else snprintf(gt_status, sizeof gt_status, "Moved %s to the top level.", what ? what : many);
+    }
+    cui_row(ui, .gap = 8, .align = CUI_ALIGN_CENTER, .wrap = true) {
+        if (cui_button(ui, "Reset", .icon = CUI_ICON_ROTATE_CCW, .variant = CUI_BUTTON_OUTLINE)) {
+            gt_init();
+            gt_cursor = -1;
+            snprintf(gt_status, sizeof gt_status, "Back to the start.");
+        }
+        cui_muted(ui, gt_status);
+    }
+}
+
 static void page_files(cui_ctx *ui) {
     static char folder[1024] = ".";
     static bool open_dlg, save_dlg;
@@ -1187,6 +1258,9 @@ static void page_files(cui_ctx *ui) {
     }
     cui_file_picker(ui, "open", &open_dlg, chosen, sizeof chosen, .list = files_list);
     cui_file_picker(ui, "save", &save_dlg, chosen, sizeof chosen, .list = files_list, .save = true, .name = "untitled.txt");
+
+    section(ui, "Tree table", "Drag rows to move them: before, after or into a folder. Esc cancels; Shift and Ctrl select several.");
+    gt_tree(ui);
 
     /* a small shell over the same folder */
     static cui_terminal_buffer term;
