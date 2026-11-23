@@ -4143,7 +4143,15 @@ CUI_API bool cui_node_editor_begin_ex(cui_ctx *ui, const char *id, cui_node_view
 CUI_API void cui_node_editor_end(cui_ctx *ui);
 /* A node at canvas position (*x, *y), updated while it is dragged. Returns
  * true while the node is selected. */
-typedef struct cui_node_opts { int _; float width; const char *icon; } cui_node_opts;   /* width default 184 */
+typedef struct cui_node_opts {
+    int _;
+    float width;               /* default 184 */
+    const char *icon;
+    cui_color accent;          /* a state color (running, done, failed...), a color or a token (CUI_COLOR_SUCCESS):
+                                  a stripe down the card's left edge and a tinted title row; zero (the default): none */
+    const char *badge;         /* a small pill at the right of the title ("running", "3"); NULL: none */
+    cui_tone badge_tone;       /* the badge's tone, as cui_badge(.tone); zero is neutral */
+} cui_node_opts;
 CUI_API bool cui_node_begin_ex(cui_ctx *ui, int node_id, float *x, float *y, const char *title, const cui_node_opts *opts);
 CUI_API void cui_node_end(cui_ctx *ui);
 /* A row with a pin on the left (input) or right (output). type picks the pin
@@ -4166,6 +4174,11 @@ CUI_API bool cui_node_link(cui_ctx *ui, int link_id, int from_pin, int to_pin);
 CUI_API bool cui_node_link_created(cui_ctx *ui, int *from_pin, int *to_pin);
 CUI_API bool cui_node_link_removed(cui_ctx *ui, int *link_id);
 CUI_API bool cui_node_deleted(cui_ctx *ui, int *node_id);
+/* Selects node_id alone, from code (a node the app just added, a node picked from a list), and with focus gives
+ * its card the keyboard (shown as keyboard focus), so arrows, Delete and Tab go on from there. Call it between
+ * cui_node_editor_begin and cui_node_editor_end; it takes effect when the card is built (this frame if it comes
+ * later, else the next). Nothing changes for an editor that never calls it. */
+CUI_API void cui_node_select(cui_ctx *ui, int node_id, bool focus);
 #ifndef __cplusplus
 #define cui_node_editor_begin(ui, id, view, ...) cui_node_editor_begin_ex((ui), (id), (view), CUI__OPTS(cui_node_editor_opts, __VA_ARGS__))
 #define cui_node_begin(ui, node_id, x, y, title, ...) cui_node_begin_ex((ui), (node_id), (x), (y), (title), CUI__OPTS(cui_node_opts, __VA_ARGS__))

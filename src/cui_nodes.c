@@ -94,6 +94,8 @@ typedef struct cui__ne_card {
     const char *icon;
     bool selected;
     float hover, lift, focus;
+    cui_color accent;                     /* cui_node_opts.accent (alpha 0: none) */
+    const char *badge; int badge_len; cui_tone badge_tone;
 } cui__ne_card;
 
 typedef struct { cui__ne_build *cur; cui_id last; uint64_t last_frame; } cui__ne_reg;
@@ -361,10 +363,34 @@ static void cui__paint_ne_card(cui_ctx *ui, cui_node *n, void *data) {
     cui_color edge = cp->selected ? acc : cui_mix(CUI_C(ui, BORDER), CUI_C(ui, BORDER_STRONG), cp->hover * 0.7f);
     cui_draw_rect_border(ui, r, rc, bg, edge, 1.0f);
     if (dark) cui__draw_top_light(ui, r, rc, 0.045f);
-    /* title */
     float head = CUI__NE_HEAD * z;
+    /* a state color: the title row tinted, a stripe down the left edge */
+    if (cp->accent.a > 0) {
+        float in = 1.0f;
+        cui_corners top = { CUI_MAX(rad - in, 0), CUI_MAX(rad - in, 0), 0, 0 };
+        cui_draw_rect(ui, (cui_rect){ r.x + in, r.y + in, r.w - 2 * in, head - in }, top, cui_alpha(cp->accent, dark ? 0.20f : 0.13f));
+        float sw = CUI_MAX(3.0f * z, 2.0f);
+        float m = CUI_MAX(rad, 2.0f);   /* between the rounded corners */
+        if (r.h > 2 * m) cui_draw_rect(ui, (cui_rect){ r.x + in, r.y + m, sw, r.h - 2 * m }, CUI_CORNERS(sw * 0.5f), cp->accent);
+    }
+    /* title */
     float ts = cui__fs(ui, ui->theme.text_body) * z;
     float x = r.x + 12 * z;
+    float right = r.x + r.w - 12 * z;
+    if (cp->badge_len > 0) {   /* the badge's pill, right-aligned in the title row */
+        float bs = cui__fs(ui, ui->theme.text_xs) * z;
+        if (bs >= 3) {
+            float tw = cui__text_width(ui, CUI_FONT_MEDIUM, bs, cp->badge, cp->badge_len, false);
+            float ph = bs + 6 * z, pw = tw + 12 * z;
+            cui_color tc = cp->badge_tone ? cui__tone_color(ui, cp->badge_tone) : CUI_C(ui, TEXT_SECONDARY);
+            cui_rect pr = { right - pw, r.y + (head - ph) * 0.5f, pw, ph };
+            cui_draw_rect(ui, pr, CUI_CORNERS(ph * 0.5f), cui_alpha(tc, dark ? 0.22f : 0.14f));
+            float bfh = cui__font_line_height(ui, CUI_FONT_MEDIUM, bs);
+            cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, bs, pr.x + 6 * z, pr.y + (ph - bfh) * 0.5f, tw + 1, tc,
+                                    cp->badge, cp->badge_len, false);
+            right = pr.x - 6 * z;
+        }
+    }
     if (cp->icon) {
         float is = 14 * z;
         if (is >= 4) cui_draw_icon(ui, cp->icon, (cui_rect){ x, r.y, is, head }, is, CUI_C(ui, TEXT_SECONDARY));
@@ -372,7 +398,7 @@ static void cui__paint_ne_card(cui_ctx *ui, cui_node *n, void *data) {
     }
     if (ts >= 3) {
         float fh = cui__font_line_height(ui, CUI_FONT_MEDIUM, ts);
-        cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, ts, x, r.y + (head - fh) * 0.5f, r.x + r.w - 12 * z - x,
+        cui__draw_text_ellipsis(ui, CUI_FONT_MEDIUM, ts, x, r.y + (head - fh) * 0.5f, right - x,
                                 CUI_C(ui, FOREGROUND), cp->title, cp->title_len, false);
     }
     float hair = 1.0f;
@@ -907,6 +933,10 @@ bool cui_node_begin_ex(cui_ctx *ui, int node_id, float *x, float *y, const char 
     cp->title = title ? title : "";
     cp->title_len = title ? cui__display_len(title) : 0;
     cp->icon = o->icon;
+    cp->accent = cui_color_of(ui, o->accent);   /* a token (CUI_COLOR_SUCCESS) follows the theme */
+    cp->badge = o->badge;
+    cp->badge_len = o->badge ? (int)strlen(o->badge) : 0;
+    cp->badge_tone = o->badge_tone;
     cp->selected = selected;
     cp->hover = *hover;
     cp->focus = *focus;
@@ -1070,6 +1100,13 @@ void cui_node_content_end(cui_ctx *ui) {
 /* ------------------------------------------------------------------------ */
 /* Links and events                                                         */
 /* ------------------------------------------------------------------------ */
+
+void cui_node_select(cui_ctx *ui, int node_id, bool focus) {
+    cui__ne_build *b = cui__ne_cur(ui);
+    if (!b || b->inert > 0) return;
+    cui__ne_select_only(ui, b->st, node_id);
+    if (focus) cui_focus_set(ui, cui__ne_card_id(b->id, node_id), true);
+}
 
 bool cui_node_link(cui_ctx *ui, int link_id, int from_pin, int to_pin) {
     cui__ne_build *b = cui__ne_cur(ui);

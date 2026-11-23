@@ -6415,6 +6415,69 @@ static void test_node_editor(void) {
     cui_destroy(ui);
 }
 
+/* node editor: a state color and a badge on a card, and selection from code */
+typedef struct {
+    cui_node_view view;
+    float pos[2][2];
+    int pick; bool focus;
+    bool sel[2];
+    cui_id card[2];
+} nsel_ctx;
+
+static void build_nsel(cui_ctx *ui, void *user) {
+    nsel_ctx *a = user;
+    if (cui_node_editor_begin(ui, "g2", &a->view, .height = CUI_PX(320))) {
+        if (a->pick) { cui_node_select(ui, a->pick, a->focus); a->pick = 0; }
+        a->sel[0] = cui_node_begin(ui, 1, &a->pos[0][0], &a->pos[0][1], "A long title that is cut before the badge",
+                                   .accent = CUI_RGB(0x2F80ED), .badge = "running", .badge_tone = CUI_TONE_INFO);
+        a->card[0] = cui_last_id(ui);
+        cui_node_output(ui, 10, "Out");
+        cui_node_end(ui);
+        a->sel[1] = cui_node_begin(ui, 2, &a->pos[1][0], &a->pos[1][1], "Done", .badge = "done", .badge_tone = CUI_TONE_SUCCESS);
+        a->card[1] = cui_last_id(ui);
+        cui_node_input(ui, 20, "In");
+        cui_node_end(ui);
+        cui_node_editor_end(ui);
+    }
+}
+
+static void test_node_editor_state_select(void) {
+    printf("node editor: accent and badge, cui_node_select with and without focus\n");
+    cui_ctx *ui = new_ctx();
+    nsel_ctx a;
+    memset(&a, 0, sizeof a);
+    a.pos[0][0] = 20; a.pos[0][1] = 20; a.pos[1][0] = 300; a.pos[1][1] = 40;
+    run(ui, build_nsel, &a, 3);
+    CHECK(!a.sel[0] && !a.sel[1]);
+    cui_rect c0 = cui_get_rect(ui, a.card[0]);
+    CHECK(c0.w > 100 && c0.h > 30);          /* the options change nothing of the layout */
+    /* selected from code, with the keyboard: the arrows then move it */
+    a.pick = 2; a.focus = true;
+    run(ui, build_nsel, &a, 2);
+    CHECK(!a.sel[0] && a.sel[1]);
+    CHECK(cui_focus_get(ui) == a.card[1] && cui_focus_visible(ui, a.card[1]));
+    float x0 = a.pos[1][0];
+    cui_input_key(ui, CUI_KEY_RIGHT, true, 0); cui_input_key(ui, CUI_KEY_RIGHT, false, 0);
+    run(ui, build_nsel, &a, 2);
+    CHECK(a.pos[1][0] > x0);
+    CHECK_NEAR(a.pos[0][0], 20, 0.01);
+    /* without focus: the selection moves, the keyboard stays where it was */
+    a.pick = 1; a.focus = false;
+    run(ui, build_nsel, &a, 2);
+    CHECK(a.sel[0] && !a.sel[1]);
+    /* a click still selects as before */
+    cui_rect c1 = cui_get_rect(ui, a.card[1]);
+    click_at(ui, build_nsel, &a, c1.x + 20, c1.y + 10);
+    CHECK(!a.sel[0] && a.sel[1]);
+    /* both themes paint the accent and the badge */
+    cui_set_theme(ui, CUI_THEME_LIGHT);
+    run(ui, build_nsel, &a, 2);
+    cui_set_theme(ui, CUI_THEME_DARK);
+    run(ui, build_nsel, &a, 2);
+    CHECK(a.sel[1]);
+    cui_destroy(ui);
+}
+
 /* curve and gradient editors ------------------------------------------- */
 
 typedef struct {
@@ -15733,6 +15796,7 @@ int main(void) {
     test_read_only_plan_activation();
     test_planning_drag_interrupted();
     test_node_editor();
+    test_node_editor_state_select();
     test_disabled_node_editor_wheel();
     test_flame();
     test_disabled_flame_wheel();
