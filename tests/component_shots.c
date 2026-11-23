@@ -1083,6 +1083,65 @@ static void tt_describe(void) {
     else if (n > 1) snprintf(tt_status, sizeof tt_status, "%d items selected", n);
     else snprintf(tt_status, sizeof tt_status, "Nothing selected");
 }
+/* Dragging two selected files onto a folder: the folder outlined, the dragged
+ * rows dimmed, the ghost with a count beside the pointer. */
+#define TD_N 11
+static cui_tree_node td_nodes[TD_N];
+static const struct { const char *name; int parent; const char *size, *kind; } td_files[TD_N] = {
+    { "src", -1, "", "Folder" },          { "cui_core.c", 0, "24 KB", "C source" },  { "cui_grid.c", 0, "29 KB", "C source" },
+    { "cui_treetable.c", 0, "27 KB", "C source" }, { "render", 0, "", "Folder" },  { "cui_render_sw.c", 4, "34 KB", "C source" },
+    { "cui_render_gl.c", 4, "21 KB", "C source" }, { "docs", -1, "", "Folder" },  { "architecture.md", 7, "18 KB", "Markdown" },
+    { "components.md", 7, "77 KB", "Markdown" }, { "README.md", -1, "6 KB", "Markdown" },
+};
+static int td_cursor = -1;
+static const char *td_label(void *user, int n) { (void)user; return td_files[n].name; }
+static void td_init(void) {
+    for (int k = 0; k < TD_N; k++) { td_nodes[k].parent = td_files[k].parent; td_nodes[k].first_child = td_nodes[k].next_sibling = -1; td_nodes[k].flags = 0; }
+    for (int k = TD_N - 1; k >= 0; k--) {   /* link each node in front of its later siblings */
+        int p = td_files[k].parent;
+        if (p >= 0) { td_nodes[k].next_sibling = td_nodes[p].first_child; td_nodes[p].first_child = k; }
+    }
+    td_nodes[0].next_sibling = 7; td_nodes[7].next_sibling = 10;
+    td_nodes[0].flags = td_nodes[7].flags = CUI_TREE_HAS_CHILDREN | CUI_TREE_OPEN;
+    td_nodes[4].flags = CUI_TREE_HAS_CHILDREN;
+    td_cursor = -1;
+}
+static void body_tree_table_drag(cui_ctx *ui) {
+    static const cui_grid_column cols[] = {
+        { "Name", 250, CUI_TEXT_LEFT, true, false, 0 }, { "Size", 90, CUI_TEXT_RIGHT, true, false, 1 }, { "Kind", 120, CUI_TEXT_LEFT, true, false, 2 },
+    };
+    cui_tree_table_begin(ui, "moves", cols, 3, td_nodes, TD_N, .height = CUI_PX(340), .cursor = &td_cursor, .guides = true,
+                         .label = td_label, .draggable = true);
+    int n;
+    while ((n = cui_tree_table_row(ui)) >= 0) {
+        bool folder = td_nodes[n].flags & CUI_TREE_HAS_CHILDREN;
+        cui_tree_table_name(ui, td_files[n].name, folder ? ((td_nodes[n].flags & CUI_TREE_OPEN) ? CUI_ICON_FOLDER_OPEN : CUI_ICON_FOLDER) : CUI_ICON_FILE);
+        cui_data_grid_cell_text(ui, td_files[n].size);
+        cui_data_grid_cell_text(ui, td_files[n].kind);
+    }
+    cui_tree_table_end(ui);
+}
+static void scene_tree_table_drag(cui_ctx *ui, int f) {
+    if (f >= 0) { frame_wrap(ui, body_tree_table_drag); return; }
+    int fr = -f - 1;
+    if (fr == 0) td_init();
+    cui_rect g = cui_get_rect(ui, cui_make_id(ui, "moves"));
+    if (g.w <= 0) return;
+    float x = g.x + 330;
+#define TD_ROW(i) (g.y + 40 + 32 * (i) + 16)
+    if (fr == 4) cui_input_mouse_move(ui, x, TD_ROW(1));   /* cui_core.c */
+    if (fr == 5) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    if (fr == 6) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    if (fr == 8) { cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_PRIMARY); cui_input_mouse_move(ui, x, TD_ROW(2)); }   /* + cui_grid.c */
+    if (fr == 9) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    if (fr == 10) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    if (fr == 11) cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    if (fr == 24) cui_input_mouse_move(ui, g.x + 110, TD_ROW(2));   /* grab cui_grid.c by its name */
+    if (fr == 25) cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    if (fr >= 26 && fr <= 50) cui_input_mouse_move(ui, g.x + 110 + (fr - 26) * 3.0f, TD_ROW(2) + (TD_ROW(4) + 2 - TD_ROW(2)) * (fr - 26) / 24.0f);   /* onto render */
+#undef TD_ROW
+}
+
 SCENE(tree_table) {
     static bool init = false;
     if (!init) { tt_init(ui); tt_describe(); init = true; }
@@ -4616,7 +4675,7 @@ int main(int argc, char **argv) {
         { "checklist", scene_checklist, 500, 420, true }, { "toc", scene_toc_input, 760, 320, true },
         { "undo-toast", scene_undo, 460, 200, true },
         { "data-grid", scene_data_grid, 760, 312, true }, { "code-block", scene_code_block, 720, 340, true },
-        { "tree-table", scene_tree_table, 760, 576, true }, { "path-bar", scene_path_bar, 680, 330, true },
+        { "tree-table", scene_tree_table, 760, 576, true }, { "tree-table-drag", scene_tree_table_drag, 600, 420, true }, { "path-bar", scene_path_bar, 680, 330, true },
         { "json-view", scene_json_view, 560, 330, true }, { "markdown", scene_markdown, 700, 850, true },
         { "code-editor", scene_code_editor, 760, 446, true },
         { "code-editor-text", scene_code_editor_text, 620, 264, true },

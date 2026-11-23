@@ -4,6 +4,7 @@
 #define CUI__GRID_COLS 32
 #define CUI__GRID_HEAD 40.0f
 #define CUI__GRID_CHECK 44.0f
+#define CUI__GRID_SCROLL 0x5C011u   /* salt of the scroll area's id */
 
 typedef struct {
     float widths[CUI__GRID_COLS];
@@ -32,6 +33,7 @@ struct cui_grid_build {
     bool in_row;
     bool clicked_row;
     bool row_double;         /* the current row was double clicked this frame */
+    bool row_pressed;        /* the current row was pressed this frame */
     bool focused;
 };
 
@@ -83,7 +85,7 @@ bool cui_data_grid_begin_ex(cui_ctx *ui, const char *id_str, const cui_grid_colu
     struct cui_grid_build *b = cui__frame_alloc(ui, sizeof *b);
     memset(b, 0, sizeof *b);
     b->id = cui_make_id(ui, id_str);
-    b->sid = b->id ^ 0x5C011u;
+    b->sid = b->id ^ CUI__GRID_SCROLL;
     b->cols = cols; b->ncols = ncols; b->nrows = nrows; b->o = *o;
     b->row_h = o->row_height > 0 ? o->row_height : 40;
     b->row = -1;
@@ -310,6 +312,7 @@ bool cui_data_grid_row(cui_ctx *ui, int row) {
     bool sel = b->o.selected && b->o.selected[row];
     bool clicked = false;
     b->row_double = r.double_clicked || (r.clicked && ui->click_count >= 2);
+    b->row_pressed = r.hovered && ui->mpressed[0];
     if (r.clicked) {
         clicked = true;
         if (st->edit_row < 0) ui->focus = b->id;   /* a cell editor that just opened keeps the focus */
@@ -487,6 +490,26 @@ void cui_data_grid_end(cui_ctx *ui) {
     cui__close(ui);          /* frame */
     ui->last_id = b->id;
     ui->building.grid = NULL;
+}
+
+bool cui__grid_rows_at(cui_ctx *ui, cui_id id, cui_rect *view, float *row0_top) {
+    if (!cui__has_prev_rect(ui, id)) return false;
+    cui_rect r = cui__prev_rect(ui, id);
+    cui_scroll_state *ss = cui_state(ui, id ^ CUI__GRID_SCROLL, sizeof *ss);
+    *view = (cui_rect){ r.x, r.y + CUI__GRID_HEAD, r.w, CUI_MAX(0.0f, r.h - CUI__GRID_HEAD) };
+    *row0_top = r.y + CUI__GRID_HEAD - ss->y;
+    return true;
+}
+
+void cui__grid_scroll_by(cui_ctx *ui, cui_id id, float dy) {
+    cui_scroll_state *ss = cui_state(ui, id ^ CUI__GRID_SCROLL, sizeof *ss);
+    ss->ty = CUI_MAX(0.0f, ss->ty + dy);   /* the grid keeps it below the end */
+    ui->animating = true;
+}
+
+bool cui__grid_row_pressed(cui_ctx *ui) {
+    struct cui_grid_build *b = ui->building.grid;
+    return b && b->in_row && b->row_pressed;
 }
 
 /* ------------------------------------------------------------------------ */

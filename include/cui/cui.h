@@ -1510,13 +1510,23 @@ CUI_API bool cui_filter_bar(cui_ctx *ui, const char *id, const cui_filter_field 
  * child, Left closes it or moves to its parent, Home and End, Enter
  * activates, * opens every sibling, typing jumps to a name (with .label).
  * Selection is the data grid's: click, Shift for a range, Ctrl to toggle,
- * Ctrl+A, Esc. Columns hide by cui_grid_column.priority when narrow. */
+ * Ctrl+A, Esc. Columns hide by cui_grid_column.priority when narrow.
+ *
+ * With .draggable, rows drag to move nodes: the drag carries the selection
+ * (or the row you grab when it is not selected), a line or an outlined row
+ * shows where it would land, the list scrolls near its edges, a closed
+ * folder opens when you hold the drag over it, and Esc cancels. The table
+ * only reports the drop; move the nodes with cui_tree_move:
+ *
+ *     if (ev.drop_count > 0)
+ *         root = cui_tree_move(nodes, count, root, ev.dropped, ev.drop_count, ev.drop_target, ev.drop_where); */
 enum {
     CUI_TREE_HAS_CHILDREN = 1 << 0,   /* shows a chevron before its children are loaded */
     CUI_TREE_OPEN         = 1 << 1,   /* expanded (the table toggles it) */
     CUI_TREE_SELECTED     = 1 << 2,   /* the table sets and clears it */
     CUI_TREE_LOADING      = 1 << 3    /* children pending: an open node shows a spinner row; clear it when loaded */
 };
+enum { CUI_TREE_DROP_BEFORE, CUI_TREE_DROP_INSIDE, CUI_TREE_DROP_AFTER };   /* where dropped nodes go, next to a target node */
 typedef struct cui_tree_node {
     int parent;                /* -1 for a top level node */
     int first_child;           /* -1 when it has none, or none loaded yet */
@@ -1532,7 +1542,9 @@ typedef struct cui_tree_table_opts {
     int *cursor;               /* the keyboard node, optional (in and out) */
     bool guides;               /* quiet vertical lines for each indentation level */
     const char *(*label)(void *user, int node);   /* names for type-ahead, optional */
-    void *user;                /* passed to `label` as its first argument */
+    void *user;                /* passed to `label` and `can_drop` as their first argument */
+    bool draggable;            /* rows drag to move nodes; the drop arrives in cui_tree_table_events */
+    bool (*can_drop)(void *user, int target, int where);   /* optional: false refuses a drop of the dragged (selected) nodes there */
 } cui_tree_table_opts;
 typedef struct cui_tree_table_events {
     int activated;             /* node chosen with Enter or a double click, else -1 */
@@ -1541,6 +1553,9 @@ typedef struct cui_tree_table_events {
     int load_count;            /* number of nodes in `load`; at most 64 a frame */
     bool selection_changed;    /* a node's `CUI_TREE_SELECTED` flag changed this frame */
     bool sort_changed;         /* re-sort every sibling list by *sort */
+    const int *dropped;        /* nodes dropped this frame (.draggable), in tree order, none inside another; valid this frame */
+    int drop_count;            /* number of nodes in `dropped`, 0 without a drop */
+    int drop_target, drop_where;   /* they go CUI_TREE_DROP_BEFORE, _INSIDE (as the last children) or _AFTER this node, else -1 */
 } cui_tree_table_events;
 CUI_API void cui_tree_table_begin_ex(cui_ctx *ui, const char *id, const cui_grid_column *columns, int column_count,
                                      cui_tree_node *nodes, int node_count, const cui_tree_table_opts *opts);
@@ -1555,6 +1570,12 @@ CUI_API cui_tree_table_events cui_tree_table_end(cui_ctx *ui);
 /* Sorts every sibling list (stable) by cmp, relinking the nodes. Returns
  * the new first top level node. */
 CUI_API int cui_tree_sort(cui_tree_node *nodes, int node_count, int root, int (*cmp)(void *user, int a, int b), void *user);
+/* Moves nodes, each with its subtree, before, into (after the last child) or
+ * after target, keeping their order, and relinks the nodes. Returns the new
+ * first top level node. A target that is one of the nodes or inside one
+ * moves nothing. Flags stay as they are: open the target yourself if you
+ * want the moved nodes in view. */
+CUI_API int cui_tree_move(cui_tree_node *nodes, int node_count, int root, const int *move, int move_count, int target, int where);
 
 /* Path bar: a breadcrumb for file and scene paths. Segments are clickable,
  * the last one is the current place. Middle segments that do not fit

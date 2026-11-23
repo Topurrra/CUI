@@ -743,6 +743,27 @@ Children can arrive later. A node with `CUI_TREE_HAS_CHILDREN` and no `first_chi
 
 With the table focused, Up and Down move and the selection follows. Right opens a node, or moves to its first child when it is already open. Left closes an open node, or moves to its parent. Home and End jump to the first and last row, Page Up and Page Down move a page, and Enter (or a double click) reports `ev.activated`. `*` opens every sibling of the current node. Typing a few letters jumps to the next name that starts with them, when you pass `.label`. Selection works as in the data grid, without a checkbox column: Shift+click or Shift+arrows select a range, Ctrl+click toggles a row, Ctrl+arrows move without selecting, Ctrl+A selects every row of the open tree and Esc clears. A plain click or arrow also drops any selected nodes inside closed folders.
 
+#### Dragging rows
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="images/components/tree-table-drag-dark.png"><img src="images/components/tree-table-drag.png" alt="Two files dragged onto a folder in a tree table"></picture>
+
+```c
+cui_tree_table_begin(ui, "files", cols, 4, nodes, count, .root = root, .label = name_of, .draggable = true, .can_drop = can_drop);
+/* ... rows as above ... */
+cui_tree_table_events ev = cui_tree_table_end(ui);
+if (ev.drop_count > 0) {
+    move_files(ev.dropped, ev.drop_count, ev.drop_target, ev.drop_where);   /* your data first */
+    root = cui_tree_move(nodes, count, root, ev.dropped, ev.drop_count, ev.drop_target, ev.drop_where);
+    if (ev.drop_where == CUI_TREE_DROP_INSIDE) nodes[ev.drop_target].flags |= CUI_TREE_OPEN;
+}
+```
+
+With `.draggable`, rows drag to move nodes. A drag starts once a pressed row moves 4 points, so a click still selects. It carries the selection, or only the row you grabbed when that row is not selected (it then becomes the selection). Nodes inside another dragged node go with it. The dragged rows dim, and a ghost beside the pointer shows the first node's icon and name (with `.label`) and how many nodes move.
+
+Where they land follows the pointer. Over a folder (a node with children or `CUI_TREE_HAS_CHILDREN`), the top quarter is before it, the bottom quarter after it, and the middle half into it, shown as an outline. Other rows split in half: before or after. A line from the row's indentation on marks before and after. The line under an open folder is before its first child, and below the last row is after the last top level node. A node cannot go into itself or into its own subtree, and `.can_drop(user, target, where)` can refuse more; with no place to land, the pointer shows that and the release does nothing. Hold the drag on a closed folder for 0.6 seconds and it opens (a lazy folder asks for its children as usual). Near the top or bottom edge the rows scroll, faster closer to the edge. Esc cancels.
+
+The table only reports the drop: `ev.dropped` lists the nodes in tree order, and they go `CUI_TREE_DROP_BEFORE`, `_INSIDE` (after the last child) or `_AFTER` `ev.drop_target`. `cui_tree_move` relinks your nodes to match, keeping their order, and returns the new first top level node. It refuses a target that is one of the nodes or inside one. Moving into a lazy folder whose children have not loaded yet links the nodes as its only children, so it will not ask for the rest: load the folder first, or leave the move to your data and reload it. There is no keyboard way to move nodes yet.
+
 When the table is narrower than its columns, columns with a `priority` hide, the highest number first, until the rest fit. Columns with priority 0 always stay, and so does the last column left. This is a data grid feature (`cui_grid_column.priority`), so plain grids can use it too. In the explorer above, Kind (3) goes first, then Modified (2), then Size (1); at phone width only Name is left.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="images/components/path-bar-dark.png"><img src="images/components/path-bar.png" alt="Path bar"></picture>

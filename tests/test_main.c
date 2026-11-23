@@ -3035,15 +3035,19 @@ typedef struct {
     int activated, expanded, collapsed, loads, load_node, sort_changes, sel_changes;
     cui_id grid_id;
     const char *const *names;
+    bool draggable, apply, refuse_inside;      /* drag and drop: apply moves the nodes with cui_tree_move */
+    int drops, drop_target, drop_where, drop_count, dropped[8];
 } ttab_ctx;
 static const char *ttab_label(void *user, int n) { ttab_ctx *t = user; return t->names ? t->names[n] : NULL; }
+static bool ttab_can_drop(void *user, int target, int where) { ttab_ctx *t = user; (void)target; return !(t->refuse_inside && where == CUI_TREE_DROP_INSIDE); }
 static void build_ttab(cui_ctx *ui, void *u) {
     ttab_ctx *t = u;
     cui_column(ui, .pad = 20, .width = CUI_FILL, .height = CUI_FILL) {
         static const cui_grid_column cols[] = { { "Name", 240, CUI_TEXT_LEFT, true }, { "Value", 120, CUI_TEXT_RIGHT, true, false, 1 },
                                                 { "Type", 120, CUI_TEXT_LEFT, true, false, 2 } };
         cui_tree_table_begin(ui, "tt", cols, 3, t->nodes, t->count, .height = CUI_PX(t->height > 0 ? t->height : 360), .root = t->root,
-                             .sort = &t->sort, .cursor = &t->cursor, .guides = true, .label = ttab_label, .user = t);
+                             .sort = &t->sort, .cursor = &t->cursor, .guides = true, .label = ttab_label, .user = t,
+                             .draggable = t->draggable, .can_drop = ttab_can_drop);
         t->grid_id = cui_make_id(ui, "tt");
         t->nseq = 0; t->rows_built = 0;
         int n;
@@ -3064,6 +3068,12 @@ static void build_ttab(cui_ctx *ui, void *u) {
         if (ev.load_count > 0) t->load_node = ev.load[0];
         t->sort_changes += ev.sort_changed;
         t->sel_changes += ev.selection_changed;
+        if (ev.drop_count > 0) {
+            t->drops++;
+            t->drop_target = ev.drop_target; t->drop_where = ev.drop_where; t->drop_count = ev.drop_count;
+            for (int k = 0; k < ev.drop_count && k < 8; k++) t->dropped[k] = ev.dropped[k];
+            if (t->apply) t->root = cui_tree_move(t->nodes, t->count, t->root, ev.dropped, ev.drop_count, ev.drop_target, ev.drop_where);
+        }
     }
 }
 static void ttab_link(cui_tree_node *nd, int parent, const int *kids, int n) {
@@ -3426,6 +3436,138 @@ static void test_tree_table(void) {
         CHECK(p.clicked == first_hidden);
         cui_destroy(ui);
     }
+}
+
+/* Presses at (x, y0), drags to y1 in a few steps, rests there `hold` frames, then lets go. */
+static void ttab_drag(cui_ctx *ui, ttab_ctx *t, float x, float y0, float y1, int hold) {
+    cui_input_mouse_move(ui, x, y0);
+    run(ui, build_ttab, t, 1);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_ttab, t, 1);
+    for (int i = 1; i <= 6; i++) { cui_input_mouse_move(ui, x, y0 + (y1 - y0) * i / 6); run(ui, build_ttab, t, 1); }
+    run(ui, build_ttab, t, hold);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_ttab, t, 2);
+}
+static float ttab_row_top(cui_rect g, int i) { return g.y + 40 + 32 * i; }
+static bool ttab_kids(const cui_tree_node *nd, int parent, const int *want, int n) {
+    int c = parent >= 0 ? nd[parent].first_child : -1;
+    for (int k = 0; k < n; k++, c = nd[c].next_sibling) if (c != want[k] || nd[c].parent != parent) return false;
+    return c == -1;
+}
+
+static void test_tree_table_drag(void) {
+    printf("tree table drag and drop: targets, hold to open, Esc, refusals, several nodes, edge scroll; cui_tree_move\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 900, 600, 1);
+    /* 0 A { 1 A1 { 3 A1a }, 2 A2 }, 4 B { 5 B1 }, 6 C */
+    cui_tree_node nd[8];
+    for (int k = 0; k < 8; k++) { nd[k].parent = nd[k].first_child = nd[k].next_sibling = -1; nd[k].flags = 0; }
+    { int top[] = { 0, 4, 6 }, a[] = { 1, 2 }, a1[] = { 3 }, bb[] = { 5 };
+      ttab_link(nd, -1, top, 3); ttab_link(nd, 0, a, 2); ttab_link(nd, 1, a1, 1); ttab_link(nd, 4, bb, 1); }
+    nd[0].flags = nd[1].flags = nd[4].flags = CUI_TREE_HAS_CHILDREN;
+    static const char *const names[] = { "Alpha", "Apple", "Avocado", "Apricot", "Banana", "Blueberry", "Cherry" };
+    ttab_ctx t;
+    memset(&t, 0, sizeof t);
+    t.nodes = nd; t.count = 7; t.cursor = -1; t.names = names; t.sort.column = -1;
+    t.activated = t.expanded = t.collapsed = -1;
+    t.draggable = true; t.apply = true;
+    run(ui, build_ttab, &t, 3);
+    cui_rect g = rect_of(ui, t.grid_id);
+    float x = g.x + 300;
+    /* a press that does not move is a click: it selects, nothing drops */
+    click_at(ui, build_ttab, &t, x, ttab_row_y(g, 1));
+    CHECK(t.drops == 0 && ttab_selected(&t) == 1 && (nd[4].flags & CUI_TREE_SELECTED));
+    /* drag C (row 2, not selected) to the top edge of A: it goes before A and becomes the selection */
+    ttab_drag(ui, &t, x, ttab_row_y(g, 2), ttab_row_top(g, 0) + 4, 0);
+    CHECK(t.drops == 1 && t.drop_count == 1 && t.dropped[0] == 6 && t.drop_target == 0 && t.drop_where == CUI_TREE_DROP_BEFORE);
+    { int w[] = { 6, 0, 4 }; CHECK(t.root == 6 && ttab_seq(&t, w, 3)); }
+    CHECK(ttab_selected(&t) == 1 && (nd[6].flags & CUI_TREE_SELECTED));   /* the release over A did not click it */
+    /* drag B by its name into the middle of A: it becomes A's last child */
+    ttab_drag(ui, &t, g.x + 80, ttab_row_y(g, 2), ttab_row_y(g, 1), 0);
+    CHECK(t.drops == 2 && t.dropped[0] == 4 && t.drop_target == 0 && t.drop_where == CUI_TREE_DROP_INSIDE);
+    { int w[] = { 1, 2, 4 }; CHECK(ttab_kids(nd, 0, w, 3) && nd[6].next_sibling == 0 && nd[0].next_sibling == -1); }
+    /* the bottom half of a leaf is after it; below the last row is after the last top level node */
+    ttab_drag(ui, &t, x, ttab_row_y(g, 0), ttab_row_top(g, 1) - 6, 0);   /* C onto its own row: refused */
+    CHECK(t.drops == 2);
+    ttab_drag(ui, &t, x, ttab_row_y(g, 0), ttab_row_y(g, 4), 0);   /* rows: A, C... below both */
+    CHECK(t.drops == 3 && t.drop_target == 0 && t.drop_where == CUI_TREE_DROP_AFTER);
+    { int w[] = { 0, 6 }; CHECK(t.root == 0 && ttab_seq(&t, w, 2)); }
+    /* holding the drag on a closed folder opens it; the line under an open folder is before its first child */
+    ttab_drag(ui, &t, x, ttab_row_y(g, 1), ttab_row_y(g, 0), 45);
+    CHECK((nd[0].flags & CUI_TREE_OPEN) && t.expanded == 0);
+    CHECK(t.drops == 4 && t.drop_target == 0 && t.drop_where == CUI_TREE_DROP_INSIDE);   /* still over A's middle */
+    { int w[] = { 1, 2, 4, 6 }; CHECK(ttab_kids(nd, 0, w, 4)); }
+    run(ui, build_ttab, &t, 2);
+    { int w[] = { 0, 1, 2, 4, 6 }; CHECK(ttab_seq(&t, w, 5)); }
+    ttab_drag(ui, &t, x, ttab_row_y(g, 4), ttab_row_top(g, 1) - 4, 0);   /* C to the bottom quarter of open A */
+    CHECK(t.drops == 5 && t.drop_target == 1 && t.drop_where == CUI_TREE_DROP_BEFORE);
+    { int w[] = { 6, 1, 2, 4 }; CHECK(ttab_kids(nd, 0, w, 4)); }
+    /* a node may not go into itself or its own subtree */
+    ttab_drag(ui, &t, x, ttab_row_y(g, 0), ttab_row_y(g, 2), 0);   /* A onto A1 */
+    CHECK(t.drops == 5);
+    /* Esc cancels the drag; the selection stays */
+    click_at(ui, build_ttab, &t, x, ttab_row_y(g, 3));
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    run(ui, build_ttab, &t, 1);
+    for (int i = 1; i <= 4; i++) { cui_input_mouse_move(ui, x, ttab_row_y(g, 3) - 8 * i); run(ui, build_ttab, &t, 1); }
+    key(ui, build_ttab, &t, CUI_KEY_ESCAPE, 0);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_ttab, &t, 2);
+    CHECK(t.drops == 5 && ttab_selected(&t) == 1 && (nd[2].flags & CUI_TREE_SELECTED));
+    /* can_drop refuses: a folder's middle is then no target */
+    t.refuse_inside = true;
+    ttab_drag(ui, &t, x, ttab_row_y(g, 1), ttab_row_y(g, 4), 0);   /* C into the middle of B */
+    CHECK(t.drops == 5);
+    t.refuse_inside = false;
+    /* several selected nodes move together in tree order; A1's child goes with it */
+    { int w[] = { 0, 6, 1, 2, 4 }; CHECK(ttab_seq(&t, w, 5)); }
+    click_at(ui, build_ttab, &t, x, ttab_row_y(g, 2));   /* A1 */
+    cui_input_key(ui, CUI_KEY_NONE, false, CUI_MOD_PRIMARY);
+    click_at(ui, build_ttab, &t, x, ttab_row_y(g, 4));   /* + B */
+    click_at(ui, build_ttab, &t, x, ttab_row_y(g, 1));   /* + C */
+    cui_input_key(ui, CUI_KEY_NONE, false, 0);
+    CHECK(ttab_selected(&t) == 3);
+    ttab_drag(ui, &t, x, ttab_row_y(g, 4), ttab_row_y(g, 6) + 40, 0);   /* below the last row: after A */
+    CHECK(t.drops == 6 && t.drop_count == 3 && t.dropped[0] == 6 && t.dropped[1] == 1 && t.dropped[2] == 4);
+    { int w[] = { 2 }; CHECK(ttab_kids(nd, 0, w, 1)); }
+    CHECK(nd[0].next_sibling == 6 && nd[6].next_sibling == 1 && nd[1].next_sibling == 4 && nd[4].next_sibling == -1);
+    CHECK(nd[6].parent == -1 && nd[1].parent == -1 && nd[4].parent == -1 && nd[1].first_child == 3 && ttab_selected(&t) == 3);
+    cui_destroy(ui);
+
+    /* the rows scroll while the drag rests near the bottom edge */
+    ui = new_ctx();
+    cui_set_viewport(ui, 900, 600, 1);
+    cui_tree_node many[100];
+    for (int k = 0; k < 100; k++) { many[k].parent = -1; many[k].first_child = -1; many[k].next_sibling = k + 1 < 100 ? k + 1 : -1; many[k].flags = 0; }
+    memset(&t, 0, sizeof t);
+    t.nodes = many; t.count = 100; t.cursor = -1; t.sort.column = -1; t.activated = -1;
+    t.draggable = true; t.height = 300;
+    run(ui, build_ttab, &t, 3);
+    g = rect_of(ui, t.grid_id);
+    CHECK(t.seq[0] == 0);
+    ttab_drag(ui, &t, g.x + 300, ttab_row_y(g, 0), g.y + g.h - 4, 60);
+    CHECK(t.seq[0] > 0 && t.drops == 1 && t.dropped[0] == 0 && t.drop_where != CUI_TREE_DROP_INSIDE && t.drop_target > 5);
+    cui_destroy(ui);
+
+    /* cui_tree_move on its own: 0 { 3, 4 }, 1, 2 */
+    cui_tree_node m[6];
+    for (int k = 0; k < 6; k++) { m[k].parent = m[k].first_child = m[k].next_sibling = -1; m[k].flags = 0; }
+    { int top[] = { 0, 1, 2 }, kids[] = { 3, 4 }; ttab_link(m, -1, top, 3); ttab_link(m, 0, kids, 2); }
+    int root;
+    { int mv[] = { 1, 2 }, w[] = { 3, 1, 2, 4 };   /* after a child, in their order */
+      root = cui_tree_move(m, 6, 0, mv, 2, 3, CUI_TREE_DROP_AFTER);
+      CHECK(root == 0 && ttab_kids(m, 0, w, 4) && m[0].next_sibling == -1); }
+    { int mv[] = { 0 };   /* into its own child, or next to itself: nothing */
+      root = cui_tree_move(m, 6, root, mv, 1, 4, CUI_TREE_DROP_INSIDE);
+      CHECK(root == 0 && m[0].parent == -1 && m[4].first_child == -1);
+      CHECK(cui_tree_move(m, 6, root, mv, 1, 0, CUI_TREE_DROP_AFTER) == 0 && m[0].next_sibling == -1); }
+    { int mv[] = { 4, 3 }, w[] = { 1, 2 };   /* before the first top level node: a new root */
+      root = cui_tree_move(m, 6, root, mv, 2, 0, CUI_TREE_DROP_BEFORE);
+      CHECK(root == 4 && m[4].next_sibling == 3 && m[3].next_sibling == 0 && m[3].parent == -1 && ttab_kids(m, 0, w, 2)); }
+    { int mv[] = { 5 };   /* a node not linked yet goes in as a child */
+      CHECK(cui_tree_move(m, 6, root, mv, 1, 2, CUI_TREE_DROP_INSIDE) == 4 && m[2].first_child == 5 && m[5].parent == 2); }
+    { int mv[] = { 9 }; CHECK(cui_tree_move(m, 6, root, mv, 1, 2, CUI_TREE_DROP_AFTER) == root && m[2].next_sibling == -1); }
 }
 
 static void test_text_capacity(void) {
@@ -10348,6 +10490,7 @@ int main(void) {
     test_table_focus();
     test_filter_handoff();
     test_tree_table();
+    test_tree_table_drag();
     test_tools();
     test_hex_view();
     test_markdown();

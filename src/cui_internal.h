@@ -787,6 +787,13 @@ float cui__fl_tick_x(float px0, double k, double t0, double origin, double q, do
 const char *cui__fl_tick(cui_ctx *ui, double t, double step);
 const char *cui__fl_dur(cui_ctx *ui, double s);
 void cui__scroll_end_ex(cui_ctx *ui);
+/* the data grid's rows, for the tree table that drags over them (cui_grid.c): where grid `id`
+ * put its rows last frame (the area under the sticky header, and the top of row 0, which moves
+ * with the scroll), false before its first layout; a nudge of its scroll target; and whether
+ * the row cui_data_grid_row just began was pressed this frame */
+bool cui__grid_rows_at(cui_ctx *ui, cui_id id, cui_rect *view, float *row0_top);
+void cui__grid_scroll_by(cui_ctx *ui, cui_id id, float dy);
+bool cui__grid_row_pressed(cui_ctx *ui);
 cui_color cui__backdrop(cui_ctx *ui);
 
 void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);
