@@ -11,6 +11,7 @@
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include <wchar.h>
 
 /* UTF-8 to UTF-16; always terminated, empty on failure. */
 static bool cui__to_wide(const char *s, WCHAR *out, int cap) {
@@ -81,6 +82,19 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
         ofn.nMaxFile = MAX_PATH * 4;
         ofn.lpstrTitle = title;
         ofn.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR | (o->kind == CUI_FILE_SAVE ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+        WCHAR directory[MAX_PATH * 4];
+        if (o->kind == CUI_FILE_SAVE) {
+            ofn.Flags |= OFN_NOTESTFILECREATE;
+            if (wcspbrk(path, L"\\/")) {
+                WCHAR *name = NULL;
+                DWORD length = GetFullPathNameW(path, MAX_PATH * 4, directory, &name);
+                if (length && length < MAX_PATH * 4 && name) {
+                    wmemcpy(path, name, wcslen(name) + 1);
+                    *name = 0;
+                    ofn.lpstrInitialDir = directory;
+                }
+            }
+        }
         BOOL ok = o->kind == CUI_FILE_SAVE ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
         if (!ok) return false;
     }

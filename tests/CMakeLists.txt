@@ -75,6 +75,13 @@ if(CUI_WITH_APP)
     target_link_libraries(cui_test_window_state PRIVATE cui::cui)
     add_test(NAME cui_test_window_state COMMAND cui_test_window_state)
 
+    if(CUI_BACKEND STREQUAL "win32")
+        add_executable(cui_test_save_directory test_save_directory.c)
+        target_link_libraries(cui_test_save_directory PRIVATE cui::cui advapi32)
+        add_test(NAME cui_test_save_directory COMMAND cui_test_save_directory)
+        set_tests_properties(cui_test_save_directory PROPERTIES TIMEOUT 30)
+    endif()
+
     add_executable(cui_test_app_screenshot test_app_screenshot.c)
     target_link_libraries(cui_test_app_screenshot PRIVATE cui::cui)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT DEFINED ENV{DISPLAY} AND NOT DEFINED ENV{WAYLAND_DISPLAY})

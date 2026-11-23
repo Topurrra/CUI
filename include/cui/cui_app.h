@@ -156,7 +156,7 @@ typedef struct cui_file_dialog_opts {
     const char *title;
     const char *filter_name;    /* e.g. "Images" */
     const char *filter;         /* extensions separated by ';', e.g. "png;jpg" */
-    const char *default_name;   /* save dialogs */
+    const char *default_name;   /* save dialogs: suggested name, optionally with its directory on Windows */
 } cui_file_dialog_opts;
 CUI_API bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap);
 
