@@ -1326,7 +1326,7 @@ static int cui__em_button(cui_ctx *ui, cui_id tid, cui_interact ti, cui_size w, 
     ui->nodes[b].radius = CUI_CORNERS(8);
     if (ti.focus_visible) cui__focus_ring(ui, b, 1);
     cui__em_tab_paint *tp = cui__frame_alloc(ui, sizeof *tp);
-    memset(tp, 0, sizeof *tp);
+    if (!tp) return b;
     tp->s = s; tp->len = (int)strlen(s); tp->alpha = 1; tp->icon = icon;
     ui->nodes[b].paint = cui__paint_emoji_tab; ui->nodes[b].paint_data = tp;
     return b;
