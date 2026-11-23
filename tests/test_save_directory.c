@@ -45,6 +45,8 @@ int main(void) {
         return 1;
     }
     int result = 1;
+    WCHAR start_dir[MAX_PATH * 4], dir[MAX_PATH * 4];
+    if (!GetCurrentDirectoryW(MAX_PATH * 4, start_dir)) start_dir[0] = 0;
     HANDLE probe = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
     DWORD probe_error = probe == INVALID_HANDLE_VALUE ? GetLastError() : 0;
     if (probe != INVALID_HANDLE_VALUE) {
@@ -73,6 +75,12 @@ int main(void) {
                            GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES);
                 if (result) fprintf(stderr, "Expected '%s', Save returned '%s' (accepted=%d)\n",
                                     expected, actual, (int)accepted);
+                /* The dialog is opened with OFN_NOCHANGEDIR. */
+                if (GetCurrentDirectoryW(MAX_PATH * 4, dir) && wcscmp(dir, start_dir) != 0) {
+                    fprintf(stderr, "The Save dialog moved the current directory from '%ls' to '%ls'\n",
+                            start_dir, dir);
+                    result = 1;
+                }
             }
             if (timer) KillTimer(NULL, timer);
             cui_app_destroy(app);
@@ -80,15 +88,11 @@ int main(void) {
             fputs("Could not create the owner window\n", stderr);
         }
     }
-    /* The shell, or a virus scanner, can still hold the folder for a moment
-     * after the dialog closes. */
-    BOOL removed = RemoveDirectoryW(folder);
-    for (int tries = 0; !removed && tries < 50; tries++) {
-        Sleep(100);
-        removed = RemoveDirectoryW(folder);
-    }
-    if (!removed) {
-        fprintf(stderr, "Could not remove the test directory (error %lu)\n", GetLastError());
+    if (!RemoveDirectoryW(folder)) {
+        DWORD error = GetLastError();
+        if (!GetCurrentDirectoryW(MAX_PATH * 4, dir)) dir[0] = 0;
+        fprintf(stderr, "Could not remove the test directory (error %lu); the current directory is '%ls'\n",
+                error, dir);
         result = 1;
     }
     return result;
