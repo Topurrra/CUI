@@ -34,6 +34,7 @@ typedef struct {
     int hold_node; double hold_time;   /* the closed folder under the drag, and since when */
     char icon[16];                     /* the first dragged node's icon, for the ghost */
     cui_spring lift;
+    uint64_t drag_frame;               /* the frame the drag input last ran */
 } cui__tt_state;
 
 typedef struct cui__tt_build {
@@ -337,7 +338,11 @@ static void cui__tt_edge_scroll(cui_ctx *ui, cui__tt_build *b, cui_rect view) {
 static bool cui__tt_drag_input(cui_ctx *ui, cui__tt_build *b) {
     cui__tt_state *st = b->st;
     cui_id did = b->id ^ CUI__TT_GHOST;
-    if (cui_is_disabled(ui)) {   /* a disabled table drops nothing: the drag ends */
+    /* a table left out of a frame lost its press or drag: the button may have gone
+     * up meanwhile, and a release seen on its return would drop at a stale place */
+    bool gone = ui->frame - st->drag_frame > 1;
+    st->drag_frame = ui->frame;
+    if (gone || cui_is_disabled(ui)) {   /* a disabled table drops nothing: the drag ends */
         st->pending = st->dragging = false;
         st->mark = CUI__TT_MARK_NONE;
         return false;
