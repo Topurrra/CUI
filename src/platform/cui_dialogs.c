@@ -128,7 +128,12 @@ bool cui__plat_file_dialog(cui_app *app, const cui_file_dialog_opts *o, char *ou
                 }
             }
         }
+        /* OFN_NOCHANGEDIR does not hold for GetOpenFileName, and a Save dialog that
+         * opens in lpstrInitialDir can return with the current directory there. */
+        WCHAR cwd[MAX_PATH * 4];
+        DWORD cwd_len = GetCurrentDirectoryW(MAX_PATH * 4, cwd);
         BOOL ok = o->kind == CUI_FILE_SAVE ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
+        if (cwd_len && cwd_len < MAX_PATH * 4) SetCurrentDirectoryW(cwd);
         if (!ok) return false;
     }
     return WideCharToMultiByte(CP_UTF8, 0, path, -1, out, (int)cap, NULL, NULL) > 0;
