@@ -3637,6 +3637,26 @@ static void test_tree_table_drag(void) {
         ttab_drag(ui, &t, x, ttab_row_y(g, 0), ttab_row_y(g, 3), 0);
         CHECK(t.drops == 2 && t.drop_count == 1);
     }
+    /* the drag carries the selection, also when Shift+Down grows it mid-drag: all three move, in order */
+    {
+        float x = g.x + 300;
+        cui_input_mouse_move(ui, x, ttab_row_y(g, 1));
+        run(ui, build_ttab, &t, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        run(ui, build_ttab, &t, 1);
+        for (int i = 1; i <= 4; i++) { cui_input_mouse_move(ui, x, ttab_row_y(g, 1) + 12 * i); run(ui, build_ttab, &t, 1); }
+        key(ui, build_ttab, &t, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+        key(ui, build_ttab, &t, CUI_KEY_DOWN, CUI_MOD_SHIFT);
+        cui_input_mouse_move(ui, x, ttab_row_y(g, 7));
+        run(ui, build_ttab, &t, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        run(ui, build_ttab, &t, 2);
+        int sel = 0;
+        for (int k = 0; k < 100; k++) sel += (many[k].flags & CUI_TREE_SELECTED) != 0;
+        CHECK(t.drops == 3 && t.drop_count == 3 && sel == 3);
+        CHECK(many[t.dropped[0]].next_sibling == t.dropped[1] && many[t.dropped[1]].next_sibling == t.dropped[2]);
+        for (int k = 0; k < 3 && k < t.drop_count; k++) CHECK(many[t.dropped[k]].flags & CUI_TREE_SELECTED);
+    }
     cui_destroy(ui);
 
     /* cui_tree_move on its own: 0 { 3, 4 }, 1, 2 */

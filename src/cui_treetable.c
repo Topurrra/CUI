@@ -364,8 +364,11 @@ static bool cui__tt_drag_input(cui_ctx *ui, cui__tt_build *b) {
     }
     cui__spring(ui, &st->lift, st->dragging ? 1.0f : 0.0f, CUI__SPRING_ENTER);
     if (!st->dragging) return false;
-    for (int k = 0; k < st->drag_n; k++)
-        if (!cui__tt_ok(b, st->drag[k])) { st->dragging = false; return false; }   /* the nodes changed under the drag */
+    /* the drag carries the selection, also when the keys change it mid-drag (or the nodes change) */
+    int first = st->drag_n > 0 ? st->drag[0] : -1;
+    cui__tt_collect_drag(ui, b);
+    if (st->drag_n == 0) { st->dragging = false; return false; }
+    if (st->drag[0] != first) st->icon[0] = 0;   /* the ghost shows the new first node's icon once its row is built */
     ui->active = did;   /* the pointer is the drag's: no row takes the release as a click */
     if (cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         ui->kpressed[CUI_KEY_ESCAPE] = 0;
