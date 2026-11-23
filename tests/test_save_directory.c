@@ -38,15 +38,22 @@ int main(void) {
             L"D:P(D;;0x2;;;WD)(A;;FA;;;OW)(A;;FA;;;SY)", SDDL_REVISION_1, &sd, NULL)) return 1;
     SECURITY_ATTRIBUTES sa = { sizeof sa, sd, FALSE };
     BOOL made = CreateDirectoryW(folder, &sa);
+    DWORD made_error = made ? 0 : GetLastError();
     LocalFree(sd);
-    if (!made) return 1;
+    if (!made) {
+        fprintf(stderr, "Could not create the test directory (error %lu)\n", made_error);
+        return 1;
+    }
     int result = 1;
     HANDLE probe = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    DWORD probe_error = probe == INVALID_HANDLE_VALUE ? GetLastError() : 0;
     if (probe != INVALID_HANDLE_VALUE) {
         CloseHandle(probe);
         DeleteFileW(path);
         fputs("Expected the directory to deny file creation\n", stderr);
-    } else if (GetLastError() == ERROR_ACCESS_DENIED) {
+    } else if (probe_error != ERROR_ACCESS_DENIED) {
+        fprintf(stderr, "Creating a file in the directory failed with error %lu\n", probe_error);
+    } else {
         cui_app_desc desc = { .title = "Save directory test", .renderer = CUI_RENDERER_SOFTWARE };
         cui_app *app = cui_app_create(&desc);
         if (app) {
@@ -69,8 +76,20 @@ int main(void) {
             }
             if (timer) KillTimer(NULL, timer);
             cui_app_destroy(app);
+        } else {
+            fputs("Could not create the owner window\n", stderr);
         }
     }
-    if (!RemoveDirectoryW(folder)) result = 1;
+    /* The shell, or a virus scanner, can still hold the folder for a moment
+     * after the dialog closes. */
+    BOOL removed = RemoveDirectoryW(folder);
+    for (int tries = 0; !removed && tries < 50; tries++) {
+        Sleep(100);
+        removed = RemoveDirectoryW(folder);
+    }
+    if (!removed) {
+        fprintf(stderr, "Could not remove the test directory (error %lu)\n", GetLastError());
+        result = 1;
+    }
     return result;
 }
