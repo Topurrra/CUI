@@ -382,6 +382,23 @@ cui_context_menu(ui, "file-menu") {                   /* right click on the prev
 
 Menus open with a short scale and fade from the trigger, close on a click outside, Esc or after choosing. Item options: `icon`, `shortcut`, `danger`, `disabled`, `checked`. Menu options: `icon`, `variant`, `placement`, `width`, `icon_only`. A context menu can also be opened from code at a point with `cui_context_menu_open_at(ui, id, x, y)`, for example at the pointer when a tab strip reports a right click. Keyboard: Down opens from the focused trigger, Up/Down move, Enter chooses.
 
+### The standard edit items
+
+`cui_edit_items` adds what every desktop editor has on a right click in text, inside any menu, context menu or submenu: Undo, Redo; Cut, Copy, Paste, Delete; Select all. They act on the text input, text area, search field, code editor or markdown view that was right-clicked (else the one that had the keyboard when the menu opened), through that widget's own code: its undo history, its clipboard handling (a paste is one undo step). Each item is disabled when it can't act: read-only text disables Cut, Paste, Delete, Undo and Redo; no selection disables Cut, Copy and Delete; nothing to undo or redo disables those. Paste is on whenever the text is editable (the clipboard is not read to decide). The call returns the item chosen (`CUI_EDIT_*`) and performs it.
+
+```c
+if (r.context_clicked && !r.context_gutter) cui_context_menu_open_at(ui, "ed-menu", r.context_x, r.context_y);
+cui_context_menu(ui, "ed-menu") {
+    cui_edit_items(ui);                                   /* zeroed options: the widget's own state decides */
+    cui_menu_separator(ui);
+    if (cui_menu_item(ui, "Format document")) format();   /* the app's own items in the same menu */
+}
+cui_edit_command(ui, CUI_EDIT_PASTE);                     /* the same from code: an Edit menu, a toolbar */
+cui_input_use_edit_menu(ui, true);                        /* once: every text field opens the menu on a right click */
+```
+
+Options: `read_only`, `no_selection`, `no_undo`, `no_redo` disable more (for text that is not a CUI widget, with `no_perform` to only report the choice); `hide_undo` and `hide_select_all` leave items out; `copy_only` shows Copy and Select all only (a read-only view); `keys` shows a code editor's rebound shortcuts; `no_icons`. With `cui_input_use_edit_menu` on (it is off by default), a right click on a text field moves the caret there (unless it lands in the selection), gives the field the keyboard and opens the menu; while it shows, the arrows, Enter and Esc are the menu's. A code editor does the same only with its own `.edit_menu`, since apps build their editor menus from `context_clicked`.
+
 ## Popover
 
 A small floating panel anchored to a control, for content that does not need a dialog.

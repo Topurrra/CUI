@@ -2875,16 +2875,22 @@ static void md_sel_begin(md_ctx *c, int root) {
         if (r.active && ui->mdown[CUI_MOUSE_LEFT]) S->probe = true;
         else st->dragging = false;
     }
-    if (st->focused && !ui->edit_prev) {
-        if (cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_A)) {
+    bool keys = st->focused && !ui->edit_prev;
+    int em_cmd = cui__edit_cmd_take(ui, c->id);   /* the edit menu (cui_edit_command): Copy and Select all */
+    if (keys || em_cmd) {
+        if ((keys && cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_A)) || em_cmd == CUI_EDIT_SELECT_ALL) {
             st->anchor = md_mkpos(0, 0, 0);
             st->head = md_mkpos(MD_SEL_END, 0, 0);
             st->dragging = false;
             S->probe = false;
             has = true;
         }
-        if (has && cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_C)) S->copying = true;
+        if (has && ((keys && cui_shortcut(ui, CUI_MOD_PRIMARY, CUI_KEY_C)) || em_cmd == CUI_EDIT_COPY)) S->copying = true;
     }
+    /* the edit menu: a read-only view that copies; a right press on it makes the menu its own (the selection stays) */
+    bool rpress = ui->mpressed[CUI_MOUSE_RIGHT] && ui->hot_layer == ui->current_layer && cui__has_prev_rect(ui, c->id) &&
+                  cui__rect_contains(cui__prev_rect(ui, c->id), ui->mx, ui->my);   /* on the text or a link in it */
+    cui__edit_seen(ui, c->id, CUI__EM_VIEW | CUI__EM_RO | (has ? CUI__EM_SEL : 0), keys, rpress);
     md_sel_order(S);
 }
 

@@ -351,6 +351,8 @@ typedef struct {
     cui__edit_paint measure;             /* font, size and masking, for cui__x_at */
     bool shift, word_mod, line_mod, prim;
     bool moved, edited, vertical;
+    int cmd;                             /* an edit menu command for this field (CUI_EDIT_*), 0 none */
+    bool menu_press;                     /* a right press that opens the edit menu: the caret goes there */
 } cui__edit_frame;
 
 #ifdef CUI_TEXT_SHAPING
@@ -420,7 +422,7 @@ static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
     cui_edit_state *e = c->e;
     const char *buf = c->buf;
     int len = c->len;
-    if (!(r.active && (ui->mdown[0] || ui->mpressed[0]) && c->area.w > 0)) return;
+    if (!(c->menu_press || (r.active && (ui->mdown[0] || ui->mpressed[0]))) || c->area.w <= 0) return;
     int pos;
     if (!c->multiline) {
         float x = ui->mx - c->area.x + e->scroll_x;
@@ -449,6 +451,13 @@ static void cui__edit_pointer(cui__edit_frame *c, cui_interact r) {
         pos = cui__ta_hit(c, ln, ui->mx - c->area.x);
         if (pos > L->end) pos = L->end;
         if (ln < c->nlines - 1 && pos == L->end && L->end == c->lines[ln + 1].start && pos > L->start) pos = cui__utf8_prev(buf, pos);
+    }
+    if (c->menu_press) {   /* the edit menu: the caret goes to the click, unless it is inside the selection */
+        int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
+        if (s0 == s1 || pos < s0 || pos > s1) { e->cursor = e->anchor = pos; c->moved = true; }
+        e->preferred_x = -1;
+        e->lead_at = -1;
+        return;
     }
     if (ui->mpressed[0]) {
         if (r.double_clicked || ui->click_count >= 2) {
@@ -573,7 +582,7 @@ static void cui__edit_move_keys(cui__edit_frame *c) {
             cui__edit_move(c, end);
         } else cui__edit_move(c, len);
     }
-    if (c->prim && cui_key_pressed(ui, CUI_KEY_A)) { e->anchor = 0; e->cursor = len; c->moved = true; }
+    if ((c->prim && cui_key_pressed(ui, CUI_KEY_A)) || c->cmd == CUI_EDIT_SELECT_ALL) { e->anchor = 0; e->cursor = len; c->moved = true; }
 }
 
 /* copy, cut and paste */
@@ -581,19 +590,21 @@ static void cui__edit_clipboard(cui__edit_frame *c) {
     cui_ctx *ui = c->ui;
     cui_edit_state *e = c->e;
     int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor);
-    if (c->prim && (cui_key_pressed(ui, CUI_KEY_C) || cui_key_pressed(ui, CUI_KEY_X)) && s1 > s0 && !c->password) {
+    bool cut = (c->prim && cui_key_pressed(ui, CUI_KEY_X)) || c->cmd == CUI_EDIT_CUT;
+    bool copy = (c->prim && cui_key_pressed(ui, CUI_KEY_C)) || c->cmd == CUI_EDIT_COPY;
+    if ((copy || cut) && s1 > s0 && !c->password) {
         if (ui->platform.set_clipboard) {
             char *tmpc = cui__frame_strdup(ui, c->buf + s0, s1 - s0);
             ui->platform.set_clipboard(ui->platform.user, tmpc);
         }
-        if (cui_key_pressed(ui, CUI_KEY_X) && !c->read_only) {
+        if (cut && !c->read_only) {
             cui__undo_push(ui, e, c->buf);
             cui__delete_range(c->buf, &c->len, s0, s1);
             e->cursor = e->anchor = s0;   /* the selection is gone; a paste in the same frame inserts at the caret */
             c->edited = true;
         }
     }
-    if (!c->read_only && c->prim && cui_key_pressed(ui, CUI_KEY_V) && ui->platform.get_clipboard) {
+    if (!c->read_only && ((c->prim && cui_key_pressed(ui, CUI_KEY_V)) || c->cmd == CUI_EDIT_PASTE) && ui->platform.get_clipboard) {
         const char *clip = ui->platform.get_clipboard(ui->platform.user);
         if (clip && *clip) {
             cui__undo_push(ui, e, c->buf);
@@ -609,11 +620,18 @@ static void cui__edit_typing(cui__edit_frame *c, cui__edit_result *res) {
     cui_edit_state *e = c->e;
     char *buf = c->buf;
     int s0, s1;
-    bool undo = c->prim && cui_key_pressed(ui, CUI_KEY_Z) && !c->shift;
-    bool redo = c->prim && ((c->shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y));
+    bool undo = (c->prim && cui_key_pressed(ui, CUI_KEY_Z) && !c->shift) || c->cmd == CUI_EDIT_UNDO;
+    bool redo = (c->prim && ((c->shift && cui_key_pressed(ui, CUI_KEY_Z)) || cui_key_pressed(ui, CUI_KEY_Y))) || c->cmd == CUI_EDIT_REDO;
     if ((undo || redo) && cui__edit_undo_step(ui, e, buf, c->cap, !undo)) {
         c->len = (int)strlen(buf);
         res->changed = true;
+    }
+    s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
+    if (c->cmd == CUI_EDIT_DELETE && s1 > s0) {   /* the edit menu's Delete: the selection, one undo step */
+        cui__undo_push(ui, e, buf);
+        cui__delete_range(buf, &c->len, s0, s1);
+        e->cursor = e->anchor = s0;
+        c->edited = true;
     }
     for (int rep = ui->kpressed[CUI_KEY_BACKSPACE]; rep > 0; rep--) {
         s0 = CUI_MIN(e->cursor, e->anchor); s1 = CUI_MAX(e->cursor, e->anchor);
@@ -693,7 +711,7 @@ static void cui__edit_follow_caret(cui__edit_frame *c, const cui__edit_result *r
 /** Report focus loss in the same frame so a second Escape can reach a dialog. */
 static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *e, char *buf, size_t cap,
                                         bool multiline, bool password, bool read_only, cui_rect area,
-                                        cui_font font, float size, float line_h, cui_interact r) {
+                                        cui_font font, float size, float line_h, cui_interact r, bool menu_press) {
     cui__edit_result res;
     memset(&res, 0, sizeof res);
     int len = (int)strlen(buf);
@@ -717,6 +735,8 @@ static cui__edit_result cui__edit_logic(cui_ctx *ui, cui_id id, cui_edit_state *
     c.area = area; c.font = font; c.size = size; c.line_h = line_h;
     c.measure.font = font; c.measure.size = size; c.measure.password = password;
     if (multiline) c.nlines = cui__edit_lines(ui, font, size, buf, len, area.w, &c.lines);
+    c.cmd = cui__edit_cmd_take(ui, id);
+    c.menu_press = menu_press;
 
     cui__edit_pointer(&c, r);
     if (!ui->mdown[0]) e->selecting = false;
@@ -808,8 +828,16 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
     cui_rect area = cui__prev_rect(ui, area_id);
     bool password = o->password && !e->show_password;
     e->para_dir = o->direction;
+    bool menu_open = rf.right_clicked && ui->em.fields;   /* cui_input_use_edit_menu: the field takes the keyboard */
+    if (menu_open) ui->focus = id;
+    cui__keys_held held;
+    bool hold = ui->em.fields && cui__edit_menu_hold(ui, id ^ 0xED17E3u, &held);   /* its menu showing has the keys */
     cui__edit_result er = cui__edit_logic(ui, id, e, buf, cap, multiline, password, o->read_only || disabled, area,
-                                          font, size, line_h, rf);
+                                          font, size, line_h, rf, menu_open);
+    if (hold) cui__edit_menu_release(ui, &held);
+    cui__edit_seen(ui, id, (o->read_only || disabled ? CUI__EM_RO : 0) | (e->cursor != e->anchor ? CUI__EM_SEL : 0) |
+                           (o->password ? CUI__EM_SECRET : 0) | (e->undo_pos > 0 ? CUI__EM_UNDO : 0) |
+                           (e->undo_pos + 1 < e->undo_count ? CUI__EM_REDO : 0), ui->focus == id, rf.right_clicked);
     float wheel = multiline && !disabled && area.h > 0 ? cui__take_vertical_wheel(ui, area_id) : 0;
     if (wheel != 0) {
         /* wheel scrolls the text whether or not the field has focus */
@@ -965,6 +993,7 @@ int cui__text_field(cui_ctx *ui, cui_id id, char *buf, size_t cap, const cui_inp
         cui__field_message(ui, o->hint, o->error);
         cui__close(ui);
     }
+    cui__edit_menu_popup(ui, id ^ 0xED17E3u, menu_open, NULL);   /* nothing unless it was opened */
     ui->last_id = id;
     ui->text_unshaped = unshaped;
     return flags;
@@ -1095,3 +1124,118 @@ void cui__edit_delete(char *buf, int *len, int a, int b) { cui__delete_range(buf
 bool cui__edit_is_word(unsigned char c) { return cui__is_word(c); }
 int cui__edit_word_left(const char *s, int pos) { return cui__word_left(s, pos); }
 int cui__edit_word_right(const char *s, int len, int pos) { return cui__word_right(s, len, pos); }
+
+/* ---- the standard edit menu: cui_edit_items, cui_edit_command, cui_input_use_edit_menu ---- */
+
+void cui__edit_seen(cui_ctx *ui, cui_id id, int flags, bool focused, bool menu) {
+    cui__edit_target t = { id, flags, ui->frame };
+    if (focused) ui->em.cur = t;
+    if (menu) { ui->em.menu = t; ui->em.menu_frame = ui->frame; }
+    else if (ui->em.menu.id == id) ui->em.menu = t;   /* its state, as of this frame */
+}
+
+int cui__edit_cmd_take(cui_ctx *ui, cui_id id) {
+    if (!ui->em.cmd || ui->em.cmd_id != id) return 0;
+    int c = ui->em.cmd;
+    ui->em.cmd = 0;
+    return c;
+}
+
+/* inside a menu: the widget it was opened for; else the one with the keyboard (this frame or last), else the last menu's */
+static cui__edit_target *cui__edit_target_get(cui_ctx *ui) {
+    cui__edit_menu *m = &ui->em;
+    bool menu_ok = m->menu.id && ui->frame - m->menu.seen <= 2;   /* still drawn */
+    if (ui->pb_depth > 0 && menu_ok) return &m->menu;
+    if (m->cur.id) return &m->cur;
+    if (m->last.id) return &m->last;
+    return menu_ok ? &m->menu : NULL;
+}
+
+bool cui_edit_command(cui_ctx *ui, cui_edit_cmd cmd) {
+    cui__edit_target *t = cui__edit_target_get(ui);
+    if (!t || cmd <= CUI_EDIT_NONE || cmd > CUI_EDIT_SELECT_ALL) return false;
+    ui->em.cmd = (int)cmd;
+    ui->em.cmd_id = t->id;
+    ui->em.cmd_frame = ui->frame;
+    if (!(t->flags & CUI__EM_VIEW)) ui->focus = t->id;   /* it acts while it has the keyboard, on its next frame */
+    ui->animating = true;
+    return true;
+}
+
+void cui_input_use_edit_menu(cui_ctx *ui, bool on) { ui->em.fields = on; }
+
+cui_edit_cmd cui_edit_items_ex(cui_ctx *ui, const cui_edit_items_opts *o) {
+    cui_edit_items_opts d;
+    memset(&d, 0, sizeof d);
+    if (!o) o = &d;
+    cui__edit_target *t = cui__edit_target_get(ui);
+    int f = t ? t->flags : CUI__EM_SEL | CUI__EM_UNDO | CUI__EM_REDO;
+    bool ro = o->read_only || (f & CUI__EM_RO), sel = !o->no_selection && (f & CUI__EM_SEL), secret = (f & CUI__EM_SECRET) != 0;
+    cui_editor_keys dk;
+    const cui_editor_keys *k = o->keys;
+    if (!k) { cui_editor_keys_default(&dk); k = &dk; }
+    static const struct { int cmd, edk; const char *label, *icon; } items[] = {
+        { CUI_EDIT_UNDO, CUI_EDK_UNDO, "Undo", CUI_ICON_UNDO_2 }, { CUI_EDIT_REDO, CUI_EDK_REDO, "Redo", CUI_ICON_REDO_2 },
+        { CUI_EDIT_CUT, CUI_EDK_CUT, "Cut", CUI_ICON_SCISSORS }, { CUI_EDIT_COPY, CUI_EDK_COPY, "Copy", CUI_ICON_COPY },
+        { CUI_EDIT_PASTE, CUI_EDK_PASTE, "Paste", CUI_ICON_CLIPBOARD }, { CUI_EDIT_DELETE, -1, "Delete", CUI_ICON_TRASH_2 },
+        { CUI_EDIT_SELECT_ALL, CUI_EDK_SELECT_ALL, "Select all", CUI_ICON_TYPE },
+    };
+    bool off[8] = { false, ro || o->no_undo || !(f & CUI__EM_UNDO), ro || o->no_redo || !(f & CUI__EM_REDO), ro || !sel || secret,
+                    !sel || secret, ro, ro || !sel, false };
+    cui_edit_cmd chosen = CUI_EDIT_NONE;
+    bool keep = ui->em.keep_focus;
+    ui->em.keep_focus = true;   /* a click on an item leaves the text its keyboard (no blur) */
+    for (int i = 0; i < CUI_COUNTOF(items); i++) {
+        int c = items[i].cmd;
+        if ((c == CUI_EDIT_UNDO || c == CUI_EDIT_REDO) && o->hide_undo) continue;
+        if (c == CUI_EDIT_SELECT_ALL && o->hide_select_all) continue;
+        if (o->copy_only && c != CUI_EDIT_COPY && c != CUI_EDIT_SELECT_ALL) continue;
+        if (((c == CUI_EDIT_CUT && !o->hide_undo) || c == CUI_EDIT_SELECT_ALL) && !o->copy_only) cui_menu_separator(ui);
+        cui_menu_item_opts io;
+        memset(&io, 0, sizeof io);
+        io.icon = o->no_icons ? NULL : items[i].icon;
+        io.disabled = off[c];
+        const char *sc = items[i].edk < 0 ? cui_key_name(CUI_KEY_DELETE)
+                       : cui_shortcut_label(ui, k->combo[items[i].edk][0].key ? k->combo[items[i].edk][0] : k->combo[items[i].edk][1]);
+        io.shortcut = sc && sc[0] ? sc : NULL;
+        if (cui_menu_item_ex(ui, items[i].label, &io)) chosen = (cui_edit_cmd)c;
+    }
+    ui->em.keep_focus = keep;
+    if (chosen && !o->no_perform) cui_edit_command(ui, chosen);
+    return chosen;
+}
+
+bool cui__edit_menu_hold(cui_ctx *ui, cui_id pid, cui__keys_held *h) {
+    cui_popup *p = cui__popup_get(ui, pid, false);
+    if (!p || !p->open) return false;
+    memcpy(h->k, ui->kpressed, sizeof h->k);
+    h->text = ui->text_in_len;
+    memset(ui->kpressed, 0, sizeof ui->kpressed);
+    ui->text_in_len = 0;
+    return true;
+}
+
+void cui__edit_menu_release(cui_ctx *ui, const cui__keys_held *h) {
+    memcpy(ui->kpressed, h->k, sizeof h->k);
+    ui->text_in_len = h->text;
+}
+
+void cui__edit_menu_popup(cui_ctx *ui, cui_id pid, bool open, const struct cui_editor_keys *keys) {
+    if (open) {
+        cui__close_all_popups(ui);
+        cui__popup_set(ui, pid, true);
+        cui_popup *p = cui__popup_get(ui, pid, false);
+        if (p) { p->at_mouse = true; p->no_anchor_w = true; p->mouse.x = ui->mx; p->mouse.y = ui->my; }
+        ui->animating = true;
+    }
+    if (!cui__popup_get(ui, pid, false)) return;   /* never opened: nothing to build */
+    cui_id last = ui->last_id;
+    if (cui__popup_begin(ui, pid, 0, CUI_PLACE_BOTTOM_START, 0, 6, 0, true)) {
+        cui_edit_items_opts eo;
+        memset(&eo, 0, sizeof eo);
+        eo.keys = keys;
+        cui_edit_items_ex(ui, &eo);
+        cui__popup_end(ui);
+    }
+    ui->last_id = last;
+}

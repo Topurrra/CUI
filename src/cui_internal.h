@@ -640,6 +640,24 @@ typedef struct cui__popup_build { cui_id id; bool disabled_pushed; bool menu; in
 typedef struct cui__modal_build { cui_id id; bool disabled_pushed; } cui__modal_build;
 typedef struct cui__vlist_build { int count; float row_h; int first; } cui__vlist_build;
 
+/* The standard edit menu (cui_edit_items, cui_edit_command, cui_input_use_edit_menu; cui_textedit.c). Each text widget
+ * (text field, code editor, markdown view) says every frame what it can do (cui__edit_seen); the menu's items and
+ * commands act on the target: the one right-clicked, else the one that had the keyboard when the menu opened. */
+enum { CUI__EM_RO = 1, CUI__EM_SEL = 2, CUI__EM_UNDO = 4, CUI__EM_REDO = 8, CUI__EM_SECRET = 16,
+       CUI__EM_VIEW = 32 /* not a keyboard focus (the markdown view): a command does not move the focus to it */ };
+typedef struct cui__edit_target { cui_id id; int flags; uint64_t seen; } cui__edit_target;
+typedef struct cui__edit_menu {
+    cui__edit_target cur, last;   /* the text widget with the keyboard this frame, and last frame (id 0: none) */
+    cui__edit_target menu;        /* the one the open menu belongs to */
+    uint64_t menu_frame;          /* the frame a right press set `menu` (a menu opening that frame keeps it) */
+    int cmd;                      /* a CUI_EDIT_* command waiting for widget cmd_id's next frame, 0 none */
+    cui_id cmd_id;
+    uint64_t cmd_frame;
+    int edk;                      /* during the target code editor's keys: its command as CUI_EDK_* + 1, else 0 */
+    bool fields;                  /* cui_input_use_edit_menu: text fields open the menu on a right click */
+    bool keep_focus;              /* the items being built leave the keyboard where it is (cui_edit_items) */
+} cui__edit_menu;
+
 #define CUI_MAX_TOASTS 16
 #define CUI_ID_STACK 64
 #define CUI_PARENT_STACK 256
@@ -829,6 +847,7 @@ struct cui_ctx {
     cui_font tf_font;
     float tf_size;
     cui_id tf_select_all;      /* this field selects all of its text when it next has focus */
+    cui__edit_menu em;         /* the standard edit menu's target and pending command (cui_textedit.c) */
     /* files dropped from the OS, valid for one frame */
     char *drop_buf; size_t drop_used, drop_cap;
     int drop_off[64]; int drop_count;
@@ -1008,6 +1027,18 @@ typedef struct cui_edit_state {
     int para_dir;              /* text area with cui_input_use_paragraphs: the field's cui_input_opts.direction (set every frame) */
 } cui_edit_state;
 void cui__edit_attach(cui_ctx *ui, cui_id id, cui_edit_state *e);   /* once per state: the history is freed with it */
+/* The edit menu (cui__edit_menu): a text widget's report for this frame (CUI__EM_* flags; focused: it has the keyboard;
+ * menu: it was right-clicked, the menu is for it), and the command waiting for it (CUI_EDIT_*, taken: 0 after). */
+void cui__edit_seen(cui_ctx *ui, cui_id id, int flags, bool focused, bool menu);
+int cui__edit_cmd_take(cui_ctx *ui, cui_id id);
+/* The menu CUI opens itself on a right click (a text field with cui_input_use_edit_menu, a code editor with .edit_menu):
+ * opens popup pid at the pointer (open), then builds it if it is showing. keys: the shortcuts shown (NULL the usual). */
+void cui__edit_menu_popup(cui_ctx *ui, cui_id pid, bool open, const struct cui_editor_keys *keys);
+/* While that menu shows, the keys are its own (arrows, Enter, Esc): hold takes this frame's keys and typed text away
+ * from the widget (true when it did), release gives them back for the menu, which is built after the widget. */
+typedef struct cui__keys_held { uint8_t k[CUI_KEY_COUNT]; int text; } cui__keys_held;
+bool cui__edit_menu_hold(cui_ctx *ui, cui_id pid, cui__keys_held *h);
+void cui__edit_menu_release(cui_ctx *ui, const cui__keys_held *h);
 /* Snapshot before an edit. kind: 1 insert, 2 delete, 3 other; edits of the
  * same kind at the caret within a second merge into one step. */
 void cui__edit_undo_push(cui_ctx *ui, cui_edit_state *e, const char *buf, int kind);

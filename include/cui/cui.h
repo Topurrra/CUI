@@ -1038,6 +1038,44 @@ CUI_API void cui_submenu_end(cui_ctx *ui);
 CUI_API void cui_menu_separator(cui_ctx *ui);
 CUI_API void cui_menu_label(cui_ctx *ui, const char *text);
 
+/* The standard edit items, as every desktop editor has them on a right click in text: Undo, Redo; Cut, Copy, Paste,
+ * Delete; Select all. Call cui_edit_items inside any menu, context menu or submenu (alone, or before or after the app's
+ * own items). They act on the TARGET: the text input, text area, search field, code editor or markdown view that was
+ * right-clicked (CUI notes a right press on any of them), else the one that had the keyboard when the menu opened.
+ * Each item is disabled when it can't act, from the target's own state: read-only text disables Cut, Paste, Delete,
+ * Undo and Redo; no selection disables Cut, Copy and Delete (a password field never copies); nothing to undo or redo
+ * disables those. Paste stays enabled whenever the text is editable (the clipboard is not read to decide).
+ * Zeroed options: the target's state decides, nothing more; with no target every item is enabled. The state options
+ * only disable more (a host whose text is not a CUI widget sets them, with .no_perform).
+ * Returns the item chosen this frame (CUI_EDIT_*, 0 none) and performs it with cui_edit_command, unless .no_perform. */
+typedef enum cui_edit_cmd {
+    CUI_EDIT_NONE = 0, CUI_EDIT_UNDO, CUI_EDIT_REDO, CUI_EDIT_CUT, CUI_EDIT_COPY, CUI_EDIT_PASTE, CUI_EDIT_DELETE,
+    CUI_EDIT_SELECT_ALL
+} cui_edit_cmd;
+typedef struct cui_edit_items_opts {
+    int _;
+    bool read_only;            /* also treat the text as read only: Cut, Paste, Delete, Undo and Redo disabled */
+    bool no_selection;         /* also treat it as having nothing selected: Cut, Copy and Delete disabled */
+    bool no_undo, no_redo;     /* also nothing to undo, or to redo */
+    bool hide_undo;            /* leave out Undo and Redo (and the separator after them) */
+    bool hide_select_all;      /* leave out Select all (and the separator before it) */
+    bool copy_only;            /* a read-only view: only Copy and Select all, no separator */
+    bool no_icons;             /* items without icons */
+    bool no_perform;           /* only report the choice: the app performs it (its text is not a CUI text widget) */
+    const struct cui_editor_keys *keys;   /* the shortcuts shown: a code editor's .keys (NULL: the usual Ctrl Z, Ctrl X...) */
+} cui_edit_items_opts;
+CUI_API cui_edit_cmd cui_edit_items_ex(cui_ctx *ui, const cui_edit_items_opts *opts);
+/* Performs an edit command on the target text widget (as cui_edit_items describes; outside a menu: the one with the
+ * keyboard, else the last menu's), through the widget's own code: its undo history, its clipboard handling (a paste is
+ * one undo step), its selection. The widget gets the keyboard back and acts on its next frame, so no fake key
+ * presses are needed. Delete removes the selection (nothing without one). Returns false when there is no target. */
+CUI_API bool cui_edit_command(cui_ctx *ui, cui_edit_cmd cmd);
+/* Opt in, once: a right click on a text input, text area or search field (cui_input, cui_textarea, cui_search,
+ * cui_number...) opens the standard edit menu by itself, with no app code. The click moves the caret there unless it
+ * lands inside the selection, and the field takes the keyboard. Off by default. Code editors take part only with
+ * their own cui_code_editor_opts.edit_menu, since apps build their editor menus from context_clicked. */
+CUI_API void cui_input_use_edit_menu(cui_ctx *ui, bool on);
+
 /* Tooltip for the previous component. The first hover waits for the delay,
  * measured in elapsed time even when the app sleeps between frames. */
 CUI_API void cui_tooltip(cui_ctx *ui, const char *text);
@@ -2448,6 +2486,10 @@ typedef struct cui_code_editor_opts {
                                 * scrolls the text. A line's bar is made when it first shows on the strip and kept, an edit
                                 * makes only the lines it touched again: meant for texts of a few megabytes (an app turns it
                                 * off for its huge files, as it does colours). Off: nothing changes. */
+    bool edit_menu;            /* a right click on the text opens the standard edit menu (cui_edit_items) by itself: the
+                                * caret moves to the click unless it lands inside the selection, and the editor takes the
+                                * keyboard. context_clicked is then reported for the gutter only. Off: nothing changes
+                                * (an app with its own menu builds it from context_clicked and can call cui_edit_items). */
 } cui_code_editor_opts;
 #define CUI_MM_WIDTH 84   /* the minimap's width, points */
 typedef struct cui_code_editor_result {
@@ -6622,6 +6664,7 @@ CUI_API const cui_draw_data *cui_get_draw_data(cui_ctx *ui);
 #define cui_submenu(ui, label, ...)         CUI__SCOPE_IF(cui_submenu_begin((ui), (label), CUI__OPTS(cui_menu_item_opts, __VA_ARGS__)), cui_submenu_end(ui))
 #define cui_popover_at(ui, id, x, y, placement, ...) CUI__SCOPE_IF(cui_popover_at_begin((ui), (id), (x), (y), (placement), CUI__OPTS(cui_popover_opts, __VA_ARGS__)), cui_popover_end(ui))
 #define cui_menu_item(ui, label, ...)       cui_menu_item_ex((ui), (label), CUI__OPTS(cui_menu_item_opts, __VA_ARGS__))
+#define cui_edit_items(ui, ...)             cui_edit_items_ex((ui), CUI__OPTS(cui_edit_items_opts, __VA_ARGS__))
 #define cui_dialog(ui, title, open, ...)    CUI__SCOPE_IF(cui_dialog_begin((ui), (title), (open), CUI__OPTS(cui_dialog_opts, __VA_ARGS__)), cui_dialog_end(ui))
 #define cui_dialog_footer(ui)               CUI__SCOPE(cui_dialog_footer_begin(ui), cui_dialog_footer_end(ui))
 #define cui_sheet(ui, title, open, ...)     CUI__SCOPE_IF(cui_sheet_begin((ui), (title), (open), CUI__OPTS(cui_sheet_opts, __VA_ARGS__)), cui_sheet_end(ui))

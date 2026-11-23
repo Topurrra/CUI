@@ -31,6 +31,12 @@ void cui__popup_set(cui_ctx *ui, cui_id id, bool open) {
     cui_popup *p = cui__popup_get(ui, id, true);
     if (!p) return;
     if (open && !p->open) {
+        /* the edit menu's target: a menu opening on its own (not a submenu, not after a right press on a text
+         * widget this frame) is for the text widget that has the keyboard, if any (cui_edit_items) */
+        bool root = true;
+        for (int i = 0; i < ui->popup_count; i++) if (ui->popups[i].open) root = false;
+        cui__edit_target *had = ui->em.cur.id ? &ui->em.cur : &ui->em.last;
+        if (root && ui->em.menu_frame != ui->frame && had->id) ui->em.menu = *had;
         p->opened_frame = ui->frame;
         p->z = 1000 + ++ui->layer_seq;
         cui__menu_nav *nav = cui_state(ui, id ^ 0x4E4156u, sizeof *nav);
@@ -278,7 +284,7 @@ bool cui_menu_item_ex(cui_ctx *ui, const char *label, const cui_menu_item_opts *
     cui_id id = cui_make_id(ui, label);
     bool disabled = o->disabled || cui_is_disabled(ui);
     cui_push_disabled(ui, o->disabled);
-    cui_interact r = cui__interact(ui, id, 0);
+    cui_interact r = cui__interact(ui, id, ui->em.keep_focus ? CUI_IF_KEEP_FOCUS : 0);   /* edit items: the text keeps the keyboard */
     cui_pop_disabled(ui);
     if (r.hovered && nav && (ui->mx != ui->pmx || ui->my != ui->pmy || !nav->keyboard)) { nav->highlight = index; nav->keyboard = false; }
     bool hl = nav && nav->highlight == index && !disabled;
