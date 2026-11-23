@@ -3215,6 +3215,7 @@ void cui_editor_keys_default(cui_editor_keys *k) {
 /* one of the editor's own commands this frame: the usual test, or with .keys its two combinations (the keys they
  * press are taken, so nothing below sees them again) */
 static bool cui__edk(cui_ctx *ui, const cui_code_editor_opts *o, int cmd, bool usual) {
+    if (ui->em.edk == cmd + 1) return true;   /* the edit menu's command (cui_edit_command), during this editor's keys */
     if (!o || !o->keys) return usual;
     for (int j = 0; j < 2; j++) {
         cui_key_combo c = o->keys->combo[cmd][j];
@@ -4563,6 +4564,14 @@ static void cui__edf_keys(cui__edf *f) {
     f->word_mod = (f->mods & CUI_MOD_CTRL) != 0; f->line_mod = false;
 #endif
     int before_c = e->cursor, before_a = e->anchor;
+    /* the edit menu's command for this editor: through the keys' own paths (cui__edk), Delete as the Delete key on a
+     * selection; the key state is put back after, so nothing later in the frame sees it */
+    static const int edk_of[] = { 0, CUI_EDK_UNDO + 1, CUI_EDK_REDO + 1, CUI_EDK_CUT + 1, CUI_EDK_COPY + 1, CUI_EDK_PASTE + 1, 0, CUI_EDK_SELECT_ALL + 1 };
+    int em_cmd = cui__edit_cmd_take(ui, f->lid);
+    int del_keys = ui->kpressed[CUI_KEY_DELETE];
+    bool em_del = em_cmd == CUI_EDIT_DELETE && e->cursor != e->anchor && !E->ro;
+    if (em_del) ui->kpressed[CUI_KEY_DELETE] = 1;
+    ui->em.edk = em_cmd > 0 && em_cmd < CUI_COUNTOF(edk_of) ? edk_of[em_cmd] : 0;
     if (f->o->ghost) { cui__edf_ghost(f); if (f->g_on) cui__edf_ghost_keys(f); }   /* the ghost's keys first */
     for (int k = CUI_KEY_NONE + 1; k < CUI_KEY_COUNT; k++)
         if (ui->kpressed[k] && k != CUI_KEY_TAB && k != CUI_KEY_ESCAPE) st->tab_free = false;
@@ -4596,6 +4605,8 @@ static void cui__edf_keys(cui__edf *f) {
         if (vmove == 0 && vpage == 0) st->pref_col = -1;
     }
     if (!E->ro && !st->tab_free) ui->tab_owner = f->lid;
+    ui->em.edk = 0;
+    if (em_del) ui->kpressed[CUI_KEY_DELETE] = (unsigned char)del_keys;
 }
 
 /* a toggle in the find row: Aa, W, .* */
@@ -5130,12 +5141,24 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     /* input */
     f.mods = ui->mods;
     f.shift = (f.mods & CUI_MOD_SHIFT) != 0; f.prim = (f.mods & CUI_MOD_PRIMARY) != 0;
+    cui__keys_held held;
+    bool hold = o->edit_menu && cui__edit_menu_hold(ui, f.id ^ 0xED17E3u, &held);   /* its own menu showing has the keys */
     cui__edf_bar_keys(&f);
     cui__edf_pointer(&f);
+    bool em_press = res.context_clicked, em_open = false;   /* a right press: the edit menu is for this editor */
+    if (em_press && !res.context_gutter && o->edit_menu) {   /* CUI's own menu: the caret goes to the click, unless inside the selection */
+        int s0 = CUI_MIN(e->cursor, e->anchor), s1 = CUI_MAX(e->cursor, e->anchor), at = res.context_offset;
+        if (at >= 0 && (s0 == s1 || at < s0 || at > s1)) { e->cursor = e->anchor = at; st->pref_col = -1; }
+        ui->focus = f.lid;
+        res.context_clicked = false;
+        res.context_line = 0; res.context_offset = 0; res.context_x = res.context_y = 0;
+        em_open = true;
+    }
     if (st->mm) cui__edf_mm_input(&f);
     f.focused = ui->focus == f.lid;
     if (!f.focused) st->tab_free = false;
     if (f.focused) cui__edf_keys(&f);
+    if (hold) cui__edit_menu_release(ui, &held);
 
     /* build */
     bool dark = ui->mode == CUI_THEME_DARK;
@@ -5191,6 +5214,12 @@ static cui_code_editor_result cui__code_editor_ex_body(cui_ctx *ui, const char *
     res.cursor_count = 1 + cui__edm_count(st);
     res.fold_count = st->fold ? st->fold->n : 0;
     res.hidden_lines = st->fold ? st->fold->hidden : 0;
+    bool can_undo = E.doc ? cui_text_doc_can_undo(E.doc) : st->hist.pos > 0;
+    bool can_redo = E.doc ? cui_text_doc_can_redo(E.doc) : st->hist.pos < st->hist.n;
+    cui__edit_seen(ui, f.lid, (E.ro ? CUI__EM_RO : 0) | (e->cursor != e->anchor ? CUI__EM_SEL : 0) | (can_undo ? CUI__EM_UNDO : 0) |
+                              (can_redo ? CUI__EM_REDO : 0), ui->focus == f.lid, em_press);
+    cui__edit_menu_popup(ui, f.id ^ 0xED17E3u, em_open, o->keys);   /* .edit_menu: nothing unless it was opened */
+    ui->last_id = f.id;
     return res;
 }
 

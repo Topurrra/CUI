@@ -1008,6 +1008,9 @@ void cui_begin_frame(cui_ctx *ui, float dt) {
     ui->time += dt;
     cui__flush_clicks(ui);
     ui->frame++;
+    ui->em.last = ui->em.cur;                     /* the edit menu: who had the keyboard last frame */
+    ui->em.cur.id = 0;
+    if (ui->em.cmd && ui->frame - ui->em.cmd_frame > 3) ui->em.cmd = 0;   /* its widget is gone */
     ui->animating = false;
     ui->wakeup = -1;
     ui->cursor = CUI_CURSOR_ARROW;
