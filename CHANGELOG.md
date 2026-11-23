@@ -71,6 +71,8 @@ What changed in CUI, newest first. Every component mentioned here runs live in t
 
 ### Fixed
 
+- Enter and Space on a focused month calendar activate the selected day, also when the pointer rests on another day ([#124](https://github.com/yappologistic/CUI/issues/124)).
+- The single-file build compiles with GCC 15 at `-O3` and `-Werror=array-bounds`; CI now checks it ([#123](https://github.com/yappologistic/CUI/issues/123)).
 - macOS Metal renderer: the window's content no longer jitters while the window is dragged to a new size. Each frame drawn during the drag is shown together with the new window size, as the software renderer's already are.
 - Windows: maximizing, minimizing or restoring a window no longer freezes it for about a second with vsync on. The window keeps presenting, without vsync, while DWM animates the change, and vsync comes back right after ([#117](https://github.com/yappologistic/CUI/issues/117)).
 - Repeated software screenshots capture the whole frame when the destination buffer is reused ([#101](https://github.com/yappologistic/CUI/issues/101)).
