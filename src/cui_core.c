@@ -297,6 +297,7 @@ void cui_set_renderer(cui_ctx *ui, const cui_renderer_iface *r) {
 void cui_set_platform(cui_ctx *ui, const cui_platform_iface *p) {
     if (p) ui->platform = *p; else memset(&ui->platform, 0, sizeof ui->platform);
 }
+void cui_get_platform(cui_ctx *ui, cui_platform_iface *out) { if (out) *out = ui->platform; }
 
 void cui_set_clipboard_text(cui_ctx *ui, const char *text) {
     if (text && ui->platform.set_clipboard) ui->platform.set_clipboard(ui->platform.user, text);
@@ -496,6 +497,10 @@ void cui_focus_set(cui_ctx *ui, cui_id id, bool visible) {
     ui->focus = id;
     ui->focus_visible = id && visible;
     cui_request_redraw(ui);
+}
+void cui_focus_select_all(cui_ctx *ui, cui_id id) {
+    cui_focus_set(ui, id, false);
+    ui->tf_select_all = id;
 }
 
 bool cui_is_disabled(cui_ctx *ui) { return ui->disabled_depth > 0; }

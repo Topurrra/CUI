@@ -63,6 +63,8 @@ struct cui_vt {
     cui__vt_x *x;                     /* the opt-in parts (cui_vt_sixel.c): NULL until cui_vt_set_features or cui_vt_set_colors */
     uint8_t pic_on;                   /* CUI__VT_PIC_*: where pictures are kept; 0 keeps every picture hook off the text paths */
     uint16_t cell_w16;                /* the view's cell width in 1/16 device pixels (cell_w is rounded), for sixel pictures' aspect */
+    cui__vt_find *find;               /* find in the scrollback (cui_vt_find.c): NULL until cui_vt_find */
+    uint32_t wseq;                    /* counts writes, so found matches know when they may be stale */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -116,6 +118,7 @@ cui_vt *cui_vt_create(int cols, int rows, int scrollback_lines) {
 void cui_vt_destroy(cui_vt *v) {
     if (!v) return;
     if (v->x) cui__vt_x_free(v);
+    if (v->find) cui__vt_find_free(v);
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
     free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap);
     free(v);
@@ -126,6 +129,7 @@ size_t cui_vt_memory(const cui_vt *v) {
     n += (size_t)v->cols * (size_t)v->rows * sizeof(cui__vt_cell) * (v->scr[1].cells ? 2 : 1);
     if (v->snap) n += (size_t)v->snap_cols * (size_t)v->snap_rows * sizeof(cui__vt_cell);
     if (v->x) n += cui__vt_x_memory(v);
+    if (v->find) n += cui__vt_find_memory(v);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -563,6 +567,7 @@ static void cui__vt_control(cui_vt *v, unsigned char c) {
 
 void cui_vt_write(cui_vt *v, const char *data, size_t len) {
     if (!v) return;
+    v->wseq++;
     const unsigned char *d = (const unsigned char *)data;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = d[i];
@@ -800,6 +805,21 @@ void cui__vt_set_pic_bits(cui_vt *v, uint8_t bits) { v->pic_on = bits; }
 int cui__vt_slot(const cui_vt *v, int scr, int y) { return v->scr[scr].map ? v->scr[scr].map[y] : y; }
 void cui__vt_set_cursor(cui_vt *v, int x, int y) { cui__vt_cursor_to(v, x, y); }
 
+/* for cui_vt_find.c */
+cui__vt_find **cui__vt_find_slot(cui_vt *v) { return &v->find; }
+const cui__vt_find *cui__vt_find_get(const cui_vt *v) { return v->find; }
+uint32_t cui__vt_wseq(const cui_vt *v) { return v->wseq; }
+static const cui__vt_cell *cui__vt_cells_abs(const cui_vt *v, int64_t abs, int *n, bool *wrapped);
+int cui__vt_row_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool *wrapped) {
+    int n = 0; bool w = false;
+    const cui__vt_cell *c = cui__vt_cells_abs(v, abs, &n, &w);
+    *wrapped = w;
+    if (!c) return -1;
+    n = CUI_MIN(n, cap);
+    for (int i = 0; i < n; i++) out[i] = (c[i].ca & CUI__VT_SPACER) ? CUI__VT_FIND_SPACER : CUI__VT_CP(c[i].ca);
+    return n;
+}
+
 void cui__vt_scroll_lines(cui_vt *v, int n) {
     v->cy = v->sbot;
     cui__vt_scroll_up(v, v->stop, v->sbot, n);
@@ -848,6 +868,8 @@ typedef struct {
     uint32_t sync_seen; double sync_t0;   /* the update the view last saw open, and when the view first drew it */
     int mcol, mrow; bool mvalid;      /* the last cell the mouse was reported in */
     bool finit, fin;                  /* the view had the keyboard and the window had the focus, as of the last frame */
+    uint32_t find_seen;               /* .find: the current match the view last showed (cui_vt_find.c's count of moves) */
+    int w_mods_n;                     /* bytes of this frame's records that are Shift, Ctrl or Alt alone */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -1081,12 +1103,13 @@ CUI__VT_SMALL static void cui__vt_keys32(cui_ctx *ui, const cui_vt *v, cui__vt_s
     bool ctrl = (mods & CUI_MOD_CTRL) != 0, alt = (mods & CUI_MOD_ALT) != 0, shift = (mods & CUI_MOD_SHIFT) != 0;
     int want = (shift ? CUI__VT_CS_SHIFT : 0) | (ctrl ? CUI__VT_CS_LCTRL : 0) | (alt ? CUI__VT_CS_LALT : 0);
     static const uint8_t mk[3][3] = { { CUI__VT_CS_SHIFT, 0x10, 0x2A }, { CUI__VT_CS_LCTRL, 0x11, 0x1D }, { CUI__VT_CS_LALT, 0x12, 0x38 } };
-    int cs = st->w_cs;
+    int cs = st->w_cs, mods0 = st->out_n;
     for (int i = 0; i < 3; i++) {
         if (!((want ^ cs) & mk[i][0])) continue;
         cs = (cs & ~(int)mk[i][0]) | (want & mk[i][0]);
         cui__vt_w_rec(st, mk[i][1], mk[i][2], 0, (want & mk[i][0]) != 0, cs);
     }
+    st->w_mods_n = st->out_n - mods0;         /* Shift, Ctrl or Alt alone: not typing, the view stays where it is */
     st->w_cs = (uint8_t)want;
     cs = want;
 
@@ -1334,6 +1357,8 @@ typedef struct {
     const cui__vt_cell *snap;         /* paint this copy of the screen (a synchronized update is open) instead of the live one */
     int scx, scy; bool scursor;
     const cui__vt_pic_draw *pics;     /* each visible row's picture (cui_vt_sixel.c), or NULL when none is on screen */
+    bool find;                        /* .find: mark the matches of cui_vt_find (cui_vt_find.c) */
+    cui__vt_find_look fl;
     cui__vt_pos s0, s1;
     cui_color fg, bg, sel, cursor, bar;
     float bar_t;
@@ -1447,6 +1472,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             } else while (e < cn && cells[e].bg == 0 && !(cells[e].ca & CUI_VT_INVERSE)) e++;
             x = e;
         }
+        if (p->find) cui__vt_find_paint_row(ui, v, arow, x0, ry, p->cw, p->lh, &p->fl);   /* found matches: over the backgrounds, under the text */
         /* text: a run of the same style is one draw call; characters outside ASCII are placed in their own cell */
         for (int x = 0; x < cn;) {
             uint32_t ch = CUI__VT_CP(cells[x].ca);
@@ -1582,6 +1608,20 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     st->seen_total = v->sb_total; st->init = true;
     if (st->off > v->sb_count) st->off = v->sb_count;
     if (v->cur == 1) st->off = 0;
+    /* find (opt in): stale matches are found again, and a current match that moved is scrolled into view and selected */
+    if (o->find && v->find) {
+        cui__vt_span m;
+        if (cui__vt_find_frame(ui, v, &st->find_seen, &m)) {
+            int64_t top = (int64_t)v->sb_total - st->off, last = m.c1 > 0 ? m.r1 : m.r1 - 1;
+            if (m.r0 < top || last >= top + v->rows) {                  /* out of sight: put it near the middle */
+                int64_t off = (int64_t)v->sb_total - (m.r0 - v->rows / 2);
+                st->off = (int)CUI_CLAMP(off, 0, (int64_t)v->sb_count);
+            }
+            st->a = (cui__vt_pos){ m.r0, m.c0 };
+            st->b = m.c1 > 0 ? (cui__vt_pos){ m.r1, m.c1 - 1 } : (cui__vt_pos){ m.r1 - 1, v->cols - 1 };
+            st->has_sel = true; st->selecting = false;
+        }
+    }
     /* the program has the mouse (opt in): its clicks, drags and wheel are reports, Shift or scrolled-back history keeps them local */
     bool mshift = (ui->mods & CUI_MOD_SHIFT) != 0;
     bool can_grab = o->mouse && !o->no_input && v->mouse_modes != 0 && st->off == 0;
@@ -1649,12 +1689,13 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
             if (cui_key_pressed(ui, CUI_KEY_END)) st->off = 0;
         }
         int before = st->out_n;
+        st->w_mods_n = 0;
         if (o->win32_keys && v->win32_input) { st->w_on = true; cui__vt_keys32(ui, v, st); }
         else {
             if (st->w_on) { st->w_on = false; st->w_cs = 0; st->w_pend_n = 0; memset(st->w_held, 0, sizeof st->w_held); }     /* the program no longer takes records: plain bytes again */
             cui__vt_keys(ui, v, st);
         }
-        if (st->out_n > before) { st->off = 0; st->has_sel = false; }
+        if (st->out_n - st->w_mods_n > before) { st->off = 0; st->has_sel = false; }    /* typing goes back to the live screen */
         for (int k = 1; k < CUI_KEY_COUNT; k++) ui->kpressed[k] = 0;   /* nothing else sees what the program got */
     }
     /* right click: copy the selection, or paste */
@@ -1669,6 +1710,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         }
     }
     res.input = st->out; res.input_len = st->out_n;
+    res.scrolled = st->off;
     st->out_n = 0;      /* the bytes stay readable in `out` until the next frame writes there */
 
     int leaf = cui__leaf(ui, id, o->width.kind ? o->width : CUI_FILL, o->height.kind ? o->height : CUI_FILL);
@@ -1690,6 +1732,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     p->bar = CUI_C(ui, BORDER_STRONG);
     p->bar_t = in.hovered || st->off > 0 ? 1.0f : 0.0f;
     p->wheel = wid;
+    if (o->find && v->find) { p->find = true; cui__vt_find_look_of(ui, &p->fl); }
     /* an update bracketed by ?2026h and ?2026l is open: show the screen as it was when it opened, for about 150 ms of frames at most */
     if (v->sync_on && v->snap && st->off == 0 && v->snap_cols == v->cols && v->snap_rows == v->rows) {
         if (st->sync_seen != v->sync_seq) { st->sync_seen = v->sync_seq; st->sync_t0 = ui->time; }

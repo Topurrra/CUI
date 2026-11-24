@@ -533,6 +533,30 @@ void cui__vt_pic_drop_screen(cui_vt *v, int scr);
 void cui__vt_x_resize(cui_vt *v, int scr, const uint16_t *old_map, int old_rows, int cols, int rows);
 const cui__vt_pic_draw *cui__vt_pic_view(cui_ctx *ui, cui_id id, const cui_vt *v, int off, bool frozen);   /* per visible row, valid this frame; NULL: none */
 uint32_t cui__vt_pic_px(const cui_vt *v, int row, int px, int py);   /* tests: a picture pixel (r | g << 8 | b << 16 | a << 24) */
+/* Find in the scrollback (cui_vt_find.c, cui_vt_find and friends). Rows are counted as the view counts them: sb_total + y for
+ * the live screen, older rows smaller. */
+typedef struct cui__vt_find cui__vt_find;
+typedef struct { int64_t r0, r1; int c0, c1; } cui__vt_span;   /* a match: from cell (r0, c0) to (r1, c1), the end not included */
+typedef struct { cui_color fill, edge, cur_fill, cur_edge; } cui__vt_find_look;
+#define CUI__VT_FIND_SPACER 0xFFFFFFFFu                       /* cui__vt_row_chars: the second cell of a wide character */
+/* cui_regex.c: a pattern compiled once and searched many times; find: 1 (start, end in bytes), 0 none, -2 too complex */
+typedef struct cui__regex cui__regex;
+cui__regex *cui__regex_new(const char *pattern, int flags, const char **error);   /* NULL with *error for an invalid pattern */
+void cui__regex_free(cui__regex *r);
+int cui__regex_find(const cui__regex *r, const char *text, int len, int from, int *start, int *end, const char **error);
+/* cui_vt.c, for cui_vt_find.c */
+cui__vt_find **cui__vt_find_slot(cui_vt *v);
+const cui__vt_find *cui__vt_find_get(const cui_vt *v);
+uint32_t cui__vt_wseq(const cui_vt *v);                         /* bumps at every cui_vt_write */
+int cui__vt_row_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool *wrapped);   /* a row's code points; -1: no such row */
+/* cui_vt_find.c, for cui_vt.c */
+void cui__vt_find_free(cui_vt *v);
+size_t cui__vt_find_memory(const cui_vt *v);
+/* a view with .find, once a frame: finds stale matches again (at most every 100 ms), and returns true with the current
+ * match in *cur when it moved since *seen (which it updates) */
+bool cui__vt_find_frame(cui_ctx *ui, cui_vt *v, uint32_t *seen, cui__vt_span *cur);
+void cui__vt_find_look_of(cui_ctx *ui, cui__vt_find_look *o);
+void cui__vt_find_paint_row(cui_ctx *ui, const cui_vt *v, int64_t arow, float x0, float ry, float cw, float lh, const cui__vt_find_look *k);
 int cui__vt_pic_count(const cui_vt *v);                             /* tests: slices kept */
 /* The screen pointer in the layout space of wheel area `id`, using its last paint transform. */
 cui_vec2 cui__wheel_point(cui_ctx *ui, cui_id id);
