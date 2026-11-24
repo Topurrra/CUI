@@ -4707,7 +4707,8 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  *
  * Understood: cursor movement, erase, insert and delete (characters and lines), scrolling regions, 16, 256
  * and true colors, bold, dim, italic, underline (single, double, curly, dotted, dashed: `4:0` to `4:5`, `21`; `58` and `59` are read but the line takes the text color: a cell has no room for a second color), overline (`53`, `55`), inverse, strike, colors in the colon forms (`38:2::r:g:b`, `38:2:r:g:b`, `38:5:n`), wide characters, the alternate screen
- * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2),
+ * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2), the current
+ * folder (OSC 7, `cui_vt_cwd`), the bell (counted, `cui_vt_bell_count`),
  * cursor shape (`CSI Ps SP q`: block, underline, bar; never blinking), synchronized output (`?2026`: the view shows the screen as it was until the update ends, for at most about 150 ms), cursor position, device attribute, XTVERSION (`ESC [ > q`) and size reports (`ESC [ 14 t`, `16 t` and `18 t`, with the cell size the view records each frame), mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
  * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, character sets, pictures (sixel ones with `CUI_VT_FEATURE_SIXEL`, below).
  *
@@ -4777,6 +4778,16 @@ CUI_API size_t cui_vt_memory(const cui_vt *vt);                               /*
 /* One screen row as text with its blank right end cut: row 0 is the top of the live screen, -1 the newest scrollback line. Returns the length. */
 CUI_API size_t cui_vt_line_text(const cui_vt *vt, int row, char *out, size_t cap);
 CUI_API bool cui_vt_cell_at(const cui_vt *vt, int x, int y, cui_vt_cell *out);
+/* The folder the program says it is in, from OSC 7 (ESC ] 7 ; file://host/path ST, which shells send at each prompt),
+ * percent-decoded: "C:\Users\me" for file://pc/C:/Users/me (a drive path takes backslashes), "/home/me" for
+ * file://pc/home/me. NULL when no OSC 7 has come, or when the last one named another machine (an ssh session): the host
+ * counts as this machine when it is empty, "localhost" or this machine's name (COMPUTERNAME on Windows, gethostname
+ * elsewhere; only the first label is compared). Valid until the next cui_vt_write. Only ever set by the program. */
+CUI_API const char *cui_vt_cwd(const cui_vt *vt);
+CUI_API const char *cui_vt_cwd_host(const cui_vt *vt);    /* the host of the last OSC 7 as sent ("" for file:///path); NULL when none came */
+/* How many times the program rang the bell (BEL, 0x07, outside a sequence: the one that ends an OSC does not count)
+ * since the screen was made. Nothing is shown or played: compare it with the count you saw last and ring your own way. */
+CUI_API unsigned cui_vt_bell_count(const cui_vt *vt);
 /* Opt-in parts of the screen, for a program behind a console host that passes queries and pictures through (Windows
  * Terminal's OpenConsole.exe). With none set the screen parses, answers, draws and uses memory exactly as before.
  *   CUI_VT_FEATURE_QUERIES  answer what such a host forwards instead of answering itself: device attributes as a VT220-class

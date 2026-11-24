@@ -1,6 +1,7 @@
 #include <cui/cui.h>
 #include <cui/cui_render.h>
 #include <stdio.h>
+#include <string.h>
 
 static int checks, failed;
 #define CHECK(condition) do { checks++; if (!(condition)) { failed++; \
@@ -253,6 +254,32 @@ static void test_cursor(cui_ctx *ui) {
     cui_set_platform(ui, NULL);
 }
 
+/* cui_focus_select_all on a field built in the same frame: it gets the keyboard with all its text selected, so typing
+ * replaces it (a rename field that opens with the old name) */
+static void test_focus_select(cui_ctx *ui) {
+    char buf[32] = "old name";
+    cui_begin_frame(ui, 1.0f / 60);
+    cui_input(ui, "name", buf, sizeof buf);
+    cui_end_frame(ui);
+    CHECK(cui_focused_id(ui) != cui_make_id(ui, "name"));
+    cui_begin_frame(ui, 1.0f / 60);
+    cui_focus_select_all(ui, cui_make_id(ui, "name"));
+    cui_input(ui, "name", buf, sizeof buf);
+    cui_end_frame(ui);
+    CHECK(cui_focused_id(ui) == cui_make_id(ui, "name"));
+    cui_input_text(ui, "new");
+    cui_begin_frame(ui, 1.0f / 60);
+    int f = cui_input(ui, "name", buf, sizeof buf);
+    cui_end_frame(ui);
+    CHECK((f & CUI_CHANGED) && !strcmp(buf, "new"));
+    cui_input_key(ui, CUI_KEY_ENTER, true, 0);
+    cui_begin_frame(ui, 1.0f / 60);
+    f = cui_input(ui, "name", buf, sizeof buf);
+    cui_end_frame(ui);
+    cui_input_key(ui, CUI_KEY_ENTER, false, 0);
+    CHECK((f & CUI_SUBMITTED) && !strcmp(buf, "new"));
+}
+
 int main(void) {
     cui_sw_renderer *sw = cui_sw_create();
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw) });
@@ -263,6 +290,7 @@ int main(void) {
     test_cursor(ui);
     test_ctrl_tab_release(ui);
     test_modal_canvas_with_popovers(ui);
+    test_focus_select(ui);
     cui_destroy(ui);
     cui_sw_destroy(sw);
     printf("%d component input checks, %d failed\n", checks, failed);

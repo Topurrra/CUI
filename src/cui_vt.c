@@ -7,6 +7,9 @@
  * kept in one ring of cells with the blank right end of each line cut off, so its memory is fixed.
  * Writing parses in place with no allocation; the view paints only what is on screen. */
 #include "cui_internal.h"
+#if !defined(_WIN32)
+#  include <unistd.h>                 /* gethostname: is an OSC 7 folder on this machine */
+#endif
 
 #define CUI__VT_MAX_COLS 1000
 #define CUI__VT_MAX_ROWS 500
@@ -43,7 +46,7 @@ struct cui_vt {
     int p[16], np; bool pany; char priv, inter;
     uint16_t pcolon;                  /* bit i: the separator before p[i] was a colon (a sub-parameter) */
     uint32_t cp; int need;            /* a UTF-8 sequence cut by the end of a write */
-    char osc[160]; int osc_n;
+    char osc[2048]; int osc_n;        /* room for an OSC 7 folder (a long path, percent-encoded) */
     char title[128];
     char reply[256]; int reply_n;
     cui__vt_cell *sb; size_t sb_cap, sb_pos;
@@ -65,6 +68,8 @@ struct cui_vt {
     uint16_t cell_w16;                /* the view's cell width in 1/16 device pixels (cell_w is rounded), for sixel pictures' aspect */
     cui__vt_find *find;               /* find in the scrollback (cui_vt_find.c): NULL until cui_vt_find */
     uint32_t wseq;                    /* counts writes, so found matches know when they may be stale */
+    char *cwd;                        /* the last OSC 7: "host\0path\0" in one allocation, NULL until one came (cui_vt_cwd) */
+    unsigned bells;                   /* BEL (0x07) outside a sequence, ever (cui_vt_bell_count) */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -120,7 +125,7 @@ void cui_vt_destroy(cui_vt *v) {
     if (v->x) cui__vt_x_free(v);
     if (v->find) cui__vt_find_free(v);
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
-    free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap);
+    free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap); free(v->cwd);
     free(v);
 }
 
@@ -130,6 +135,7 @@ size_t cui_vt_memory(const cui_vt *v) {
     if (v->snap) n += (size_t)v->snap_cols * (size_t)v->snap_rows * sizeof(cui__vt_cell);
     if (v->x) n += cui__vt_x_memory(v);
     if (v->find) n += cui__vt_find_memory(v);
+    if (v->cwd) { size_t h = strlen(v->cwd); n += h + strlen(v->cwd + h + 1) + 2; }
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -542,6 +548,45 @@ static void cui__vt_esc(cui_vt *v, char c) {
     }
 }
 
+/* OSC 7 ; file://host/path: the program's current folder, percent-decoded. A drive path (/C:/Users) becomes a Windows
+ * one (C:\Users). Anything else (another scheme, no path, a decoded control character) leaves the last one as it was. */
+static int cui__vt_hexval(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1;
+}
+
+static void cui__vt_osc_cwd(cui_vt *v, const char *s, int n) {
+    if (n < 7 || strncmp(s, "file://", 7)) return;
+    s += 7; n -= 7;
+    int h = 0;
+    while (h < n && s[h] != '/') h++;
+    if (h == n || h > 255) return;                     /* no path, or no host name looks like that */
+    char *buf = (char *)malloc((size_t)n + 2);
+    if (!buf) return;
+    memcpy(buf, s, (size_t)h);
+    buf[h] = 0;
+    char *p = buf + h + 1;
+    int k = 0;
+    for (int i = h; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '%' && i + 2 < n && cui__vt_hexval(s[i + 1]) >= 0 && cui__vt_hexval(s[i + 2]) >= 0) {
+            c = (unsigned char)(cui__vt_hexval(s[i + 1]) * 16 + cui__vt_hexval(s[i + 2]));
+            i += 2;
+        }
+        if (c < 0x20 || c == 0x7F) { free(buf); return; }
+        p[k++] = (char)c;
+    }
+    p[k] = 0;
+    bool drive = k >= 3 && p[0] == '/' && ((p[1] | 32) >= 'a' && (p[1] | 32) <= 'z') && p[2] == ':' && (k == 3 || p[3] == '/');
+    if (drive) {
+        memmove(p, p + 1, (size_t)k);                  /* the NUL too */
+        k--;
+        for (int i = 0; i < k; i++) if (p[i] == '/') p[i] = '\\';
+        if (k == 2) { p[2] = '\\'; p[3] = 0; }         /* "C:" is the drive's current folder: say its root */
+    }
+    free(v->cwd);
+    v->cwd = buf;
+}
+
 static void cui__vt_osc_end(cui_vt *v, bool bel) {
     v->osc[v->osc_n] = 0;
     int code = 0, i = 0;
@@ -553,6 +598,7 @@ static void cui__vt_osc_end(cui_vt *v, bool bel) {
         for (; t[k] && k + 1 < sizeof v->title; k++) v->title[k] = (unsigned char)t[k] < 32 ? ' ' : t[k];
         v->title[k] = 0;
     }
+    if (code == 7 && i < v->osc_n && v->osc[i] == ';') cui__vt_osc_cwd(v, v->osc + i + 1, v->osc_n - i - 1);
 }
 
 static void cui__vt_control(cui_vt *v, unsigned char c) {
@@ -561,6 +607,7 @@ static void cui__vt_control(cui_vt *v, unsigned char c) {
     case 0x09: do v->cx++; while (v->cx < v->cols - 1 && !v->tabs[v->cx]); if (v->cx >= v->cols) v->cx = v->cols - 1; v->pend = false; break;
     case 0x0A: case 0x0B: case 0x0C: cui__vt_linefeed(v); break;      /* the terminal behind ConPTY sends \r\n: LF alone keeps the column, as xterm */
     case 0x0D: v->cx = 0; v->pend = false; break;
+    case 0x07: v->bells++; break;                                       /* BEL: counted, the app rings (cui_vt_bell_count) */
     default: break;
     }
 }
@@ -724,6 +771,34 @@ bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; 
 bool cui_vt_synchronized(const cui_vt *v) { return v && v->sync_on; }
 int cui_vt_cursor_shape(const cui_vt *v) { return v ? v->cursor_shape : CUI_VT_CURSOR_BLOCK; }
 int cui_vt_scrollback_count(const cui_vt *v) { return v->sb_count; }
+
+/* "", "localhost" and this machine's name (its first label: "pc" matches "pc.example.org") are this machine */
+static bool cui__vt_label_eq(const char *a, const char *b) {          /* the first labels, ASCII case ignored */
+    size_t n = strcspn(a, "."), m = strcspn(b, ".");
+    if (!n || n != m) return false;
+    for (size_t i = 0; i < n; i++) if ((a[i] | 32) != (b[i] | 32)) return false;
+    return true;
+}
+
+static bool cui__vt_host_is_local(const char *host) {
+    if (!host[0] || cui__vt_label_eq(host, "localhost")) return true;
+    char me[256] = "";
+#if defined(_WIN32)
+    const char *e = getenv("COMPUTERNAME");
+    if (e) snprintf(me, sizeof me, "%s", e);
+#else
+    if (gethostname(me, sizeof me - 1) != 0) me[0] = 0;
+    me[sizeof me - 1] = 0;
+#endif
+    return cui__vt_label_eq(host, me);
+}
+
+const char *cui_vt_cwd_host(const cui_vt *v) { return v && v->cwd ? v->cwd : NULL; }
+const char *cui_vt_cwd(const cui_vt *v) {
+    if (!v || !v->cwd || !cui__vt_host_is_local(v->cwd)) return NULL;
+    return v->cwd + strlen(v->cwd) + 1;
+}
+unsigned cui_vt_bell_count(const cui_vt *v) { return v ? v->bells : 0; }
 
 /* the cells of row `row` counted from the top of the live screen: negative rows are scrollback, -1 the newest */
 static const cui__vt_cell *cui__vt_cells_at(const cui_vt *v, int64_t row, int *n, bool *wrapped) {
