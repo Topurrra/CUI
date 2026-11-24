@@ -1391,6 +1391,17 @@ cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_d
     cui__dtf_scroll_strip(&f, ss);
 
     /* build */
+    /* the overflow menu: while last frame's tabs did not fit, the strip and a chevron share a row (the baseline
+     * runs under both). Once they fit beside the chevron they fit without it, so it never flickers. */
+    bool menu = o->overflow_menu && count > 1 && ss->content_w > ss->view_w + 0.5f;
+    int wrap = -1;
+    if (menu) {
+        wrap = cui__node_new(ui, f.id ^ 0x3E9Bu);
+        cui_node *wn = &ui->nodes[wrap];
+        wn->dir = CUI_ROW; wn->align = CUI_ALIGN_STRETCH; wn->w = CUI_FILL; wn->self_align = CUI_ALIGN_STRETCH;
+        wn->pad[1] = 4;
+        cui__open(ui, wrap);
+    }
     cui_box sb;
     memset(&sb, 0, sizeof sb);
     sb.width = CUI_FILL;
@@ -1403,8 +1414,9 @@ cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_d
         ep->c = CUI_C(ui, BORDER);
         ep->skip_node = -1;
         f.edge = ep;
-        cn->paint = cui__paint_dtabs_edge;
-        cn->paint_data = ep;
+        cui_node *en = menu ? &ui->nodes[wrap] : cn;
+        en->paint = cui__paint_dtabs_edge;
+        en->paint_data = ep;
     }
     ss->fade = cui__backdrop(ui);   /* the strip has no fill of its own: fade into what it sits on */
     int row = cui__node_new(ui, f.id ^ 0x5707u);
@@ -1417,6 +1429,26 @@ cui_doc_tabs_result cui_doc_tabs_ex(cui_ctx *ui, const char *id_str, const cui_d
     for (int k = 0; k < count; k++) cui__dtf_build_tab(&f, k, vis_sel, rad, fs);
     cui__close(ui);
     cui__scroll_end_ex(ui);
+    if (menu) {
+        cui_column(ui, .justify = CUI_JUSTIFY_END, .pad_bottom = 3) {
+            if (cui_icon_button(ui, CUI_ICON_CHEVRON_DOWN, .tooltip = "All tabs", .size = CUI_SIZE_SM)) {
+                cui_rect br = cui_last_rect(ui);
+                cui_context_menu_open_at(ui, "all-tabs", br.x, br.y + br.h + 4);
+            }
+            if (cui_context_menu_begin(ui, "all-tabs")) {
+                for (int k = 0; k < count; k++) {
+                    cui_push_id(ui, cui__frame_printf(ui, "%d", k));
+                    const char *t = tabs[k].title ? tabs[k].title : "";
+                    t = cui__frame_printf(ui, "%.*s", cui__display_len(t), t);   /* without a ###id */
+                    if (cui_menu_item_ex(ui, t,&(cui_menu_item_opts){ ._ = 0, .icon = tabs[k].icon, .checked = k == f.sel }))
+                        f.sel = k;
+                    cui_pop_id(ui);
+                }
+                cui_context_menu_end(ui);
+            }
+        }
+        cui__close(ui);   /* the row of the strip and the chevron */
+    }
     cui_pop_id(ui);
 
     /* selection follows a move, so the app only has to move its own array */

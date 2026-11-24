@@ -1010,7 +1010,7 @@ bool cui_result_card_ex(cui_ctx *ui, const char *id_str, cui_texture image, cons
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS_WIDE);
     float aspect = o->aspect > 0 ? o->aspect : CUI__RESULT_ASPECT;
     cui_rect prev = cui__prev_rect(ui, id);
     float w = prev.w > 0 ? prev.w : (o->width.kind == CUI_SIZE_FIXED ? o->width.value : CUI__RESULT_W);

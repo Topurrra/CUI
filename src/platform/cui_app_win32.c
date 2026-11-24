@@ -774,6 +774,35 @@ static RECT cui__win32_frame(cui_app *app, HWND hwnd) {
     return r;
 }
 
+/* cui_app_desc.fit_work_area: a first size (frame included) larger than the work area of the primary monitor, where
+ * a window with no place of its own opens, is made smaller to fit, never below the minimum size, and the window is
+ * centred in the work area. r is the outer rectangle at `scale`; desc.width and height become the new content size. */
+static void cui__win32_fit_work(cui_app *app, DWORD style, float scale, RECT *r, int *left, int *top) {
+    MONITORINFO mi;
+    memset(&mi, 0, sizeof mi);
+    mi.cbSize = sizeof mi;
+    POINT origin = { 0, 0 };
+    if (!GetMonitorInfoW(MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY), &mi)) return;
+    LONG ww = mi.rcWork.right - mi.rcWork.left, wh = mi.rcWork.bottom - mi.rcWork.top;
+    LONG fw = r->right - r->left, fh = r->bottom - r->top;
+    if (ww <= 0 || wh <= 0 || (fw <= ww && fh <= wh)) return;
+    LONG frame_w = fw - (LONG)(app->desc.width * scale), frame_h = fh - (LONG)(app->desc.height * scale);
+    int cw = app->desc.width, ch = app->desc.height;
+    if (fw > ww) cw = (int)((float)(ww - frame_w) / scale);
+    if (fh > wh) ch = (int)((float)(wh - frame_h) / scale);
+    int minw = app->desc.min_width > 0 ? app->desc.min_width : 360, minh = app->desc.min_height > 0 ? app->desc.min_height : 280;
+    if (cw < minw) cw = minw;
+    if (ch < minh) ch = minh;
+    app->desc.width = cw;
+    app->desc.height = ch;
+    r->left = 0; r->top = 0;
+    r->right = (LONG)(cw * scale); r->bottom = (LONG)(ch * scale);
+    if (!app->desc.custom_titlebar) AdjustWindowRectEx(r, style, FALSE, 0);
+    fw = r->right - r->left; fh = r->bottom - r->top;
+    *left = (int)(mi.rcWork.left + (ww > fw ? (ww - fw) / 2 : 0));
+    *top = (int)(mi.rcWork.top + (wh > fh ? (wh - fh) / 2 : 0));
+}
+
 bool cui__plat_init(cui_app *app) {
     cui__win32_dpi_awareness();
     cui__win32 *w = calloc(1, sizeof *w);
@@ -802,6 +831,7 @@ bool cui__plat_init(cui_app *app) {
     /* desc.placement also carries desc.x, .y and .has_pos (cui_app_create) */
     const cui_window_placement *pl = app->desc.placement;
     int left = CW_USEDEFAULT, top = CW_USEDEFAULT;
+    if (app->desc.fit_work_area && !pl) cui__win32_fit_work(app, style, scale, &r, &left, &top);
     if (pl && pl->has_position) {
         /* only a place whose title bar is on a monitor: one that was unplugged leaves it to Windows.
          * A custom title bar is the top of the content (r has no frame then). */
@@ -827,7 +857,7 @@ bool cui__plat_init(cui_app *app) {
         SetWindowPos(w->hwnd, NULL, 0, 0, fw, fh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
     /* the frame was measured at the primary monitor's DPI: place the content exactly */
-    if (left != CW_USEDEFAULT) cui__plat_set_position(app, pl->x, pl->y);
+    if (left != CW_USEDEFAULT && pl) cui__plat_set_position(app, pl->x, pl->y);
     RECT cr;
     GetClientRect(w->hwnd, &cr);
     w->width = cr.right; w->height = cr.bottom;

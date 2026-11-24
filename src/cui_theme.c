@@ -125,7 +125,53 @@ static const cui__accent_def cui__accents[CUI_ACCENT_COUNT] = {
 
 const char *cui_accent_name(cui_accent a) { return (a >= 0 && a < CUI_ACCENT_COUNT) ? cui__accents[a].name : "neutral"; }
 
-void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
+/* The black dark style (CUI_DARK_BLACK), laid over the gray dark theme once it is built: a true black canvas and
+ * chrome, one near-black step for cards, inputs and floating layers, hairline white borders, and with the blue
+ * accent one cobalt. Separation comes from the borders, not from gray fills. Every other value (series, tones
+ * without a status meaning, shadows, sizes) stays the dark theme's. */
+static void cui__theme_black(cui_theme *t, cui_accent accent) {
+    cui_color *c = t->colors;
+    c[CUI_TOKEN_BACKGROUND] = cui__hexa(0x000000, 255);
+    c[CUI_TOKEN_SURFACE] = cui__hexa(0x111111, 255);
+    c[CUI_TOKEN_SURFACE_RAISED] = cui__hexa(0x111111, 255);
+    c[CUI_TOKEN_SURFACE_MUTED] = cui__hexa(0x000000, 255);
+    c[CUI_TOKEN_FOREGROUND] = cui__hexa(0xf5f5f5, 255);
+    c[CUI_TOKEN_TEXT_SECONDARY] = cui__hexa(0xa3a3a3, 255);
+    c[CUI_TOKEN_TEXT_MUTED] = cui__hexa(0x8f8f8f, 255);
+    c[CUI_TOKEN_BORDER] = cui__hexa(0xffffff, 20);          /* 8% */
+    c[CUI_TOKEN_BORDER_SUBTLE] = cui__hexa(0xffffff, 13);   /* 5% */
+    c[CUI_TOKEN_BORDER_STRONG] = cui__hexa(0xffffff, 51);   /* 20%: outlines that must show, such as a check box */
+    c[CUI_TOKEN_CONTROL_TRACK] = cui__hexa(0x262626, 255);
+    c[CUI_TOKEN_CONTROL_TRACK_HOVER] = cui__hexa(0x303030, 255);
+    c[CUI_TOKEN_CONTROL_THUMB] = cui__hexa(0xf5f5f5, 255);
+    c[CUI_TOKEN_HOVER] = cui__hexa(0xffffff, 20);           /* 8% */
+    c[CUI_TOKEN_ACTIVE] = cui__hexa(0xffffff, 28);          /* 11% */
+    c[CUI_TOKEN_SCRIM] = cui__rgba(0, 0, 0, 160);
+    t->tone_green = cui__hexa(0x34d399, 255);
+    t->tone_amber = cui__hexa(0xfbbf24, 255);
+    t->tone_sky = cui__hexa(0x60a5fa, 255);
+    c[CUI_TOKEN_SUCCESS] = t->tone_green;
+    c[CUI_TOKEN_WARNING] = t->tone_amber;
+    c[CUI_TOKEN_DANGER] = cui__hexa(0xf87171, 255);
+    c[CUI_TOKEN_INFO] = t->tone_sky;
+    if (accent == CUI_ACCENT_NEUTRAL) {
+        c[CUI_TOKEN_CONTROL_ON] = cui__hexa(0xf5f5f5, 255);
+        c[CUI_TOKEN_CONTROL_GLYPH] = cui__hexa(0x000000, 255);
+        c[CUI_TOKEN_CONTROL_THUMB_ON] = cui__hexa(0x000000, 255);
+        c[CUI_TOKEN_ACCENT_FOREGROUND] = c[CUI_TOKEN_BACKGROUND];
+    } else if (accent == CUI_ACCENT_BLUE) {
+        c[CUI_TOKEN_ACCENT] = cui__hexa(0x3d63f0, 255);
+        c[CUI_TOKEN_ACCENT_STRONG] = cui__hexa(0x7c97f7, 255);
+        c[CUI_TOKEN_ACCENT_SUBTLE] = cui__hexa(0x3d63f0, 0x40);
+        c[CUI_TOKEN_ACCENT_FOREGROUND] = cui__hexa(0xffffff, 255);
+        c[CUI_TOKEN_CONTROL_ON] = cui__hexa(0x3d63f0, 255);
+        c[CUI_TOKEN_CONTROL_GLYPH] = cui__hexa(0xffffff, 255);
+    }
+    /* on black the ring is the accent itself, a little lighter: mixed toward the canvas it would sink */
+    if (accent != CUI_ACCENT_NEUTRAL) c[CUI_TOKEN_FOCUS_RING] = cui_mix(c[CUI_TOKEN_ACCENT], cui__hexa(0xffffff, 255), 0.15f);
+}
+
+void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent, cui_dark_style style) {
     memset(t, 0, sizeof *t);
     bool dark = mode == CUI_THEME_DARK;
     cui_color *c = t->colors;
@@ -235,6 +281,7 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
         uint32_t v = sp[dark][(first + i) % 6];
         c[CUI_TOKEN_SERIES_1 + i] = cui__rgba((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v, 255);
     }
+    if (dark && style == CUI_DARK_BLACK) cui__theme_black(t, accent);
 
     /* one scale, nested concentrically: a menu item (8) sits 6 inside its
      * panel (14); controls are soft rectangles, not pills */
@@ -268,10 +315,11 @@ void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent) {
     t->font_scale = 1;
 }
 
-void cui__theme_init(cui_ctx *ui, cui_theme_mode mode, cui_accent accent) {
+void cui__theme_init(cui_ctx *ui, cui_theme_mode mode, cui_accent accent, cui_dark_style style) {
     ui->mode = mode;
     ui->accent = accent;
-    cui__theme_build(&ui->target_theme, mode, accent);
+    ui->dark_style = style == CUI_DARK_BLACK ? CUI_DARK_BLACK : CUI_DARK_GRAY;
+    cui__theme_build(&ui->target_theme, mode, accent, ui->dark_style);
     ui->theme = ui->target_theme;
     ui->from_theme = ui->theme;
     ui->theme_t = 1;
@@ -280,7 +328,7 @@ void cui__theme_init(cui_ctx *ui, cui_theme_mode mode, cui_accent accent) {
 static void cui__theme_retarget(cui_ctx *ui) {
     cui_theme keep = ui->theme;
     ui->from_theme = ui->theme;
-    cui__theme_build(&ui->target_theme, ui->mode, ui->accent);
+    cui__theme_build(&ui->target_theme, ui->mode, ui->accent, ui->dark_style);
     /* keep user customizations of the non-color fields */
     memcpy(ui->target_theme.shadow_resting, keep.shadow_resting, sizeof keep.shadow_resting);
     ui->target_theme.radius_control = keep.radius_control;
@@ -304,6 +352,22 @@ void cui_set_accent(cui_ctx *ui, cui_accent accent) {
     cui__theme_retarget(ui);
 }
 cui_accent cui_get_accent(cui_ctx *ui) { return ui->accent; }
+
+void cui_set_dark_style(cui_ctx *ui, cui_dark_style style) {
+    if (style != CUI_DARK_BLACK) style = CUI_DARK_GRAY;
+    if (style == ui->dark_style) return;
+    ui->dark_style = style;
+    cui__theme_retarget(ui);
+}
+cui_dark_style cui_get_dark_style(cui_ctx *ui) { return ui->dark_style; }
+
+float cui__press(cui_ctx *ui, cui_spring *s, bool pressed, float scale) {
+    float target = pressed ? scale : 1.0f;
+    /* a critically damped spring of period T settles (to the spring's rest threshold, over a 3% travel) in about
+     * 0.65 T: the period is stretched so the press settles in press_time */
+    if (ui->theme.press_time > 0) return cui__spring(ui, s, target, ui->theme.press_time * 1.5f, 0.0f);
+    return cui__spring(ui, s, target, CUI_SPRING_SNAPPY);
+}
 
 cui_theme *cui_theme_get(cui_ctx *ui) { return &ui->theme; }
 

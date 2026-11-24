@@ -96,6 +96,10 @@ if(CUI_WITH_APP)
     target_link_libraries(cui_test_maximize PRIVATE cui::cui)
     add_test(NAME cui_test_maximize COMMAND cui_test_maximize)
 
+    add_executable(cui_test_fit_work_area test_fit_work_area.c)
+    target_link_libraries(cui_test_fit_work_area PRIVATE cui::cui)
+    add_test(NAME cui_test_fit_work_area COMMAND cui_test_fit_work_area)
+
     add_executable(cui_test_window_state test_window_state.c)
     target_link_libraries(cui_test_window_state PRIVATE cui::cui)
     add_test(NAME cui_test_window_state COMMAND cui_test_window_state)

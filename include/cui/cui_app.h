@@ -139,6 +139,14 @@ typedef struct cui_app_desc {
      * cutting popovers out of its page). Off: an exposed part makes the next frame copy the whole picture, as
      * before. Windows only; ignored elsewhere and with OpenGL. */
     bool present_exposed_part;
+    /* The dark theme's style from the first frame, as cui_set_dark_style: CUI_DARK_BLACK is a true black
+     * dark theme. Default gray. CUI_DARK=black (or gray) in the environment overrides it, as CUI_THEME does. */
+    cui_dark_style dark_style;
+    /* Windows: a window opened at width x height (no saved placement) that would not fit the work area of
+     * the monitor it opens on (the screen less the taskbar) is made smaller to fit, never below min_width x
+     * min_height, and placed inside it: a 1200 x 780 window on a 1366 x 768 screen at 125% opens at about
+     * 1093 x 545. Off: the size is used as given, as before. Ignored elsewhere. */
+    bool fit_work_area;
 } cui_app_desc;
 
 /* What cui_app_desc.hit_test returns. */

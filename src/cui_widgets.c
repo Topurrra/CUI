@@ -378,7 +378,7 @@ static bool cui__button_impl(cui_ctx *ui, cui_id id, const char *label, const ch
     if (o->color.r | o->color.g | o->color.b | o->color.a) col.fg = cui_color_of(ui, o->color);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS);
 
     float h = cui__control_height(ui, o->size);
     float fs = o->size == CUI_SIZE_SM ? ui->theme.text_sm : o->size == CUI_SIZE_LG ? ui->theme.text_lg - 1 : ui->theme.text_body;

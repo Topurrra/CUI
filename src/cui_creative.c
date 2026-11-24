@@ -178,7 +178,7 @@ bool cui_status_tag_ex(cui_ctx *ui, const char *label, cui_tag_status status, co
         cui__tween(ui, &st->x, (r.hovered || r.focus_visible) ? 1.0f : 0.0f, CUI__T_HOVER);
         cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
         if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
-        cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+        cui__press(ui, &st->press, r.pressed, CUI__PRESS);
     }
 
     /* build */
@@ -1002,7 +1002,7 @@ int cui_seed_field_ex(cui_ctx *ui, const char *label, uint32_t *seed, bool *lock
     cui__tween(ui, &st->hover, r.hovered && !fixed ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
-    cui__spring(ui, &st->press, r.pressed && !fixed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed && !fixed, CUI__PRESS);
     if (r.hovered) cui__set_cursor(ui, fixed ? CUI_CURSOR_NOT_ALLOWED : CUI_CURSOR_HAND);
 
     /* build */

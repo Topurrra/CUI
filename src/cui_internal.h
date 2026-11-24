@@ -780,6 +780,7 @@ struct cui_ctx {
     cui_theme target_theme;
     cui_theme_mode mode;
     cui_accent accent;
+    cui_dark_style dark_style;
     bool reduced_motion;
     float theme_t;              /* theme transition progress */
     cui_theme from_theme;
@@ -883,9 +884,11 @@ struct cui_ctx {
 };
 
 /* ---- theme ---- */
-void cui__theme_init(cui_ctx *ui, cui_theme_mode mode, cui_accent accent);
+void cui__theme_init(cui_ctx *ui, cui_theme_mode mode, cui_accent accent, cui_dark_style style);
 void cui__theme_update(cui_ctx *ui);
-void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent);
+void cui__theme_build(cui_theme *t, cui_theme_mode mode, cui_accent accent, cui_dark_style style);
+/* a press scale (CUI__PRESS or CUI__PRESS_WIDE while pressed, 1 at rest): the springy default, or theme.press_time */
+float cui__press(cui_ctx *ui, cui_spring *s, bool pressed, float scale);
 cui_color cui__tone_color(cui_ctx *ui, cui_tone tone);
 #define CUI_C(ui, tok) ((ui)->theme.colors[CUI_TOKEN_##tok])
 /* a font size in points, scaled by the theme's text size setting */

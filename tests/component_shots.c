@@ -4536,9 +4536,13 @@ static void scene_rtl_chrome(cui_ctx *ui, int f) {
 
 typedef struct { const char *name; scene_fn fn; float w, h; bool dark_too; bool dark_only; cui_accent accent; } scene;
 
+/* --black: the dark renders use the black dark style (CUI_DARK_BLACK) and are named -black;
+ * --black-blue: the same with the blue accent where the scene has none */
+static int g_black;
 static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *sw) {
+    cui_accent accent = g_black == 2 && s->accent == CUI_ACCENT_NEUTRAL ? CUI_ACCENT_BLUE : s->accent;
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT,
-                                             .accent = s->accent });
+                                             .accent = accent, .dark_style = g_black ? CUI_DARK_BLACK : CUI_DARK_GRAY });
     cui_set_viewport(ui, s->w, s->h, 2);
     cui_input_mouse_leave(ui);
     g_scene_w = s->w;
@@ -4547,7 +4551,7 @@ static void render(const char *dir, const scene *s, bool dark, cui_sw_renderer *
     unsigned char *px = malloc((size_t)dd->width_px * dd->height_px * 4);
     cui_sw_render(sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
     char path[512];
-    snprintf(path, sizeof path, "%s/%s%s.png", dir, s->name, dark ? "-dark" : "");
+    snprintf(path, sizeof path, "%s/%s%s.png", dir, s->name, dark ? (g_black ? "-black" : "-dark") : "");
     cui_write_png(path, px, dd->width_px, dd->height_px, dd->width_px * 4);
     printf("wrote %s\n", path);
     free(px);
@@ -4579,7 +4583,9 @@ static void render_states(const char *dir, bool dark, cui_sw_renderer *sw) {
         for (int c = 0; c < cols; c++) {
             g_cell.variant = r; g_cell.state = c;
             float h = r < 0 ? hh : ch;
-            cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT });
+            cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT,
+                                                     .accent = g_black == 2 ? CUI_ACCENT_BLUE : CUI_ACCENT_NEUTRAL,
+                                                     .dark_style = g_black ? CUI_DARK_BLACK : CUI_DARK_GRAY });
             cui_set_viewport(ui, cw, h, S);
             cui_input_mouse_leave(ui);
             for (int f = 0; f < 50; f++) {
@@ -4598,7 +4604,7 @@ static void render_states(const char *dir, bool dark, cui_sw_renderer *sw) {
             cui_destroy(ui);
         }
     char path[512];
-    snprintf(path, sizeof path, "%s/button-states%s.png", dir, dark ? "-dark" : "");
+    snprintf(path, sizeof path, "%s/button-states%s.png", dir, dark ? (g_black ? "-black" : "-dark") : "");
     cui_write_png(path, big, W, H, W * 4);
     printf("wrote %s\n", path);
     free(big);
@@ -5174,6 +5180,13 @@ static void cb_files(cui_ctx *ui) {
 SCENE(selection_bar) { cui_column(ui, .width = CUI_FILL, .align = CUI_ALIGN_CENTER, .pad_bottom = 56) { cb_files(ui); } }
 
 int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++)   /* --black or --black-blue, anywhere: taken out of the arguments */
+        if (strcmp(argv[i], "--black") == 0 || strcmp(argv[i], "--black-blue") == 0) {
+            g_black = argv[i][7] ? 2 : 1;
+            for (int j = i; j + 1 < argc; j++) argv[j] = argv[j + 1];
+            argc--;
+            break;
+        }
     const char *dir = argc > 1 ? argv[1] : ".";
     static const scene scenes[] = {
         { "buttons", scene_buttons, 760, 110, true }, { "segmented", scene_segmented, 420, 110, true },
@@ -5284,6 +5297,13 @@ int main(int argc, char **argv) {
 #endif
     };
     cui_sw_renderer *sw = cui_sw_create();
+    if (g_black) {   /* every scene, dark only, in the black style */
+        if (argc <= 2 || strcmp(argv[2], "button-states") == 0) render_states(dir, true, sw);
+        for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++)
+            if (argc <= 2 || strcmp(argv[2], scenes[i].name) == 0) render(dir, &scenes[i], true, sw);
+        cui_sw_destroy(sw);
+        return 0;
+    }
     if (argc <= 2 || strcmp(argv[2], "button-states") == 0) { render_states(dir, false, sw); render_states(dir, true, sw); }
     for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
         if (argc > 2 && strcmp(argv[2], scenes[i].name) != 0) continue;   /* optional: one scene */

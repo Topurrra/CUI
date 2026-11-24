@@ -255,7 +255,7 @@ static void cui__morph_button(cui_ctx *ui, cui_id id, cui__morph_state *st, cui_
     float target = width_b ? wb : wa;
     if (!st->init) { st->w.x = target; st->press.x = 1; st->init = true; }
     cui__spring(ui, &st->w, target, CUI_SPRING_MORPH);
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     cui_color bga = cui_mix(a->col.bg, a->col.bg_hover, st->hover), bgb = cui_mix(b->col.bg, b->col.bg_hover, st->hover);
@@ -466,7 +466,7 @@ int cui_speed_dial_ex(cui_ctx *ui, const char *id_str, const cui_speed_action *a
     }
     if (st->press.x == 0) st->press.x = 1;
     cui__spring(ui, &st->t, st->open ? 1.0f : 0.0f, st->open ? 0.42f : 0.24f, st->open ? 0.18f : 0.0f);
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     float size = 52;
     cui__btn_colors col = cui__button_colors(ui, CUI_BUTTON_PRIMARY, false);

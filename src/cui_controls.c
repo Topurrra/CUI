@@ -509,7 +509,7 @@ bool cui_chip_ex(cui_ctx *ui, const char *label, bool *selected, const cui_chip_
     cui__tween(ui, &st->sel, sel ? 1.0f : 0.0f, CUI__T_STATE);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS);
     int i = cui__node_new(ui, id);
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 6;
@@ -787,7 +787,7 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
     cui__tween(ui, &st->hover, r.hovered || ar.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
     cui__tween(ui, &st->focus, r.focus_visible ? 1.0f : 0.0f, CUI__T_FOCUS);
     if (st->press.x == 0 && st->press.v == 0) st->press.x = 1;
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS_WIDE);
     bool first = g->frame != ui->frame;
     if (first) {
         /* no item selected for two frames in a row: drop the highlight, so the next
@@ -816,7 +816,7 @@ bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *o) {
     }
     cui_node *n = &ui->nodes[i];
     n->dir = CUI_ROW; n->align = CUI_ALIGN_CENTER; n->gap = 10;
-    n->h = CUI_PX(32);
+    n->h = CUI_PX(o->height > 0 ? o->height : 32);
     n->pad[1] = 10; n->pad[3] = 10;
     n->w = CUI_FILL;
     n->self_align = CUI_ALIGN_STRETCH;

@@ -145,6 +145,12 @@ typedef enum cui_token {
 
 typedef enum cui_theme_mode { CUI_THEME_LIGHT = 0, CUI_THEME_DARK = 1 } cui_theme_mode;
 
+/* How dark the dark theme is (cui_set_dark_style). The light theme is the same in both. */
+typedef enum cui_dark_style {
+    CUI_DARK_GRAY = 0,         /* the default: layered dark grays */
+    CUI_DARK_BLACK = 1         /* a true black canvas and chrome; borders separate, not gray fills */
+} cui_dark_style;
+
 typedef enum cui_accent {
     CUI_ACCENT_NEUTRAL = 0, CUI_ACCENT_VIOLET, CUI_ACCENT_BLUE, CUI_ACCENT_GREEN,
     CUI_ACCENT_AMBER, CUI_ACCENT_ORANGE, CUI_ACCENT_CORAL, CUI_ACCENT_ROSE,
@@ -185,6 +191,7 @@ typedef struct cui_ctx_desc {
     cui_accent accent;
     bool no_default_fonts;            /* skip the embedded Inter/Geist/Lucide fonts */
     cui_direction direction;
+    cui_dark_style dark_style;        /* the dark theme's style from the first frame (default gray) */
 } cui_ctx_desc;
 
 CUI_API cui_ctx *cui_create(const cui_ctx_desc *desc);
@@ -431,10 +438,22 @@ typedef struct cui_theme {
 
     float motion;           /* 1 = normal, 0 = reduced motion (no travel), >1 slow motion */
     float font_scale;       /* user text scale multiplier (default 1) */
+    /* Seconds a press takes to scale a button, chip or tile down (and back), eased with no
+     * bounce: 0.12 to 0.16 is short and firm. 0 (the default) keeps the springy press. */
+    float press_time;
 } cui_theme;
 
 CUI_API void cui_set_theme(cui_ctx *ui, cui_theme_mode mode);
 CUI_API cui_theme_mode cui_get_theme_mode(cui_ctx *ui);
+/* The dark theme's style. CUI_DARK_BLACK, opt in, is a true black dark theme:
+ *   canvas, side bars, activity bar and tab strips #000000; cards, inputs, popovers, menus and
+ *   dialogs #111111; borders white at 8% (subtle 5%, strong 20%); text #F5F5F5, secondary
+ *   #A3A3A3, muted #8F8F8F; hover white 8%, pressed 11%; status green #34D399, amber #FBBF24,
+ *   red #F87171, blue #60A5FA; with CUI_ACCENT_BLUE one cobalt accent, #3D63F0 (white on it).
+ * Layers are told apart by hairline borders rather than gray fills. It animates like
+ * cui_set_theme and changes nothing while the light theme shows; light is the same in both. */
+CUI_API void cui_set_dark_style(cui_ctx *ui, cui_dark_style style);
+CUI_API cui_dark_style cui_get_dark_style(cui_ctx *ui);
 CUI_API void cui_set_accent(cui_ctx *ui, cui_accent accent);
 CUI_API cui_accent cui_get_accent(cui_ctx *ui);
 /* The active theme. Edit it to customize; changes apply next frame. Theme
@@ -911,6 +930,7 @@ typedef struct cui_nav_opts {
     const char *action_icon;   /* e.g. CUI_ICON_X */
     const char *action_tooltip;   /* tooltip of the button; `NULL` for none */
     bool *action_clicked;      /* set to true on the frame the button is clicked, otherwise left as it is */
+    float height;              /* the row's height in points; 0 (the default) is 32 */
 } cui_nav_opts;
 CUI_API bool cui_nav_item_ex(cui_ctx *ui, const char *label, const cui_nav_opts *opts);
 CUI_API void cui_nav_section(cui_ctx *ui, const char *title);
@@ -3302,13 +3322,15 @@ CUI_API bool cui_tab_bar_ex(cui_ctx *ui, const char *id, const cui_tab_bar_item 
 /* Activity bar: the narrow column of icons on a window's edge that picks what the side bar shows (an IDE's Files,
  * Search, Source control, Run...). *selected is the selected item (-1: none); the selected one gets a bar on its outer
  * edge. Returns the item clicked this frame, or -1. Items with .bottom sit at the bottom (account, settings); items with
- * .button report clicks but never take the selection. Up and Down move the focus, Enter or Space click. */
+ * .button report clicks but never take the selection. Up and Down move the focus, Enter or Space click. An item's
+ * tooltip shows beside the bar (to the right of a bar on the left edge), so it never covers the other icons. */
 typedef struct cui_activity_item {
     const char *icon;
     const char *tooltip;
     int badge;                 /* a count on the icon ("99+" above 99); 0 for none */
     bool bottom;               /* at the bottom of the bar */
     bool button;               /* a plain button: clicking does not select it */
+    bool group;                /* starts a group: a short hairline above it sets it apart from the items before */
 } cui_activity_item;
 typedef struct cui_activity_bar_opts {
     int _;
@@ -3318,6 +3340,11 @@ typedef struct cui_activity_bar_opts {
     cui_color badge_color;     /* default the accent */
     bool toggle;               /* clicking the selected item again unselects it (*selected = -1): a side bar that hides */
     bool right;                /* the bar sits on the right edge: the selection mark goes on that side */
+    /* When the bar is too short for every item (a small window), the last top items fold into a More button (an
+     * ellipsis) after the ones that fit; its menu lists them with their icons and tooltips, and choosing one acts as
+     * a click on it. The More button carries the selection mark while the selected item is folded. The bar never
+     * grows taller than the space it is given. Bottom items always show. Off: the bar is as tall as its items. */
+    bool fold;
 } cui_activity_bar_opts;
 CUI_API int cui_activity_bar_ex(cui_ctx *ui, const char *id, const cui_activity_item *items, int count, int *selected, const cui_activity_bar_opts *opts);
 
@@ -4353,6 +4380,9 @@ typedef struct cui_doc_tabs_opts {
     bool no_active_underline;  /* the strip's baseline is not drawn under the selected tab, whatever its fill */
     bool no_baseline;          /* no baseline under the strip at all */
     cui_color active_fill;     /* fill of the selected tab (default CUI_COLOR_SURFACE) */
+    /* While the tabs do not fit the strip, a chevron at its end opens a menu of every tab (the selected one
+     * checked); choosing one selects it and scrolls it into view. Off: only the strip scrolls, as before. */
+    bool overflow_menu;
 } cui_doc_tabs_opts;
 typedef struct cui_doc_tabs_result {
     bool changed;              /* *selected changed (click, keys or a move) */
@@ -4402,6 +4432,7 @@ typedef struct cui_dockspace_opts {
     bool shortcuts;            /* Ctrl+Tab, Ctrl+Shift+Tab and Ctrl+W act on the focused leaf */
     bool leaf_header;          /* a leaf with exactly one panel draws no tab strip but a header for the app to fill (see below) */
     float leaf_header_height;  /* with leaf_header: the header's height in points (default 32) */
+    bool tab_menu;             /* every tab strip gets cui_doc_tabs_opts.overflow_menu: a menu of its tabs when they do not fit */
 } cui_dockspace_opts;
 CUI_API void cui_dockspace_begin_ex(cui_ctx *ui, const char *id, const cui_dockspace_opts *opts);
 CUI_API void cui_dockspace_end(cui_ctx *ui);

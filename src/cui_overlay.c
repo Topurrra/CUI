@@ -668,6 +668,13 @@ static void cui__tooltip_render(cui_ctx *ui) {
     n->elevation = CUI_ELEVATION_RAISED;
     bool dark = ui->mode == CUI_THEME_DARK;
     cui_color fg = dark ? cui_oklch(0.18f, 0, 0, 1) : cui_oklch(0.98f, 0, 0, 1);
+    if (dark && ui->dark_style == CUI_DARK_BLACK) {
+        /* on black a light bubble glares: a raised near-black one with a hairline, as every other layer */
+        n->bg = cui_mix(CUI_C(ui, SURFACE_RAISED), CUI_C(ui, FOREGROUND), 0.06f);
+        n->border = 1;
+        n->border_color = CUI_C(ui, BORDER_STRONG);
+        fg = CUI_C(ui, FOREGROUND);
+    }
     /* "Label  ·  Ctrl B": the shortcut sits beside the label as quiet key caps */
     const char *sep = strstr(tt->text, "  \xc2\xb7  ");
     if (sep) {

@@ -95,6 +95,7 @@ typedef struct cui__dk_build {
     int container;
     float min_w, min_h;
     bool shortcuts, in_panel;
+    bool tab_menu;             /* opts.tab_menu */
     bool leaf_header;          /* opts.leaf_header */
     float hdr_h;
     bool in_hdr;               /* inside cui_dock_panel_header_begin */
@@ -572,6 +573,12 @@ static void cui__dk_reorder(cui__dk_state *st, int leaf, const int *vis, int vn,
     cui__dk_insert(st, p, leaf, before);
 }
 
+/* a panel's body, and its tab that opens into it: the surface, or with the black dark style the canvas itself, so a
+ * docked view sits on true black (the tab strip is black too; borders mark the selected tab) */
+static cui_color cui__dk_body(cui_ctx *ui) {
+    return ui->mode == CUI_THEME_DARK && ui->dark_style == CUI_DARK_BLACK ? CUI_C(ui, BACKGROUND) : CUI_C(ui, SURFACE);
+}
+
 static void cui__dk_build_leaf(cui_ctx *ui, cui__dk_build *b, int i) {
     cui__dk_state *st = b->st;
     cui__dk_node *n = &st->nodes[i];
@@ -608,7 +615,7 @@ static void cui__dk_build_leaf(cui_ctx *ui, cui__dk_build *b, int i) {
         HB->dir = CUI_COLUMN;
         HB->w = CUI_FILL; HB->h = CUI_FILL;
         HB->self_align = CUI_ALIGN_STRETCH;
-        HB->bg = CUI_C(ui, SURFACE);
+        HB->bg = cui__dk_body(ui);
         b->body[i] = hbody;
         cui__close(ui);
         return;
@@ -635,6 +642,8 @@ static void cui__dk_build_leaf(cui_ctx *ui, cui__dk_build *b, int i) {
     memset(&o, 0, sizeof o);
     o.shortcuts = b->shortcuts && st->cur_leaf == i && st->drag != DK_DRAG;
     o.no_close = !closable;
+    o.overflow_menu = b->tab_menu;
+    o.active_fill = cui__dk_body(ui);
     bool fake = b->takeover == i, held = ui->mdown[0];
     if (fake) ui->mdown[0] = false;   /* the strip's own drag lets go: the dock drag has it */
     cui_doc_tabs_result r = cui_doc_tabs_ex(ui, cui__frame_printf(ui, "t%u", (unsigned)n->uid), tabs, vn, &sel, &o);
@@ -657,7 +666,7 @@ static void cui__dk_build_leaf(cui_ctx *ui, cui__dk_build *b, int i) {
     B->dir = CUI_COLUMN;
     B->w = CUI_FILL; B->h = CUI_FILL;
     B->self_align = CUI_ALIGN_STRETCH;
-    B->bg = CUI_C(ui, SURFACE);
+    B->bg = cui__dk_body(ui);
     b->body[i] = body;
     cui__close(ui);
 }
@@ -883,13 +892,14 @@ static void cui__dk_build_compact(cui_ctx *ui, cui__dk_build *b) {
     }
     cui_doc_tabs_opts o;
     memset(&o, 0, sizeof o);
-    o.shortcuts = b->shortcuts; o.no_close = !closable; o.no_reorder = true;
+    o.shortcuts = b->shortcuts; o.no_close = !closable; o.no_reorder = true; o.overflow_menu = b->tab_menu;
+    o.active_fill = cui__dk_body(ui);
     cui_doc_tabs_result r = cui_doc_tabs_ex(ui, cui__frame_printf(ui, "t%u", 0xC0A7u), tabs, vn, &sel, &o);   /* the ids cui__dk_tab_id gives */
     if (vn > 0 && r.close >= 0 && r.close < vn && st->panels[list[r.close]].closable) st->panels[list[r.close]].close_req = true;
     int body = cui__node_new(ui, lid ^ 0xB0D1u);
     cui_node *B = &ui->nodes[body];
     B->dir = CUI_COLUMN; B->w = CUI_FILL; B->h = CUI_FILL; B->self_align = CUI_ALIGN_STRETCH;
-    B->bg = CUI_C(ui, SURFACE);
+    B->bg = cui__dk_body(ui);
     cui__close(ui);
     if (vn <= 0) return;
     sel = CUI_CLAMP(sel, 0, vn - 1);
@@ -919,6 +929,7 @@ void cui_dockspace_begin_ex(cui_ctx *ui, const char *id_str, const cui_dockspace
     b->min_w = o->min_panel_width > 0 ? o->min_panel_width : 120;
     b->min_h = o->min_panel_height > 0 ? o->min_panel_height : 96;
     b->shortcuts = o->shortcuts;
+    b->tab_menu = o->tab_menu;
     b->leaf_header = o->leaf_header;
     b->hdr_h = o->leaf_header_height > 0 ? o->leaf_header_height : CUI__DK_HEADER;
     b->cur_panel = -1;
