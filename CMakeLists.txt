@@ -96,6 +96,7 @@ set(CUI_CORE_SOURCES
     src/cui_terminal.c
     src/cui_vt.c
     src/cui_vt_glyphs.c
+    src/cui_vt_links.c
     src/cui_vt_sixel.c
     src/cui_vt_find.c
     src/cui_emoji.c

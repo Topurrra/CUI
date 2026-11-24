@@ -550,7 +550,7 @@ int cui__regex_find(const cui__regex *r, const char *text, int len, int from, in
 /* cui_vt.c, for cui_vt_find.c */
 cui__vt_find **cui__vt_find_slot(cui_vt *v);
 const cui__vt_find *cui__vt_find_get(const cui_vt *v);
-uint32_t cui__vt_wseq(const cui_vt *v);                         /* bumps at every cui_vt_write */
+uint32_t cui__vt_wseq(const cui_vt *v);                         /* bumps at every cui_vt_write and cui_vt_resize */
 int cui__vt_row_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool *wrapped);   /* a row's code points; -1: no such row */
 /* cui_vt_find.c, for cui_vt.c */
 void cui__vt_find_free(cui_vt *v);
@@ -561,6 +561,33 @@ bool cui__vt_find_frame(cui_ctx *ui, cui_vt *v, uint32_t *seen, cui__vt_span *cu
 void cui__vt_find_look_of(cui_ctx *ui, cui__vt_find_look *o);
 void cui__vt_find_paint_row(cui_ctx *ui, const cui_vt *v, int64_t arow, float x0, float ry, float cw, float lh, const cui__vt_find_look *k);
 int cui__vt_pic_count(const cui_vt *v);                             /* tests: slices kept */
+/* The VT screen's links (cui_vt_links.c): OSC 8 hyperlinks kept per cell (CUI_VT_FEATURE_LINKS), links found in the text
+ * under the mouse, the smart double and triple click. cui_vt.c calls the cui__vt_lk_* hooks only while the screen has a
+ * link table (cui__vt_lk is set, after the first OSC 8 with the feature on); a screen without one tests one pointer. */
+typedef struct cui__vt_lx cui__vt_lx;
+typedef struct { bool on; int64_t r0, r1; int c0, c1; } cui__vt_lpaint;   /* the link under the mouse with Ctrl: cells r0:c0 to r1:c1, rows as sb_total + y */
+/* cui_vt.c, for cui_vt_links.c (which also reads rows with cui__vt_row_chars and the write count with cui__vt_wseq, above) */
+cui__vt_lx *cui__vt_lk(const cui_vt *v);
+void cui__vt_set_lk(cui_vt *v, cui__vt_lx *lx);
+void cui__vt_set_lk_on(cui_vt *v, bool on);
+/* cui_vt_links.c, for cui_vt.c and cui_vt_sixel.c */
+void cui__vt_lk_feature(cui_vt *v, bool on);                          /* CUI_VT_FEATURE_LINKS on or off (off frees the table) */
+void cui__vt_lk_free(cui_vt *v);
+size_t cui__vt_lk_memory(const cui_vt *v);
+void cui__vt_lk_osc(cui_vt *v, const char *arg, int n, bool cut);     /* OSC 8: params ; URI (cut: the URI did not fit the buffer) */
+void cui__vt_lk_put(cui_vt *v, int scr, int slot, int x, int w);      /* a character of w cells was written at x of the row in slot */
+void cui__vt_lk_erase(cui_vt *v, int scr, int slot, int x0, int x1);
+void cui__vt_lk_shift(cui_vt *v, int scr, int slot, int x, int n);    /* n > 0 inserts n blank cells at x, n < 0 deletes */
+void cui__vt_lk_pushed(cui_vt *v, int slot);                          /* the main screen's row in slot went into the scrollback */
+void cui__vt_lk_reset(cui_vt *v);                                     /* RIS: no link open */
+/* the view (cui_vt.c's view body and paint) */
+const cui__vt_lpaint *cui__vt_links_hover(cui_ctx *ui, cui_id id, const cui_vt *v, bool hovered, int64_t row, int col, bool ctrl);
+const cui_vt_link *cui__vt_links_take(cui_ctx *ui, cui_id id);        /* the link under the mouse, copied to frame memory */
+void cui__vt_smart_word(const cui_vt *v, int64_t row, int col, int64_t *r0, int *c0, int64_t *r1, int *c1);
+void cui__vt_smart_line(const cui_vt *v, int64_t row, int64_t *r0, int64_t *r1);
+void cui__vt_trim_copy(char *text);                                   /* spaces before each line break and at the end go */
+void cui__vt_links_paint(cui_ctx *ui, const cui_vt *v, const cui__vt_lpaint *lp, int64_t top, int rows, float x0, float y0, float cw, float lh, cui_color col);
+int cui__vt_links_detections(void);                                   /* tests: how many times the view looked for a link (all screens) */
 /* The screen pointer in the layout space of wheel area `id`, using its last paint transform. */
 cui_vec2 cui__wheel_point(cui_ctx *ui, cui_id id);
 
