@@ -248,6 +248,8 @@ static cui_key cui__win32_key(WPARAM vk) {
     case VK_OEM_5: return CUI_KEY_BACKSLASH;
     case VK_OEM_3: return CUI_KEY_GRAVE;
     case VK_INSERT: return CUI_KEY_INSERT;
+    case VK_OEM_4: return CUI_KEY_LEFT_BRACKET;
+    case VK_OEM_6: return CUI_KEY_RIGHT_BRACKET;
     default: return CUI_KEY_NONE;
     }
 }

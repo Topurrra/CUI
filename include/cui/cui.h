@@ -282,6 +282,7 @@ typedef enum cui_key {
     CUI_KEY_F7, CUI_KEY_F8, CUI_KEY_F9, CUI_KEY_F10, CUI_KEY_F11, CUI_KEY_F12,
     CUI_KEY_BACKSLASH, CUI_KEY_GRAVE,   /* ` and ~ */
     CUI_KEY_INSERT,
+    CUI_KEY_LEFT_BRACKET, CUI_KEY_RIGHT_BRACKET,   /* [ and ]: the keys a US keyboard has them on (Shift: { and }) */
     CUI_KEY_COUNT
 } cui_key;
 
@@ -3537,6 +3538,11 @@ typedef struct cui_composer_opts {
     const float *levels;       /* the microphone's levels while recording (0..1, newest last), drawn as a scrolling voice waveform */
     int level_count;           /* number of `levels` */
     float record_seconds;      /* how long the take is so far, shown beside the recording dot */
+    bool focus;                /* the text takes the keyboard this frame, with the caret at its end (a thread was opened, or the
+                                * app put text in: a recalled prompt, a completion); not while `recording`. With a caret that
+                                * stops blinking (cui_set_caret_blink > 0) the caret shows steady at once, asking for no
+                                * frames, until the text is typed in or the caret moves */
+    bool *focused;             /* set to whether the text has the keyboard (after this frame's input), for an app's own keys */
 } cui_composer_opts;
 CUI_API int cui_chat_composer_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_composer_opts *opts);
 

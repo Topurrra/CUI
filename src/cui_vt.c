@@ -1017,22 +1017,22 @@ static void cui__vt_keys(cui_ctx *ui, const cui_vt *v, cui__vt_state *st) {
  * the control key state, the repeat count. Scan codes are a fixed US layout table; Left and Right modifiers are not told
  * apart (CUI reports one flag each), so the Left ones are sent. Numpad and F13 and up are keys CUI does not have.
  * The tables below are indexed by cui_key and follow its order: none, Tab, Enter, Escape, Backspace, Delete, Space, Left,
- * Right, Up, Down, Home, End, Page Up, Page Down, A to Z, 0 to 9, - = , . /, F1 to F12, backslash, grave, Insert. */
+ * Right, Up, Down, Home, End, Page Up, Page Down, A to Z, 0 to 9, - = , . /, F1 to F12, backslash, grave, Insert, [ and ]. */
 enum { CUI__VT_CS_RALT = 0x01, CUI__VT_CS_LALT = 0x02, CUI__VT_CS_LCTRL = 0x08, CUI__VT_CS_SHIFT = 0x10, CUI__VT_CS_ENHANCED = 0x100 };
 
 static const uint8_t cui__vt_w_vk[CUI_KEY_COUNT] = {
     0, 9, 13, 27, 8, 46, 32, 37, 39, 38, 40, 36, 35, 33, 34,
     65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 189, 187, 188, 190, 191,
-    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 220, 192, 45 };
+    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 220, 192, 45, 219, 221 };
 static const uint8_t cui__vt_w_sc[CUI_KEY_COUNT] = {
     0, 15, 28, 1, 14, 83, 57, 75, 77, 72, 80, 71, 79, 73, 81,
     30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,
     11, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 51, 52, 53,
-    59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88, 43, 41, 82 };
+    59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88, 43, 41, 82, 26, 27 };
 /* what a US keyboard types on the key, plain and with Shift (0: nothing) */
-static const char cui__vt_w_c0[] = "\0\0\0\0\0\0 \0\0\0\0\0\0\0\0" "abcdefghijklmnopqrstuvwxyz" "0123456789" "-=,./" "\0\0\0\0\0\0\0\0\0\0\0\0" "\\`" "\0";
-static const char cui__vt_w_c1[] = "\0\0\0\0\0\0 \0\0\0\0\0\0\0\0" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ")!@#$%^&*(" "_+<>?" "\0\0\0\0\0\0\0\0\0\0\0\0" "|~" "\0";
+static const char cui__vt_w_c0[] = "\0\0\0\0\0\0 \0\0\0\0\0\0\0\0" "abcdefghijklmnopqrstuvwxyz" "0123456789" "-=,./" "\0\0\0\0\0\0\0\0\0\0\0\0" "\\`" "\0" "[]";
+static const char cui__vt_w_c1[] = "\0\0\0\0\0\0 \0\0\0\0\0\0\0\0" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ")!@#$%^&*(" "_+<>?" "\0\0\0\0\0\0\0\0\0\0\0\0" "|~" "\0" "{}";
 typedef char cui__vt_w_tables_follow_cui_key[sizeof cui__vt_w_c0 == CUI_KEY_COUNT + 1 && sizeof cui__vt_w_c1 == CUI_KEY_COUNT + 1 ? 1 : -1];
 
 /* Keys are a few a second: small code beats fast code here, and the record writer is one copy (it is called from a dozen

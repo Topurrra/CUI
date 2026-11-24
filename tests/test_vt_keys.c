@@ -123,6 +123,8 @@ static void test_table(void) {
         { CUI_KEY_BACKSLASH, 0, "\\", 220, 43, 92, 0, "\\" },
         { CUI_KEY_BACKSLASH, CUI_MOD_CTRL, NULL, 220, 43, 28, CT, "Ctrl+\\" },
         { CUI_KEY_GRAVE, CUI_MOD_SHIFT, "~", 192, 41, 126, SH, "~" },
+        { CUI_KEY_LEFT_BRACKET, 0, "[", 219, 26, 91, 0, "[" },
+        { CUI_KEY_RIGHT_BRACKET, CUI_MOD_SHIFT, "}", 221, 27, 125, SH, "}" },
         { CUI_KEY_A, 0, NULL, 65, 30, 0, 0, "a key with no text (a dead key)" },
     };
     for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) {

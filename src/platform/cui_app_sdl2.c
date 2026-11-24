@@ -267,6 +267,8 @@ static cui_key cui__sdl_key(SDL_Keycode k) {
     case SDLK_BACKSLASH: return CUI_KEY_BACKSLASH;
     case SDLK_BACKQUOTE: return CUI_KEY_GRAVE;
     case SDLK_INSERT: return CUI_KEY_INSERT;
+    case SDLK_LEFTBRACKET: return CUI_KEY_LEFT_BRACKET;
+    case SDLK_RIGHTBRACKET: return CUI_KEY_RIGHT_BRACKET;
     default: return CUI_KEY_NONE;
     }
 }
