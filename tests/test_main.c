@@ -8705,6 +8705,13 @@ static void test_composer_focus(void) {
     run(ui, build_cfocus, &c, 1);
     key(ui, build_cfocus, &c, CUI_KEY_ENTER, 0);
     CHECK(c.focused && (c.flags & CUI_COMPOSER_SEND));
+    /* with a caret that stops blinking, the focus given by the app shows it steady: no frame is asked for it */
+    cui_set_caret_blink(ui, 5);
+    type(ui, build_cfocus, &c, "x");          /* typing starts the blink: a frame is wanted for it */
+    CHECK(cui_next_wakeup(ui) >= 0);
+    c.focus = true;
+    run(ui, build_cfocus, &c, 2);
+    CHECK(c.focused && cui_next_wakeup(ui) < 0);
     cui_destroy(ui);
 }
 

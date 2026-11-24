@@ -3539,7 +3539,9 @@ typedef struct cui_composer_opts {
     int level_count;           /* number of `levels` */
     float record_seconds;      /* how long the take is so far, shown beside the recording dot */
     bool focus;                /* the text takes the keyboard this frame, with the caret at its end (a thread was opened, or the
-                                * app put text in: a recalled prompt, a completion); not while `recording` */
+                                * app put text in: a recalled prompt, a completion); not while `recording`. With a caret that
+                                * stops blinking (cui_set_caret_blink > 0) the caret shows steady at once, asking for no
+                                * frames, until the text is typed in or the caret moves */
     bool *focused;             /* set to whether the text has the keyboard (after this frame's input), for an app's own keys */
 } cui_composer_opts;
 CUI_API int cui_chat_composer_ex(cui_ctx *ui, const char *id, char *buf, size_t cap, const cui_composer_opts *opts);

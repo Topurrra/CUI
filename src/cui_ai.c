@@ -1008,6 +1008,9 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
         e->cursor = e->anchor = (int)strlen(buf);
         e->preferred_x = -1;
         ui->focus = ids.fid;
+        /* with a caret that stops blinking (cui_set_caret_blink > 0) it shows steady at once: a window that opens ready to
+         * type draws nothing more at rest; typing or moving the caret makes it blink as usual */
+        if (ui->caret_blink_s > 0) ui->caret_time = ui->time - (double)ui->caret_blink_s - 0.01;
     }
     if (recording && (ui->focus == ids.cancel || ui->focus == ids.sid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         ui->kpressed[CUI_KEY_ESCAPE] = 0;
