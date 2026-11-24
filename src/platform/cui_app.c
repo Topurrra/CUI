@@ -133,6 +133,8 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     static const char *accents[CUI_ACCENT_COUNT] = { "neutral", "violet", "blue", "green", "amber", "orange", "coral", "rose" };
     for (int i = 0; i < CUI_ACCENT_COUNT; i++)
         if (cui__env_is("CUI_ACCENT", accents[i])) d->accent = (cui_accent)i;
+    if (cui__env_is("CUI_DARK", "black")) d->dark_style = CUI_DARK_BLACK;
+    if (cui__env_is("CUI_DARK", "gray")) d->dark_style = CUI_DARK_GRAY;
     d->theme = mode;
     /* Auto: OpenGL is set up on another thread while the first pictures are drawn in software,
      * so the window shows without waiting for the driver. Tests and screenshots, and an app or
@@ -153,6 +155,7 @@ cui_app *cui_app_create(const cui_app_desc *desc) {
     memset(&cd, 0, sizeof cd);
     cd.theme = mode;
     cd.accent = d->accent;
+    cd.dark_style = d->dark_style;
     app->ui = cui_create(&cd);
     if (!app->ui) { cui__app_drop_gl_start(app); if (app->gl_counted) cui__gl_apps--; free(app); return NULL; }
     if (!cui__plat_init(app)) {

@@ -5831,6 +5831,130 @@ static void test_theme(void) {
     cui_destroy(ui);
 }
 
+static bool same_color(cui_color a, cui_color b) { return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a; }
+static bool is_rgb(cui_color c, uint32_t rgb, uint8_t a) { return c.r == (rgb >> 16 & 255) && c.g == (rgb >> 8 & 255) && c.b == (rgb & 255) && c.a == a; }
+
+static void test_dark_black(void) {
+    printf("theme: the black dark style (opt in), the gray one unchanged, light the same in both\n");
+    /* from the first frame, as an app asks for it */
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK,
+                                              .accent = CUI_ACCENT_BLUE, .dark_style = CUI_DARK_BLACK });
+    CHECK(cui_get_dark_style(ui) == CUI_DARK_BLACK);
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_BACKGROUND), 0x000000, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_SURFACE_MUTED), 0x000000, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_SURFACE), 0x111111, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_SURFACE_RAISED), 0x111111, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_FOREGROUND), 0xf5f5f5, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_TEXT_SECONDARY), 0xa3a3a3, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_TEXT_MUTED), 0x8f8f8f, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_BORDER), 0xffffff, 20));        /* white at 8% */
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_HOVER), 0xffffff, 20));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_ACCENT), 0x3d63f0, 255));       /* one cobalt accent */
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_CONTROL_ON), 0x3d63f0, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_ACCENT_FOREGROUND), 0xffffff, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_SUCCESS), 0x34d399, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_WARNING), 0xfbbf24, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_DANGER), 0xf87171, 255));
+    CHECK(is_rgb(cui_token_color(ui, CUI_TOKEN_INFO), 0x60a5fa, 255));
+    cui_destroy(ui);
+
+    /* the default is the gray dark theme CUI always had: not black, and the same tokens as a context that never heard of the style */
+    cui_ctx *gray = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_BLUE });
+    cui_ctx *gray2 = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_BLUE,
+                                                 .dark_style = CUI_DARK_GRAY });
+    CHECK(cui_get_dark_style(gray) == CUI_DARK_GRAY);
+    CHECK(cui_token_color(gray, CUI_TOKEN_BACKGROUND).r > 10);
+    bool all_same = true;
+    for (int t = 1; t < CUI_TOKEN_COUNT; t++) all_same &= same_color(cui_token_color(gray, (cui_token)t), cui_token_color(gray2, (cui_token)t));
+    CHECK(all_same);
+    cui_destroy(gray2);
+
+    /* switching at run time animates to black and then rests; switching back restores every gray token */
+    cui_color before[CUI_TOKEN_COUNT];
+    for (int t = 1; t < CUI_TOKEN_COUNT; t++) before[t] = cui_token_color(gray, (cui_token)t);
+    cui_set_viewport(gray, 200, 100, 1);
+    run(gray, build_empty, NULL, 2);
+    cui_set_dark_style(gray, CUI_DARK_BLACK);
+    run(gray, build_empty, NULL, 1);
+    CHECK(cui_needs_redraw(gray));
+    run(gray, build_empty, NULL, 60);
+    CHECK(is_rgb(cui_token_color(gray, CUI_TOKEN_BACKGROUND), 0x000000, 255));
+    run(gray, build_empty, NULL, 5);
+    CHECK(!cui_needs_redraw(gray));
+    cui_set_dark_style(gray, CUI_DARK_GRAY);
+    run(gray, build_empty, NULL, 60);
+    all_same = true;
+    for (int t = 1; t < CUI_TOKEN_COUNT; t++) all_same &= same_color(cui_token_color(gray, (cui_token)t), before[t]);
+    CHECK(all_same);
+    cui_destroy(gray);
+
+    /* light is the same with either style, and switching the style while light changes nothing */
+    cui_ctx *l1 = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_LIGHT });
+    cui_ctx *l2 = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_LIGHT, .dark_style = CUI_DARK_BLACK });
+    all_same = true;
+    for (int t = 1; t < CUI_TOKEN_COUNT; t++) all_same &= same_color(cui_token_color(l1, (cui_token)t), cui_token_color(l2, (cui_token)t));
+    CHECK(all_same);
+    cui_set_viewport(l1, 200, 100, 1);
+    cui_set_dark_style(l1, CUI_DARK_BLACK);
+    run(l1, build_empty, NULL, 30);
+    all_same = true;
+    for (int t = 1; t < CUI_TOKEN_COUNT; t++) all_same &= same_color(cui_token_color(l1, (cui_token)t), cui_token_color(l2, (cui_token)t));
+    CHECK(all_same);
+    /* ...and going dark then lands on black */
+    cui_set_theme(l1, CUI_THEME_DARK);
+    run(l1, build_empty, NULL, 60);
+    CHECK(is_rgb(cui_token_color(l1, CUI_TOKEN_BACKGROUND), 0x000000, 255));
+    cui_destroy(l1);
+    cui_destroy(l2);
+}
+
+/* the width of a solid primary button, in pixels of the middle row, from a software render */
+static void build_press_button(cui_ctx *ui, void *u) {
+    (void)u;
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .align = CUI_ALIGN_CENTER, .justify = CUI_JUSTIFY_CENTER) {
+        cui_button(ui, "Press me", .variant = CUI_BUTTON_PRIMARY, .width = CUI_PX(100));
+    }
+}
+static int press_button_width(cui_ctx *ui) {
+    static unsigned char px[200 * 100 * 4];
+    const cui_draw_data *dd = cui_get_draw_data(ui);
+    cui_sw_render(g_sw, dd, px, dd->width_px, dd->height_px, dd->width_px * 4, CUI_SW_RGBA);
+    int y = dd->height_px / 2 + 12, n = 0;   /* below the label */
+    for (int x = 0; x < dd->width_px; x++) {
+        const unsigned char *p = px + ((size_t)y * dd->width_px + x) * 4;
+        if (p[2] > 160 && p[0] < 120) n++;     /* the blue fill */
+    }
+    return n;
+}
+
+static void test_press_time(void) {
+    printf("theme: press_time, a short press with no bounce\n");
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_BLUE,
+                                              .dark_style = CUI_DARK_BLACK });
+    cui_set_viewport(ui, 200, 100, 1);
+    CHECK(cui_theme_get(ui)->press_time == 0);   /* off by default */
+    cui_theme_get(ui)->press_time = 0.14f;
+    run(ui, build_press_button, NULL, 3);
+    int rest = press_button_width(ui);
+    CHECK(rest >= 98 && rest <= 101);
+    cui_input_mouse_move(ui, 100, 50);
+    run(ui, build_press_button, NULL, 2);
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+    int least = rest;
+    for (int f = 0; f < 9; f++) {   /* 150 ms */
+        run(ui, build_press_button, NULL, 1);
+        int w = press_button_width(ui);
+        if (w < least) least = w;
+    }
+    int held = press_button_width(ui);
+    CHECK(abs(held - (int)(rest * 0.97f + 0.5f)) <= 1);   /* settled at the press scale within the time */
+    CHECK(least >= held - 1);                             /* and never past it: no bounce */
+    cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+    run(ui, build_press_button, NULL, 12);
+    CHECK(abs(press_button_width(ui) - rest) <= 1);
+    cui_destroy(ui);
+}
+
 /* the series palette: every color readable on the page, at one lightness, under every accent */
 static double series_lin(int c) { double v = c / 255.0; return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4); }
 static double series_lum(cui_color c) { return 0.2126 * series_lin(c.r) + 0.7152 * series_lin(c.g) + 0.0722 * series_lin(c.b); }
@@ -8144,6 +8268,181 @@ static void test_activity_bar(void) {
     key(ui, build_activity, &a, CUI_KEY_DOWN, 0);
     key(ui, build_activity, &a, CUI_KEY_SPACE, 0);
     CHECK(a.sel == 1);
+    cui_destroy(ui);
+}
+
+/* a bar with eight top items and one at the bottom, in a column that also holds a status line */
+typedef struct { int sel, clicked; bool fold; float height; cui_id bar_id, status_id; } abf_ctx;
+
+static void build_activity_fold(cui_ctx *ui, void *u) {
+    abf_ctx *a = u;
+    static const cui_activity_item items[] = {
+        { CUI_ICON_SPARKLES, "Agents", 0, false, false, false },
+        { CUI_ICON_HASH, "Channels", 0, false, false, false },
+        { CUI_ICON_GLOBE, "Browser", 0, false, false, true },
+        { CUI_ICON_MAIL, "Mail", 0, false, false, false },
+        { CUI_ICON_REPEAT, "Routines", 0, false, false, false },
+        { CUI_ICON_CODE, "Code", 0, false, false, false },
+        { CUI_ICON_GIT_BRANCH, "Git", 0, false, false, false },
+        { CUI_ICON_TERMINAL, "Terminal", 0, false, false, false },
+        { CUI_ICON_SETTINGS, "Settings", 0, true, false, false },
+    };
+    cui_column(ui, .width = CUI_FILL, .height = CUI_PX(a->height), .gap = 0) {
+        cui_row(ui, .width = CUI_FILL, .height = CUI_FILL) {
+            int c = cui_activity_bar(ui, "abf", items, 9, &a->sel, .fold = a->fold);
+            a->bar_id = cui_last_id(ui);
+            if (c >= 0) a->clicked = c;
+            cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { cui_text(ui, "side"); }
+        }
+        cui_row(ui, .id = "abf-status", .width = CUI_FILL) { cui_text(ui, "status"); }
+        a->status_id = cui_make_id(ui, "abf-status");
+    }
+}
+
+static void test_activity_bar_fold(void) {
+    printf("activity bar: groups, folding into More, tooltips beside the bar\n");
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 600, 600, 1);
+    abf_ctx a;
+    memset(&a, 0, sizeof a);
+    a.sel = 0; a.clicked = -1; a.height = 600;
+    /* tall enough: every item shows; the group's hairline (9) sits above Browser */
+    a.fold = true;
+    run(ui, build_activity_fold, &a, 3);
+    cui_rect br = rect_of(ui, a.bar_id);
+    click_at(ui, build_activity_fold, &a, br.x + 24, br.y + 4 + 2 * 50 + 9 + 2 + 24);
+    CHECK(a.clicked == 2 && a.sel == 2);
+    /* the tooltip of an item shows to the right of the bar, not over the item above it */
+    cui_input_mouse_move(ui, br.x + 24, br.y + 4 + 50 + 24);
+    run(ui, build_activity_fold, &a, 50);
+    cui_layer_rect layers[4];
+    int nl = cui_floating_layers(ui, layers, 4);
+    bool beside = false;
+    for (int i = 0; i < nl && i < 4; i++)
+        if (layers[i].rect.x >= br.x + br.w - 0.5f && layers[i].rect.y < br.y + 4 + 100 && layers[i].rect.y + layers[i].rect.h > br.y + 54) beside = true;
+    CHECK(nl >= 1 && beside);
+    cui_destroy(ui);
+
+    /* without .fold the bar is as tall as its items: in 220 points the status line is pushed out */
+    ui = new_ctx();
+    cui_set_viewport(ui, 600, 220, 1);
+    memset(&a, 0, sizeof a);
+    a.sel = 0; a.clicked = -1; a.height = 220; a.fold = false;
+    run(ui, build_activity_fold, &a, 3);
+    cui_rect st = rect_of(ui, a.status_id);
+    CHECK(st.y + st.h > 220.5f);
+    cui_destroy(ui);
+
+    /* with .fold: the bar keeps to its space and the status line stays in the window */
+    ui = new_ctx();
+    cui_set_viewport(ui, 600, 220, 1);
+    memset(&a, 0, sizeof a);
+    a.sel = 5; a.clicked = -1; a.height = 220; a.fold = true;
+    run(ui, build_activity_fold, &a, 3);
+    st = rect_of(ui, a.status_id);
+    br = rect_of(ui, a.bar_id);
+    CHECK(st.y + st.h <= 220.5f);
+    CHECK(br.y + br.h <= st.y + 0.5f);
+    /* t top items, More, the spacer and Settings take 8 + 50 t + 100 points: in about 200, one or two items show */
+    int shown = (int)((br.h - 108 + 0.5f) / 50);
+    CHECK(shown >= 1 && shown <= 2);
+    float more_y = br.y + 4 + shown * 50 + 24;
+    /* the first item still clicks */
+    click_at(ui, build_activity_fold, &a, br.x + 24, br.y + 4 + 24);
+    CHECK(a.clicked == 0 && a.sel == 0);
+    /* More opens a menu of the folded items: the first of them is item `shown` */
+    a.clicked = -1;
+    click_at(ui, build_activity_fold, &a, br.x + 24, more_y);
+    CHECK(a.clicked == -1);
+    key(ui, build_activity_fold, &a, CUI_KEY_DOWN, 0);
+    key(ui, build_activity_fold, &a, CUI_KEY_ENTER, 0);
+    CHECK(a.clicked == shown && a.sel == shown);
+    /* the bottom item still shows at the bottom */
+    a.clicked = -1;
+    run(ui, build_activity_fold, &a, 10);
+    click_at(ui, build_activity_fold, &a, br.x + 24, br.y + br.h - 4 - 24);
+    CHECK(a.clicked == 8);
+    /* and with room for every item, the bottom item still sits at the bottom */
+    a.height = 600;
+    cui_set_viewport(ui, 600, 600, 1);
+    run(ui, build_activity_fold, &a, 4);
+    br = rect_of(ui, a.bar_id);
+    a.clicked = -1;
+    click_at(ui, build_activity_fold, &a, br.x + 24, br.y + br.h - 4 - 24);
+    CHECK(a.clicked == 8);
+    cui_destroy(ui);
+}
+
+static void build_nav_height(cui_ctx *ui, void *u) {
+    cui_id *ids = u;
+    cui_column(ui, .width = CUI_PX(200)) {
+        cui_nav_item(ui, "Default");
+        ids[0] = cui_last_id(ui);
+        cui_nav_item(ui, "Taller", .height = 36);
+        ids[1] = cui_last_id(ui);
+    }
+}
+
+static void test_nav_item_height(void) {
+    printf("nav item: a row height of its own (opt in)\n");
+    cui_ctx *ui = new_ctx();
+    cui_id ids[2] = { 0, 0 };
+    run(ui, build_nav_height, ids, 3);
+    CHECK(rect_of(ui, ids[0]).h == 32);
+    CHECK(rect_of(ui, ids[1]).h == 36);
+    cui_destroy(ui);
+}
+
+typedef struct { int sel; bool menu; cui_doc_tabs_result r; cui_doc_tab tabs[12]; int count; } dtm_ctx;
+static void build_doc_tabs_menu(cui_ctx *ui, void *u) {
+    dtm_ctx *d = u;
+    cui_column(ui, .width = CUI_PX(320)) { d->r = cui_doc_tabs(ui, "dtm", d->tabs, d->count, &d->sel, .overflow_menu = d->menu); }
+}
+
+static void test_doc_tabs_overflow_menu(void) {
+    printf("document tabs: an overflow menu lists every tab when they do not fit\n");
+    static const char *const names[12] = { "alpha.c", "beta.c", "gamma.c", "delta.c", "epsilon.c", "zeta.c",
+                                           "eta.c", "theta.c", "iota.c", "kappa.c", "lambda.c", "mu.c" };
+    cui_ctx *ui = new_ctx();
+    cui_set_viewport(ui, 600, 300, 1);
+    dtm_ctx d;
+    memset(&d, 0, sizeof d);
+    for (int i = 0; i < 12; i++) d.tabs[i].title = names[i];
+    d.count = 12; d.sel = 9; d.menu = true;
+    run(ui, build_doc_tabs_menu, &d, 4);
+    cui_rect strip = rect_of(ui, cui_make_id(ui, "dtm"));
+    (void)strip;
+    /* the chevron sits at the strip's right end (a 30 point button, 4 from the edge, 3 above the bottom) */
+    float bx = 320 - 4 - 15, by = 0;
+    /* find the strip's height from the row the tabs sit in: the chevron is level with them */
+    for (float y = 4; y < 60 && by == 0; y += 2) {
+        cui_input_mouse_move(ui, bx, y);
+        run(ui, build_doc_tabs_menu, &d, 2);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        run(ui, build_doc_tabs_menu, &d, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        run(ui, build_doc_tabs_menu, &d, 2);
+        key(ui, build_doc_tabs_menu, &d, CUI_KEY_DOWN, 0);
+        key(ui, build_doc_tabs_menu, &d, CUI_KEY_ENTER, 0);
+        if (d.sel == 0) by = y;
+        else { key(ui, build_doc_tabs_menu, &d, CUI_KEY_ESCAPE, 0); d.sel = 9; run(ui, build_doc_tabs_menu, &d, 3); }
+    }
+    CHECK(by > 0);    /* the menu opened and its first item selected the first tab */
+    /* three tabs fit: no chevron, the same click does nothing */
+    d.count = 3; d.sel = 2;
+    d.tabs[0].title = "a"; d.tabs[1].title = "b"; d.tabs[2].title = "c";   /* short: the strip's right end is empty */
+    run(ui, build_doc_tabs_menu, &d, 40);
+    if (by > 0) {
+        cui_input_mouse_move(ui, bx, by);
+        run(ui, build_doc_tabs_menu, &d, 2);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, true);
+        run(ui, build_doc_tabs_menu, &d, 1);
+        cui_input_mouse_button(ui, CUI_MOUSE_LEFT, false);
+        run(ui, build_doc_tabs_menu, &d, 2);
+        cui_layer_rect layers[2];
+        CHECK(cui_floating_layers(ui, layers, 2) == 0);   /* no menu opened */
+        CHECK(d.sel == 2);
+    }
     cui_destroy(ui);
 }
 
@@ -16073,6 +16372,9 @@ int main(void) {
     test_viz();
     test_motion();
     test_activity_bar();
+    test_activity_bar_fold();
+    test_doc_tabs_overflow_menu();
+    test_nav_item_height();
     test_typing_indicator_motion();
     test_running_task_motion();
     test_running_job_motion();
@@ -16112,6 +16414,8 @@ int main(void) {
     test_virtual_list();
     test_split_minimums();
     test_theme();
+    test_dark_black();
+    test_press_time();
     test_series_palette();
     test_radial_gauge_styles();
     test_treemap_select();

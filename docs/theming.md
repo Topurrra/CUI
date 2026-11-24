@@ -24,6 +24,21 @@ A theme switcher with Light, Dark and System changes this while the app runs. `c
 
 The neutral accent is near black in light mode and near white in dark mode. The colored accents are tuned per mode so text and controls keep their contrast.
 
+### Black
+
+The dark theme comes in two styles. The default, `CUI_DARK_GRAY`, layers dark grays. `CUI_DARK_BLACK` is a true black theme for apps that want the darkest, calmest dark: the canvas, side bars, activity bar and tab strips are #000000, cards, inputs, popovers, menus and dialogs #111111, and layers are told apart by hairline borders (white at 8%) instead of gray fills. Text is #F5F5F5, secondary #A3A3A3, muted #8F8F8F; status colors are #34D399, #FBBF24, #F87171 and #60A5FA; tooltips are a near-black bubble with a hairline rather than a light one. With the blue accent it has one cobalt accent, #3D63F0, with white on it.
+
+```c
+cui_app_create(&(cui_app_desc){ .theme = CUI_THEME_DARK, .accent = CUI_ACCENT_BLUE, .dark_style = CUI_DARK_BLACK });
+cui_set_dark_style(ui, CUI_DARK_BLACK);     /* at run time; it animates like cui_set_theme */
+```
+
+The style only changes the dark theme: light looks the same with either, and a Light, Dark and System switcher keeps working as it is. `CUI_DARK=black` in the environment tries any app in it, and `cui_component_shots <dir> --black` renders every component in it.
+
+![](images/overview-black.png)
+
+Two more options suit it. `cui_theme.press_time` (say 0.14) makes a press a short, firm scale with no bounce, and `cui_app_desc.fit_work_area` opens a window that would not fit a small screen at a size that does.
+
 ## Semantic colors
 
 Components never use raw colors. They use tokens, and so should your own boxes and text, so they follow the theme:

@@ -250,7 +250,7 @@ CUI__COLD cui_ctx *cui_create(const cui_ctx_desc *desc) {
     ui->wakeup = -1;
     ui->settle_frames = 2;
     ui->toast_next_handle = 1;
-    cui__theme_init(ui, d.theme, d.accent);
+    cui__theme_init(ui, d.theme, d.accent, d.dark_style);
     cui__fonts_init(ui, !d.no_default_fonts);
     return ui;
 }

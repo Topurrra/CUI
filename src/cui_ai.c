@@ -701,7 +701,7 @@ int cui_prompt_suggestions_ex(cui_ctx *ui, const char *id_str, const cui_prompt_
         cui__tween(ui, &st[0], r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
         cui_spring *press = (cui_spring *)&st[1];
         if (press->x <= 0) press->x = 1;
-        cui__spring(ui, press, r.pressed ? CUI__PRESS_WIDE : 1.0f, CUI_SPRING_SNAPPY);
+        cui__press(ui, press, r.pressed, CUI__PRESS_WIDE);
         int c = cui__node_new(ui, cid);
         cui_node *cn = &ui->nodes[c];
         cn->dir = CUI_ROW; cn->gap = 12; cn->align = CUI_ALIGN_START;
@@ -1121,7 +1121,7 @@ bool cui_voice_orb_ex(cui_ctx *ui, const char *id_str, cui_voice_state state, fl
     if (!st->init) { st->state_t[state & 3] = 1; st->scale.x = 1; st->init = true; }
     for (int k = 0; k < 4; k++) cui__tween(ui, &st->state_t[k], k == (int)state ? 1.0f : 0.0f, CUI__T_STATE);
     cui__spring(ui, &st->level, cui__clampf(level, 0, 1), 0.18f, 0.0f);
-    cui__spring(ui, &st->scale, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->scale, r.pressed, CUI__PRESS);
     float size = o->size > 0 ? o->size : 160;
     int n = cui__leaf(ui, id, CUI_PX(size), CUI_PX(size));
     cui_node *nd = &ui->nodes[n];

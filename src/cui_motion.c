@@ -863,7 +863,7 @@ bool cui_control_tile_ex(cui_ctx *ui, const char *label, bool *on, const cui_til
     if (!st->init) { st->on = v ? 1.0f : 0.0f; st->press.x = 1; st->init = true; }
     cui__tween(ui, &st->on, v ? 1.0f : 0.0f, CUI__T_STATE);
     cui__tween(ui, &st->hover, r.hovered ? 1.0f : 0.0f, CUI__T_HOVER);
-    cui__spring(ui, &st->press, r.pressed ? CUI__PRESS : 1.0f, CUI_SPRING_SNAPPY);
+    cui__press(ui, &st->press, r.pressed, CUI__PRESS);
     bool dark = ui->mode == CUI_THEME_DARK;
     cui_color off_bg = dark ? cui_mix(CUI_C(ui, SURFACE), CUI_C(ui, FOREGROUND), 0.08f + 0.04f * st->hover) : cui_mix(CUI_C(ui, SURFACE_MUTED), CUI_C(ui, FOREGROUND), 0.035f * st->hover);
     cui_color on_bg = cui__color_set(o->color) ? cui_color_of(ui, o->color) : (ui->accent == CUI_ACCENT_NEUTRAL ? CUI_C(ui, CONTROL_ON) : CUI_C(ui, ACCENT));
