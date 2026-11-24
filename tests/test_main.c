@@ -8672,6 +8672,42 @@ static void test_ai(void) {
     cui_destroy(ui);
 }
 
+/* the composer's opt-in focus: the app gives it the keyboard with the caret at the end, and reads whether it has it */
+typedef struct { char draft[64]; bool focus, focused; int flags; } cfocus_ctx;
+static void build_cfocus(cui_ctx *ui, void *u) {
+    cfocus_ctx *c = u;
+    cui_column(ui, .pad = 20, .gap = 10, .width = CUI_PX(500)) {
+        cui_button(ui, "Other");
+        c->flags |= cui_chat_composer(ui, "comp", c->draft, sizeof c->draft, .focus = c->focus, .focused = &c->focused);
+    }
+    c->focus = false;
+}
+
+static void test_composer_focus(void) {
+    printf("composer: focus with the caret at the end, focused reported\n");
+    cui_ctx *ui = new_ctx();
+    cfocus_ctx c;
+    memset(&c, 0, sizeof c);
+    run(ui, build_cfocus, &c, 2);
+    CHECK(!c.focused);                       /* nothing takes the keyboard unasked */
+    type(ui, build_cfocus, &c, "x");
+    CHECK(c.draft[0] == 0);
+    snprintf(c.draft, sizeof c.draft, "recalled prompt");
+    c.focus = true;
+    run(ui, build_cfocus, &c, 2);
+    CHECK(c.focused);
+    type(ui, build_cfocus, &c, "!");         /* the caret was put after the last character */
+    CHECK(strcmp(c.draft, "recalled prompt!") == 0);
+    key(ui, build_cfocus, &c, CUI_KEY_TAB, CUI_MOD_SHIFT);
+    run(ui, build_cfocus, &c, 1);
+    CHECK(!c.focused);                       /* the keyboard went back to the button */
+    c.focus = true;
+    run(ui, build_cfocus, &c, 1);
+    key(ui, build_cfocus, &c, CUI_KEY_ENTER, 0);
+    CHECK(c.focused && (c.flags & CUI_COMPOSER_SEND));
+    cui_destroy(ui);
+}
+
 /* tool panels: inspector and log console ------------------------------- */
 
 typedef struct {
@@ -11899,6 +11935,7 @@ static void test_code_editor_mdwrite(void) {
     CHECK(strcmp(cui_key_name(CUI_KEY_BACKSLASH), "\\") == 0);
     CHECK(strcmp(cui_key_name(CUI_KEY_GRAVE), "`") == 0);
     CHECK(strcmp(cui_key_name(CUI_KEY_INSERT), "Insert") == 0);
+    CHECK(strcmp(cui_key_name(CUI_KEY_LEFT_BRACKET), "[") == 0 && strcmp(cui_key_name(CUI_KEY_RIGHT_BRACKET), "]") == 0);
     c.ro = false; c.lang = "md";
     ced_text(&c, "a");
     ced_sel(ui, &c, 0, 0);
@@ -16380,6 +16417,7 @@ int main(void) {
     test_running_job_motion();
     test_tab_step();
     test_ai();
+    test_composer_focus();
     test_text_capacity();
     test_dialog();
     test_dialog_escape_after_edit();

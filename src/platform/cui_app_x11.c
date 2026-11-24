@@ -651,6 +651,8 @@ static cui_key cui__x11_key(KeySym ks) {
     case XK_backslash: return CUI_KEY_BACKSLASH;
     case XK_grave: return CUI_KEY_GRAVE;
     case XK_Insert: return CUI_KEY_INSERT;
+    case XK_bracketleft: return CUI_KEY_LEFT_BRACKET;
+    case XK_bracketright: return CUI_KEY_RIGHT_BRACKET;
     default: return CUI_KEY_NONE;
     }
 }

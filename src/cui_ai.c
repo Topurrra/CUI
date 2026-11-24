@@ -1003,6 +1003,12 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     if (recording && !st->was_recording && (ui->focus == ids.mic || ui->focus == ids.fid)) ui->focus = ids.sid;
     if (!recording && st->was_recording && (ui->focus == ids.cancel || ui->focus == ids.sid)) ui->focus = o->mic ? ids.mic : ids.fid;
     st->was_recording = recording;
+    if (o->focus && !recording) {      /* the app gives the text the keyboard, the caret after its last character */
+        cui_edit_state *e = cui_state(ui, ids.fid, sizeof *e);
+        e->cursor = e->anchor = (int)strlen(buf);
+        e->preferred_x = -1;
+        ui->focus = ids.fid;
+    }
     if (recording && (ui->focus == ids.cancel || ui->focus == ids.sid) && cui_key_pressed(ui, CUI_KEY_ESCAPE)) {
         ui->kpressed[CUI_KEY_ESCAPE] = 0;
         result |= CUI_COMPOSER_CANCEL;
@@ -1046,6 +1052,7 @@ int cui_chat_composer_ex(cui_ctx *ui, const char *id_str, char *buf, size_t cap,
     cui_pop_id(ui);
     cui__close(ui);
     ui->last_id = ids.id;
+    if (o->focused) *o->focused = ui->focus == ids.fid;
     return result;
 }
 
