@@ -513,7 +513,10 @@ void cui__vt_reply(cui_vt *v, const char *s);
 void cui__vt_scroll_lines(cui_vt *v, int n);      /* n line feeds at the bottom of the scroll region (rows leave into the scrollback) */
 void cui__vt_set_cursor(cui_vt *v, int x, int y);
 int cui__vt_mode_report(const cui_vt *v, int mode, bool dec);     /* DECRQM: 0 not recognized, 1 set, 2 reset */
+void cui__vt_reflow_set(cui_vt *v, bool on);      /* CUI_VT_FEATURE_REFLOW (cui_vt_set_features passes it here; it is not an extension feature) */
+void cui__vt_sb_mark_pic(cui_vt *v);              /* the newest scrollback line holds a picture: a reflow keeps it as it is */
 /* cui_vt_sixel.c, for cui_vt.c */
+void cui__vt_pic_sb_remap(cui_vt *v, uint64_t first, const int32_t *map, int n);   /* reflow: scrollback line first + i is now first + map[i] (-1: gone) */
 void cui__vt_x_free(cui_vt *v);
 size_t cui__vt_x_memory(const cui_vt *v);
 void cui__vt_x_reset(cui_vt *v);                  /* RIS: sixel display mode off, a picture being read is dropped */

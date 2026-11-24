@@ -4798,7 +4798,25 @@ CUI_API bool cui_vt_cell_at(const cui_vt *vt, int x, int y, cui_vt_cell *out);
  * drawn): ESC [ 16 t answers 6;20;W, ESC [ 14 t rows*20 by cols*W, and a picture covers width / W cells, rounded up. A row of
  * picture keeps the W it was drawn with; a picture drawn with another W into the same row first scales the row's old cells. */
 #define CUI_VT_FEATURE_SIXEL_ASPECT 4u
+/* Reflow: a change of width joins the lines the right edge wrapped (soft wraps, not line ends) and wraps them again at the new
+ * width, in the scrollback and on the main screen, as Windows Terminal does. Attributes go with their cells, a wide character
+ * is never split (it moves to the next row and leaves a padding cell, which a later reflow drops again), the cursor keeps its
+ * place in its line, trailing blanks (and spaces) at a line's end are dropped. The screen is laid out as a Windows console
+ * host lays out its own buffer (it has no scrollback): the screen's first row starts a line, rows that no longer fit go into
+ * the scrollback with the cursor kept on screen, a wider screen keeps its top row. So the host and the screen agree on every
+ * row, and a host that repaints after a resize (the system conhost) paints what is already there. The alternate screen is
+ * cut, not reflowed (its program redraws); the main screen behind it is reflowed once from how it was. Scrollback rows that
+ * hold a sixel picture keep their row (not joined, not wrapped). A selection is cleared; a view looking back stays on its text.
+ * Without cui_vt_resize_sent each resize reflows from the last one; see there. Opt-in: without it a resize cuts as before. */
+#define CUI_VT_FEATURE_REFLOW 8u
 CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
+/* With REFLOW, for a program behind a console host that hears of the size later than the screen (a resize debounced during a
+ * drag): call this when you tell the program the screen's size (ResizePseudoConsole). From the first call on, the main screen
+ * reflows from how it was when the program last heard its size or last wrote to it, so a drag through a narrow width and back
+ * loses nothing the host keeps (rows pushed out on the way come back). While the alternate screen is shown the call waits: the
+ * host reflows the main screen once, when the program leaves it. */
+CUI_API void cui_vt_resize_sent(cui_vt *vt);
+CUI_API unsigned cui_vt_reflows(const cui_vt *vt);     /* how many times REFLOW re-laid the rows: row numbers kept from before (matches, marks) are stale when it changes */
 CUI_API void cui_vt_set_picture_budget(cui_vt *vt, size_t bytes);       /* most picture pixels kept (8 MB unless set); over it the rows drawn longest ago go first */
 CUI_API void cui_vt_set_colors(cui_vt *vt, cui_color fg, cui_color bg, cui_color cursor);   /* what OSC 10, 11, 12 answer: plain colors; alpha 0 (or a token) is "no answer" */
 typedef struct cui_vt_opts {
