@@ -220,6 +220,15 @@ static void test_osc8(void) {
     CHECK(cui_vt_hyperlink(v, 0, 0) == NULL);
     cui_vt_line_text(v, 0, line, sizeof line);
     CHECK(line[0] == 'R');
+    /* with reflow too: the cells move, the links go, the text is joined again */
+    cui_vt_set_features(v, CUI_VT_FEATURE_LINKS | CUI_VT_FEATURE_REFLOW);
+    W(v, "\x1b" "c" "\x1b]8;;https://rf.example\x1b\\0123456789012345678901234567890123456789\x1b]8;;\x1b\\");
+    CHECK_STR(cui_vt_hyperlink(v, 0, 1), "https://rf.example");
+    cui_vt_resize(v, 50, 6);
+    CHECK(cui_vt_hyperlink(v, 0, 0) == NULL && cui_vt_hyperlink(v, 35, 0) == NULL);
+    cui_vt_line_text(v, 0, line, sizeof line);
+    CHECK_STR(line, "0123456789012345678901234567890123456789");
+    cui_vt_set_features(v, CUI_VT_FEATURE_LINKS);
     /* the feature off frees everything */
     W(v, "\x1b[H\x1b]8;;https://r.example\x1b\\R\x1b]8;;\x1b\\");
     cui_vt_set_features(v, 0);
