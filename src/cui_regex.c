@@ -40,6 +40,8 @@ typedef struct {
     const char *p, *end;        /* the pattern while parsing */
     const char *error;
     int root;
+    uint8_t first[32];          /* the bytes a match can start with (set by cui__rx_compile) */
+    bool filter;                /* false: a match can be empty or start anywhere, try every position */
 } cui__rx;
 
 /* ---- parsing ---- */
@@ -291,6 +293,29 @@ static int cui__rx_alt(cui__rx *R) {
     return n;
 }
 
+/* adds the bytes a match of `node` can start with to set; true when it can match the empty string (what follows it
+ * can then start the match too) */
+static bool cui__rx_first(const cui__rx *R, int node, uint8_t *set, int depth) {
+    const cui__rx_node *n = &R->node[node];
+    if (depth > 48) { memset(set, 0xFF, 32); return true; }
+    switch (n->type) {
+    case RX_CHAR: cui__rx_add(set, n->ch); return false;
+    case RX_SET: for (int i = 0; i < 32; i++) set[i] |= R->set[n->set][i]; return false;
+    case RX_ANY: memset(set, 0xFF, 32); return false;
+    case RX_SEQ:
+        for (int j = 0; j < n->nkid; j++) if (!cui__rx_first(R, R->kid[n->kid + j], set, depth + 1)) return false;
+        return true;
+    case RX_ALT: {
+        bool empty = false;
+        for (int j = 0; j < n->nkid; j++) empty |= cui__rx_first(R, R->kid[n->kid + j], set, depth + 1);
+        return empty;
+    }
+    case RX_GROUP: return cui__rx_first(R, R->kid[n->kid], set, depth + 1);
+    case RX_REPEAT: return cui__rx_first(R, R->kid[n->kid], set, depth + 1) || n->min == 0;
+    default: return true;                                           /* ^ $ \b \B take no character */
+    }
+}
+
 static bool cui__rx_compile(cui__rx *R, const char *pattern, int flags) {
     memset(R->names, 0, sizeof R->names);
     R->nn = R->nk = R->ns = R->groups = 0;
@@ -300,6 +325,10 @@ static bool cui__rx_compile(cui__rx *R, const char *pattern, int flags) {
     R->root = cui__rx_alt(R);
     if (R->root >= 0 && R->p < R->end) { R->error = "Unmatched )"; R->root = -1; }
     if (R->root < 0 && !R->error) R->error = "Invalid pattern";
+    if (R->root >= 0) {                                             /* the bytes a match starts with: positions with others are skipped */
+        memset(R->first, 0, sizeof R->first);
+        R->filter = !cui__rx_first(R, R->root, R->first, 0);
+    }
     return R->root >= 0;
 }
 
@@ -478,27 +507,22 @@ static int cui__rx_match(cui__rx_m *M, int node, int i, const cui__rx_k *k) {
     return r;
 }
 
-int cui_regex_search(const char *pattern, int flags, const char *text, int len, int from, cui_regex_match *m, const char **error) {
-    cui__rx R;   /* about 20 KB */
-    if (error) *error = NULL;
-    if (m) memset(m, 0, sizeof *m);
-    if (!pattern || !text) return 0;
-    if (len < 0) len = (int)strlen(text);
-    if (!cui__rx_compile(&R, pattern, flags)) { if (error) *error = R.error; return -1; }
+static int cui__rx_run(const cui__rx *R, const char *text, int len, int from, cui_regex_match *m, const char **error) {
     cui__rx_m M;
     memset(&M, 0, sizeof M);
-    M.R = &R; M.s = text; M.len = len;
+    M.R = R; M.s = text; M.len = len;
     for (int i = CUI_MAX(0, from); i <= len; i++) {
+        if (R->filter && (i >= len || !cui__rx_has(R->first, (unsigned char)text[i]))) continue;   /* no match starts with this byte */
         if (i > from && i < len && ((unsigned char)text[i] & 0xC0) == 0x80) continue;   /* start at whole characters */
         for (int g = 0; g < CUI_REGEX_GROUPS; g++) M.cap[g][0] = M.cap[g][1] = -1;
         M.depth = 0;
-        if (cui__rx_match(&M, R.root, i, NULL)) {
+        if (cui__rx_match(&M, R->root, i, NULL)) {
             if (m) {
                 m->start = i; m->end = M.end;
-                m->groups = R.groups;
-                for (int g = 1; g <= R.groups; g++) {
+                m->groups = R->groups;
+                for (int g = 1; g <= R->groups; g++) {
                     m->group_start[g] = M.cap[g][0]; m->group_end[g] = M.cap[g][0] >= 0 ? M.cap[g][1] : -1;
-                    memcpy(m->group_name[g], R.names[g], sizeof m->group_name[g]);
+                    memcpy(m->group_name[g], R->names[g], sizeof m->group_name[g]);
                 }
                 m->group_start[0] = i; m->group_end[0] = M.end;
             }
@@ -507,4 +531,32 @@ int cui_regex_search(const char *pattern, int flags, const char *text, int len, 
         if (M.abort) { if (error) *error = "Too complex: the pattern backtracks too much"; return -2; }
     }
     return 0;
+}
+
+int cui_regex_search(const char *pattern, int flags, const char *text, int len, int from, cui_regex_match *m, const char **error) {
+    cui__rx R;   /* about 20 KB */
+    if (error) *error = NULL;
+    if (m) memset(m, 0, sizeof *m);
+    if (!pattern || !text) return 0;
+    if (len < 0) len = (int)strlen(text);
+    if (!cui__rx_compile(&R, pattern, flags)) { if (error) *error = R.error; return -1; }
+    return cui__rx_run(&R, text, len, from, m, error);
+}
+
+/* compiled once, searched many times (cui_vt_find.c searches every line of a terminal) */
+struct cui__regex { cui__rx R; };
+cui__regex *cui__regex_new(const char *pattern, int flags, const char **error) {
+    if (error) *error = NULL;
+    cui__regex *r = (cui__regex *)malloc(sizeof *r);
+    if (!r) { if (error) *error = "Out of memory"; return NULL; }
+    if (!pattern || !cui__rx_compile(&r->R, pattern, flags)) { if (error) *error = pattern ? r->R.error : "Invalid pattern"; free(r); return NULL; }
+    return r;
+}
+void cui__regex_free(cui__regex *r) { free(r); }
+int cui__regex_find(const cui__regex *r, const char *text, int len, int from, int *start, int *end, const char **error) {
+    cui_regex_match m;
+    if (error) *error = NULL;
+    int k = cui__rx_run(&r->R, text, len, from, &m, error);
+    if (k == 1) { *start = m.start; *end = m.end; }
+    return k;
 }

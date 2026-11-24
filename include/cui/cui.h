@@ -380,6 +380,7 @@ typedef struct cui_platform_iface {
     bool (*draw_emoji)(void *user, const char *utf8, int len, int px, unsigned char *rgba);
 } cui_platform_iface;
 CUI_API void cui_set_platform(cui_ctx *ui, const cui_platform_iface *platform);
+CUI_API void cui_get_platform(cui_ctx *ui, cui_platform_iface *out);   /* the services set now, to wrap one (a test that keeps the clipboard to itself) */
 /* Request a cursor during component submission or painting. The last request
  * wins. At end of frame the platform hook receives it; the next frame starts
  * with CUI_CURSOR_ARROW. */
@@ -720,6 +721,7 @@ CUI_API bool cui_last_hovered(cui_ctx *ui);
  * earlier in this frame sees the change on the next one; cui_focus_set asks for that frame. */
 CUI_API cui_id cui_focus_get(cui_ctx *ui);
 CUI_API void cui_focus_set(cui_ctx *ui, cui_id id, bool visible);
+CUI_API void cui_focus_select_all(cui_ctx *ui, cui_id id);   /* gives the keyboard to the text field with this id and selects all its text (a find bar opened again) */
 CUI_API bool cui_is_disabled(cui_ctx *ui);
 CUI_API void cui_push_disabled(cui_ctx *ui, bool disabled);
 CUI_API void cui_pop_disabled(cui_ctx *ui);
@@ -4811,6 +4813,7 @@ typedef struct cui_vt_opts {
     bool glyphs;                   /* draw by hand, complete and meeting exactly across cells: all box drawing (round corners, dashes, double junctions), all block elements, braille, sextants and wedges, status line shapes (U+E0B0..); false: box lines and the first block elements as before, the rest from the font */
     bool italic;                   /* draw italic text (SGR 3) slanted; false: upright as before */
     bool win32_keys;               /* send keys as Windows key records (ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _) to a program that asked with mode 9001 (a Windows console host does at start); false: the bytes of a terminal, whatever the program asks */
+    bool find;                     /* show what cui_vt_find found (see "Find" below): every match marked, the current one stronger, scrolled into view and selected when it moves; false: nothing is marked, as before */
 } cui_vt_opts;
 typedef struct cui_vt_result {
     const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */
@@ -4822,9 +4825,45 @@ typedef struct cui_vt_result {
     bool resized;                  /* the grid changed to cols x rows: tell the program */
     bool copied;                   /* a selection went to the clipboard */
     int cols, rows;
+    int scrolled;                  /* rows the view looks back into the scrollback (0: the live screen) */
 } cui_vt_result;
 CUI_API cui_vt_result cui_vt_view_ex(cui_ctx *ui, const char *id, cui_vt *vt, const cui_vt_opts *opts);
 CUI_API bool cui_vt_focused(cui_ctx *ui, const char *id);                     /* the view with this id has the keyboard (id as given to cui_vt_view, in the same id scope) */
+/* Find (cui_vt_find.c): searches the scrollback and the screen (only the screen while the alternate one is shown) for a query.
+ * flags are CUI_FIND_CASE (match case; without it ASCII, Latin-1, Greek and Cyrillic letters match either case), CUI_FIND_WORD
+ * (whole words: no letter, digit or _ just before or after) and CUI_FIND_REGEX (cui_regex_search's syntax, see "Regular
+ * expressions"; without CUI_FIND_CASE it ignores ASCII case only). A line that wraps is searched as one line, so a match may run
+ * on into the next row; wide characters count as the two cells they cover. Matches do not overlap and are kept oldest first,
+ * at most 50000 (info.truncated says there were more). The query is copied; the first search allocates, cui_vt_find_clear frees.
+ *
+ *     cui_vt_find(vt, "error", CUI_FIND_CASE);                       // as the query is typed: returns the count
+ *     cui_vt_find_info fi = cui_vt_find_get(vt);                     // "%d of %d", fi.count - fi.current, fi.count, say
+ *     cui_vt_find_step(vt, -1);                                      // Enter: the one before (older, up); +1 the one after
+ *     cui_vt_view(ui, "shell", vt, .find = true);                    // marks them, shows and selects the current one
+ *
+ * The current match: on a new search the newest one; searching again (a longer query, or the same one after new output) keeps
+ * the match at the same place, else the nearest one before it. A view with `.find` marks every match on screen, the current
+ * one stronger, and whenever the current one moves (a search, a step, cui_vt_find_select) scrolls it into view (to the middle
+ * when it was out of sight) and makes it the selection, so Ctrl+C copies it. It also finds the same query again when output
+ * arrived or the size changed, at most every 100 ms, so marks follow the text; without a view call cui_vt_find again.
+ * Searching 5000 lines takes a few ms (tests/test_vt.c prints it). */
+typedef struct cui_vt_match {
+    int row, col;                  /* where it starts: row as cui_vt_line_text counts (0 the top of the live screen, -1 the newest scrollback line) */
+    int len;                       /* cells it covers, going on at column 0 of the next row past the end of a wrapped row */
+    int end_row, end_col;          /* the cell after its last one */
+} cui_vt_match;
+typedef struct cui_vt_find_info {
+    int count;                     /* matches kept */
+    int current;                   /* 0 based, oldest first; -1 when there is none */
+    bool truncated;                /* there were more than the 50000 kept */
+    const char *error;             /* why a regular expression was not searched (invalid or too complex), else NULL */
+} cui_vt_find_info;
+CUI_API int cui_vt_find(cui_vt *vt, const char *query, int flags);           /* CUI_FIND_CASE | CUI_FIND_WORD | CUI_FIND_REGEX; returns the count (0 for "" or an invalid pattern) */
+CUI_API cui_vt_find_info cui_vt_find_get(const cui_vt *vt);
+CUI_API bool cui_vt_find_match(const cui_vt *vt, int i, cui_vt_match *out);  /* the i-th match, 0 based oldest first; false outside 0..count-1 */
+CUI_API int cui_vt_find_step(cui_vt *vt, int dir);                           /* dir < 0 the match before (older), > 0 the one after, wrapping; returns the new current (-1 none) */
+CUI_API void cui_vt_find_select(cui_vt *vt, int i);                          /* makes the i-th match the current one (a view shows it) */
+CUI_API void cui_vt_find_clear(cui_vt *vt);                                  /* no query, no marks, the memory freed (a view keeps its selection and where it looks) */
 
 /* ---- Emoji ----
  * Color emoji come from an emoji font: the system's (cui_emoji_font_load_system, which
