@@ -4710,7 +4710,7 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * (1049, 47), application cursor keys, bracketed paste, cursor visibility, window titles (OSC 0 and 2), the current
  * folder (OSC 7, `cui_vt_cwd`), the bell (counted, `cui_vt_bell_count`),
  * cursor shape (`CSI Ps SP q`: block, underline, bar; never blinking), synchronized output (`?2026`: the view shows the screen as it was until the update ends, for at most about 150 ms), cursor position, device attribute, XTVERSION (`ESC [ > q`) and size reports (`ESC [ 14 t`, `16 t` and `18 t`, with the cell size the view records each frame), mouse reporting (modes 1000, 1002, 1003, encodings 1006 and
- * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks, character sets, pictures (sixel ones with `CUI_VT_FEATURE_SIXEL`, below).
+ * the classic one; sent only with `.mouse`). Not understood (skipped): hyperlinks (kept with `CUI_VT_FEATURE_LINKS`, below), character sets, pictures (sixel ones with `CUI_VT_FEATURE_SIXEL`, below).
  *
  * Mouse (`.mouse = true`): while the program asked for the mouse (`cui_vt_mouse_reporting`), clicks, drags,
  * motion, the wheel (one report per notch) and the right click go to the program through `input`, as keys do, and
@@ -4743,7 +4743,7 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * `paste`, valid until the next clipboard call, for you to write (with ESC [ 200 ~ before and ESC [ 201 ~
  * after when `paste_bracketed` is set; turn line breaks into \r first). Shift+PageUp, Shift+PageDown,
  * Shift+Home and Shift+End and the wheel move through the scrollback; on the alternate screen the wheel
- * sends arrow keys. Drag, double click and triple click select. */
+ * sends arrow keys. Drag, double click and triple click select (see `.smart_select` and `.copy_on_select`). */
 enum {
     CUI_VT_BOLD = 1 << 24, CUI_VT_DIM = 1 << 25, CUI_VT_ITALIC = 1 << 26, CUI_VT_UNDERLINE = 1 << 27,
     CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29,
@@ -4820,6 +4820,12 @@ CUI_API unsigned cui_vt_bell_count(const cui_vt *vt);
  * hold a sixel picture keep their row (not joined, not wrapped). A selection is cleared; a view looking back stays on its text.
  * Without cui_vt_resize_sent each resize reflows from the last one; see there. Opt-in: without it a resize cuts as before. */
 #define CUI_VT_FEATURE_REFLOW 8u
+/* Keep OSC 8 hyperlinks (ESC ] 8 ; params ; URI ST, closed by ESC ] 8 ; ; ST; a URI up to 2 KB) with the cells they were
+ * written into: a 16-bit id per cell into a table of the URIs, nothing allocated before the first link. The two screens
+ * cost 2 bytes a cell then; the scrollback keeps ids only for the lines that hold a link, and they go when their line
+ * goes. Ids no cell holds any more are reused once the table (8192 links) is full. A resize drops every link (the cells
+ * move, reflowed or cut); the text stays. Without it OSC 8 is skipped, as before. The view shows and opens them with `.links`. */
+#define CUI_VT_FEATURE_LINKS 16u
 CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
 /* With REFLOW, for a program behind a console host that hears of the size later than the screen (a resize debounced during a
  * drag): call this when you tell the program the screen's size (ResizePseudoConsole). From the first call on, the main screen
@@ -4843,7 +4849,32 @@ typedef struct cui_vt_opts {
     bool italic;                   /* draw italic text (SGR 3) slanted; false: upright as before */
     bool win32_keys;               /* send keys as Windows key records (ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _) to a program that asked with mode 9001 (a Windows console host does at start); false: the bytes of a terminal, whatever the program asks */
     bool find;                     /* show what cui_vt_find found (see "Find" below): every match marked, the current one stronger, scrolled into view and selected when it moves; false: nothing is marked, as before */
+    bool links;                   /* Ctrl over a link underlines it and shows the hand, a Ctrl+click returns it in `link` (see "Links" below); OSC 8 links get a dotted underline */
+    bool smart_select;             /* a double click takes a whole path or URL (else the word, across wrapped rows), a triple click the whole wrapped line; copied text loses the spaces at the end of its lines */
+    bool copy_on_select;           /* a finished selection (drag, double or triple click) goes to the clipboard at once (`copied`); a right click then always pastes */
 } cui_vt_opts;
+/* Links (`.links = true`). A link is an OSC 8 hyperlink (kept with CUI_VT_FEATURE_LINKS) or text that looks like one:
+ *   - a URL: http://, https://, file:// (punctuation at its end and a closing bracket it did not open are not part of it);
+ *   - a path: absolute (C:\x, C:/x, \\server\share, /usr/x), relative (.\x, ..\x, ~/x, dir\file.ext, dir/file.ext,
+ *     dir\), quoted with spaces ("C:\Program Files\x\y.txt"), and an absolute one with spaces when a compiler's
+ *     position follows it (C:\Program Files\x\y.cpp(12): error);
+ *   - with the position compilers, git and shells print: path:line, path:line:col, path(line), path(line,col),
+ *     "path", line N (Python), path:line char:col (PowerShell); a bare name.ext needs a position to count.
+ * The text is the logical line under the mouse (wrapped rows joined). Detection runs only while Ctrl is held, and then
+ * only when the mouse moves to another cell, Ctrl goes down, or the screen changed: never every frame. The program's
+ * mouse reports (`.mouse`) win while it has the mouse. cui_vt_link_find is the detector on plain text. */
+enum { CUI_VT_LINK_URL = 1, CUI_VT_LINK_PATH = 2 };
+typedef struct cui_vt_link {
+    int kind;                      /* CUI_VT_LINK_URL or CUI_VT_LINK_PATH */
+    const char *text;              /* the URL as written (an OSC 8 link: its URI); a path without its position; a file:// URL as a path (decoded) */
+    int line, col;                 /* the position after a path, 1 based; 0 none */
+    bool osc8;                     /* an OSC 8 hyperlink */
+} cui_vt_link;
+/* The link of `text` (len bytes) that covers byte `at`: true and *out filled, its text written into buf (cap bytes), its
+ * bytes in text in [*start, *end) (start and end may be NULL). A path's span is the path and its position, without quotes. */
+CUI_API bool cui_vt_link_find(const char *text, int len, int at, cui_vt_link *out, char *buf, int cap, int *start, int *end);
+/* The OSC 8 URI of cell x of a row (row 0 is the top of the live screen, -1 the newest scrollback line), or NULL. */
+CUI_API const char *cui_vt_hyperlink(const cui_vt *vt, int x, int row);
 typedef struct cui_vt_result {
     const char *input;             /* bytes for the program from the keys and the wheel this frame (valid until the next frame) */
     int input_len;
@@ -4855,6 +4886,7 @@ typedef struct cui_vt_result {
     bool copied;                   /* a selection went to the clipboard */
     int cols, rows;
     int scrolled;                  /* rows the view looks back into the scrollback (0: the live screen) */
+    const cui_vt_link *link;       /* `.links`: the link Ctrl+clicked this frame (no selection starts), or NULL; valid until the next frame */
 } cui_vt_result;
 CUI_API cui_vt_result cui_vt_view_ex(cui_ctx *ui, const char *id, cui_vt *vt, const cui_vt_opts *opts);
 CUI_API bool cui_vt_focused(cui_ctx *ui, const char *id);                     /* the view with this id has the keyboard (id as given to cui_vt_view, in the same id scope) */
