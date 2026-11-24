@@ -178,6 +178,7 @@ static int cui__vtp_cw(const cui__vt_x *x, const cui__vt_info *in) {
 
 void cui_vt_set_features(cui_vt *v, unsigned features) {
     if (!v) return;
+    cui__vt_reflow_set(v, (features & CUI_VT_FEATURE_REFLOW) != 0);     /* the screen's own (cui_vt.c): needs no extension */
     features &= CUI_VT_FEATURE_QUERIES | CUI_VT_FEATURE_SIXEL | CUI_VT_FEATURE_SIXEL_ASPECT;
     cui__vt_x *x = cui__vt_ext(v);
     if (!features && !x) return;
@@ -490,8 +491,27 @@ void cui__vt_pic_pushed(cui_vt *v, int slot) {
             }
             x->sb[(x->sb_head + x->sb_n) % x->sb_cap] = (cui__vtp_sbent){ in.sb_total - 1, s };
             x->sb_n++;
+            cui__vt_sb_mark_pic(v);                         /* a reflow keeps this line as it is */
         }
     }
+    cui__vt_pic_trim_sb(v);
+}
+
+/* A reflow renumbered the scrollback: the line first + i is now first + map[i], or gone (-1). The ring stays oldest first,
+ * since a reflow keeps the order of lines. */
+void cui__vt_pic_sb_remap(cui_vt *v, uint64_t first, const int32_t *map, int n) {
+    cui__vt_x *x = cui__vt_ext(v);
+    if (!x || !x->sb_n) return;
+    int w = 0;
+    for (int i = 0; i < x->sb_n; i++) {
+        cui__vtp_sbent e = x->sb[(x->sb_head + i) % x->sb_cap];
+        int64_t k = e.line >= first ? (int64_t)(e.line - first) : -1;
+        if (k < 0 || k >= n || !map || map[k] < 0) { cui__vtp_slice_free(x, e.s); continue; }
+        e.line = first + (uint64_t)map[k];
+        x->sb[(x->sb_head + w) % x->sb_cap] = e;
+        w++;
+    }
+    x->sb_n = w;
     cui__vt_pic_trim_sb(v);
 }
 

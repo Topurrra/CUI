@@ -27,7 +27,8 @@ enum { CUI__VT_SPACER = 1u << 30 };  /* the second cell of a wide character */
 typedef struct { uint32_t ca; uint16_t fg, bg; } cui__vt_cell;
 typedef char cui__vt_cell_is_8_bytes[sizeof(cui__vt_cell) == 8 ? 1 : -1];
 typedef struct { cui__vt_cell *cells; uint16_t *map; uint8_t *wrap; } cui__vt_screen;
-typedef struct { uint32_t off; uint16_t len; uint8_t wrapped; } cui__vt_line;
+typedef struct { uint32_t off; uint16_t len; uint8_t wrapped, pic; } cui__vt_line;   /* wrapped: 1 soft wrap, 2 soft wrap after a padding cell (a wide character moved on); pic: holds a picture */
+typedef struct cui__vt_rf cui__vt_rf;   /* CUI_VT_FEATURE_REFLOW's state (the "Reflow" part below) */
 
 enum { CUI__VT_GROUND, CUI__VT_ESC, CUI__VT_ESC_INT, CUI__VT_CSI, CUI__VT_OSC, CUI__VT_OSC_ESC, CUI__VT_STR, CUI__VT_STR_ESC,
        CUI__VT_DCS, CUI__VT_SIXEL };   /* the last two only with an extension (cui_vt_sixel.c): a DCS's parameters, sixel data */
@@ -70,9 +71,17 @@ struct cui_vt {
     uint32_t wseq;                    /* counts writes, so found matches know when they may be stale */
     char *cwd;                        /* the last OSC 7: "host\0path\0" in one allocation, NULL until one came (cui_vt_cwd) */
     unsigned bells;                   /* BEL (0x07) outside a sequence, ever (cui_vt_bell_count) */
+    cui__vt_rf *rf;                   /* CUI_VT_FEATURE_REFLOW: NULL while off (a resize cuts) */
+    unsigned rf_seq;                  /* reflows done (cui_vt_reflows) */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
+
+/* Reflow (CUI_VT_FEATURE_REFLOW), in its own part below cui_vt_resize */
+static void cui__vt_rf_free(cui_vt *v);
+static size_t cui__vt_rf_memory(const cui_vt *v);
+static void cui__vt_rf_commit(cui_vt *v);
+static void cui__vt_rf_resize(cui_vt *v, int cols, int rows);
 
 /* ------------------------------------------------------------------------ */
 /* Screens                                                                  */
@@ -124,6 +133,7 @@ void cui_vt_destroy(cui_vt *v) {
     if (!v) return;
     if (v->x) cui__vt_x_free(v);
     if (v->find) cui__vt_find_free(v);
+    if (v->rf) cui__vt_rf_free(v);
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
     free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap); free(v->cwd);
     free(v);
@@ -136,6 +146,7 @@ size_t cui_vt_memory(const cui_vt *v) {
     if (v->x) n += cui__vt_x_memory(v);
     if (v->find) n += cui__vt_find_memory(v);
     if (v->cwd) { size_t h = strlen(v->cwd); n += h + strlen(v->cwd + h + 1) + 2; }
+    if (v->rf) n += cui__vt_rf_memory(v);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -148,18 +159,26 @@ static void cui__vt_sb_drop(cui_vt *v) {
     v->sb_count--;
 }
 
-static void cui__vt_sb_push(cui_vt *v, const cui__vt_cell *src, int n, bool wrapped) {
+static void cui__vt_sb_push(cui_vt *v, const cui__vt_cell *src, int n, uint8_t wrapped) {
     if (v->sb_max == 0) return;
-    while (n > 0 && src[n - 1].ca == 0 && src[n - 1].bg == 0) n--;      /* the blank right end is not kept */
+    if (!(wrapped && v->rf)) while (n > 0 && src[n - 1].ca == 0 && src[n - 1].bg == 0) n--;      /* the blank right end is not kept (a reflow needs a soft-wrapped row whole) */
     if ((size_t)n > v->sb_cap) n = (int)v->sb_cap;
     if (v->sb_count == v->sb_max) cui__vt_sb_drop(v);
     if (n > 0) {
         for (;;) {
             if (v->sb_count == 0) v->sb_pos = 0;
             size_t oldest = v->sb_count ? v->sb_lines[v->sb_head].off : 0;
-            if (v->sb_count == 0 || v->sb_pos > oldest) {            /* data runs from oldest up to pos: room at the end, then wrap */
+            bool any = v->sb_count > 0;
+            if (v->rf && any) {      /* with REFLOW: an empty line holds no cells (and must not go for want of room): the data starts at the oldest line with cells */
+                int k = 0;
+                while (k < v->sb_count && v->sb_lines[(v->sb_head + k) % v->sb_max].len == 0) k++;
+                if (k == v->sb_count) any = false;
+                else oldest = v->sb_lines[(v->sb_head + k) % v->sb_max].off;
+            }
+            if (!any || v->sb_pos > oldest) {                         /* data runs from oldest up to pos: room at the end, then wrap */
                 if (v->sb_pos + (size_t)n <= v->sb_cap) break;
                 v->sb_pos = 0;
+                if (!any) break;
                 continue;
             }
             if (v->sb_pos + (size_t)n <= oldest) break;              /* wrapped: room between pos and the oldest line */
@@ -167,7 +186,7 @@ static void cui__vt_sb_push(cui_vt *v, const cui__vt_cell *src, int n, bool wrap
         }
     }
     cui__vt_line *L = &v->sb_lines[(v->sb_head + v->sb_count) % v->sb_max];
-    L->off = (uint32_t)v->sb_pos; L->len = (uint16_t)n; L->wrapped = wrapped;
+    L->off = (uint32_t)v->sb_pos; L->len = (uint16_t)n; L->wrapped = wrapped; L->pic = 0;
     if (n > 0) { memcpy(v->sb + v->sb_pos, src, (size_t)n * sizeof *src); v->sb_pos += (size_t)n; }
     v->sb_count++; v->sb_total++;
 }
@@ -242,7 +261,7 @@ static void cui__vt_put(cui_vt *v, uint32_t c) {
     cui__vt_screen *s = CUI__VT_S(v);
     if (v->pend || v->cx + w > v->cols) {
         if (v->autowrap) {
-            s->wrap[s->map[v->cy]] = 1;
+            s->wrap[s->map[v->cy]] = v->rf && !v->pend ? 2 : 1;      /* 2: a wide character left the last cell as padding (a reflow drops it) */
             v->cx = 0;
             cui__vt_linefeed(v);
         } else v->cx = v->cols - w;
@@ -375,6 +394,7 @@ static void cui__vt_switch_screen(cui_vt *v, bool alt, bool save) {
         for (int y = 0; y < v->rows; y++) { uint16_t b = v->bg; v->bg = 0; cui__vt_clear_row(v, y); v->bg = b; }
     } else {
         v->cur = 0;
+        if (v->rf) cui__vt_rf_commit(v);                                       /* the main screen is written again: reflows start from it */
         if (v->pic_on & CUI__VT_PIC_ALT) cui__vt_pic_drop_screen(v, 1);      /* the other screen's pictures go with it */
         if (save) { cui__vt_cursor_to(v, v->sx, v->sy); v->pend = v->spend; v->attr = v->sattr; v->fg = v->sfg; v->bg = v->sbg; }
     }
@@ -615,6 +635,7 @@ static void cui__vt_control(cui_vt *v, unsigned char c) {
 void cui_vt_write(cui_vt *v, const char *data, size_t len) {
     if (!v) return;
     v->wseq++;
+    if (v->rf && v->cur == 0 && len) cui__vt_rf_commit(v);      /* output on the main screen: reflows start from what it makes */
     const unsigned char *d = (const unsigned char *)data;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = d[i];
@@ -718,6 +739,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     rows = CUI_CLAMP(rows, 1, CUI__VT_MAX_ROWS);
     if (cols == v->cols && rows == v->rows) return;
     v->sync_on = false;
+    if (v->rf) { cui__vt_rf_resize(v, cols, rows); return; }      /* CUI_VT_FEATURE_REFLOW (below) */
     /* the cursor must stay on screen: rows above it move into the scrollback */
     if (v->cur == 0 && v->cy >= rows) {
         int drop = v->cy - rows + 1;
@@ -748,6 +770,348 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     v->stop = 0; v->sbot = rows - 1;
     v->cx = CUI_MIN(v->cx, cols - 1); v->cy = CUI_MIN(v->cy, rows - 1);
     v->pend = false;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Reflow (CUI_VT_FEATURE_REFLOW)                                           */
+/* ------------------------------------------------------------------------ */
+
+/* What a Windows console host does with its own buffer on a resize, measured behind OpenConsole 1.24 and the system conhost
+ * of Windows 11 (jnshell's tests/ptyprobe.c "reflow", written up in jnshell's docs/window.md): its buffer is only the screen
+ * (no scrollback); a new width joins the lines the edge wrapped and wraps them again, the first row starting a line; rows
+ * that no longer fit leave at the top so the cursor stays on screen; a wider or taller screen keeps its top row and grows
+ * blank rows at the bottom. The main screen here is laid out the same way, so the host and the screen agree on every row
+ * (absolute cursor moves land where the program meant, and the system host's repaint after a resize paints what is already
+ * shown; OpenConsole writes nothing at all). The scrollback is joined and wrapped on its own (a line cut by the screen's top
+ * edge heals once its second part scrolls into the scrollback too).
+ *
+ * A host that hears of a drag only at its end (cui_vt_resize_sent) has reflowed once, from its last size: the screen does the
+ * same, from a copy of the main screen as it was then (the base), so rows a narrow width pushed out come back when it widens
+ * again. The scrollback is reflowed step by step, which loses nothing but the oldest lines past its size.
+ *
+ * Cost: one pass over the cells, into a new ring (the old one is freed after): 5000 lines at 200 columns in about a ms. */
+struct cui__vt_rf {
+    bool told;                        /* the app calls cui_vt_resize_sent: a base lasts until the host hears of a size */
+    bool base_ok;
+    int bcols, brows, bcx, bcy; bool bpend;      /* the base: the main screen the reflows start from, and its cursor */
+    cui__vt_cell *bcells; uint8_t *bwrap; size_t bcap, bwcap;
+    int pushed;                       /* scrollback lines the last reflow from this base pushed (the next one takes them back) */
+    cui__vt_cell *tmp; uint8_t *twrap; size_t tcap, twcap;      /* the screen's rows at the new width, before they are placed */
+    int32_t *map; int map_n, map_cap; bool map_ok;              /* the last scrollback reflow: line i is now map[i] (-1: gone) */
+    uint64_t map_first;               /* the first kept line's number right after it */
+};
+
+static const cui__vt_cell cui__vt_rf_blank_cell = { 0, 0, 0 };
+
+/* blank for a line's end, as the console host measures it: no character, or a space (the attributes do not count) */
+static bool cui__vt_rf_blank(uint32_t ca) {
+    uint32_t c = CUI__VT_CP(ca);
+    return !(ca & CUI__VT_SPACER) && (c == 0 || c == ' ');
+}
+
+void cui__vt_reflow_set(cui_vt *v, bool on) {
+    if (!on) { if (v->rf) cui__vt_rf_free(v); return; }
+    if (!v->rf) v->rf = (cui__vt_rf *)calloc(1, sizeof *v->rf);
+}
+
+static void cui__vt_rf_free(cui_vt *v) {
+    cui__vt_rf *rf = v->rf;
+    free(rf->bcells); free(rf->bwrap); free(rf->tmp); free(rf->twrap); free(rf->map);
+    free(rf);
+    v->rf = NULL;
+}
+
+static size_t cui__vt_rf_memory(const cui_vt *v) {
+    const cui__vt_rf *rf = v->rf;
+    return sizeof *rf + (rf->bcap + rf->tcap) * sizeof(cui__vt_cell) + rf->bwcap + rf->twcap + (size_t)rf->map_cap * sizeof(int32_t);
+}
+
+static void cui__vt_rf_commit(cui_vt *v) { v->rf->base_ok = false; v->rf->pushed = 0; }
+
+void cui_vt_resize_sent(cui_vt *v) {
+    if (!v || !v->rf) return;
+    v->rf->told = true;
+    if (v->cur == 0) cui__vt_rf_commit(v);      /* on the alternate screen the host keeps the main screen as it was */
+}
+
+unsigned cui_vt_reflows(const cui_vt *v) { return v ? v->rf_seq : 0; }
+
+void cui__vt_sb_mark_pic(cui_vt *v) {
+    if (v->sb_count > 0) v->sb_lines[(v->sb_head + v->sb_count - 1) % v->sb_max].pic = 1;
+}
+
+/* Rows of one width are made from a stream of cells: into the scrollback, or into rf->tmp (the screen's rows). */
+typedef struct {
+    cui_vt *v;
+    int W, col;                       /* the new width; cells in the row being filled */
+    bool to_sb, failed;
+    int64_t rows;                     /* rows made so far */
+    cui__vt_cell row[CUI__VT_MAX_COLS];
+} cui__vt_rfw;
+
+static void cui__vt_rfw_emit(cui__vt_rfw *w, int n, uint8_t wrap) {
+    if (w->to_sb) cui__vt_sb_push(w->v, w->row, n, wrap);
+    else {
+        cui__vt_rf *rf = w->v->rf;
+        size_t need = (size_t)(w->rows + 1) * (size_t)w->W;
+        if (need > rf->tcap || (size_t)w->rows + 1 > rf->twcap) {
+            size_t cap = CUI_MAX(need * 2, (size_t)w->W * 64), wcap = cap / (size_t)w->W;
+            cui__vt_cell *t = (cui__vt_cell *)realloc(rf->tmp, cap * sizeof *t);
+            if (t) rf->tmp = t;
+            uint8_t *tw = t ? (uint8_t *)realloc(rf->twrap, wcap) : NULL;
+            if (tw) rf->twrap = tw;
+            if (!t || !tw) { w->failed = true; w->col = 0; return; }
+            rf->tcap = cap; rf->twcap = wcap;
+        }
+        cui__vt_cell *d = rf->tmp + (size_t)w->rows * (size_t)w->W;
+        memcpy(d, w->row, (size_t)n * sizeof *d);
+        for (int x = n; x < w->W; x++) d[x] = cui__vt_rf_blank_cell;
+        rf->twrap[w->rows] = wrap;
+    }
+    w->rows++;
+    w->col = 0;
+}
+
+/* source rows: the cells of row r, how many, its wrap flag */
+typedef const cui__vt_cell *(*cui__vt_rf_get)(const void *src, int r, int *n, uint8_t *wrap);
+
+/* One line, made of the source rows r0..r1 (each but the last soft-wrapped), wrapped again into the writer. The padding cell
+ * a wide character left at a row's end is dropped, a wide character that does not fit the new row moves to the next one and
+ * leaves padding (wrap 2), the blanks at the line's end are dropped. `dangling`: the line goes on past r1 (the scrollback's
+ * newest line, cut by the screen's top edge): its blanks stay and its last row keeps the soft wrap. (cur_r, cur_c): a cell to
+ * follow (the cursor; the line is at least as long as to include it), whose new place is put in *orow, *ocol; cur_r < 0 for
+ * none. `map` (or NULL): the writer row that each source row's first cell went to. */
+static void cui__vt_rf_line(cui__vt_rfw *w, cui__vt_rf_get get, const void *src, int r0, int r1, bool dangling,
+                            int cur_r, int cur_c, int64_t *orow, int *ocol, int32_t *map) {
+    int n; uint8_t wr;
+    const cui__vt_cell *c = get(src, r1, &n, &wr);
+    int er = r1, ec = n - (wr == 2 && n > 0 ? 1 : 0);          /* the line's end: row er, before cell ec */
+    if (!dangling) for (;;) {
+        while (ec > 0 && cui__vt_rf_blank(c[ec - 1].ca)) ec--;
+        if (ec > 0 || er == r0) break;
+        c = get(src, --er, &n, &wr);
+        ec = n - (wr == 2 && n > 0 ? 1 : 0);
+    }
+    if (cur_r >= 0 && (cur_r > er || (cur_r == er && cur_c + 1 > ec))) { er = cur_r; ec = cur_c + 1; }
+    for (int r = r0; r <= er; r++) {
+        c = get(src, r, &n, &wr);
+        int cnt = r == er ? ec : n - (wr == 2 && n > 0 ? 1 : 0);
+        if (map) map[r] = (int32_t)(w->rows + (w->col >= w->W ? 1 : 0));
+        for (int x = 0; x < cnt; x++) {
+            cui__vt_cell cell = x < n ? c[x] : cui__vt_rf_blank_cell;
+            if (cell.ca & CUI__VT_SPACER) {          /* the second half goes with its first; alone it is dropped */
+                if (r == cur_r && x == cur_c && w->col > 0) { *orow = w->rows; *ocol = w->col - 1; }
+                continue;
+            }
+            bool wide = x + 1 < cnt && x + 1 < n && (c[x + 1].ca & CUI__VT_SPACER);
+            int cw = wide ? 2 : 1;
+            if (w->col + cw > w->W) {                /* the row is full: a soft wrap (after a padding cell when a wide one moves on) */
+                uint8_t f = 1;
+                if (w->col < w->W) { w->row[w->col] = cui__vt_rf_blank_cell; f = 2; }
+                cui__vt_rfw_emit(w, w->W, f);
+            }
+            if (r == cur_r && x == cur_c) { *orow = w->rows; *ocol = w->col; }
+            w->row[w->col++] = cell;
+            if (wide) w->row[w->col++] = c[x + 1];
+        }
+    }
+    cui__vt_rfw_emit(w, w->col, dangling ? 1 : 0);
+}
+
+typedef struct { const cui__vt_cell *sb; const cui__vt_line *lines; int head, max; } cui__vt_rf_sbsrc;
+
+static const cui__vt_cell *cui__vt_rf_sbget(const void *p, int r, int *n, uint8_t *wrap) {
+    const cui__vt_rf_sbsrc *s = (const cui__vt_rf_sbsrc *)p;
+    const cui__vt_line *L = &s->lines[(s->head + r) % s->max];
+    *n = L->len; *wrap = L->wrapped;
+    return s->sb + L->off;
+}
+
+/* The scrollback wrapped again at W: a new ring of the same size, filled line by line, the old one freed. Out of memory it
+ * stays as it is. Rows that hold a picture keep their row (cut to W) and their picture (renumbered). */
+static void cui__vt_rf_sb(cui_vt *v, int W) {
+    cui__vt_rf *rf = v->rf;
+    rf->map_ok = false;
+    int n = v->sb_count;
+    if (n == 0 || v->sb_max == 0) return;
+    if (rf->map_cap < n) {
+        int32_t *m = (int32_t *)realloc(rf->map, sizeof *m * (size_t)v->sb_max);
+        if (!m) return;
+        rf->map = m; rf->map_cap = v->sb_max;
+    }
+    cui__vt_cell *nsb = (cui__vt_cell *)malloc(v->sb_cap * sizeof *nsb);
+    cui__vt_line *nl = (cui__vt_line *)malloc(sizeof *nl * (size_t)v->sb_max);
+    cui__vt_rfw *w = (cui__vt_rfw *)malloc(sizeof *w);
+    if (!nsb || !nl || !w) { free(nsb); free(nl); free(w); return; }
+    cui__vt_rf_sbsrc src = { v->sb, v->sb_lines, v->sb_head, v->sb_max };
+    uint64_t first = v->sb_total - (uint64_t)n;
+    v->sb = nsb; v->sb_lines = nl; v->sb_head = 0; v->sb_count = 0; v->sb_pos = 0; v->sb_total = first;
+    w->v = v; w->W = W; w->col = 0; w->to_sb = true; w->failed = false; w->rows = 0;
+    for (int i = 0; i < n;) {
+        const cui__vt_line *L = &src.lines[(src.head + i) % src.max];
+        if (L->pic) {
+            rf->map[i] = (int32_t)w->rows;
+            int len = CUI_MIN((int)L->len, W);
+            memcpy(w->row, src.sb + L->off, (size_t)len * sizeof *w->row);
+            cui__vt_rfw_emit(w, len, L->wrapped);
+            cui__vt_sb_mark_pic(v);
+            i++;
+            continue;
+        }
+        int j = i;
+        while (j + 1 < n && src.lines[(src.head + j) % src.max].wrapped && !src.lines[(src.head + j + 1) % src.max].pic) j++;
+        bool dangling = src.lines[(src.head + j) % src.max].wrapped != 0;
+        cui__vt_rf_line(w, cui__vt_rf_sbget, &src, i, j, dangling, -1, 0, NULL, NULL, rf->map);
+        i = j + 1;
+    }
+    if (v->pic_on & CUI__VT_PIC_SB) cui__vt_pic_sb_remap(v, first, rf->map, n);     /* (map is still in rows made, from `first`) */
+    int64_t dropped = w->rows - v->sb_count;                   /* the oldest rows made, past the scrollback's size */
+    for (int i = 0; i < n; i++) rf->map[i] = rf->map[i] >= dropped ? (int32_t)(rf->map[i] - dropped) : -1;
+    rf->map_n = n; rf->map_ok = true; rf->map_first = v->sb_total - (uint64_t)v->sb_count;
+    free((void *)src.sb); free((void *)src.lines); free(w);
+}
+
+/* the newest n scrollback lines go (they were made from the base and are made again) */
+static void cui__vt_rf_pop(cui_vt *v, int n) {
+    if (n > v->sb_count) n = v->sb_count;
+    v->sb_count -= n; v->sb_total -= (uint64_t)n;
+    if (v->sb_count > 0) { const cui__vt_line *L = &v->sb_lines[(v->sb_head + v->sb_count - 1) % v->sb_max]; v->sb_pos = L->off + L->len; }
+    else v->sb_pos = 0;
+}
+
+static bool cui__vt_rf_capture(cui_vt *v) {
+    cui__vt_rf *rf = v->rf;
+    size_t need = (size_t)v->cols * (size_t)v->rows;
+    if (rf->bcap < need) { cui__vt_cell *b = (cui__vt_cell *)realloc(rf->bcells, need * sizeof *b); if (!b) return false; rf->bcells = b; rf->bcap = need; }
+    if (rf->bwcap < (size_t)v->rows) { uint8_t *b = (uint8_t *)realloc(rf->bwrap, (size_t)v->rows); if (!b) return false; rf->bwrap = b; rf->bwcap = (size_t)v->rows; }
+    const cui__vt_screen *s = &v->scr[0];
+    for (int y = 0; y < v->rows; y++) {
+        memcpy(rf->bcells + (size_t)y * (size_t)v->cols, cui__vt_row(v, s, y), sizeof(cui__vt_cell) * (size_t)v->cols);
+        rf->bwrap[y] = s->wrap[s->map[y]];
+    }
+    rf->bcols = v->cols; rf->brows = v->rows;
+    if (v->cur == 0) { rf->bcx = v->cx; rf->bcy = v->cy; rf->bpend = v->pend; }
+    else { rf->bcx = v->sx; rf->bcy = v->sy; rf->bpend = v->spend; }      /* behind the alternate screen: the cursor it saved */
+    rf->bcx = CUI_CLAMP(rf->bcx, 0, v->cols - 1); rf->bcy = CUI_CLAMP(rf->bcy, 0, v->rows - 1);
+    rf->base_ok = true; rf->pushed = 0;
+    return true;
+}
+
+typedef struct { const cui__vt_cell *c; const uint8_t *wrap; int cols; } cui__vt_rf_scrsrc;
+
+static const cui__vt_cell *cui__vt_rf_scrget(const void *p, int r, int *n, uint8_t *wrap) {
+    const cui__vt_rf_scrsrc *s = (const cui__vt_rf_scrsrc *)p;
+    *n = s->cols; *wrap = s->wrap[r];
+    return s->c + (size_t)r * (size_t)s->cols;
+}
+
+/* The base laid out at W x H as the console host lays out its buffer: the rows up to the cursor's (or the last with text),
+ * joined and wrapped again; rows past H leave at the top into the scrollback, the cursor kept on screen. False when out of
+ * memory (nothing changed). */
+static bool cui__vt_rf_screen(cui_vt *v, int W, int H, cui__vt_screen *out, int *ocx, int *ocy, bool *opend) {
+    cui__vt_rf *rf = v->rf;
+    if (!cui__vt_screen_alloc(out, W, H)) { cui__vt_screen_free(out); return false; }
+    cui__vt_rfw *w = (cui__vt_rfw *)malloc(sizeof *w);
+    if (!w) { cui__vt_screen_free(out); return false; }
+    w->v = v; w->W = W; w->col = 0; w->to_sb = false; w->failed = false; w->rows = 0;
+    int last = rf->bcy;
+    for (int y = rf->brows - 1; y > last; y--) {
+        const cui__vt_cell *c = rf->bcells + (size_t)y * (size_t)rf->bcols;
+        int x = 0;
+        while (x < rf->bcols && cui__vt_rf_blank(c[x].ca)) x++;
+        if (x < rf->bcols) { last = y; break; }
+    }
+    cui__vt_rf_scrsrc src = { rf->bcells, rf->bwrap, rf->bcols };
+    int64_t crow = 0; int ccol = 0;
+    for (int y = 0; y <= last;) {
+        int z = y;
+        while (z < last && rf->bwrap[z]) z++;
+        bool has = rf->bcy >= y && rf->bcy <= z;
+        cui__vt_rf_line(w, cui__vt_rf_scrget, &src, y, z, false, has ? rf->bcy : -1, rf->bcx, &crow, &ccol, NULL);
+        y = z + 1;
+    }
+    if (w->failed) { free(w); cui__vt_screen_free(out); return false; }
+    bool pend = false;
+    if (rf->bpend) { if (ccol >= W - 1) { ccol = W - 1; pend = true; } else ccol++; }   /* the cursor was past its cell */
+    int64_t N = w->rows, p = N > H ? N - H : 0;
+    if (p > crow) p = crow;
+    for (int64_t r = 0; r < p; r++) cui__vt_sb_push(v, rf->tmp + (size_t)r * (size_t)W, W, rf->twrap[r]);
+    rf->pushed = (int)p;
+    for (int y = 0; y < H && p + y < N; y++) {
+        memcpy(out->cells + (size_t)y * (size_t)W, rf->tmp + (size_t)(p + y) * (size_t)W, sizeof(cui__vt_cell) * (size_t)W);
+        out->wrap[y] = rf->twrap[p + y];
+    }
+    *ocx = ccol; *ocy = (int)(crow - p); *opend = pend;
+    free(w);
+    return true;
+}
+
+static void cui__vt_rf_resize(cui_vt *v, int cols, int rows) {
+    cui__vt_rf *rf = v->rf;
+    bool cut_main = (v->pic_on & CUI__VT_PIC_MAIN) != 0;       /* pictures on the main screen: it is cut as before (the scrollback still reflows) */
+    if (cut_main) cui__vt_rf_commit(v);
+    else if (!rf->base_ok && !cui__vt_rf_capture(v)) cut_main = true;
+    if (rf->pushed) cui__vt_rf_pop(v, rf->pushed);
+    rf->pushed = 0;
+    if (cols != v->cols) cui__vt_rf_sb(v, cols);
+    else rf->map_ok = false;
+    /* the screens that are cut get their new grids first, so running out of memory changes nothing */
+    cui__vt_screen ns[2];
+    memset(ns, 0, sizeof ns);
+    if (v->scr[1].cells && !cui__vt_screen_alloc(&ns[1], cols, rows)) { cui__vt_screen_free(&ns[1]); return; }
+    int ncx = 0, ncy = 0; bool npend = false;
+    bool main_done = !cut_main && cui__vt_rf_screen(v, cols, rows, &ns[0], &ncx, &ncy, &npend);
+    if (!main_done && !cui__vt_screen_alloc(&ns[0], cols, rows)) { cui__vt_screen_free(&ns[0]); cui__vt_screen_free(&ns[1]); return; }
+    if (!main_done && v->cur == 0 && v->cy >= rows) {           /* cut as before: the cursor stays on screen */
+        int drop = v->cy - rows + 1;
+        for (int i = 0; i < drop; i++) {
+            cui__vt_screen *s = &v->scr[0];
+            cui__vt_sb_push(v, cui__vt_row(v, s, 0), v->cols, s->wrap[s->map[0]]);
+            if (v->pic_on & (CUI__VT_PIC_MAIN | CUI__VT_PIC_SB)) cui__vt_pic_pushed(v, s->map[0]);
+            uint16_t slot = s->map[0];
+            memmove(&s->map[0], &s->map[1], sizeof(uint16_t) * (size_t)(v->rows - 1));
+            s->map[v->rows - 1] = slot;
+        }
+        v->cy -= drop;
+    }
+    for (int k = 0; k < 2; k++) {
+        cui__vt_screen *old = &v->scr[k], *n = &ns[k];
+        if (!old->cells) continue;
+        if (!(k == 0 && main_done)) {                           /* the alternate screen (its program redraws), or a main screen with pictures: cut */
+            int cy = CUI_MIN(v->rows, rows), cx = CUI_MIN(v->cols, cols);
+            for (int y = 0; y < cy; y++) {
+                memcpy(n->cells + (size_t)y * (size_t)cols, old->cells + (size_t)old->map[y] * (size_t)v->cols, sizeof(cui__vt_cell) * (size_t)cx);
+                n->wrap[y] = old->wrap[old->map[y]];
+            }
+        }
+        if (v->x) cui__vt_x_resize(v, k, old->map, v->rows, cols, rows);     /* pictures follow their rows (a reflowed screen has none) */
+        cui__vt_screen_free(old);
+        *old = *n;
+    }
+    v->cols = cols; v->rows = rows;
+    v->stop = 0; v->sbot = rows - 1;
+    if (main_done && v->cur == 0) { v->cx = ncx; v->cy = ncy; v->pend = npend; }
+    else {
+        if (main_done) { v->sx = ncx; v->sy = ncy; v->spend = npend; }
+        v->cx = CUI_MIN(v->cx, cols - 1); v->cy = CUI_MIN(v->cy, rows - 1);
+        v->pend = false;
+    }
+    if (!rf->told && v->cur == 0) cui__vt_rf_commit(v);      /* the program hears of every size: the next reflow starts from this one */
+    v->rf_seq++;
+}
+
+/* A view that looked back keeps the same text at its top after a reflow (sb0: the scrollback's lines before it). */
+static void cui__vt_rf_follow(const cui_vt *v, int *off, int sb0) {
+    const cui__vt_rf *rf = v->rf;
+    if (*off <= 0) return;
+    int top = sb0 - *off;                                       /* the scrollback line at the view's top */
+    if (rf && rf->map_ok && top >= 0 && top < rf->map_n) {
+        int64_t shift = (int64_t)(v->sb_total - (uint64_t)v->sb_count) - (int64_t)rf->map_first;   /* lines the screen's rows pushed out since */
+        int64_t ni = rf->map[top] < 0 ? 0 : rf->map[top] - shift;
+        if (ni < 0) ni = 0;
+        *off = (int)CUI_CLAMP((int64_t)v->sb_count - ni, 0, (int64_t)v->sb_count);
+    }
+    if (*off > v->sb_count) *off = v->sb_count;
 }
 
 size_t cui_vt_reply(cui_vt *v, char *out, size_t cap) {
@@ -945,6 +1309,7 @@ typedef struct {
     bool finit, fin;                  /* the view had the keyboard and the window had the focus, as of the last frame */
     uint32_t find_seen;               /* .find: the current match the view last showed (cui_vt_find.c's count of moves) */
     int w_mods_n;                     /* bytes of this frame's records that are Shift, Ctrl or Alt alone */
+    unsigned rf_seen;                 /* cui_vt_reflows as of the last frame */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -1675,9 +2040,17 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     if (pr.w > 0 && pr.h > 0) {
         int cols = (int)((pr.w - 2 * padx) / cw), rows = (int)((pr.h - 2 * pady) / lh);
         cols = CUI_MAX(cols, 2); rows = CUI_MAX(rows, 1);
-        if (cols != v->cols || rows != v->rows) { cui_vt_resize(v, cols, rows); res.resized = true; }
+        if (cols != v->cols || rows != v->rows) {
+            int sb0 = v->sb_count; unsigned rf0 = v->rf_seq;
+            cui_vt_resize(v, cols, rows); res.resized = true;
+            if (v->rf_seq == rf0 + 1 && st->init) cui__vt_rf_follow(v, &st->off, sb0);    /* reflowed: stay on the same text */
+        }
     }
     res.cols = v->cols; res.rows = v->rows;
+    if (v->rf_seq != st->rf_seen) {          /* the rows were laid out again: row numbers from before mean nothing now */
+        if (st->init) { st->has_sel = false; st->selecting = false; st->seen_total = v->sb_total; }
+        st->rf_seen = v->rf_seq;
+    }
     /* new lines scrolled off while looking back: stay on the same text */
     if (st->init && v->sb_total > st->seen_total && st->off > 0) st->off += (int)(v->sb_total - st->seen_total);
     st->seen_total = v->sb_total; st->init = true;
