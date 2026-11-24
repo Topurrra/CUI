@@ -263,14 +263,15 @@ CUI_API void cui_app_drag_window(cui_app *app);
 /* Native file dialogs. Blocking; returns true and writes the chosen path
  * (UTF-8) to out when the user confirms. On Linux this uses zenity or
  * kdialog when installed. Pass NULL as app to use the current app (handy in
- * cui_app_run callbacks). */
+ * cui_app_run callbacks). On Windows the folder chooser also works when the
+ * calling thread already uses a multithreaded COM apartment. */
 typedef enum cui_file_dialog_kind { CUI_FILE_OPEN = 0, CUI_FILE_SAVE, CUI_FILE_FOLDER } cui_file_dialog_kind;
 typedef struct cui_file_dialog_opts {
     cui_file_dialog_kind kind;
     const char *title;
     const char *filter_name;    /* e.g. "Images" */
     const char *filter;         /* extensions separated by ';', e.g. "png;jpg" */
-    const char *default_name;   /* save dialogs */
+    const char *default_name;   /* save dialogs: suggested name, optionally with its directory on Windows */
     bool multi;                 /* open dialogs: allow choosing several files (see below) */
 } cui_file_dialog_opts;
 CUI_API bool cui_app_file_dialog(cui_app *app, const cui_file_dialog_opts *opts, char *out, size_t cap);

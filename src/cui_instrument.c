@@ -90,6 +90,12 @@ void cui__draw_hdash(cui_ctx *ui, float x0, float x1, float y, float dash, float
     for (float x = x0; x < x1; x += period) cui_draw_rect(ui, (cui_rect){ x, y, CUI_MIN(dash, x1 - x), 1 }, CUI_CORNERS(0), c);
 }
 
+/* an annotation's own color, else the emphasis color when it is an accent, else `plain` */
+static cui_color cui__ann_color(cui_ctx *ui, const cui_chart_annotation *an, cui_color em, cui_color plain) {
+    if (cui__color_set(an->color)) return cui_color_of(ui, an->color);
+    return an->accent ? em : plain;
+}
+
 /* Draws `a` over `plot`, mapping x from x0..x1 and values from y0..y1. Labels of vertical
  * lines start at `label_top` (headroom above the plot, or the plot's own top); labels of
  * horizontal lines go right of the plot when `gutter` is set, else inside its right end.
@@ -134,11 +140,11 @@ void cui__paint_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n, c
     /* then the lines and dots, under every label */
     for (int i = 0; i < n; i++) {
         const cui_chart_annotation *an = &a[i];
-        cui_color line = an->accent ? em : CUI_C(ui, TEXT_MUTED);
+        cui_color line = cui__ann_color(ui, an, em, CUI_C(ui, TEXT_MUTED));
         if (an->kind == CUI_ANNOTATION_Y) {
             if (an->y < y0 || an->y > y1) continue;
             float yy = floorf(plot.y + plot.h - (float)((an->y - y0) / (y1 - y0)) * plot.h) + 0.5f;
-            cui__draw_hdash(ui, plot.x, plot.x + plot.w, yy - 0.5f, 3, 6, an->accent ? em : CUI_C(ui, BORDER_STRONG));
+            cui__draw_hdash(ui, plot.x, plot.x + plot.w, yy - 0.5f, 3, 6, cui__ann_color(ui, an, em, CUI_C(ui, BORDER_STRONG)));
             continue;
         }
         if (an->x < x0 || an->x > x1) continue;
@@ -161,14 +167,14 @@ void cui__paint_annotations(cui_ctx *ui, const cui_chart_annotation *a, int n, c
             float lx = out ? plot.x + plot.w + 6 : plot.x + plot.w - w1 - 2;
             float ly = out ? yy - lh * 0.5f : yy - lh - 2;
             if (!out) cui_draw_rect(ui, (cui_rect){ lx - 3, ly, w1 + 6, lh }, CUI_CORNERS(3), cui_alpha(CUI_C(ui, BACKGROUND), 0.86f));
-            cui__draw_text_line(ui, CUI_FONT_MONO, fs, lx, ly, an->accent ? em : CUI_C(ui, TEXT_MUTED), an->label, -1, true);
+            cui__draw_text_line(ui, CUI_FONT_MONO, fs, lx, ly, cui__ann_color(ui, an, em, CUI_C(ui, TEXT_MUTED)), an->label, -1, true);
             continue;
         }
         if (box[i].w <= 0) continue;
         float bx = box[i].x + 2, by = box[i].y;
         if (an->kind == CUI_ANNOTATION_POINT || by + box[i].h > plot.y + 1)
             cui_draw_rect(ui, (cui_rect){ bx - 3, by, box[i].w + 2, box[i].h }, CUI_CORNERS(3), cui_alpha(CUI_C(ui, BACKGROUND), 0.86f));
-        if (an->label) cui__draw_text_line(ui, CUI_FONT_MONO, fs, bx, by, an->accent ? em : CUI_C(ui, FOREGROUND), an->label, -1, true);
+        if (an->label) cui__draw_text_line(ui, CUI_FONT_MONO, fs, bx, by, cui__ann_color(ui, an, em, CUI_C(ui, FOREGROUND)), an->label, -1, true);
         if (an->detail) cui__draw_text_line(ui, CUI_FONT_MONO, fs, bx, by + (an->label ? lh : 0), CUI_C(ui, TEXT_MUTED), an->detail, -1, true);
     }
 }

@@ -240,6 +240,8 @@ cui_app_open_url("https://example.com");
 
 Native dialogs on Windows and macOS; on Linux `zenity` or `kdialog` when installed. Kinds: `CUI_FILE_OPEN`, `CUI_FILE_SAVE`, `CUI_FILE_FOLDER`. Inside a `cui_app_run` callback, pass `NULL` for the app.
 
+On Windows, a save dialog accepts a full path in `default_name` to suggest both the directory and the file name. The dialog returns the selected path. The caller creates the file.
+
 ## 8. Screenshots and tests
 
 Any CUI app can save a screenshot and exit, which is handy for docs and visual tests:

@@ -13,3 +13,5 @@ A build has one window backend, set with `-DCUI_PLATFORM=` (`auto` is Win32 on W
 The GPU renderers are built with CMake only, not in the single-file distribution. `CUI_RENDERER=gpu` picks the GPU renderer at run time; [Performance](performance.md#direct3d-12-vulkan-and-metal-against-opengl) compares them.
 
 `wayland` uses the SDL2 implementation (`cui_app_backend` returns `sdl2`) but requires the Wayland video driver. Use `sdl2` instead if automatic selection or X11 fallback is desired.
+
+On Windows, `cui_app_file_dialog` with `CUI_FILE_FOLDER` works from either a single-threaded or a multithreaded COM apartment. The call waits for selection or cancellation in both cases.

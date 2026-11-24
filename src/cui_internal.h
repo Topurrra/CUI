@@ -993,6 +993,13 @@ double cui__cg_into_view(double scroll, double view, double lo, double hi);
 static inline bool cui__cg_sel_same(const cui_cellgrid_sel *a, const cui_cellgrid_sel *b) {
     return a->row == b->row && a->col == b->col && a->anchor_row == b->anchor_row && a->anchor_col == b->anchor_col;
 }
+/* the data grid's rows, for the tree table that drags over them (cui_grid.c): where grid `id`
+ * put its rows last frame (the area under the sticky header, and the top of row 0, which moves
+ * with the scroll), false before its first layout; a nudge of its scroll target; and whether
+ * the row cui_data_grid_row just began was pressed this frame */
+bool cui__grid_rows_at(cui_ctx *ui, cui_id id, cui_rect *view, float *row0_top);
+void cui__grid_scroll_by(cui_ctx *ui, cui_id id, float dy);
+bool cui__grid_row_pressed(cui_ctx *ui);
 cui_color cui__backdrop(cui_ctx *ui);
 
 void cui__paint_scrollbars(cui_ctx *ui, cui_node *n, cui_rect clip);

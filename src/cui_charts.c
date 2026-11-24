@@ -59,6 +59,21 @@ const char *cui__fmt_value(cui_ctx *ui, const char *fmt, float v) {
     return cui__frame_printf(ui, "%.0f", (double)v);
 }
 
+/* What the plot's left and right edges stand for in annotation x. A chart that sets x_min and
+ * x_max puts them at its first and last point, else x is the point's index. Bars sit in the
+ * middle of their slots, so their edges are half a step outside the first and last point;
+ * a single bar's slot spans x_min to x_max. */
+static void cui__chart_ann_x(const cui_chart_opts *o, int npts, bool bars, double *x0, double *x1) {
+    if (!(o->x_max > o->x_min)) {
+        *x0 = bars ? -0.5 : 0;
+        *x1 = bars ? npts - 0.5 : npts - 1;
+        return;
+    }
+    double half = bars && npts > 1 ? (o->x_max - o->x_min) / (npts - 1) * 0.5 : 0;
+    *x0 = o->x_min - half;
+    *x1 = o->x_max + half;
+}
+
 static cui_color cui__series_color(cui_ctx *ui, const cui_series *s, int k) {
     if (cui__color_set(s->color)) return cui_color_of(ui, s->color);
     return ui->theme.colors[CUI_TOKEN_SERIES_1 + (k % 6)];
@@ -312,7 +327,9 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
                 if (p->o.stacked) acc += s->values[i] * intro;
             }
         }
-        cui__paint_annotations(ui, p->o.annotations, p->o.annotation_count, plot, -0.5, npts - 0.5, lo, hi, plot.y, false);
+        double ax0, ax1;
+        cui__chart_ann_x(&p->o, npts, true, &ax0, &ax1);
+        cui__paint_annotations(ui, p->o.annotations, p->o.annotation_count, plot, ax0, ax1, lo, hi, plot.y, false);
         if (p->hover >= 0 && p->hover < npts) {
             float cx = plot.x + slot * (p->hover + 0.5f);
             if (!cui__chart_chip(ui, p, r, cx, col_top, p->hover))
@@ -392,7 +409,11 @@ static void cui__paint_xy_chart(cui_ctx *ui, cui_node *n, void *data) {
     for (int k = 0; k < p->count; k++)
         if (line_n[k] > 0) cui_draw_polyline(ui, lines[k], line_n[k], 2.0f, cui__series_color(ui, &p->series[k], k), false);
     cui_pop_clip(ui);
-    if (npts > 1) cui__paint_annotations(ui, p->o.annotations, p->o.annotation_count, plot, 0, npts - 1, lo, hi, plot.y, false);
+    if (npts > 1) {
+        double ax0, ax1;
+        cui__chart_ann_x(&p->o, npts, false, &ax0, &ax1);
+        cui__paint_annotations(ui, p->o.annotations, p->o.annotation_count, plot, ax0, ax1, lo, hi, plot.y, false);
+    }
     if (p->hover >= 0 && p->hover_t > 0.01f) {
         float hx = p->hx;
         cui_rect cl = { hx - 0.5f, plot.y, 1, plot.h };

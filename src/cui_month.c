@@ -426,7 +426,7 @@ cui_month_result cui_month_calendar_ex(cui_ctx *ui, const char *id_str, cui_date
             }
         if (hover_ev >= 0 || on_more) cui__set_cursor(ui, CUI_CURSOR_HAND);
     }
-    if (r.clicked && hover_day >= 0) {
+    if (r.released && hover_day >= 0) {
         if (hover_ev >= 0) res.event = hover_ev;
         else if (on_more) { st->more_day = hover_day; cui__popup_set(ui, pid, true); }
         else {

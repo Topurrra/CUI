@@ -108,6 +108,11 @@ jobs:
         run: sh .github/apt-install.sh libx11-dev
       - name: Generate cui.h, cui.c and cui_single.h
         run: python3 tools/amalgamate.py dist
+      - name: Compile the optimized amalgamation with GCC 15
+        if: matrix.cc == 'gcc'
+        run: >
+          docker run --rm -v "$PWD/dist:/src:ro" gcc:15 gcc -O3 -D_FORTIFY_SOURCE=2 -std=c99 -Wall
+          -Werror=array-bounds -Werror=stringop-overflow -DCUI_NO_APP -c /src/cui.c -o /tmp/cui.o
       - name: Build an app from each form, and the optional parts on and off
         run: |
           W="-std=c99 -O1 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers"
