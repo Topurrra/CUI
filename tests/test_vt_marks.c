@@ -602,6 +602,30 @@ static void test_cost(void) {
     cui_vt_destroy(v);
 }
 
+/* a frame (build and software render) of a view with 2000 marks and its ticks shown (hovered), against the same view without .marks */
+static void test_frame_cost(void) {
+    cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_DARK });
+    cui_set_viewport(ui, 640, 400, 1);
+    cui_set_reduced_motion(ui, true);
+    scene s = { mkvt(80, 24, 10000, 0), { 0 }, false, false };
+    for (int i = 0; i < 3; i++) build(ui, &s);
+    for (int i = 0; i < 2000; i++) run(s.vt, "ls", i % 5 ? "a\r\nb\r\n" : "c\r\n", i % 5 ? 0 : 1);
+    cui_input_mouse_move(ui, 300, 200);
+    double best[2] = { 1e9, 1e9 };
+    for (int pass = 0; pass < 6; pass++) {
+        s.marks = pass & 1;
+        build(ui, &s); render(ui);
+        double t0 = now_ms();
+        for (int f = 0; f < 50; f++) { cui_input_mouse_move(ui, 300.0f + (float)(f & 1), 200); build(ui, &s); render(ui); }
+        double t = (now_ms() - t0) / 50;
+        if (t < best[pass & 1]) best[pass & 1] = t;
+    }
+    printf("  frame with the scrollbar shown: %.3f ms without .marks, %.3f ms with 2000 ticks\n", best[0], best[1]);
+    CHECK(best[1] < best[0] * 1.5 + 0.5);
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 /* with a folder argument: the view with its ticks, a failed command's output selected, dark and light (vt-marks-dark.png, -light.png) */
 static void shots(const char *dir) {
     for (int dark = 0; dark < 2; dark++) {
@@ -643,6 +667,7 @@ int main(int argc, char **argv) {
     test_clipboard();
     test_view();
     test_cost();
+    test_frame_cost();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
