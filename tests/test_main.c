@@ -15959,6 +15959,41 @@ static void test_doc_tab_dot(void) {
     (void)tx;
 }
 
+/* cui_doc_tab.tint: a line of the tint along a tab's top and a wash over it, selected or not; the tab keeps its size;
+ * zero draws exactly what it drew before */
+static void test_doc_tab_tint(void) {
+    printf("doc tabs: tint\n");
+    static unsigned char px[800 * 600 * 4];
+    cui_color red = { 229, 72, 77, 255 };
+    uint32_t hash[2] = { 0, 0 };
+    float w[3];
+    for (int v = 0; v < 3; v++) {   /* none, none again, both tabs tinted */
+        dto_ctx d = { 0, { 0 }, { { "alpha.c", NULL, NULL, false }, { "beta.c", NULL, NULL, false } } };
+        if (v == 2) { d.tabs[0].tint = red; d.tabs[1].tint = red; }
+        cui_ctx *ui = new_ctx();
+        run(ui, build_dto, &d, 4);
+        cui_rect a = rect_of(ui, scoped_id(ui, "dt", "alpha.c")), b = rect_of(ui, scoped_id(ui, "dt", "beta.c"));
+        w[v] = a.w + b.w;
+        cui_sw_render(g_sw, cui_get_draw_data(ui), px, 800, 600, 800 * 4, CUI_SW_RGBA);
+        uint32_t h = 2166136261u;
+        for (int i = 0; i < 800 * 120 * 4; i++) h = (h ^ px[i]) * 16777619u;
+        if (v < 2) hash[v] = h;
+        else {
+            CHECK(h != hash[0]);
+            for (int t = 0; t < 2; t++) {
+                cui_rect r = t ? b : a;
+                const unsigned char *top = px + ((int)(r.y + 1) * 800 + (int)(r.x + r.w / 2)) * 4;
+                CHECK(top[0] > 180 && top[1] < 120 && top[2] < 120);                     /* the line on top is the tint */
+                const unsigned char *mid = px + ((int)(r.y + r.h / 2) * 800 + (int)(r.x + 4)) * 4;
+                CHECK(mid[0] > mid[1] + 4 || mid[0] < mid[1] - 4 || mid[0] != mid[2]);   /* the wash: not gray any more */
+            }
+        }
+        cui_destroy(ui);
+    }
+    CHECK(hash[0] == hash[1]);
+    CHECK(w[2] == w[0]);
+}
+
 static void test_doc_tabs_new_opts(void) {
     printf("doc tabs: no_active_underline, no_baseline, active_fill, height\n");
     cui_doc_tabs_opts zero = { 0 };
@@ -16357,6 +16392,7 @@ int main(void) {
     test_open_pointer();
     test_doc_tabs_new_opts();
     test_doc_tab_dot();
+    test_doc_tab_tint();
     test_instant_fold();
     test_explicit_lengths();
     test_code_editor();
