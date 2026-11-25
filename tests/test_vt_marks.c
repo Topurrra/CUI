@@ -551,15 +551,18 @@ static void test_view(void) {
     CHECK_EQ(s.r.scrolled, s.r.rows / 3 - MK(s.vt, 10).prompt_row);
     CHECK(!s.r.selected);
     /* the selected tick is drawn in the accent: the picture changes with the choice */
-    render(ui);
-    uint32_t h1 = 0; for (int i = 0; i < 640 * 400; i++) h1 = h1 * 31 + g_px[i];
-    cui_vt_mark_select(s.vt, 11, CUI_VT_MARK_SHOW);
+    #define TICKS_HASH(h) do { render(ui); h = 0; for (int y = 0; y < 400; y++) for (int x = 620; x < 634; x++) h = h * 31 + g_px[y * 640 + x]; } while (0)
+    uint32_t h1, h2, h3;
+    TICKS_HASH(h1);
+    cui_vt_mark_select(s.vt, 0, CUI_VT_MARK_SHOW);                         /* another one (the view moves, the ticks do not) */
     build(ui, &s); build(ui, &s);
+    TICKS_HASH(h2);
     cui_vt_mark_select(s.vt, 10, CUI_VT_MARK_SHOW);
     build(ui, &s); build(ui, &s);
-    render(ui);
-    uint32_t h2 = 0; for (int i = 0; i < 640 * 400; i++) h2 = h2 * 31 + g_px[i];
-    CHECK(h1 == h2);
+    TICKS_HASH(h3);
+    CHECK(h1 != h2);
+    CHECK(h1 == h3);
+    #undef TICKS_HASH
     /* without .marks the view ignores the request */
     s.marks = false;
     int at = s.r.scrolled;
@@ -599,8 +602,36 @@ static void test_cost(void) {
     cui_vt_destroy(v);
 }
 
-int main(void) {
+/* with a folder argument: the view with its ticks, a failed command's output selected, dark and light (vt-marks-dark.png, -light.png) */
+static void shots(const char *dir) {
+    for (int dark = 0; dark < 2; dark++) {
+        cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = dark ? CUI_THEME_DARK : CUI_THEME_LIGHT });
+        cui_set_viewport(ui, 640, 400, 1);
+        cui_set_reduced_motion(ui, true);
+        scene s = { mkvt(80, 24, 1000, 0), { 0 }, false, true };
+        for (int i = 0; i < 3; i++) build(ui, &s);
+        char b[256];
+        for (int i = 0; i < 40; i++) {
+            snprintf(b, sizeof b, "build step %d: compiled 12 files\r\nlinked\r\n", i);
+            run(s.vt, i % 9 == 4 ? "make test" : "make", i % 9 == 4 ? "3 tests failed\r\n" : b, i % 9 == 4 ? 2 : 0);
+        }
+        W(s.vt, A "PS> " B);
+        cui_vt_mark_select(s.vt, 31, CUI_VT_MARK_SELECT_OUTPUT);
+        cui_input_mouse_move(ui, 600, 200);
+        for (int i = 0; i < 3; i++) build(ui, &s);
+        render(ui);
+        char path[512];
+        snprintf(path, sizeof path, "%s/vt-marks-%s.png", dir, dark ? "dark" : "light");
+        cui_write_png(path, g_px, 640, 400, 640 * 4);
+        printf("  wrote %s\n", path);
+        cui_vt_destroy(s.vt);
+        cui_destroy(ui);
+    }
+}
+
+int main(int argc, char **argv) {
     g_sw = cui_sw_create();
+    if (argc > 1) { shots(argv[1]); cui_sw_destroy(g_sw); return 0; }
     test_off();
     test_parse();
     test_split();

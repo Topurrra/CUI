@@ -765,14 +765,15 @@ static float cui__vtm_tick_y(const cui__vt_info *I, cui_rect r, int64_t row) {
     return r.y + (float)(at / total) * r.h;
 }
 
-#define CUI__VTM_TICK_W 7.0f                 /* points from the view's right edge less 2 */
+#define CUI__VTM_TICK_R 7.0f                 /* a tick ends this far from the view's right edge, beside the thumb (3 points at 6 from the edge) */
+#define CUI__VTM_TICK_W 6.0f
 
 void cui__vt_mk_paint(cui_ctx *ui, const cui_vt *v, cui_rect r) {
     const cui__vt_mk *k = cui__vt_mk_get(v);
     if (!k || !k->n) return;
     cui__vt_info I; cui__vt_get_info(v, &I);
     float s = ui->scale > 0 ? ui->scale : 1, th = fmaxf(1.0f, floorf(2.0f * s + 0.5f)) / s;
-    float x1 = r.x + r.w - 2, x0 = x1 - CUI__VTM_TICK_W;
+    float x1 = r.x + r.w - CUI__VTM_TICK_R, x0 = x1 - CUI__VTM_TICK_W;
     cui_color plain = cui_alpha(CUI_C(ui, TEXT_SECONDARY), 0.85f), bad = CUI_C(ui, DANGER), acc = cui__emphasis(ui);
     int sel = k->sel_any ? cui__vtm_index_of(k, k->sel_id) : -1;
     int last_py = INT_MIN, pri = 0;           /* ticks on one device row are one: the selected wins, then a failed one */
@@ -797,7 +798,7 @@ void cui__vt_mk_paint(cui_ctx *ui, const cui_vt *v, cui_rect r) {
 /* the mark whose tick is under the mouse (within 4 points, the nearest), -1 none */
 int cui__vt_mk_hit(const cui_vt *v, cui_rect r, float mx, float my) {
     const cui__vt_mk *k = cui__vt_mk_get(v);
-    if (!k || !k->n || mx < r.x + r.w - 2 - CUI__VTM_TICK_W - 3 || mx > r.x + r.w || my < r.y || my > r.y + r.h) return -1;
+    if (!k || !k->n || mx < r.x + r.w - CUI__VTM_TICK_R - CUI__VTM_TICK_W - 3 || mx > r.x + r.w || my < r.y || my > r.y + r.h) return -1;   /* the ticks and the thumb's column */
     cui__vt_info I; cui__vt_get_info(v, &I);
     int best = -1; float bd = 4.01f;
     for (int i = 0; i < k->n; i++) {
