@@ -270,7 +270,7 @@ static void test_osc8(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus, links, smart, cos, w32; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus, links, smart, cos, w32, app_clip, do_copy, do_paste, no_input; } scene;
 static cui_cursor g_cursor;
 static char g_clip[4096];
 static void set_clip(void *user, const char *text) { (void)user; snprintf(g_clip, sizeof g_clip, "%s", text); }
@@ -279,9 +279,13 @@ static void set_cur(void *user, cui_cursor c) { (void)user; g_cursor = c; }
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .links = s->links, .smart_select = s->smart, .copy_on_select = s->cos, .win32_keys = s->w32); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) {
+        s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .links = s->links, .smart_select = s->smart, .copy_on_select = s->cos, .win32_keys = s->w32,
+                           .no_clipboard_keys = s->app_clip, .copy = s->do_copy, .paste = s->do_paste, .no_input = s->no_input);
+    }
     cui_end_frame(ui);
     s->focus = false;
+    s->do_copy = s->do_paste = false;                         /* asked for one frame */
 }
 
 static float g_cw;
@@ -533,6 +537,97 @@ static void test_select(void) {
     cui_destroy(ui);
 }
 
+/* ---- the app's own copy and paste (.no_clipboard_keys, .copy, .paste, `selected`) ---- */
+
+static void press(cui_ctx *ui, scene *s, cui_key k, int m) { cui_input_key(ui, k, true, m); build(ui, s); }
+static void release(cui_ctx *ui, scene *s, cui_key k, int m) { cui_input_key(ui, k, false, m); cui_input_key(ui, CUI_KEY_NONE, false, 0); build(ui, s); }
+
+static void select_hello(cui_ctx *ui, scene *s) {
+    W(s->vt, "\x1b[2J\x1b[Hhello world\r\n");
+    build(ui, s);
+    pause(ui, s);
+    at_cell(ui, s, 2, 0);
+    click(ui, s); click(ui, s);                               /* a double click takes the word */
+}
+
+static void test_app_clipboard(void) {
+    scene s;
+    cui_ctx *ui = view_ctx(&s, 80);
+    /* as before, without the option: Ctrl+C copies a selection, Ctrl+V pastes; nothing goes to the program */
+    select_hello(ui, &s);
+    CHECK(s.r.selected);
+    g_clip[0] = 0;
+    press(ui, &s, CUI_KEY_C, CUI_MOD_CTRL);
+    CHECK(s.r.copied); CHECK_STR(g_clip, "hello"); CHECK_EQ(s.r.input_len, 0); CHECK(!s.r.selected);
+    release(ui, &s, CUI_KEY_C, CUI_MOD_CTRL);
+    press(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    CHECK(s.r.paste && !strcmp(s.r.paste, "pasted")); CHECK_EQ(s.r.input_len, 0);
+    release(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    /* with it the keys are the program's: Ctrl+C is the interrupt even over a selection, Ctrl+V is ^V */
+    s.app_clip = true;
+    select_hello(ui, &s);
+    CHECK(s.r.selected);
+    g_clip[0] = 0;
+    press(ui, &s, CUI_KEY_C, CUI_MOD_CTRL);
+    CHECK(!s.r.copied); CHECK(g_clip[0] == 0);
+    CHECK(s.r.input_len == 1 && s.r.input[0] == 0x03);
+    release(ui, &s, CUI_KEY_C, CUI_MOD_CTRL);
+    select_hello(ui, &s);
+    press(ui, &s, CUI_KEY_C, CUI_MOD_CTRL | CUI_MOD_SHIFT);   /* Ctrl+Shift+C too: no copy */
+    CHECK(!s.r.copied); CHECK(g_clip[0] == 0);
+    release(ui, &s, CUI_KEY_C, CUI_MOD_CTRL | CUI_MOD_SHIFT);
+    press(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    CHECK(s.r.paste == NULL); CHECK(s.r.input_len == 1 && s.r.input[0] == 0x16);
+    release(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    /* the app copies and pastes when it wants to */
+    select_hello(ui, &s);
+    CHECK(s.r.selected);
+    s.do_copy = true; build(ui, &s);
+    CHECK(s.r.copied); CHECK_STR(g_clip, "hello"); CHECK(!s.r.selected); CHECK_EQ(s.r.input_len, 0);
+    g_clip[0] = 0;
+    s.do_copy = true; build(ui, &s);                          /* nothing selected: nothing copied */
+    CHECK(!s.r.copied); CHECK(g_clip[0] == 0);
+    s.do_paste = true; build(ui, &s);
+    CHECK(s.r.paste && !strcmp(s.r.paste, "pasted")); CHECK(!s.r.paste_bracketed);
+    build(ui, &s);
+    CHECK(s.r.paste == NULL);                                 /* one frame */
+    W(s.vt, "\x1b[?2004h");
+    s.do_paste = true; build(ui, &s);
+    CHECK(s.r.paste && s.r.paste_bracketed);
+    W(s.vt, "\x1b[?2004l");
+    /* a key the app took first never reaches the program */
+    cui_input_key(ui, CUI_KEY_V, true, CUI_MOD_CTRL);
+    cui_key_consume(ui, CUI_KEY_V);
+    build(ui, &s);
+    CHECK_EQ(s.r.input_len, 0);
+    release(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    /* no_input: no copy, no paste */
+    select_hello(ui, &s);
+    s.no_input = true;
+    s.do_copy = true; build(ui, &s);
+    CHECK(!s.r.copied);
+    s.do_paste = true; build(ui, &s);
+    CHECK(s.r.paste == NULL);
+    s.no_input = false;
+    /* key records (a console host): Ctrl+V goes as its record, not as a paste */
+    s.w32 = true;
+    W(s.vt, "\x1b[?9001h");
+    build(ui, &s);
+    press(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    bool rec = false;                                         /* ESC [ 86 ; ... _ : the V key's record */
+    for (int i = 0; i + 4 <= s.r.input_len; i++) rec |= !memcmp(s.r.input + i, "[86;", 4);
+    CHECK(s.r.paste == NULL); CHECK(rec);
+    release(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    s.app_clip = false;
+    press(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);                   /* without the option it is the view's paste again */
+    CHECK(s.r.paste != NULL);
+    release(ui, &s, CUI_KEY_V, CUI_MOD_CTRL);
+    W(s.vt, "\x1b[?9001l");
+    s.w32 = false;
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 /* ---- cost ---- */
 
 static double now_s(void) { return (double)clock() / CLOCKS_PER_SEC; }
@@ -576,6 +671,7 @@ int main(void) {
     printf("view links\n"); test_view_links();
     printf("view click\n"); test_view_click();
     printf("select\n"); test_select();
+    printf("app clipboard\n"); test_app_clipboard();
     printf("cost\n"); test_cost();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);

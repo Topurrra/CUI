@@ -4753,7 +4753,10 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * `paste`, valid until the next clipboard call, for you to write (with ESC [ 200 ~ before and ESC [ 201 ~
  * after when `paste_bracketed` is set; turn line breaks into \r first). Shift+PageUp, Shift+PageDown,
  * Shift+Home and Shift+End and the wheel move through the scrollback; on the alternate screen the wheel
- * sends arrow keys. Drag, double click and triple click select (see `.smart_select` and `.copy_on_select`). */
+ * sends arrow keys. Drag, double click and triple click select (see `.smart_select` and `.copy_on_select`).
+ * An app that binds copy and paste itself sets `.no_clipboard_keys`: those four keys then go to the program
+ * unless the app consumes them, and it copies and pastes with `.copy` and `.paste` (`selected` tells it
+ * whether there is a selection to copy). */
 enum {
     CUI_VT_BOLD = 1 << 24, CUI_VT_DIM = 1 << 25, CUI_VT_ITALIC = 1 << 26, CUI_VT_UNDERLINE = 1 << 27,
     CUI_VT_INVERSE = 1 << 28, CUI_VT_STRIKE = 1 << 29,
@@ -4889,6 +4892,11 @@ typedef struct cui_vt_opts {
     bool smart_select;             /* a double click takes a whole path or URL (else the word, across wrapped rows), a triple click the whole wrapped line; copied text loses the spaces at the end of its lines */
     bool copy_on_select;           /* a finished selection (drag, double or triple click) goes to the clipboard at once (`copied`); a right click then always pastes */
     const cui_vt_look *look;       /* colors, padding and cursor of this view (see cui_vt_look); NULL: the theme's, as before */
+    bool no_clipboard_keys;        /* Ctrl+C, Ctrl+Shift+C, Ctrl+V and Ctrl+Shift+V (Cmd+C, Cmd+V) are the app's: the view neither copies nor pastes on them and
+                                      sends them to the program like any other key (take one first with cui_key_consume); copy and paste with `.copy` and `.paste`,
+                                      and see `selected`. A right click still copies or pastes. false: the view's own keys, as before */
+    bool copy;                     /* this frame: copy the selection, as Ctrl+Shift+C does (`copied` says whether there was one; the selection ends) */
+    bool paste;                    /* this frame: paste, as Ctrl+V does (the clipboard's text comes back in `paste`) */
 } cui_vt_opts;
 /* Links (`.links = true`). A link is an OSC 8 hyperlink (kept with CUI_VT_FEATURE_LINKS) or text that looks like one:
  *   - a URL: http://, https://, file:// (punctuation at its end and a closing bracket it did not open are not part of it);
@@ -4924,6 +4932,7 @@ typedef struct cui_vt_result {
     int cols, rows;
     int scrolled;                  /* rows the view looks back into the scrollback (0: the live screen) */
     const cui_vt_link *link;       /* `.links`: the link Ctrl+clicked this frame (no selection starts), or NULL; valid until the next frame */
+    bool selected;                 /* a selection is shown at the end of this frame (what Ctrl+C or `.copy` would copy) */
 } cui_vt_result;
 CUI_API cui_vt_result cui_vt_view_ex(cui_ctx *ui, const char *id, cui_vt *vt, const cui_vt_opts *opts);
 CUI_API bool cui_vt_focused(cui_ctx *ui, const char *id);                     /* the view with this id has the keyboard (id as given to cui_vt_view, in the same id scope) */

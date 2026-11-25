@@ -1336,6 +1336,7 @@ typedef struct {
     int blink_cx, blink_cy;           /* where the cursor was then */
     uint64_t blink_total;             /* sb_total then: output that scrolls also shows it again */
     bool blink_had;                   /* the view had the keyboard and the window the focus last frame */
+    bool app_clip;                    /* .no_clipboard_keys this frame: Ctrl+C and Ctrl+V are ordinary keys */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -1440,7 +1441,7 @@ static void cui__vt_keys(cui_ctx *ui, const cui_vt *v, cui__vt_state *st) {
         if (!reps) continue;
         bool scroll_key = shift && !ctrl && (k == CUI_KEY_PAGE_UP || k == CUI_KEY_PAGE_DOWN || k == CUI_KEY_HOME || k == CUI_KEY_END) && v->cur == 0;
         bool sup = (mods & CUI_MOD_SUPER) != 0;
-        bool clip_key = (k == CUI_KEY_C && ((ctrl && (st->has_sel || shift)) || sup)) || (k == CUI_KEY_V && ((ctrl && !alt) || sup));
+        bool clip_key = !st->app_clip && ((k == CUI_KEY_C && ((ctrl && (st->has_sel || shift)) || sup)) || (k == CUI_KEY_V && ((ctrl && !alt) || sup)));
         if (scroll_key || clip_key) continue;
         char fin = 0; const char *code = "";
         switch (k) {
@@ -1588,8 +1589,8 @@ CUI__VT_SMALL static void cui__vt_keys32(cui_ctx *ui, const cui_vt *v, cui__vt_s
     memset(sent, 0, sizeof sent);
     rp[0] = 0;
     if (shift && !ctrl && v->cur == 0) rp[CUI_KEY_PAGE_UP] = rp[CUI_KEY_PAGE_DOWN] = rp[CUI_KEY_HOME] = rp[CUI_KEY_END] = 0;
-    if ((ctrl && (st->has_sel || shift)) || sup) rp[CUI_KEY_C] = 0;
-    if ((ctrl && !alt) || sup) rp[CUI_KEY_V] = 0;
+    if (!st->app_clip && ((ctrl && (st->has_sel || shift)) || sup)) rp[CUI_KEY_C] = 0;
+    if (!st->app_clip && ((ctrl && !alt) || sup)) rp[CUI_KEY_V] = 0;
 
     /* text: what did not fit the last frame, then this frame's (nothing under a plain Ctrl), decoded; each character is given the key that types it */
     char txt[512]; int tl = st->w_pend_n;
@@ -2165,10 +2166,21 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     }
     /* clipboard and scrollback keys, then the keys a program gets */
     bool ctrl = (ui->mods & CUI_MOD_CTRL) != 0, shift = (ui->mods & CUI_MOD_SHIFT) != 0, sup = (ui->mods & CUI_MOD_SUPER) != 0;
+    st->app_clip = o->no_clipboard_keys;
+    if (!o->no_input && o->copy && st->has_sel) {                       /* the app's copy and paste (.copy, .paste), as the keys below do */
+        char *t = cui__vt_selection_text(ui, v, st);
+        if (t && o->smart_select) cui__vt_trim_copy(t);
+        if (t) { cui_set_clipboard_text(ui, t); cui__free(ui, t); res.copied = true; }
+        st->has_sel = false;
+    }
+    if (!o->no_input && o->paste) {
+        const char *t = cui_get_clipboard_text(ui);
+        if (t && *t) { res.paste = t; res.paste_len = (int)strlen(t); res.paste_bracketed = v->bracketed; st->off = 0; st->has_sel = false; }
+    }
     if (focused && !o->no_input) {
         ui->tab_owner = id;
-        bool copy = cui_key_pressed(ui, CUI_KEY_C) && ((ctrl && (st->has_sel || shift)) || (sup && !ctrl));
-        bool paste = cui_key_pressed(ui, CUI_KEY_V) && ((ctrl && !(ui->mods & CUI_MOD_ALT)) || sup);
+        bool copy = !st->app_clip && cui_key_pressed(ui, CUI_KEY_C) && ((ctrl && (st->has_sel || shift)) || (sup && !ctrl));
+        bool paste = !st->app_clip && cui_key_pressed(ui, CUI_KEY_V) && ((ctrl && !(ui->mods & CUI_MOD_ALT)) || sup);
         if (copy && st->has_sel) {
             char *t = cui__vt_selection_text(ui, v, st);
             if (t && o->smart_select) cui__vt_trim_copy(t);
@@ -2213,6 +2225,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     }
     res.input = st->out; res.input_len = st->out_n;
     res.scrolled = st->off;
+    res.selected = st->has_sel;
     st->out_n = 0;      /* the bytes stay readable in `out` until the next frame writes there */
 
     int leaf = cui__leaf(ui, id, o->width.kind ? o->width : CUI_FILL, o->height.kind ? o->height : CUI_FILL);
