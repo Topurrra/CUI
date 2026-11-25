@@ -31,7 +31,8 @@ typedef struct { uint32_t off; uint16_t len; uint8_t wrapped, pic; } cui__vt_lin
 typedef struct cui__vt_rf cui__vt_rf;   /* CUI_VT_FEATURE_REFLOW's state (the "Reflow" part below) */
 
 enum { CUI__VT_GROUND, CUI__VT_ESC, CUI__VT_ESC_INT, CUI__VT_CSI, CUI__VT_OSC, CUI__VT_OSC_ESC, CUI__VT_STR, CUI__VT_STR_ESC,
-       CUI__VT_DCS, CUI__VT_SIXEL };   /* the last two only with an extension (cui_vt_sixel.c): a DCS's parameters, sixel data */
+       CUI__VT_DCS, CUI__VT_SIXEL,     /* the last two only with an extension (cui_vt_sixel.c): a DCS's parameters, sixel data */
+       CUI__VT_OSC52 };                /* only with CUI_VT_FEATURE_MARKS (cui_vt_marks.c): an OSC 52 copy request, read in runs */
 
 struct cui_vt {
     int cols, rows;
@@ -76,6 +77,7 @@ struct cui_vt {
     unsigned rf_seq;                  /* reflows done (cui_vt_reflows) */
     bool lk_on;                       /* CUI_VT_FEATURE_LINKS: OSC 8 hyperlinks are kept */
     cui__vt_lx *lk;                   /* their table and cell ids (cui_vt_links.c): NULL until the first one */
+    cui__vt_mk *mk;                   /* CUI_VT_FEATURE_MARKS: command marks, progress, copy requests (cui_vt_marks.c); NULL while off */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -138,6 +140,7 @@ void cui_vt_destroy(cui_vt *v) {
     if (v->find) cui__vt_find_free(v);
     if (v->rf) cui__vt_rf_free(v);
     if (v->lk) cui__vt_lk_free(v);
+    if (v->mk) cui__vt_mk_free(v);
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
     free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap); free(v->cwd);
     free(v);
@@ -152,6 +155,7 @@ size_t cui_vt_memory(const cui_vt *v) {
     if (v->cwd) { size_t h = strlen(v->cwd); n += h + strlen(v->cwd + h + 1) + 2; }
     if (v->rf) n += cui__vt_rf_memory(v);
     if (v->lk) n += cui__vt_lk_memory(v);
+    if (v->mk) n += cui__vt_mk_memory(v);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -162,6 +166,7 @@ size_t cui_vt_memory(const cui_vt *v) {
 static void cui__vt_sb_drop(cui_vt *v) {
     v->sb_head = (v->sb_head + 1) % v->sb_max;
     v->sb_count--;
+    if (v->mk) cui__vt_mk_trim(v);         /* a mark whose prompt was on that line goes */
 }
 
 static void cui__vt_sb_push(cui_vt *v, const cui__vt_cell *src, int n, uint8_t wrapped) {
@@ -214,6 +219,10 @@ static void cui__vt_clear_row(cui_vt *v, int y) {
 static void cui__vt_scroll_rows(cui_vt *v, int top, int bot, int n, bool keep) {
     cui__vt_screen *s = CUI__VT_S(v);
     n = CUI_MIN(n, bot - top + 1);
+    if (v->mk && v->cur == 0) {             /* marks keep their numbers when the whole screen scrolls into the scrollback; otherwise they move */
+        bool pushed = keep && top == 0 && v->sb_max > 0;
+        if (!(pushed && bot == v->rows - 1)) cui__vt_mk_scroll(v, top, bot, n, pushed ? 1 : 0);
+    }
     for (int i = 0; i < n; i++) {
         uint16_t slot = s->map[top];
         if (keep && v->cur == 0 && top == 0) {
@@ -232,6 +241,7 @@ static void cui__vt_scroll_up(cui_vt *v, int top, int bot, int n) { cui__vt_scro
 static void cui__vt_scroll_down(cui_vt *v, int top, int bot, int n) {
     cui__vt_screen *s = CUI__VT_S(v);
     n = CUI_MIN(n, bot - top + 1);
+    if (v->mk && v->cur == 0) cui__vt_mk_scroll(v, top, bot, n, -1);
     for (int i = 0; i < n; i++) {
         uint16_t slot = s->map[bot];
         memmove(&s->map[top + 1], &s->map[top], sizeof(uint16_t) * (size_t)(bot - top));
@@ -494,7 +504,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
         if (m == 0) { cui__vt_erase(v, v->cy, v->cx, v->cols); for (int y = v->cy + 1; y < v->rows; y++) cui__vt_erase(v, y, 0, v->cols); }
         else if (m == 1) { for (int y = 0; y < v->cy; y++) cui__vt_erase(v, y, 0, v->cols); cui__vt_erase(v, v->cy, 0, v->cx + 1); }
         else if (m == 2 || m == 3) { if (m == 2) for (int y = 0; y < v->rows; y++) cui__vt_erase(v, y, 0, v->cols);
-                                     else if (v->cur == 0) { v->sb_count = 0; v->sb_pos = 0; if (v->pic_on & CUI__VT_PIC_SB) cui__vt_pic_trim_sb(v); } }
+                                     else if (v->cur == 0) { v->sb_count = 0; v->sb_pos = 0; if (v->pic_on & CUI__VT_PIC_SB) cui__vt_pic_trim_sb(v); if (v->mk) cui__vt_mk_trim(v); } }
         v->pend = false;
         break;
     }
@@ -573,6 +583,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
         if (v->x) cui__vt_x_reset(v);
         if (v->lk) cui__vt_lk_reset(v);
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
+        if (v->mk) cui__vt_mk_reset(v);       /* progress off, the screen's marks go with its text */
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
         break;
@@ -633,6 +644,7 @@ static void cui__vt_osc_end(cui_vt *v, bool bel) {
         v->title[k] = 0;
     }
     if (code == 7 && i < v->osc_n && v->osc[i] == ';') cui__vt_osc_cwd(v, v->osc + i + 1, v->osc_n - i - 1);
+    if (v->mk && (code == 133 || code == 633 || code == 9) && i < v->osc_n && v->osc[i] == ';') cui__vt_mk_osc(v, code, v->osc + i + 1, v->osc_n - i - 1);   /* marks, progress (cui_vt_marks.c) */
 }
 
 static void cui__vt_control(cui_vt *v, unsigned char c) {
@@ -708,7 +720,16 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
         case CUI__VT_OSC:
             if (c == 0x07) { cui__vt_osc_end(v, true); v->state = CUI__VT_GROUND; }
             else if (c == 0x1B) v->state = CUI__VT_OSC_ESC;
-            else if (v->osc_n + 1 < (int)sizeof v->osc) v->osc[v->osc_n++] = (char)c;
+            else if (v->osc_n + 1 < (int)sizeof v->osc) {
+                v->osc[v->osc_n++] = (char)c;
+                if (v->osc_n == 3 && c == ';' && v->mk && v->osc[0] == '5' && v->osc[1] == '2') { cui__vt_mk_c52_begin(v); v->state = CUI__VT_OSC52; }   /* a copy request may be long: read past the buffer */
+            }
+            break;
+        case CUI__VT_OSC52:                 /* only with marks: base64 decoded in runs up to the terminator */
+            i += cui__vt_mk_c52_feed(v, d + i, len - i);
+            if (i >= len) break;
+            cui__vt_mk_c52_end(v);
+            v->state = d[i] == 0x1B ? CUI__VT_STR_ESC : CUI__VT_GROUND;     /* BEL ends it; ESC \ too (any other ESC starts its sequence) */
             break;
         case CUI__VT_OSC_ESC:
             if (c == '\\') { cui__vt_osc_end(v, false); v->state = CUI__VT_GROUND; }
@@ -756,9 +777,11 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     v->wseq++;
     if (v->lk) cui__vt_lk_free(v);                    /* cells move: hyperlinks go (cui_vt_links.c), the text stays */
     if (v->rf) { cui__vt_rf_resize(v, cols, rows); return; }      /* CUI_VT_FEATURE_REFLOW (below) */
+    int64_t mk_t0 = (int64_t)v->sb_total; int mk_drop = 0;        /* marks follow (cui_vt_marks.c) */
     /* the cursor must stay on screen: rows above it move into the scrollback */
     if (v->cur == 0 && v->cy >= rows) {
         int drop = v->cy - rows + 1;
+        mk_drop = drop;
         for (int i = 0; i < drop; i++) {
             cui__vt_screen *s = &v->scr[0];
             cui__vt_sb_push(v, cui__vt_row(v, s, 0), v->cols, s->wrap[s->map[0]]);
@@ -786,6 +809,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     v->stop = 0; v->sbot = rows - 1;
     v->cx = CUI_MIN(v->cx, cols - 1); v->cy = CUI_MIN(v->cy, rows - 1);
     v->pend = false;
+    if (v->mk) cui__vt_mk_cut(v, mk_t0, mk_drop);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -815,6 +839,7 @@ struct cui__vt_rf {
     cui__vt_cell *tmp; uint8_t *twrap; size_t tcap, twcap;      /* the screen's rows at the new width, before they are placed */
     int32_t *map; int map_n, map_cap; bool map_ok;              /* the last scrollback reflow: line i is now map[i] (-1: gone) */
     uint64_t map_first;               /* the first kept line's number right after it */
+    cui__vt_rfpt *pts; int npts;      /* the cells of marks the pass being made follows (cui_vt_marks.c), sorted; NULL none */
 };
 
 static const cui__vt_cell cui__vt_rf_blank_cell = { 0, 0, 0 };
@@ -862,8 +887,17 @@ typedef struct {
     int W, col;                       /* the new width; cells in the row being filled */
     bool to_sb, failed;
     int64_t rows;                     /* rows made so far */
+    cui__vt_rfpt *pts; int npts, pi;  /* cells to follow (rf->pts), and the first not placed yet */
     cui__vt_cell row[CUI__VT_MAX_COLS];
 } cui__vt_rfw;
+
+/* the cells to follow up to source cell (r, c) are where the writer is now */
+static void cui__vt_rfw_follow(cui__vt_rfw *w, int64_t r, int c) {
+    while (w->pi < w->npts && (w->pts[w->pi].r < r || (w->pts[w->pi].r == r && w->pts[w->pi].c <= c))) {
+        cui__vt_rfpt *q = &w->pts[w->pi++];
+        q->orow = w->rows; q->ocol = w->col; q->hit = true;
+    }
+}
 
 static void cui__vt_rfw_emit(cui__vt_rfw *w, int n, uint8_t wrap) {
     if (w->to_sb) cui__vt_sb_push(w->v, w->row, n, wrap);
@@ -927,10 +961,12 @@ static void cui__vt_rf_line(cui__vt_rfw *w, cui__vt_rf_get get, const void *src,
                 cui__vt_rfw_emit(w, w->W, f);
             }
             if (r == cur_r && x == cur_c) { *orow = w->rows; *ocol = w->col; }
+            if (w->npts) cui__vt_rfw_follow(w, r, x);
             w->row[w->col++] = cell;
             if (wide) w->row[w->col++] = c[x + 1];
         }
     }
+    if (w->npts) cui__vt_rfw_follow(w, CUI_MAX(r1, er), INT_MAX);     /* cells in the blanks at the line's end: its end */
     cui__vt_rfw_emit(w, w->col, dangling ? 1 : 0);
 }
 
@@ -963,10 +999,12 @@ static void cui__vt_rf_sb(cui_vt *v, int W) {
     uint64_t first = v->sb_total - (uint64_t)n;
     v->sb = nsb; v->sb_lines = nl; v->sb_head = 0; v->sb_count = 0; v->sb_pos = 0; v->sb_total = first;
     w->v = v; w->W = W; w->col = 0; w->to_sb = true; w->failed = false; w->rows = 0;
+    w->pts = rf->pts; w->npts = rf->npts; w->pi = 0;
     for (int i = 0; i < n;) {
         const cui__vt_line *L = &src.lines[(src.head + i) % src.max];
         if (L->pic) {
             rf->map[i] = (int32_t)w->rows;
+            if (w->npts) cui__vt_rfw_follow(w, i, INT_MAX);
             int len = CUI_MIN((int)L->len, W);
             memcpy(w->row, src.sb + L->off, (size_t)len * sizeof *w->row);
             cui__vt_rfw_emit(w, len, L->wrapped);
@@ -1010,6 +1048,7 @@ static bool cui__vt_rf_capture(cui_vt *v) {
     else { rf->bcx = v->sx; rf->bcy = v->sy; rf->bpend = v->spend; }      /* behind the alternate screen: the cursor it saved */
     rf->bcx = CUI_CLAMP(rf->bcx, 0, v->cols - 1); rf->bcy = CUI_CLAMP(rf->bcy, 0, v->rows - 1);
     rf->base_ok = true; rf->pushed = 0;
+    if (v->mk) cui__vt_mk_rf_capture(v);       /* marks on it remember their cells in it */
     return true;
 }
 
@@ -1030,6 +1069,7 @@ static bool cui__vt_rf_screen(cui_vt *v, int W, int H, cui__vt_screen *out, int 
     cui__vt_rfw *w = (cui__vt_rfw *)malloc(sizeof *w);
     if (!w) { cui__vt_screen_free(out); return false; }
     w->v = v; w->W = W; w->col = 0; w->to_sb = false; w->failed = false; w->rows = 0;
+    w->pts = rf->pts; w->npts = rf->npts; w->pi = 0;
     int last = rf->bcy;
     for (int y = rf->brows - 1; y > last; y--) {
         const cui__vt_cell *c = rf->bcells + (size_t)y * (size_t)rf->bcols;
@@ -1047,6 +1087,10 @@ static bool cui__vt_rf_screen(cui_vt *v, int W, int H, cui__vt_screen *out, int 
         y = z + 1;
     }
     if (w->failed) { free(w); cui__vt_screen_free(out); return false; }
+    while (w->pi < w->npts) {                  /* marks on the blank rows below the last line keep their distance to it */
+        cui__vt_rfpt *q = &w->pts[w->pi++];
+        q->orow = w->rows + (q->r - last - 1); q->ocol = q->c; q->hit = true;
+    }
     bool pend = false;
     if (rf->bpend) { if (ccol >= W - 1) { ccol = W - 1; pend = true; } else ccol++; }   /* the cursor was past its cell */
     int64_t N = w->rows, p = N > H ? N - H : 0;
@@ -1064,22 +1108,33 @@ static bool cui__vt_rf_screen(cui_vt *v, int W, int H, cui__vt_screen *out, int 
 
 static void cui__vt_rf_resize(cui_vt *v, int cols, int rows) {
     cui__vt_rf *rf = v->rf;
+    int64_t mk_t0 = (int64_t)v->sb_total;                       /* marks (cui_vt_marks.c) follow their cells through both passes */
+    if (v->mk) cui__vt_mk_rf_begin(v);
     bool cut_main = (v->pic_on & CUI__VT_PIC_MAIN) != 0;       /* pictures on the main screen: it is cut as before (the scrollback still reflows) */
     if (cut_main) cui__vt_rf_commit(v);
     else if (!rf->base_ok && !cui__vt_rf_capture(v)) cut_main = true;
     if (rf->pushed) cui__vt_rf_pop(v, rf->pushed);
     rf->pushed = 0;
+    cui__vt_mk_plan pl;
+    memset(&pl, 0, sizeof pl);
+    if (v->mk) cui__vt_mk_rf_plan(v, !cut_main, mk_t0, &pl);
+    rf->pts = pl.sb; rf->npts = pl.nsb;
     if (cols != v->cols) cui__vt_rf_sb(v, cols);
     else rf->map_ok = false;
+    bool mk_sb = cols != v->cols && rf->map_ok;
+    rf->pts = pl.base; rf->npts = pl.nbase;
     /* the screens that are cut get their new grids first, so running out of memory changes nothing */
     cui__vt_screen ns[2];
     memset(ns, 0, sizeof ns);
-    if (v->scr[1].cells && !cui__vt_screen_alloc(&ns[1], cols, rows)) { cui__vt_screen_free(&ns[1]); return; }
+    if (v->scr[1].cells && !cui__vt_screen_alloc(&ns[1], cols, rows)) { cui__vt_screen_free(&ns[1]); rf->pts = NULL; rf->npts = 0; if (v->mk) cui__vt_mk_rf_end(v, &pl, mk_sb, false, 0, 0); return; }
     int ncx = 0, ncy = 0; bool npend = false;
     bool main_done = !cut_main && cui__vt_rf_screen(v, cols, rows, &ns[0], &ncx, &ncy, &npend);
-    if (!main_done && !cui__vt_screen_alloc(&ns[0], cols, rows)) { cui__vt_screen_free(&ns[0]); cui__vt_screen_free(&ns[1]); return; }
+    int mk_p = main_done ? rf->pushed : 0, mk_drop = 0;
+    rf->pts = NULL; rf->npts = 0;
+    if (!main_done && !cui__vt_screen_alloc(&ns[0], cols, rows)) { cui__vt_screen_free(&ns[0]); cui__vt_screen_free(&ns[1]); if (v->mk) cui__vt_mk_rf_end(v, &pl, mk_sb, false, 0, 0); return; }
     if (!main_done && v->cur == 0 && v->cy >= rows) {           /* cut as before: the cursor stays on screen */
         int drop = v->cy - rows + 1;
+        mk_drop = drop;
         for (int i = 0; i < drop; i++) {
             cui__vt_screen *s = &v->scr[0];
             cui__vt_sb_push(v, cui__vt_row(v, s, 0), v->cols, s->wrap[s->map[0]]);
@@ -1114,6 +1169,7 @@ static void cui__vt_rf_resize(cui_vt *v, int cols, int rows) {
     }
     if (!rf->told && v->cur == 0) cui__vt_rf_commit(v);      /* the program hears of every size: the next reflow starts from this one */
     v->rf_seq++;
+    if (v->mk) cui__vt_mk_rf_end(v, &pl, mk_sb, main_done, mk_p, mk_drop);
 }
 
 /* A view that looked back keeps the same text at its top after a reflow (sb0: the scrollback's lines before it). */
@@ -1281,6 +1337,24 @@ cui__vt_lx *cui__vt_lk(const cui_vt *v) { return v->lk; }
 void cui__vt_set_lk(cui_vt *v, cui__vt_lx *lx) { v->lk = lx; }
 void cui__vt_set_lk_on(cui_vt *v, bool on) { v->lk_on = on; }
 
+/* for cui_vt_marks.c */
+cui__vt_mk *cui__vt_mk_get(const cui_vt *v) { return v->mk; }
+void cui__vt_set_mk(cui_vt *v, cui__vt_mk *mk) { v->mk = mk; }
+int cui__vt_main_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool *wrapped) {
+    int64_t row = abs - (int64_t)v->sb_total;
+    int n = 0; bool w = false;
+    const cui__vt_cell *c;
+    if (row >= 0) {                                         /* the main screen's row, also behind the alternate one */
+        if (row >= v->rows) return -1;
+        const cui__vt_screen *s = &v->scr[0];
+        c = cui__vt_row(v, s, (int)row); n = v->cols; w = s->wrap[s->map[row]] != 0;
+    } else if (!(c = cui__vt_cells_at(v, row, &n, &w))) return -1;
+    *wrapped = w;
+    n = CUI_MIN(n, cap);
+    for (int i = 0; i < n; i++) out[i] = (c[i].ca & CUI__VT_SPACER) ? CUI__VT_FIND_SPACER : CUI__VT_CP(c[i].ca);
+    return n;
+}
+
 void cui__vt_scroll_lines(cui_vt *v, int n) {
     v->cy = v->sbot;
     cui__vt_scroll_up(v, v->stop, v->sbot, n);
@@ -1337,6 +1411,7 @@ typedef struct {
     uint64_t blink_total;             /* sb_total then: output that scrolls also shows it again */
     bool blink_had;                   /* the view had the keyboard and the window the focus last frame */
     bool app_clip;                    /* .no_clipboard_keys this frame: Ctrl+C and Ctrl+V are ordinary keys */
+    unsigned mk_seen;                 /* .marks: the cui_vt_mark_select request the view last showed */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -1830,6 +1905,7 @@ typedef struct {
     cui_color cursor_text;            /* the character under a block cursor */
     bool cursor_off;                  /* `.look` blinking: this frame is the off half */
     bool links;                       /* `.links`: OSC 8 cells dotted, the link under the mouse underlined (cui_vt_links.c) */
+    bool marks;                       /* `.marks`: a tick per command on the scrollbar track (cui_vt_marks.c) */
     const cui__vt_lpaint *lk;
     cui__vt_pos s0, s1;
     cui_color fg, bg, sel, cursor, bar;
@@ -2042,6 +2118,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
         float frac = v->sb_count > 0 ? 1.0f - (float)p->off / (float)v->sb_count : 1.0f;
         cui_draw_rect(ui, (cui_rect){ r.x + r.w - 6, r.y + frac * (r.h - th), 3, th }, CUI_CORNERS(1.5f), cui_alpha(p->bar, p->bar_t));
     }
+    if (p->marks && p->bar_t > 0.01f && v->cur == 0) cui__vt_mk_paint(ui, v, r);     /* the commands' ticks, over the track */
 }
 
 /* ------------------------------------------------------------------------ */
@@ -2051,6 +2128,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
 static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *v, const cui_vt_opts *o) {
     cui_vt_result res;
     memset(&res, 0, sizeof res);
+    res.mark = -1;
     cui_id id = cui_make_id(ui, id_str ? id_str : "vt");
     cui_id wid = id ^ 0x7E3Eu;
     cui__vt_state *st = (cui__vt_state *)cui_state(ui, id, sizeof *st);
@@ -2105,6 +2183,19 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
             st->has_sel = true; st->selecting = false;
         }
     }
+    /* marks (opt in): a mark cui_vt_mark_select chose is scrolled to a third down from the top, its output selected if asked */
+    if (o->marks && v->mk && v->cur == 0) {
+        int64_t prompt = 0; bool sel = false; cui__vt_span sp;
+        if (cui__vt_mk_view(v, &st->mk_seen, &prompt, &sel, &sp)) {
+            int64_t top = prompt - v->rows / 3;
+            st->off = (int)CUI_CLAMP((int64_t)v->sb_total - top, 0, (int64_t)v->sb_count);
+            if (sel) {
+                st->a = (cui__vt_pos){ sp.r0, sp.c0 };
+                st->b = sp.c1 > 0 ? (cui__vt_pos){ sp.r1, sp.c1 - 1 } : (cui__vt_pos){ sp.r1 - 1, v->cols - 1 };
+                st->has_sel = true; st->selecting = false;
+            }
+        }
+    }
     /* the program has the mouse (opt in): its clicks, drags and wheel are reports, Shift or scrolled-back history keeps them local */
     bool mshift = (ui->mods & CUI_MOD_SHIFT) != 0;
     bool can_grab = o->mouse && !o->no_input && v->mouse_modes != 0 && st->off == 0;
@@ -2139,7 +2230,15 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         if (o->links) lk = cui__vt_links_hover(ui, id, v, in.hovered, at.row, at.col, (ui->mods & CUI_MOD_CTRL) != 0);
         bool link_click = lk && lk->on && in.active && ui->mpressed[CUI_MOUSE_LEFT];
         if (link_click) { res.link = cui__vt_links_take(ui, id); st->selecting = false; }
-        if (in.active && ui->mpressed[CUI_MOUSE_LEFT] && !link_click) {
+        bool tick_click = false;                  /* .marks: a click on a command's tick on the scrollbar track */
+        if (o->marks && v->mk && v->cur == 0 && in.hovered) {
+            int t = cui__vt_mk_hit(v, pr, ui->mx, ui->my);
+            if (t >= 0) {
+                cui__set_cursor(ui, CUI_CURSOR_HAND);
+                if (in.active && ui->mpressed[CUI_MOUSE_LEFT] && !link_click) { res.mark = t; tick_click = true; st->selecting = false; }
+            }
+        }
+        if (in.active && ui->mpressed[CUI_MOUSE_LEFT] && !link_click && !tick_click) {
             if (ui->click_count >= 3) {
                 st->a = (cui__vt_pos){ at.row, 0 }; st->b = (cui__vt_pos){ at.row, v->cols - 1 };
                 if (o->smart_select) cui__vt_smart_line(v, at.row, &st->a.row, &st->b.row);     /* the wrapped line as one */
@@ -2283,6 +2382,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     }
     if (v->x) p->pics = cui__vt_pic_view(ui, id, v, st->off, p->snap != NULL);   /* textures for the rows of picture on screen */
     p->links = o->links; p->lk = lk;
+    p->marks = o->marks && v->mk;
     ln->paint = cui__paint_vt;
     ln->paint_data = p;
     ui->last_id = id;
