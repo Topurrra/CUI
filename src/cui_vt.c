@@ -60,6 +60,7 @@ struct cui_vt {
     bool focus_mode;                  /* 1004: the program wants ESC [ I and ESC [ O */
     bool win32_input;                 /* 9001: the program wants every key as a Windows key record (sent only with .win32_keys) */
     uint8_t cursor_shape;             /* CUI_VT_CURSOR_* from CSI Ps SP q */
+    uint8_t cursor_req;               /* that request's Ps 1..6, 0 none (cui_vt_cursor_request; a view's .look follows it) */
     int cell_w, cell_h;               /* the view's cell in device pixels, for the size reports (0 before a view has drawn) */
     cui__vt_cell *snap;               /* synchronized output (?2026): the screen as it was at h, allocated at the first h and kept */
     int snap_cols, snap_rows, snap_cx, snap_cy; bool snap_cursor;
@@ -458,10 +459,11 @@ static void cui__vt_csi(cui_vt *v, char f) {
         if (v->inter == '!' && f == 'p') {      /* soft reset */
             v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
             v->app_cursor = false; v->pend = false;
-            v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
-        } else if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking is not drawn) */
+            v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->cursor_req = 0; v->sync_on = false;
+        } else if (v->inter == ' ' && f == 'q') {      /* cursor shape: 0, 1, 2 block, 3, 4 underline, 5, 6 bar (blinking only with a .look) */
             int m = v->np ? v->p[0] : 0;
             if (m <= 2) v->cursor_shape = CUI_VT_CURSOR_BLOCK; else if (m <= 4) v->cursor_shape = CUI_VT_CURSOR_UNDERLINE; else if (m <= 6) v->cursor_shape = CUI_VT_CURSOR_BAR;
+            if (m <= 6) v->cursor_req = (uint8_t)(m < 0 ? 0 : m);
         }
         return;
     }
@@ -566,7 +568,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
     case 'c': {
         v->attr = 0; v->fg = v->bg = 0; v->stop = 0; v->sbot = v->rows - 1; v->autowrap = true; v->cursor_vis = true;
         v->app_cursor = v->bracketed = false;
-        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->sync_on = false;
+        v->mouse_modes = 0; v->mouse_sgr = false; v->focus_mode = false; v->cursor_shape = 0; v->cursor_req = 0; v->sync_on = false;
         v->win32_input = false;     /* a full reset only: the soft reset leaves it, the console host asks for it once and never again */
         if (v->x) cui__vt_x_reset(v);
         if (v->lk) cui__vt_lk_reset(v);
@@ -1148,6 +1150,7 @@ bool cui_vt_win32_input(const cui_vt *v) { return v && v->win32_input; }
 bool cui_vt_mouse_reporting(const cui_vt *v) { return v && v->mouse_modes != 0; }
 bool cui_vt_synchronized(const cui_vt *v) { return v && v->sync_on; }
 int cui_vt_cursor_shape(const cui_vt *v) { return v ? v->cursor_shape : CUI_VT_CURSOR_BLOCK; }
+int cui_vt_cursor_request(const cui_vt *v) { return v ? v->cursor_req : 0; }
 int cui_vt_scrollback_count(const cui_vt *v) { return v->sb_count; }
 
 /* "", "localhost" and this machine's name (its first label: "pc" matches "pc.example.org") are this machine */
@@ -1329,6 +1332,10 @@ typedef struct {
     uint32_t find_seen;               /* .find: the current match the view last showed (cui_vt_find.c's count of moves) */
     int w_mods_n;                     /* bytes of this frame's records that are Shift, Ctrl or Alt alone */
     unsigned rf_seen;                 /* cui_vt_reflows as of the last frame */
+    double blink_t0;                  /* .look with a blinking cursor: when it last showed again (typing, output, the keyboard came) */
+    int blink_cx, blink_cy;           /* where the cursor was then */
+    uint64_t blink_total;             /* sb_total then: output that scrolls also shows it again */
+    bool blink_had;                   /* the view had the keyboard and the window the focus last frame */
 } cui__vt_state;
 
 static void cui__vt_out(cui__vt_state *st, const char *s, int n) {
@@ -1818,6 +1825,9 @@ typedef struct {
     const cui__vt_pic_draw *pics;     /* each visible row's picture (cui_vt_sixel.c), or NULL when none is on screen */
     bool find;                        /* .find: mark the matches of cui_vt_find (cui_vt_find.c) */
     cui__vt_find_look fl;
+    const cui_color *ansi;            /* `.look`: colors 0..15 (alpha 0: the theme's), NULL: the theme's */
+    cui_color cursor_text;            /* the character under a block cursor */
+    bool cursor_off;                  /* `.look` blinking: this frame is the off half */
     bool links;                       /* `.links`: OSC 8 cells dotted, the link under the mouse underlined (cui_vt_links.c) */
     const cui__vt_lpaint *lk;
     cui__vt_pos s0, s1;
@@ -1826,8 +1836,9 @@ typedef struct {
     cui_id wheel;
 } cui__vt_paint;
 
-static cui_color cui__vt_color(cui_ctx *ui, const cui_vt *v, uint16_t id, cui_color def) {
+static cui_color cui__vt_color(cui_ctx *ui, const cui_vt *v, uint16_t id, cui_color def, const cui_color *ansi) {
     if (id == 0) return def;
+    if (ansi && id <= 16 && ansi[id - 1].a) return ansi[id - 1];
     if (id < CUI__VT_PALETTE) return cui__tm_256(ui, id - 1);
     uint32_t c = v->rgb[id - CUI__VT_PALETTE];
     return cui__rgba((int)((c >> 16) & 255), (int)((c >> 8) & 255), (int)(c & 255), 255);
@@ -1835,7 +1846,7 @@ static cui_color cui__vt_color(cui_ctx *ui, const cui_vt *v, uint16_t id, cui_co
 
 /* a cell's colors after inverse and dim */
 static void cui__vt_cell_colors(cui_ctx *ui, const cui__vt_paint *p, const cui__vt_cell *c, cui_color *fg, cui_color *bg, bool *has_bg) {
-    cui_color f = cui__vt_color(ui, p->v, c->fg, p->fg), b = cui__vt_color(ui, p->v, c->bg, p->bg);
+    cui_color f = cui__vt_color(ui, p->v, c->fg, p->fg, p->ansi), b = cui__vt_color(ui, p->v, c->bg, p->bg, p->ansi);
     bool hb = c->bg != 0;
     if (c->ca & CUI_VT_INVERSE) { cui_color t = f; f = c->bg ? b : p->bg; b = t; hb = true; }
     if (c->ca & CUI_VT_DIM) f = cui_mix(f, p->bg, 0.4f);
@@ -1997,7 +2008,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     /* the cursor (where it was when a synchronized update opened, while one is shown) */
     int ccx = p->snap ? p->scx : v->cx, ccy = p->snap ? p->scy : v->cy;
     bool cvis = p->snap ? p->scursor : v->cursor_vis;
-    if (p->show_cursor && cvis && p->off == 0) {
+    if (p->show_cursor && cvis && p->off == 0 && !p->cursor_off) {
         float cx = x0 + (float)ccx * p->cw, cy = y0 + (float)ccy * p->lh;
         if (p->shape != CUI_VT_CURSOR_BLOCK) {              /* an underline or a bar, on whole device pixels; the character under it stays as it is */
             float s = ui->scale > 0 ? ui->scale : 1;
@@ -2015,9 +2026,9 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             const cui__vt_cell *cells = p->snap ? p->snap + (size_t)ccy * (size_t)v->cols : cui__vt_cells_at(v, ccy, &cn, &w);
             if (p->snap) cn = v->cols;
             uint32_t ch = cells && ccx < cn ? CUI__VT_CP(cells[ccx].ca) : 0;
-            if (ch > ' ' && ch != 0x7F && !(p->glyphs && ch >= 128 && cui__vt_glyph(ui, ch, (cui_rect){ cx, cy, p->cw, p->lh }, p->bg))) {
+            if (ch > ' ' && ch != 0x7F && !(p->glyphs && ch >= 128 && cui__vt_glyph(ui, ch, (cui_rect){ cx, cy, p->cw, p->lh }, p->cursor_text))) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
-                cui__draw_text_line(ui, CUI_FONT_MONO, p->size, cx, cy + (p->lh - fh) * 0.5f, p->bg, u, (int)k, true);
+                cui__draw_text_line(ui, CUI_FONT_MONO, p->size, cx, cy + (p->lh - fh) * 0.5f, p->cursor_text, u, (int)k, true);
             }
         } else {
             cui_draw_rect_border(ui, (cui_rect){ cx + 0.5f, cy + 0.5f, p->cw - 1, p->lh - 1 }, CUI_CORNERS(0), cui__rgba(0, 0, 0, 0), p->cursor, 1);
@@ -2046,6 +2057,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     float cw = cui__text_width(ui, CUI_FONT_MONO, size, "0", 1, true);
     if (cw <= 0) cw = size * 0.6f;
     float lh = ceilf(size * (o->line_height > 0 ? CUI_CLAMP(o->line_height, 1.0f, 3.0f) : 1.4f)), padx = 10, pady = 6;
+    if (o->look) { padx = CUI_CLAMP(o->look->pad_x, 0.0f, 200.0f); pady = CUI_CLAMP(o->look->pad_y, 0.0f, 200.0f); }   /* the user's padding */
     cui_rect pr = cui__prev_rect(ui, id);
     if (!v) return res;
     v->cell_w = (int)lroundf(cw * (ui->scale > 0 ? ui->scale : 1.0f)); v->cell_h = (int)lroundf(lh * (ui->scale > 0 ? ui->scale : 1.0f));
@@ -2219,6 +2231,30 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     p->bg = ln->bg;
     p->sel = cui_alpha(cui__emphasis(ui), ui->mode == CUI_THEME_DARK ? 0.35f : 0.22f);
     p->cursor = ui->mode == CUI_THEME_DARK ? CUI_C(ui, FOREGROUND) : CUI_C(ui, TEXT_SECONDARY);
+    p->cursor_text = p->bg;
+    if (o->look) {                                /* the user's look: colors, the cursor's shape until the program asks, blinking */
+        const cui_vt_look *lk = o->look;
+        if (lk->bg.a) { ln->bg = lk->bg; p->bg = lk->bg; }
+        if (lk->fg.a) p->fg = lk->fg;
+        if (lk->selection.a) p->sel = lk->selection;
+        if (lk->cursor.a) p->cursor = lk->cursor;
+        p->cursor_text = lk->cursor_text.a ? lk->cursor_text : p->bg;
+        p->ansi = lk->ansi;
+        int req = v->cursor_req;
+        p->shape = req ? v->cursor_shape : CUI_CLAMP(lk->cursor_shape, CUI_VT_CURSOR_BLOCK, CUI_VT_CURSOR_BAR);
+        bool blink = req ? (req & 1) != 0 : lk->cursor_blink;
+        bool keys = focused && ui->window_focused;
+        if (blink && keys && st->off == 0 && v->cursor_vis) {
+            if (!st->blink_had || v->cx != st->blink_cx || v->cy != st->blink_cy || v->sb_total != st->blink_total || res.input_len) {
+                st->blink_t0 = ui->time; st->blink_cx = v->cx; st->blink_cy = v->cy; st->blink_total = v->sb_total;
+            }
+            double ph = fmod(ui->time - st->blink_t0, 1.06);
+            if (ph < 0) ph = 0;
+            p->cursor_off = ph >= 0.53;
+            cui_request_wakeup(ui, (float)((ph < 0.53 ? 0.53 : 1.06) - ph) + 0.002f);   /* the next half */
+        }
+        st->blink_had = keys && blink;
+    }
     p->bar = CUI_C(ui, BORDER_STRONG);
     p->bar_t = in.hovered || st->off > 0 ? 1.0f : 0.0f;
     p->wheel = wid;

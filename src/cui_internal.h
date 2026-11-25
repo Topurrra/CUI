@@ -221,6 +221,7 @@ void cui__fonts_upload(cui_ctx *ui);
 cui_font cui__resolve_font(cui_ctx *ui, cui_font f);
 /* system fonts by script (cui_sysfont.c; cui_text.c adds the fonts and calls the hook) */
 int cui__font_add(cui_ctx *ui, const void *data, size_t size, bool copy, int face, bool sys);   /* internal index or -1 */
+cui_font cui__font_load_face(cui_ctx *ui, const void *data, size_t size, bool copy, int face);   /* a public id or -1 (cui_font_load_system) */
 bool cui__fonts_reserve(cui_ctx *ui, int n);                 /* room for n fonts without the array moving */
 void cui__fonts_changed(cui_ctx *ui);                        /* drops cached layouts, asks for a redraw */
 int cui__font_glyph(cui_ctx *ui, cui_font font, uint32_t cp, cui_font *out_font);   /* glyph drawn for cp, fallbacks included; 0 none */

@@ -1020,7 +1020,14 @@ typedef struct {
 
 typedef struct { float hover, slot_hover, xshow, focus; cui_spring x; uint32_t seq; } cui__dtab_state;
 
-typedef struct { cui_color bg, border; float r; bool full; } cui__folder_paint;
+typedef struct { cui_color bg, border; float r; bool full; cui_color tint; } cui__folder_paint;
+
+/* cui_doc_tab.tint: a 2 pt line of the tint along the top of a tab, inside its rounded corners */
+static void cui__paint_tint_line(cui_ctx *ui, cui_rect r, float rad, cui_color tint) {
+    if (!tint.a) return;
+    float in = rad * 0.6f;
+    if (r.w > 2 * in + 4) cui_draw_rect(ui, (cui_rect){ r.x + in, r.y, r.w - 2 * in, 2 }, CUI_CORNERS(1), tint);
+}
 
 /* the selected tab: a raised sheet that opens into the content below, so its
  * bottom edge is left out and its fill covers the strip's baseline */
@@ -1028,10 +1035,18 @@ static void cui__paint_folder(cui_ctx *ui, cui_node *n, void *data) {
     cui__folder_paint *p = data;
     cui_rect r = n->rect;
     cui_corners c = { p->r, p->r, p->full ? p->r : 0, p->full ? p->r : 0 };
-    if (p->full) { cui_draw_rect_border(ui, r, c, p->bg, p->border, 1); return; }
+    if (p->full) { cui_draw_rect_border(ui, r, c, p->bg, p->border, 1); cui__paint_tint_line(ui, r, p->r, p->tint); return; }
     cui_push_clip(ui, r);
     cui_draw_rect_border(ui, (cui_rect){ r.x, r.y, r.w, r.h + 4 }, c, p->bg, p->border, 1);
+    cui__paint_tint_line(ui, r, p->r, p->tint);
     cui_pop_clip(ui);
+}
+
+/* a tab that is not selected, with a tint: its wash (and the hover over it) and the line on top */
+static void cui__paint_tinted_tab(cui_ctx *ui, cui_node *n, void *data) {
+    cui__folder_paint *p = data;
+    cui_draw_rect(ui, n->rect, (cui_corners){ p->r, p->r, 0, 0 }, p->bg);
+    cui__paint_tint_line(ui, n->rect, p->r, p->tint);
 }
 
 typedef struct { cui_color c; float alpha; } cui__dirty_dot_paint;
@@ -1316,7 +1331,16 @@ static void cui__dtf_build_tab(cui__dtf *f, int k, int vis_sel, float rad, float
         fp->border = CUI_C(ui, BORDER);
         fp->r = rad;
         fp->full = dragged;
+        fp->tint = (cui_color){ 0, 0, 0, 0 };
+        if (cui__color_set(tb->tint)) { fp->tint = cui_color_of(ui, tb->tint); fp->bg = cui_mix(fp->bg, fp->tint, 0.16f); }
         n->paint = cui__paint_folder;
+        n->paint_data = fp;
+    } else if (cui__color_set(tb->tint)) {                 /* a tinted tab: the wash, the hover over it, the line on top */
+        cui__folder_paint *fp = CUI_PAINT_DATA(ui, cui__folder_paint);
+        fp->tint = cui_color_of(ui, tb->tint);
+        fp->bg = cui_alpha(fp->tint, 0.12f + 0.06f * ts->hover);
+        fp->r = rad;
+        n->paint = cui__paint_tinted_tab;
         n->paint_data = fp;
     } else {
         n->bg = cui_alpha(CUI_C(ui, HOVER), ts->hover);

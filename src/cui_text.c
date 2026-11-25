@@ -274,6 +274,17 @@ void cui_font_set_role(cui_ctx *ui, cui_font role, cui_font font) {
     ui->fonts[real].is_icon = role == CUI_FONT_ICONS;
 }
 
+cui_font cui_font_get_role(cui_ctx *ui, cui_font role) {
+    if (!ui || role < 0 || role >= 5 || ui->roles[role] < 0) return -1;
+    return CUI__USER_FONT_BASE + ui->roles[role];
+}
+
+/* For cui_font_load_system (cui_sysfont.c): a font face of mapped or copied data, as a public id; -1 when it is not a font. */
+cui_font cui__font_load_face(cui_ctx *ui, const void *data, size_t size, bool copy, int face) {
+    int i = cui__font_add(ui, data, size, copy, face, false);
+    return i < 0 ? -1 : CUI__USER_FONT_BASE + i;
+}
+
 void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback) {
     cui_font_data *fd = cui__fd(ui, cui__resolve_font(ui, font));
     int fb = cui__resolve_font(ui, fallback);

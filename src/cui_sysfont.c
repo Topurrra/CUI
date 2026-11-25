@@ -223,6 +223,128 @@ static int cui__sysfont_hook(cui_ctx *ui, int what, cui_font font, uint32_t cp, 
     return found;
 }
 
+/* ---- an installed family by name (cui_font_load_system) ---- */
+
+/* One value name of the Fonts key ("Cascadia Mono Regular (TrueType)", "MS Gothic & MS UI Gothic & MS PGothic (TrueType)"):
+ * the face of the collection whose name is `family` or "`family` Regular" (the names are in face order), or -1. */
+static int cui__sf_named_face(const wchar_t *value, const wchar_t *family) {
+    wchar_t buf[256];
+    if (wcslen(value) >= 256) return -1;
+    wcscpy(buf, value);
+    wchar_t *br = wcsrchr(buf, L'(');
+    if (br) *br = 0;
+    size_t fl = wcslen(family);
+    int face = 0;
+    for (wchar_t *s = buf; s && *s; face++) {
+        wchar_t *amp = wcsstr(s, L" & ");
+        if (amp) *amp = 0;
+        while (*s == L' ') s++;
+        size_t len = wcslen(s);
+        while (len && s[len - 1] == L' ') s[--len] = 0;
+        if (!_wcsicmp(s, family)) return face;
+        if (len > fl && !_wcsnicmp(s, family, fl) && !_wcsicmp(s + fl, L" Regular")) return face;
+        s = amp ? amp + 3 : NULL;
+    }
+    return -1;
+}
+
+/* The file and face of `family` in one Fonts key (read only); false when it is not there. */
+static bool cui__sf_find_in(HKEY root, const wchar_t *family, wchar_t *file, DWORD file_cap, int *face) {
+    HKEY k;
+    if (RegOpenKeyExW(root, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts", 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
+    bool found = false;
+    for (DWORD i = 0; !found && i < 100000; i++) {
+        wchar_t name[256];
+        DWORD nl = 256, type = 0, dl = (file_cap - 1) * (DWORD)sizeof(wchar_t);
+        LONG r = RegEnumValueW(k, i, name, &nl, NULL, &type, (LPBYTE)file, &dl);
+        if (r == ERROR_NO_MORE_ITEMS) break;
+        if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) continue;
+        file[CUI_MIN(dl / sizeof(wchar_t), file_cap - 1)] = 0;
+        int f = cui__sf_named_face(name, family);
+        if (f >= 0) { *face = f; found = true; }
+    }
+    RegCloseKey(k);
+    return found;
+}
+
+/* Files mapped for cui_font_load_system, kept for the life of the process and shared by every context (window). */
+static struct { wchar_t path[MAX_PATH * 2]; void *p; size_t n; } cui__sf_maps[16];
+
+static void *cui__sf_map_path(const wchar_t *path, size_t *size) {
+    for (int i = 0; i < 16; i++) if (cui__sf_maps[i].p && !_wcsicmp(cui__sf_maps[i].path, path)) { *size = cui__sf_maps[i].n; return cui__sf_maps[i].p; }
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return NULL;
+    void *p = NULL;
+    LARGE_INTEGER sz;
+    if (GetFileSizeEx(f, &sz) && sz.QuadPart > 12 && sz.QuadPart < 0x7FFFFFFF) {
+        HANDLE m = CreateFileMappingW(f, NULL, PAGE_READONLY, 0, 0, NULL);
+        if (m) { p = MapViewOfFile(m, FILE_MAP_READ, 0, 0, 0); CloseHandle(m); *size = (size_t)sz.QuadPart; }
+    }
+    CloseHandle(f);
+    if (!p) return NULL;
+    for (int i = 0; i < 16; i++) if (!cui__sf_maps[i].p) {
+        wcsncpy(cui__sf_maps[i].path, path, MAX_PATH * 2 - 1);
+        cui__sf_maps[i].p = p; cui__sf_maps[i].n = *size;
+        break;
+    }
+    return p;
+}
+
+/* Last resort: the font GDI picks for the name, copied with GetFontData; only a single font file (not a collection), and
+ * only when GDI really has the family (for a name it does not know it substitutes another one). */
+static cui_font cui__sf_gdi_copy(cui_ctx *ui, const wchar_t *family) {
+    cui_font id = -1;
+    HDC dc = CreateCompatibleDC(NULL);
+    if (!dc) return -1;
+    LOGFONTW lf;
+    memset(&lf, 0, sizeof lf);
+    lf.lfHeight = -64; lf.lfCharSet = DEFAULT_CHARSET; lf.lfWeight = FW_NORMAL;
+    wcsncpy(lf.lfFaceName, family, LF_FACESIZE - 1);
+    HFONT hf = CreateFontIndirectW(&lf);
+    if (hf) {
+        HGDIOBJ old = SelectObject(dc, hf);
+        wchar_t face[LF_FACESIZE] = { 0 };
+        GetTextFaceW(dc, LF_FACESIZE, face);
+        if (!_wcsicmp(face, family) && GetFontData(dc, 0x66637474u /* 'ttcf' */, 0, NULL, 0) == GDI_ERROR) {
+            DWORD n = GetFontData(dc, 0, 0, NULL, 0);
+            if (n != GDI_ERROR && n > 12 && n < (64u << 20)) {
+                void *buf = malloc(n);
+                if (buf && GetFontData(dc, 0, 0, buf, n) == n) id = cui__font_load_face(ui, buf, n, true, 0);
+                free(buf);
+            }
+        }
+        SelectObject(dc, old);
+        DeleteObject(hf);
+    }
+    DeleteDC(dc);
+    return id;
+}
+
+cui_font cui_font_load_system(cui_ctx *ui, const char *family) {
+    if (!ui || !family || !*family) return -1;
+    wchar_t wf[LF_FACESIZE * 2], file[MAX_PATH * 2];
+    if (!MultiByteToWideChar(CP_UTF8, 0, family, -1, wf, LF_FACESIZE * 2)) return -1;
+    int face = 0;
+    if (cui__sf_find_in(HKEY_CURRENT_USER, wf, file, MAX_PATH * 2, &face) || cui__sf_find_in(HKEY_LOCAL_MACHINE, wf, file, MAX_PATH * 2, &face)) {
+        wchar_t path[MAX_PATH * 2];
+        if (wcschr(file, L'\\') || wcschr(file, L'/')) { wcsncpy(path, file, MAX_PATH * 2 - 1); path[MAX_PATH * 2 - 1] = 0; }
+        else {
+            wchar_t dir[MAX_PATH];
+            DWORD n = GetEnvironmentVariableW(L"WINDIR", dir, MAX_PATH);
+            if (!n || n >= MAX_PATH) wcscpy(dir, L"C:\\Windows");
+            _snwprintf(path, MAX_PATH * 2, L"%ls\\Fonts\\%ls", dir, file);
+            path[MAX_PATH * 2 - 1] = 0;
+        }
+        size_t size = 0;
+        void *p = cui__sf_map_path(path, &size);
+        cui_font id = p ? cui__font_load_face(ui, p, size, false, face) : -1;
+        if (id >= 0) { cui__fonts_changed(ui); return id; }
+    }
+    cui_font id = cui__sf_gdi_copy(ui, wf);
+    if (id >= 0) cui__fonts_changed(ui);
+    return id;
+}
+
 void cui_font_use_system_fallback(cui_ctx *ui, bool on) {
     if (!ui) return;
     cui__sysfont *sf = ui->sysfont;
@@ -245,5 +367,6 @@ void cui_font_use_system_fallback(cui_ctx *ui, bool on) {
 #else   /* no table of system fonts for this platform yet: the option does nothing */
 
 void cui_font_use_system_fallback(cui_ctx *ui, bool on) { (void)ui; (void)on; }
+cui_font cui_font_load_system(cui_ctx *ui, const char *family) { (void)ui; (void)family; return -1; }
 
 #endif

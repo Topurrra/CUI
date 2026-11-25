@@ -252,11 +252,11 @@ static void test_speed(void) {
 /* ---- the view ---- */
 
 static cui_sw_renderer *g_sw;
-typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; float line_height; bool glyphs, italic; } scene;
+typedef struct { cui_vt *vt; cui_vt_result r; bool focus; float w, h; bool mouse, freports; float line_height; bool glyphs, italic; const cui_vt_look *look; } scene;
 
 static void build(cui_ctx *ui, scene *s) {
     cui_begin_frame(ui, 1.0f / 60.0f);
-    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports, .line_height = s->line_height, .glyphs = s->glyphs, .italic = s->italic); }
+    cui_column(ui, .width = CUI_FILL, .height = CUI_FILL) { s->r = cui_vt_view(ui, "t", s->vt, .focus = s->focus, .mouse = s->mouse, .focus_reports = s->freports, .line_height = s->line_height, .glyphs = s->glyphs, .italic = s->italic, .look = s->look); }
     cui_end_frame(ui);
     s->focus = false;
 }
@@ -767,6 +767,92 @@ static void test_opt_in_looks(void) {
     cui_destroy(ui);
 }
 
+/* ---- the user's look (.look): colors, padding, the cursor; NULL draws as before ---- */
+
+static uint32_t pixel_at(cui_ctx *ui, int x, int y) {                  /* 0xRRGGBB of one pixel of the last frame */
+    static uint32_t px[640 * 400];
+    cui_sw_render(g_sw, cui_get_draw_data(ui), px, 640, 400, 640 * 4, CUI_SW_RGBA);
+    uint32_t p = px[y * 640 + x];
+    return (p & 0xFF) << 16 | (p & 0xFF00) | (p >> 16 & 0xFF);
+}
+
+static void test_user_look(void) {
+    scene s;
+    cui_ctx *ui = mouse_ctx(&s, 640);
+    cui_input_focus(ui, true);
+    W(s.vt, "\x1b[2J\x1b[Hab\x1b[41m  \x1b[0m\x1b[1;2H");
+    build(ui, &s);
+    uint32_t plain = paint_hash(ui, 0, 0, 200, 40);
+    int cols0 = s.r.cols;
+    /* a look with nothing of its own but the default padding is the picture of no look */
+    cui_vt_look lk;
+    memset(&lk, 0, sizeof lk);
+    lk.pad_x = 10; lk.pad_y = 6;
+    s.look = &lk; build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), plain);
+    CHECK_EQ(s.r.cols, cols0);
+    /* colors: the background (the padding too), a palette color, the cursor */
+    lk.bg = CUI_RGB(0x102030); lk.ansi[1] = CUI_RGB(0xC50F1F); lk.cursor = CUI_RGB(0x00FF00); lk.fg = CUI_RGB(0xFFFF00);
+    build(ui, &s);
+    CHECK_EQ(pixel_at(ui, 3, 3), 0x102030);
+    CHECK_EQ(pixel_at(ui, 10 + (int)(2.5f * 7.8f), 6 + 9), 0xC50F1F);    /* the red cells (columns 2 and 3) */
+    CHECK_EQ(pixel_at(ui, 10 + (int)(1.5f * 7.8f), 6 + 2), 0x00FF00);    /* the block cursor on column 1 (above the glyph) */
+    /* the text under the block cursor takes the look's color too: the picture changes */
+    uint32_t colored = paint_hash(ui, 0, 0, 200, 40);
+    lk.cursor_text = CUI_RGB(0xFF00FF); build(ui, &s);
+    CHECK(paint_hash(ui, 0, 0, 200, 40) != colored);
+    /* padding: used as given, 0 is none; the grid follows at once */
+    lk.pad_x = 0; lk.pad_y = 0; build(ui, &s); build(ui, &s);
+    CHECK(s.r.cols > cols0);
+    CHECK_EQ(pixel_at(ui, (int)(2.5f * 7.8f), 9), 0xC50F1F);
+    lk.pad_x = 10; lk.pad_y = 6; build(ui, &s); build(ui, &s);
+    CHECK_EQ(s.r.cols, cols0);
+    /* the cursor's shape: the look's until the program asks, the program's while it does, the look's again after Ps 0 */
+    memset(&lk, 0, sizeof lk); lk.pad_x = 10; lk.pad_y = 6;
+    W(s.vt, "\x1b[6 q"); build(ui, &s);
+    uint32_t prog_bar = paint_hash(ui, 0, 0, 200, 40);
+    CHECK_EQ(cui_vt_cursor_request(s.vt), 6);
+    W(s.vt, "\x1b[0 q"); build(ui, &s);
+    CHECK_EQ(cui_vt_cursor_request(s.vt), 0);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), plain);                      /* the look's block */
+    lk.cursor_shape = CUI_VT_CURSOR_BAR; build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), prog_bar);                   /* the look's bar is the program's bar */
+    W(s.vt, "\x1b[2 q"); build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), plain);                      /* the program's block wins over the look's bar */
+    W(s.vt, "\x1b[!p"); CHECK_EQ(cui_vt_cursor_request(s.vt), 0);        /* a soft reset forgets it */
+    W(s.vt, "\x1b[4 q\x1b" "c"); CHECK_EQ(cui_vt_cursor_request(s.vt), 0);   /* so does a full one */
+    W(s.vt, "\x1b[2J\x1b[Hab\x1b[41m  \x1b[0m\x1b[1;2H");
+    lk.cursor_shape = CUI_VT_CURSOR_BLOCK;
+    /* blinking: off after 530 ms with the keyboard and the window's focus, back at once on a key; a program's steady
+     * request stops it; without the look nothing ever blinks */
+    lk.cursor_blink = true;
+    build(ui, &s);
+    uint32_t on = paint_hash(ui, 0, 0, 200, 40);
+    for (int i = 0; i < 36; i++) build(ui, &s);                          /* 0.6 s of frames */
+    uint32_t off = paint_hash(ui, 0, 0, 200, 40);
+    CHECK(off != on);
+    key(ui, &s, CUI_KEY_ENTER, 0);                                       /* typing shows it again */
+    CHECK(s.r.input_len > 0);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), on);
+    for (int i = 0; i < 36; i++) build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), off);
+    for (int i = 0; i < 32; i++) build(ui, &s);                          /* and on again after the next 530 ms */
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), on);
+    W(s.vt, "\x1b[2 q");
+    for (int i = 0; i < 80; i++) { build(ui, &s); CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), on); if (g_failed) break; }
+    W(s.vt, "\x1b[0 q");
+    cui_input_focus(ui, false);                                          /* the window lost the focus: no blinking */
+    for (int i = 0; i < 40; i++) build(ui, &s);
+    uint32_t unfocused = paint_hash(ui, 0, 0, 200, 40);
+    for (int i = 0; i < 40; i++) build(ui, &s);
+    CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), unfocused);
+    cui_input_focus(ui, true);
+    s.look = NULL;
+    for (int i = 0; i < 80; i++) { build(ui, &s); CHECK_EQ(paint_hash(ui, 0, 0, 200, 40), plain); if (g_failed) break; }
+    cui_vt_destroy(s.vt);
+    cui_destroy(ui);
+}
+
 /* ---- focus reports ---- */
 
 static void test_focus(void) {
@@ -814,6 +900,7 @@ int main(void) {
     test_sync();
     test_look();
     test_opt_in_looks();
+    test_user_look();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
