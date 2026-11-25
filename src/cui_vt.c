@@ -2051,6 +2051,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
 static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *v, const cui_vt_opts *o) {
     cui_vt_result res;
     memset(&res, 0, sizeof res);
+    res.mark = -1;
     cui_id id = cui_make_id(ui, id_str ? id_str : "vt");
     cui_id wid = id ^ 0x7E3Eu;
     cui__vt_state *st = (cui__vt_state *)cui_state(ui, id, sizeof *st);

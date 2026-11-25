@@ -4897,6 +4897,8 @@ typedef struct cui_vt_opts {
                                       and see `selected`. A right click still copies or pastes. false: the view's own keys, as before */
     bool copy;                     /* this frame: copy the selection, as Ctrl+Shift+C does (`copied` says whether there was one; the selection ends) */
     bool paste;                    /* this frame: paste, as Ctrl+V does (the clipboard's text comes back in `paste`) */
+    bool marks;                    /* CUI_VT_FEATURE_MARKS (see "Command marks" below): a tick per command on the scrollbar track while it shows, red for exit != 0,
+                                      the accent for the one cui_vt_mark_select chose; a click on a tick fills `mark`; cui_vt_mark_select scrolls and selects. false: none, as before */
 } cui_vt_opts;
 /* Links (`.links = true`). A link is an OSC 8 hyperlink (kept with CUI_VT_FEATURE_LINKS) or text that looks like one:
  *   - a URL: http://, https://, file:// (punctuation at its end and a closing bracket it did not open are not part of it);
@@ -4933,6 +4935,7 @@ typedef struct cui_vt_result {
     int scrolled;                  /* rows the view looks back into the scrollback (0: the live screen) */
     const cui_vt_link *link;       /* `.links`: the link Ctrl+clicked this frame (no selection starts), or NULL; valid until the next frame */
     bool selected;                 /* a selection is shown at the end of this frame (what Ctrl+C or `.copy` would copy) */
+    int mark;                      /* `.marks`: the mark whose tick was clicked this frame, -1 none (always -1 without `.marks`) */
 } cui_vt_result;
 CUI_API cui_vt_result cui_vt_view_ex(cui_ctx *ui, const char *id, cui_vt *vt, const cui_vt_opts *opts);
 CUI_API bool cui_vt_focused(cui_ctx *ui, const char *id);                     /* the view with this id has the keyboard (id as given to cui_vt_view, in the same id scope) */
@@ -4971,6 +4974,68 @@ CUI_API bool cui_vt_find_match(const cui_vt *vt, int i, cui_vt_match *out);  /* 
 CUI_API int cui_vt_find_step(cui_vt *vt, int dir);                           /* dir < 0 the match before (older), > 0 the one after, wrapping; returns the new current (-1 none) */
 CUI_API void cui_vt_find_select(cui_vt *vt, int i);                          /* makes the i-th match the current one (a view shows it) */
 CUI_API void cui_vt_find_clear(cui_vt *vt);                                  /* no query, no marks, the memory freed (a view keeps its selection and where it looks) */
+/* Command marks, progress and copy requests (cui_vt_marks.c), opt in with CUI_VT_FEATURE_MARKS. Without it OSC 133, 633, 9;4 and
+ * 52 are skipped as before and nothing is kept.
+ *
+ *     cui_vt_set_features(vt, CUI_VT_FEATURE_MARKS | ...);
+ *     cui_vt_result r = cui_vt_view(ui, "shell", vt, .marks = true);      // a tick per command on the scrollbar
+ *     if (r.mark >= 0) cui_vt_mark_select(vt, r.mark, CUI_VT_MARK_SELECT_OUTPUT);
+ *     int i = cui_vt_mark_near(vt, -r.scrolled, -1);                       // Ctrl+Up: the command above the top row in view
+ *     char out[4096]; size_t n = cui_vt_mark_output(vt, i, out, sizeof out);   // n > sizeof out - 1: it was cut; ask again with n + 1
+ *
+ * Marks (OSC 133 A prompt, B command, C output, D[;exit] end; the same as 633;A..D, and 633;E;<command line>, whose \\ and \xHH
+ * escapes are decoded) are kept per command, oldest first, at most 10000 (the oldest go first). Unknown letters and the
+ * parameters after them (133;A;aid=1, 633;P;Cwd=...) are skipped. A new A ends a command whose D never came (exit -1), and a
+ * prompt drawn above earlier marks (the screen was cleared) drops them; an A while only the prompt has come moves it. B, C or D
+ * with no open command start one at their row (B, C) or are skipped (D). Marks come only on the main screen: sequences sent while
+ * the alternate screen is shown are skipped.
+ * Rows are as cui_vt_line_text counts them (0 the top of the live screen, -1 the newest scrollback row), but always of the main
+ * screen, also while the alternate one is shown. They follow their text through scrolling, scroll regions, inserted and deleted
+ * lines, a resize and REFLOW (a mark keeps its cell in its line); a mark goes when its prompt row leaves the scrollback, is
+ * scrolled out of a region or erased with the scrollback (ESC [ 3 J), and every mark on screen goes on a full reset (ESC c).
+ * The clock is cui_vt_now_ms: milliseconds of QueryPerformanceCounter on Windows (CLOCK_MONOTONIC elsewhere), the clock CUI's
+ * app loop runs on. A mark costs about 100 bytes, its 633;E text aside; scrolling with marks kept costs nothing more. */
+#define CUI_VT_FEATURE_MARKS 32u
+typedef struct cui_vt_mark {
+    int prompt_row;        /* where A came (or the B or C that started it) */
+    int cmd_row;           /* where B came (the command's first row); = prompt_row if none */
+    int out_row;           /* where C came (the output's first row); INT_MIN when no C yet (cmd sends none) */
+    int end_row;           /* the row where D came (output ends before it), or the next A; INT_MIN while running */
+    int exit_code;         /* D's code; -1 unknown (no code given, or not finished) */
+    bool finished;         /* D came (or the next prompt) */
+    double start_ms;       /* cui_vt_now_ms at C (or B when no C), 0 if none */
+    double end_ms;         /* at D, 0 while running */
+} cui_vt_mark;
+CUI_API int cui_vt_mark_count(const cui_vt *vt);
+CUI_API bool cui_vt_mark_get(const cui_vt *vt, int i, cui_vt_mark *out);                 /* oldest first; false outside 0..count-1 */
+CUI_API int cui_vt_mark_at_row(const cui_vt *vt, int row);                                /* the command whose prompt..end covers row (a running one: to the screen's end), -1 none */
+/* The texts below return their whole length, as snprintf does (call with NULL, 0 to size a buffer), write at most cap - 1 bytes
+ * (cut at a whole character) and a NUL. Rows a wrap joined are one line; "\n" goes between lines, spaces at line ends are cut. */
+CUI_API size_t cui_vt_mark_command(const cui_vt *vt, int i, char *out, size_t cap);       /* the command text (633;E text, else B..C, prompt cut off; without C, B's line) */
+CUI_API size_t cui_vt_mark_output(const cui_vt *vt, int i, char *out, size_t cap);        /* C..D (running: C to the cursor). Without C (cmd), from the line after the command's */
+CUI_API unsigned cui_vt_mark_seq(const cui_vt *vt);                                       /* bumps when a mark is added, changed (B, C, D, E) or dropped, and when rows move by a resize */
+/* The view (`.marks`) scrolls mark i into view next frame, its prompt row a third down from the top, and with
+ * CUI_VT_MARK_SELECT_OUTPUT selects its output (C..D, as cui_vt_mark_output; nothing when it is empty), so Ctrl+C or `.copy`
+ * copies it. Mark i's tick is drawn in the accent from then on. CUI_VT_MARK_SHOW only scrolls. */
+CUI_API void cui_vt_mark_select(cui_vt *vt, int i, int what);
+#define CUI_VT_MARK_SHOW 0
+#define CUI_VT_MARK_SELECT_OUTPUT 1
+CUI_API int cui_vt_mark_selected(const cui_vt *vt);                                       /* the mark cui_vt_mark_select chose last, -1 none (or dropped since) */
+/* The newest mark whose prompt row is above row (dir < 0) / the oldest below it (dir > 0), -1 none. For Ctrl+Up and Ctrl+Down
+ * pass the selected mark's prompt row when there is one (a jump puts it a third down, so the top row would skip the marks
+ * between), else the top row in view (-scrolled). */
+CUI_API int cui_vt_mark_near(const cui_vt *vt, int row, int dir);
+CUI_API double cui_vt_now_ms(void);                                                       /* the marks' clock (above) */
+/* OSC 9;4;st;pr (ConEmu, Windows Terminal): st 0 none, 1 normal, 2 error, 3 indeterminate, 4 paused; pr 0..100 (clamped; left
+ * out: kept, 0 for st 0). Other OSC 9 (a notification text) is skipped. */
+enum { CUI_VT_PROGRESS_NONE, CUI_VT_PROGRESS_NORMAL, CUI_VT_PROGRESS_ERROR, CUI_VT_PROGRESS_INDETERMINATE, CUI_VT_PROGRESS_PAUSED };
+CUI_API int cui_vt_progress(const cui_vt *vt, int *percent);                              /* the last state (percent may be NULL); a full reset (ESC c) clears it */
+/* OSC 52;Pc;<base64> (any Pc: c, p, s, 0..7 or none): a program asks to put text on the clipboard. Kept, never done by CUI: the app
+ * decides. A query (52;c;?) is never answered (reading the clipboard is not allowed); an empty one (52;c;) and text that does not
+ * decode are skipped; over 1 MB decoded is dropped whole. */
+CUI_API size_t cui_vt_take_clipboard(cui_vt *vt, char *out, size_t cap);                 /* the newest request's decoded UTF-8 length (0: none). It is taken (cleared)
+                                                                                             only by a call whose cap holds it with its NUL; a smaller cap (or NULL, 0)
+                                                                                             writes nothing and keeps it, so a call with NULL, 0 sizes the buffer */
 
 /* ---- Emoji ----
  * Color emoji come from an emoji font: the system's (cui_emoji_font_load_system, which
