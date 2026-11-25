@@ -581,6 +581,35 @@ void cui__vt_lk_erase(cui_vt *v, int scr, int slot, int x0, int x1);
 void cui__vt_lk_shift(cui_vt *v, int scr, int slot, int x, int n);    /* n > 0 inserts n blank cells at x, n < 0 deletes */
 void cui__vt_lk_pushed(cui_vt *v, int slot);                          /* the main screen's row in slot went into the scrollback */
 void cui__vt_lk_reset(cui_vt *v);                                     /* RIS: no link open */
+/* The VT screen's command marks, progress and copy requests (cui_vt_marks.c, CUI_VT_FEATURE_MARKS). Rows as the view counts
+ * them (sb_total + y of the main screen). cui_vt.c calls the cui__vt_mk_* hooks only while the feature is on (cui__vt_mk_get is
+ * set), and the scroll hook only when rows move other than by a line feed at the bottom of the whole screen. */
+typedef struct cui__vt_mk cui__vt_mk;
+typedef struct { int64_t r; int c; int64_t orow; int ocol; int mi, k; bool hit; } cui__vt_rfpt;   /* a cell a reflow follows: source row and column, where it went */
+typedef struct { cui__vt_rfpt *sb, *base, *cut; int nsb, nbase, ncut; int64_t sb_first; } cui__vt_mk_plan;
+/* cui_vt.c, for cui_vt_marks.c */
+cui__vt_mk *cui__vt_mk_get(const cui_vt *v);
+void cui__vt_set_mk(cui_vt *v, cui__vt_mk *mk);
+int cui__vt_main_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool *wrapped);   /* as cui__vt_row_chars, of the main screen always */
+/* cui_vt_marks.c, for cui_vt.c and cui_vt_sixel.c */
+void cui__vt_mk_feature(cui_vt *v, bool on);
+void cui__vt_mk_free(cui_vt *v);
+size_t cui__vt_mk_memory(const cui_vt *v);
+void cui__vt_mk_osc(cui_vt *v, int code, const char *arg, int n);    /* OSC 133, 633 and 9 */
+void cui__vt_mk_c52_begin(cui_vt *v);                                 /* after "52;" */
+size_t cui__vt_mk_c52_feed(cui_vt *v, const unsigned char *d, size_t n);   /* bytes used, stopping before BEL or ESC */
+void cui__vt_mk_c52_end(cui_vt *v);
+void cui__vt_mk_scroll(cui_vt *v, int top, int bot, int n, int how); /* rows top..bot move: 1 up into the scrollback, 0 up, -1 down */
+void cui__vt_mk_trim(cui_vt *v);                                      /* scrollback lines went */
+void cui__vt_mk_reset(cui_vt *v);                                     /* RIS */
+void cui__vt_mk_cut(cui_vt *v, int64_t t0, int drop);                 /* a resize cut the screen; drop rows went up */
+void cui__vt_mk_rf_begin(cui_vt *v);
+void cui__vt_mk_rf_capture(cui_vt *v);                                /* a reflow's base was taken from the main screen */
+bool cui__vt_mk_rf_plan(cui_vt *v, bool use_base, int64_t t0, cui__vt_mk_plan *pl);
+void cui__vt_mk_rf_end(cui_vt *v, cui__vt_mk_plan *pl, bool sb_ok, bool main_done, int p, int drop);
+bool cui__vt_mk_view(const cui_vt *v, unsigned *seen, int64_t *prompt, bool *sel, cui__vt_span *out);
+void cui__vt_mk_paint(cui_ctx *ui, const cui_vt *v, cui_rect track);
+int cui__vt_mk_hit(const cui_vt *v, cui_rect track, float mx, float my);
 /* the view (cui_vt.c's view body and paint) */
 const cui__vt_lpaint *cui__vt_links_hover(cui_ctx *ui, cui_id id, const cui_vt *v, bool hovered, int64_t row, int col, bool ctrl);
 const cui_vt_link *cui__vt_links_take(cui_ctx *ui, cui_id id);        /* the link under the mouse, copied to frame memory */
