@@ -211,6 +211,34 @@ static void test_midrun_load(void) {
     cui_destroy(ui);
 }
 
+/* cui_font_load_system: an installed family by name (Consolas and Courier New come with Windows), mapped from the Fonts
+ * folder; an unknown name is -1 and nothing changes; cui_font_get_role gives back what a role used, so it can be put back */
+static void test_load_family(void) {
+    cui_ctx *ui = new_ctx();
+    cui_font mono = cui_font_get_role(ui, CUI_FONT_MONO);
+    CHECK(mono >= 0);
+    CHECK(cui_font_get_role(ui, 7) == -1);
+    float geist = width(ui, CUI_FONT_MONO, "iiiiiiiiii");
+    PROCESS_MEMORY_COUNTERS_EX m0 = { sizeof m0 }, m1 = { sizeof m1 };
+    GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&m0, sizeof m0);
+    cui_font con = cui_font_load_system(ui, "Consolas");
+    GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&m1, sizeof m1);
+    if (con < 0) { printf("  Consolas is not installed: skipped\n"); cui_destroy(ui); return; }
+    printf("  Consolas: +%.0f KB private (the file is mapped, not copied)\n", ((double)m1.PrivateUsage - (double)m0.PrivateUsage) / 1024.0);
+    CHECK(m1.PrivateUsage < m0.PrivateUsage + 400 * 1024);
+    cui_font_set_role(ui, CUI_FONT_MONO, con);
+    CHECK(cui_font_get_role(ui, CUI_FONT_MONO) == con);
+    float w = width(ui, CUI_FONT_MONO, "iiiiiiiiii"), w2 = width(ui, CUI_FONT_MONO, "MMMMMMMMMM");
+    CHECK(w > 0 && w != geist && w == w2);                           /* another font, and monospaced */
+    CHECK(cui_font_load_system(ui, "consolas") >= 0);                 /* the name is matched without case */
+    CHECK(cui_font_load_system(ui, "No Such Family 7f3a") == -1);
+    CHECK(cui_font_load_system(ui, "") == -1 && cui_font_load_system(ui, NULL) == -1);
+    CHECK(cui_font_load_system(ui, "Courier New") >= 0);
+    cui_font_set_role(ui, CUI_FONT_MONO, mono);                       /* back to Geist Mono */
+    CHECK(width(ui, CUI_FONT_MONO, "iiiiiiiiii") == geist);
+    cui_destroy(ui);
+}
+
 /* --shot: mixed scripts in the four text roles; Latin on the same lines for the baseline and the size */
 static void shot(const char *path) {
     cui_ctx *ui = cui_create(&(cui_ctx_desc){ .renderer = cui_sw_iface(g_sw), .theme = CUI_THEME_LIGHT });
@@ -253,6 +281,7 @@ int main(int argc, char **argv) {
     test_scripts();
     test_app_fallback_first();
     test_midrun_load();
+    test_load_family();
     cui_sw_destroy(g_sw);
     printf("test_sysfont: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
