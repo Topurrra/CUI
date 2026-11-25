@@ -526,6 +526,14 @@ CUI_API cui_font cui_font_load_memory(cui_ctx *ui, const void *data, size_t size
 CUI_API cui_font cui_font_load_file(cui_ctx *ui, const char *path);
 /* Replace one of the built-in roles (e.g. use your brand font as CUI_FONT_BODY). */
 CUI_API void cui_font_set_role(cui_ctx *ui, cui_font role, cui_font font);
+/* The font a role uses now (a CUI_FONT_* role), so a role that was replaced can be put back; -1 for none. */
+CUI_API cui_font cui_font_get_role(cui_ctx *ui, cui_font role);
+/* Opt in: loads an installed font by its family name ("Cascadia Mono", "Consolas"), its regular face, and returns its id,
+ * or -1 when the family is not installed (or the platform has no lookup). Windows: the family is found in the system's and
+ * the user's font lists (the Fonts keys of HKLM and HKCU, read only) and its file is mapped read only, not copied, the face
+ * of a collection picked by name; a family only GDI knows is copied from GDI (GetFontData) as a last resort. Every call
+ * loads it again: keep the id. Nothing is shipped or downloaded. */
+CUI_API cui_font cui_font_load_system(cui_ctx *ui, const char *family);
 /* Glyphs missing from `font` are looked up in `fallback` (e.g. CJK, emoji). */
 CUI_API void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback);
 /* Opt in (off by default): a character that no font of the app has is looked up in the system's fonts
@@ -4376,6 +4384,8 @@ typedef struct cui_doc_tab {
     const char *tooltip;
     bool dirty;                /* unsaved changes: a dot in place of the x, which returns under the pointer */
     cui_color dot;             /* a filled dot before the title, e.g. an account colour (zero = none; a CUI_COLOR_* token works); the tab grows to fit */
+    cui_color tint;            /* a wash of this colour over the tab (16 % on the selected one, 12 % on the others) and a 2 pt line of it along
+                                * its top, e.g. a red for an elevated shell (zero = none, as before; a CUI_COLOR_* token works) */
 } cui_doc_tab;
 /* The strip's height in points: 4 above the tabs, then the tabs. Put it in a fixed-height box
  * when the strip sits beside other things. */
@@ -4836,6 +4846,32 @@ CUI_API void cui_vt_resize_sent(cui_vt *vt);
 CUI_API unsigned cui_vt_reflows(const cui_vt *vt);     /* how many times REFLOW re-laid the rows: row numbers kept from before (matches, marks) are stale when it changes */
 CUI_API void cui_vt_set_picture_budget(cui_vt *vt, size_t bytes);       /* most picture pixels kept (8 MB unless set); over it the rows drawn longest ago go first */
 CUI_API void cui_vt_set_colors(cui_vt *vt, cui_color fg, cui_color bg, cui_color cursor);   /* what OSC 10, 11, 12 answer: plain colors; alpha 0 (or a token) is "no answer" */
+/* The Ps of the program's last cursor style request (CSI Ps SP q, DECSCUSR): 1 blinking block, 2 steady block, 3 blinking
+ * underline, 4 steady underline, 5 blinking bar, 6 steady bar; 0 when it has asked for none, asked for the default (Ps 0)
+ * or the screen was reset since. cui_vt_cursor_shape is unchanged (block until a request). */
+CUI_API int cui_vt_cursor_request(const cui_vt *vt);
+/* An opt-in look for one view (`.look`): a color scheme, the padding and the cursor the user picked, so an app can offer
+ * themes per screen without touching the theme of the rest of the window. NULL (the default): the theme's colors, 10 x 6
+ * points of padding, a steady cursor drawn from the program's shape request, exactly as before. The look is read every
+ * frame (change it and the next frame shows it) and is not copied: keep it alive while the view is built.
+ *   ansi[16]     colors 0..15 (SGR 30..37, 90..97, 40..47, 100..107 and 38;5;0..15); the 256 color cube and the grays
+ *                stay the standard ones. Alpha 0: the theme's color for that index.
+ *   fg, bg       the default text and background (the background fills the padding too). Alpha 0: the theme's.
+ *   cursor       the cursor's color; cursor_text the character under a block cursor (alpha 0: the background).
+ *   selection    drawn under selected text as given, alpha included (alpha 0: the theme's).
+ *   pad_x, pad_y the room between the view's edge and the grid, in points, used as given (0 is none).
+ *   cursor_shape CUI_VT_CURSOR_* used until the program asks for one with CSI Ps SP q, and again after it asks for Ps 0
+ *                (a program that sets its own shape wins while it runs, as in Windows Terminal).
+ *   cursor_blink the cursor blinks (530 ms on, 530 off) while the view has the keyboard and the window the focus; typing
+ *                and output show it again at once. A program's request wins here too: Ps 1, 3, 5 blink, 2, 4, 6 do not.
+ *                Blinking costs about two frames a second; a hidden or unfocused view draws none. */
+typedef struct cui_vt_look {
+    cui_color ansi[16];
+    cui_color fg, bg, cursor, cursor_text, selection;
+    float pad_x, pad_y;
+    int cursor_shape;
+    bool cursor_blink;
+} cui_vt_look;
 typedef struct cui_vt_opts {
     int _;
     cui_size width, height;        /* default fill */
@@ -4852,6 +4888,7 @@ typedef struct cui_vt_opts {
     bool links;                   /* Ctrl over a link underlines it and shows the hand, a Ctrl+click returns it in `link` (see "Links" below); OSC 8 links get a dotted underline */
     bool smart_select;             /* a double click takes a whole path or URL (else the word, across wrapped rows), a triple click the whole wrapped line; copied text loses the spaces at the end of its lines */
     bool copy_on_select;           /* a finished selection (drag, double or triple click) goes to the clipboard at once (`copied`); a right click then always pastes */
+    const cui_vt_look *look;       /* colors, padding and cursor of this view (see cui_vt_look); NULL: the theme's, as before */
 } cui_vt_opts;
 /* Links (`.links = true`). A link is an OSC 8 hyperlink (kept with CUI_VT_FEATURE_LINKS) or text that looks like one:
  *   - a URL: http://, https://, file:// (punctuation at its end and a closing bracket it did not open are not part of it);
