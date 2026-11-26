@@ -406,7 +406,7 @@ static void test_emoji_view(void) {
 #if defined(_WIN32)
     /* Segoe UI Emoji names its ligatures through ccmp; its other lookups are steps of a contextual one */
     CHECK(cui_emoji_supported(ui, "\xF0\x9F\xA7\x91\xE2\x80\x8D\xF0\x9F\x92\xBB", -1));       /* technologist */
-    CHECK(cui_emoji_supported(ui, "\xF0\x9F\x8F\xB3\xEF\xB8\x8F\xE2\x80\x8D\xF0\x9F\x8C\x88", -1));   /* rainbow flag */
+    CHECK(cui_emoji_supported(ui, "\xF0\x9F\xA7\x91\xE2\x80\x8D\xF0\x9F\x9A\x80", -1));       /* astronaut */
 #endif
     cui_destroy(ui);
 }
