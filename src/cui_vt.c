@@ -1943,7 +1943,7 @@ typedef struct {
     cui_color cursor_text;            /* the character under a block cursor */
     bool cursor_off;                  /* `.look` blinking: this frame is the off half */
     bool lig;                         /* `.look` ligatures or font features: ASCII runs go through cui__draw_cells */
-    bool links;                      /* `.links`: OSC 8 cells dotted, the link under the mouse underlined (cui_vt_links.c) */
+    bool links;                       /* `.links`: OSC 8 cells dotted, the link under the mouse underlined (cui_vt_links.c) */
     bool marks;                       /* `.marks`: a tick per command on the scrollbar track (cui_vt_marks.c) */
     const cui__vt_lpaint *lk;
     cui__vt_pos s0, s1;
