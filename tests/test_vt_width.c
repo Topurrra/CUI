@@ -411,6 +411,31 @@ static void test_emoji_view(void) {
     cui_destroy(ui);
 }
 
+/* a frame (build and software render) of a screen full of coloured text, with the options off and on */
+static void test_frame_cost(void) {
+    cui_ctx *ui = mkui(true);
+    double best[2] = { 1e9, 1e9 };
+    for (int on = 0; on < 2; on++) {
+        scene s = { cui_vt_create(80, 24, 0), NULL, on != 0, on ? CUI_VT_ADJUST_INDEXED : 0 };
+        if (on) cui_vt_set_features(s.vt, CUI_VT_FEATURE_CLUSTERS);
+        char b[256];
+        for (int i = 0; i < 24; i++) {
+            snprintf(b, sizeof b, "%08d \x1b[3%dm the quick brown fox \x1b[1;3%dm jumps over \x1b[0m the lazy dog \xE2\x86\x92 0123456789 abc\r\n", i, 1 + i % 7, 1 + (i / 7) % 7);
+            W(s.vt, b);
+        }
+        for (int f = 0; f < 3; f++) { build(ui, &s); render(ui); }
+        for (int f = 0; f < 40; f++) {
+            double t0 = now_ms();
+            build(ui, &s); render(ui);
+            double dt = now_ms() - t0;
+            if (dt < best[on]) best[on] = dt;
+        }
+        cui_vt_destroy(s.vt);
+    }
+    printf("  frame of 80x24 coloured text: %.3f ms as before, %.3f ms with clusters, fit and contrast\n", best[0], best[1]);
+    cui_destroy(ui);
+}
+
 /* the test page: emoji, ZWJ, flags, VS15/VS16, CJK, box drawing and symbols, with the cells they take */
 static void shots(const char *dir) {
     for (int dark = 0; dark < 2; dark++) {
@@ -456,6 +481,7 @@ int main(int argc, char **argv) {
     test_adjust();
     test_fit();
     test_emoji_view();
+    test_frame_cost();
     test_speed();
     cui_sw_destroy(g_sw);
     printf("%d checks, %d failed\n", g_checks, g_failed);
