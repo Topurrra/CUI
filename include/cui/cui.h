@@ -536,6 +536,12 @@ CUI_API cui_font cui_font_get_role(cui_ctx *ui, cui_font role);
 CUI_API cui_font cui_font_load_system(cui_ctx *ui, const char *family);
 /* Glyphs missing from `font` are looked up in `fallback` (e.g. CJK, emoji). */
 CUI_API void cui_font_add_fallback(cui_ctx *ui, cui_font font, cui_font fallback);
+/* Whether `font` (a role or an id) draws programming ligatures: 1 when its calt, liga, clig or rlig change any of
+ * "-> => != == === <= >= :: && || www <!-- |> ..." (Cascadia Code, Fira Code, JetBrains Mono), 0 when they do not
+ * (Geist Mono, Cascadia Mono, Consolas), -1 when CUI was built without a shaper (CUI_VT_LIGATURES or CUI_TEXT_SHAPING).
+ * Looked at once per font. For a
+ * terminal's setting ("this font has no ligatures"); cui_vt_look.ligatures draws them. */
+CUI_API int cui_font_ligatures(cui_ctx *ui, cui_font font);
 /* Opt in (off by default): a character that no font of the app has is looked up in the system's fonts
  * chosen by script, so Cyrillic, Greek, Armenian, Georgian, Hebrew, Arabic, the Indic scripts, Thai,
  * Khmer, Chinese, Japanese, Korean, Ethiopic and more draw instead of nothing. Every role but the icons
@@ -4889,13 +4895,24 @@ CUI_API int cui_vt_cursor_request(const cui_vt *vt);
  *                (a program that sets its own shape wins while it runs, as in Windows Terminal).
  *   cursor_blink the cursor blinks (530 ms on, 530 off) while the view has the keyboard and the window the focus; typing
  *                and output show it again at once. A program's request wins here too: Ps 1, 3, 5 blink, 2, 4, 6 do not.
- *                Blinking costs about two frames a second; a hidden or unfocused view draws none. */
+ *                Blinking costs about two frames a second; a hidden or unfocused view draws none.
+ *   ligatures    draw the font's programming ligatures (its calt, liga, clig and rlig: "=>" "!=" "->" "===" in Cascadia
+ *                Code, Fira Code, JetBrains Mono) while keeping the grid: a ligature takes exactly the cells of its
+ *                characters and never moves one; it is broken where the style changes, at the cursor and at the edges of
+ *                the selection. Shaped words are kept, so output seen before costs a table lookup, and text with none of
+ *                the characters a ligature starts with is drawn as before. A font with none (cui_font_ligatures, Geist
+ *                Mono) is drawn exactly as before. Needs a build with CUI_VT_LIGATURES (the shaper's GSUB alone, about
+ *                10 KB) or CUI_TEXT_SHAPING; without either the field does nothing. false (the default): as before.
+ *   font_features more OpenType features of the font, comma separated: "ss01,zero" turns them on, "-calt" one off (with
+ *                ligatures on, "-liga" keeps calt and drops liga). NULL or "": none. Needs the same build. */
 typedef struct cui_vt_look {
     cui_color ansi[16];
     cui_color fg, bg, cursor, cursor_text, selection;
     float pad_x, pad_y;
     int cursor_shape;
     bool cursor_blink;
+    bool ligatures;
+    const char *font_features;
 } cui_vt_look;
 typedef struct cui_vt_opts {
     int _;

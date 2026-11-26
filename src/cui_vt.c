@@ -2131,6 +2131,7 @@ typedef struct {
     const cui_color *ansi;            /* `.look`: colors 0..15 (alpha 0: the theme's), NULL: the theme's */
     cui_color cursor_text;            /* the character under a block cursor */
     bool cursor_off;                  /* `.look` blinking: this frame is the off half */
+    bool lig;                         /* `.look` ligatures or font features: ASCII runs go through cui__draw_cells */
     bool links;                       /* `.links`: OSC 8 cells dotted, the link under the mouse underlined (cui_vt_links.c) */
     bool marks;                       /* `.marks`: a tick per command on the scrollbar track (cui_vt_marks.c) */
     const cui__vt_lpaint *lk;
@@ -2258,6 +2259,25 @@ static void cui__vt_slant(cui_ctx *ui, int v0, float base) {
     for (int v = v0; v < ui->dl.vtx_count; v++) ui->dl.vtx[v].x += 0.2f * (by - ui->dl.vtx[v].y);
 }
 
+/* An ASCII run of one style with ligatures (`.look` ligatures): cells [x, x + len) of screen row y (absolute row arow),
+ * cut at the cursor (its character stands alone) and at the edges of the selection, so no ligature reaches across
+ * either; each piece is shaped in its own cells. dx: the bold pass's offset. */
+static void cui__vt_lig_text(cui_ctx *ui, const cui__vt_paint *p, float x0, float dx, int x, int len, float ty, cui_color fg,
+                             const char *buf, int y, int64_t arow) {
+    const cui_vt *v = p->v;
+    int cut[4], nc = 0;
+    int ccx = p->snap ? p->scx : v->cx, ccy = p->snap ? p->scy : v->cy;
+    if (p->show_cursor && p->off == 0 && (p->snap ? p->scursor : v->cursor_vis) && ccy == y) { cut[nc++] = ccx; cut[nc++] = ccx + 1; }
+    if (p->has_sel && arow == p->s0.row) cut[nc++] = p->s0.col;
+    if (p->has_sel && arow == p->s1.row) cut[nc++] = p->s1.col + 1;
+    for (int a = x, e = x + len; a < e;) {
+        int b = e;
+        for (int k = 0; k < nc; k++) if (cut[k] > a && cut[k] < b) b = cut[k];
+        cui__draw_cells(ui, CUI_FONT_MONO, p->size, x0 + a * p->cw + dx, ty, p->cw, fg, buf + (a - x), b - a);
+        a = b;
+    }
+}
+
 /* One cell's characters from 128 on (a cluster too), in `ncell` cells from `left`: an emoji the emoji font draws whole fills
  * its cells (CUI_VT_FEATURE_CLUSTERS); other text sits at the left edge, or with .fit_symbols is centred both ways and
  * scaled down to the cells when it is wider. */
@@ -2324,6 +2344,8 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     cui__vt_paint *p = (cui__vt_paint *)data;
     const cui_vt *v = p->v;
     cui_rect r = n->rect;
+    bool unshaped = ui->text_unshaped;
+    ui->text_unshaped = true;                     /* cells are drawn one by one in screen order: never as bidi paragraphs */
     cui__paint_wheel_hit(ui, p->wheel, r);
     float x0 = r.x + p->padx, y0 = r.y + p->pady, fh = cui__font_line_height(ui, CUI_FONT_MONO, p->size), asc = cui__font_ascent(ui, CUI_FONT_MONO, p->size);
     cui_push_clip(ui, (cui_rect){ r.x, r.y + 1, r.w, r.h - 2 });
@@ -2396,8 +2418,13 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
                 e++;
             }
             len = last - x + 1;
-            cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, buf, len, true);
-            if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, buf, len, true);
+            if (p->lig) {                           /* ligatures in the run's own cells */
+                cui__vt_lig_text(ui, p, x0, 0, x, len, ty, fg, buf, y, arow);
+                if (at & CUI_VT_BOLD) cui__vt_lig_text(ui, p, x0, 0.45f, x, len, ty, fg, buf, y, arow);
+            } else {
+                cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, buf, len, true);
+                if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, buf, len, true);
+            }
             if (slant) cui__vt_slant(ui, v0, ty + asc);
             if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, len, ry, fg);
             if (at & CUI_VT_STRIKE) cui_draw_rect(ui, (cui_rect){ x0 + x * p->cw, ry + p->lh * 0.5f, len * p->cw, 1 }, CUI_CORNERS(0), fg);
@@ -2456,6 +2483,7 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
         cui_draw_rect(ui, (cui_rect){ r.x + r.w - 6, r.y + frac * (r.h - th), 3, th }, CUI_CORNERS(1.5f), cui_alpha(p->bar, p->bar_t));
     }
     if (p->marks && p->bar_t > 0.01f && v->cur == 0) cui__vt_mk_paint(ui, v, r);     /* the commands' ticks, over the track */
+    ui->text_unshaped = unshaped;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -2690,6 +2718,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
         if (lk->cursor.a) p->cursor = lk->cursor;
         p->cursor_text = lk->cursor_text.a ? lk->cursor_text : p->bg;
         p->ansi = lk->ansi;
+        p->lig = cui__cells_begin(ui, CUI_FONT_MONO, lk->ligatures, lk->font_features);   /* false when the font has none */
         int req = v->cursor_req;
         p->shape = req ? v->cursor_shape : CUI_CLAMP(lk->cursor_shape, CUI_VT_CURSOR_BLOCK, CUI_VT_CURSOR_BAR);
         bool blink = req ? (req & 1) != 0 : lk->cursor_blink;

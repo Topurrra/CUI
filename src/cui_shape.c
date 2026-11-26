@@ -140,6 +140,10 @@ static int context(shape *s,off p,int i,int chained,unsigned flags,off lookup,in
     cui_shape_font *f=s->f;
     unsigned fmt=u16(f,p),rules=1; off set=0,classes[3]={0,0,0};
     int mode=fmt==3?2:fmt==2?1:0;
+    if (fmt==3) {                     /* the first input's coverage before any backtrack is matched: most rules end here */
+        off first=chained?rel(f,p,u16(f,p+6+2*u16(f,p+2))):rel(f,p,u16(f,p+6));
+        if (coverage(f,first,s->g[i].id)<0) return 0;
+    }
     if (fmt!=3) {
         int cov=coverage(f,rel(f,p,u16(f,p+2)),s->g[i].id);
         if (cov<0) return 0;
@@ -463,5 +467,101 @@ int cui__shape(cui_shape_font *f,cui_shape_glyph *g,int count,int capacity,uint3
         g[i].id=cui__shape_map(f,' '); g[i].advance=g[i].x=g[i].y=0;
     }
     if (rtl) for (int i=0;i<s.n/2;i++) { cui_shape_glyph t=g[i]; g[i]=g[s.n-1-i]; g[s.n-1-i]=t; }
+    return s.failed?-1:s.n;
+}
+
+/* ---- terminal cells: GSUB only, the lookups of a set of features in the order of the font's lookup list ---- */
+
+/* The lookups of the features `tags` (script, else DFLT), sorted and without repeats; returns how many (at most cap). */
+static int lookups_of(const cui_shape_font *f,uint32_t script,const uint32_t *tags,int ntags,unsigned short *out,int cap) {
+    if (!f->gsub) return 0;
+    off lang=language((cui_shape_font *)f,f->gsub,script);
+    if (!lang) return 0;
+    off features=rel(f,f->gsub,u16(f,f->gsub+6));
+    int n=0;
+    for (unsigned k=0;k<u16(f,lang+4);k++) {
+        unsigned index=u16(f,lang+6+2*k);
+        if (index>=u16(f,features)) continue;
+        off r=features+2+6*index, tag=u32(f,r);
+        int want=0;
+        for (int t=0;t<ntags && !want;t++) want=tags[t]==tag;
+        if (!want) continue;
+        off p=rel(f,features,u16(f,r+4));
+        for (unsigned l=0;l<u16(f,p+2);l++) {
+            unsigned short li=(unsigned short)u16(f,p+4+2*l);
+            int at=0;
+            while (at<n && out[at]<li) at++;
+            if (at<n && out[at]==li) continue;
+            if (n==cap) break;
+            memmove(out+at+1,out+at,(size_t)(n-at)*sizeof *out); out[at]=li; n++;
+        }
+    }
+    return n;
+}
+
+/* the first-glyph coverage of one lookup subtable (an extension is followed); 0 for none */
+static off first_coverage(const cui_shape_font *f,off p,unsigned type) {
+    if (!p) return 0;
+    unsigned fmt=u16(f,p);
+    if (type==7) return fmt==1?first_coverage(f,rel(f,p,u32(f,p+4)),u16(f,p+2)):0;
+    if (type==5 && fmt==3) return rel(f,p,u16(f,p+6));
+    if (type==6 && fmt==3) { unsigned back=u16(f,p+2); return rel(f,p,u16(f,p+4+2*back+2)); }
+    return rel(f,p,u16(f,p+2));
+}
+
+/* every glyph of a coverage table into a 256-bit digest (glyph id mod 256) */
+static void digest_add(const cui_shape_font *f,off p,uint64_t d[4]) {
+    unsigned fmt=u16(f,p),n=u16(f,p+2);
+    for (unsigned k=0;k<n;k++) {
+        unsigned first,last;
+        if (fmt==1) first=last=u16(f,p+4+2*k);
+        else if (fmt==2) { first=u16(f,p+4+6*k); last=u16(f,p+6+6*k); }
+        else return;
+        if (last<first) continue;
+        if (last-first>=255) { d[0]=d[1]=d[2]=d[3]=~0ull; return; }
+        for (unsigned gl=first;gl<=last;gl++) d[(gl>>6)&3]|=1ull<<(gl&63);
+    }
+}
+
+int cui__shape_plan(const cui_shape_font *f,uint32_t script,const uint32_t *tags,int ntags,cui_shape_plan *plan) {
+    memset(plan,0,sizeof *plan);
+    plan->count=lookups_of(f,script,tags,ntags,plan->lookup,CUI_SHAPE_PLAN_MAX);
+    off list=f->gsub?rel(f,f->gsub,u16(f,f->gsub+8)):0;
+    int gid[128];
+    for (int c=0;c<128;c++) { gid[c]=f->cmap?cui__shape_map(f,(uint32_t)c):0; plan->ascii[c]=(unsigned short)gid[c]; }
+    for (int l=0;l<plan->count && list;l++) {
+        if (plan->lookup[l]>=u16(f,list)) continue;
+        off p=rel(f,list,u16(f,list+2+2*plan->lookup[l]));
+        unsigned type=u16(f,p);
+        for (unsigned j=0;p && j<u16(f,p+4);j++) {
+            off cov=first_coverage(f,rel(f,p,u16(f,p+6+2*j)),type);
+            if (!cov) continue;
+            digest_add(f,cov,plan->digest[l]);
+            for (int c=33;c<127;c++) if (gid[c] && !plan->cover[c] && coverage(f,cov,gid[c])>=0) plan->cover[c]=1;
+        }
+    }
+    return plan->count;
+}
+
+int cui__shape_gsub(cui_shape_font *f,const cui_shape_plan *plan,cui_shape_glyph *g,int count,int capacity) {
+    if (count<0 || count>capacity || !f->cmap) return -1;
+    for (int i=0;i<count;i++) {
+        uint32_t cp=g[i].codepoint;
+        g[i].id=cp<128?plan->ascii[cp]:cui__shape_map(f,cp); g[i].x=g[i].y=0; g[i].form=-1; g[i].ligature=g[i].component=0;
+    }
+    shape s={f,g,count,capacity,0,0,0,0,0,0};
+    s.layout=f->gsub; s.list=f->gsub?rel(f,f->gsub,u16(f,f->gsub+8)):0;
+    for (int l=0;l<plan->count && s.list;l++) {
+        const uint64_t *d=plan->digest[l];
+        for (int i=0;i<s.n;) {
+            unsigned id=(unsigned)s.g[i].id;
+            if (!((d[(id>>6)&3]>>(id&63))&1)) { i++; continue; }     /* no subtable of the lookup starts with this glyph */
+            int n=apply(&s,plan->lookup[l],i,0); i+=n>0?n:1;
+        }
+    }
+    for (int i=0;i<s.n;i++) {
+        int glyph=g[i].id;
+        g[i].advance=f->metrics>0?(int)u16(f,f->hmtx+4*(off)(glyph<f->metrics?glyph:f->metrics-1)):0;
+    }
     return s.failed?-1:s.n;
 }

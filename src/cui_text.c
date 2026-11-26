@@ -17,8 +17,10 @@
 #pragma GCC diagnostic pop
 #endif
 
-#ifdef CUI_TEXT_SHAPING
+#ifdef CUI__SHAPER
 #include "cui_shape.h"
+#endif
+#ifdef CUI_TEXT_SHAPING
 #include "cui_bidi.h"
 /* pen and adv: where the glyph's advance starts and how wide it is (x adds the mark offset); rtl: its run's
  * direction. Text fields read these to place the caret (cui_input_use_bidi). */
@@ -122,9 +124,10 @@ struct cui_font_data {
     stbtt_fontinfo info;
     unsigned char *data;
     bool owned;
-#ifdef CUI_TEXT_SHAPING
+#ifdef CUI__SHAPER
     size_t data_size;
     cui_shape_font shaped;
+    signed char ligs;                  /* cui_font_ligatures: 0 not looked at yet, 1 none, 2 some */
 #endif
     float upem;
     float ascent, descent, line_gap;   /* em units (fractions of the font size) */
@@ -212,7 +215,7 @@ int cui__font_add(cui_ctx *ui, const void *data, size_t size, bool copy, int fac
     memset(fd, 0, sizeof *fd);
     fd->info = info;
     fd->data = bytes;
-#ifdef CUI_TEXT_SHAPING
+#ifdef CUI__SHAPER
     fd->data_size = size;
     cui__shape_font_init(&fd->shaped, bytes, size, off);
 #endif
@@ -330,9 +333,16 @@ void cui__fonts_init(cui_ctx *ui, bool defaults) {
 #endif
 }
 
+#ifdef CUI__SHAPER
+static void cui__cells_free(cui_ctx *ui);
+#endif
+
 void cui__fonts_shutdown(cui_ctx *ui) {
 #ifdef CUI_TEXT_SHAPING
     cui__shape_cache_clear(ui);
+#endif
+#ifdef CUI__SHAPER
+    cui__cells_free(ui);
 #endif
     for (int i = 0; i < ui->font_count; i++) {
         if (ui->fonts[i].owned) cui__free(ui, ui->fonts[i].data);
@@ -1575,3 +1585,254 @@ void cui_draw_icon(cui_ctx *ui, const char *icon, cui_rect r, float size, cui_co
     float x = r.x + (r.w - size) * 0.5f, y = r.y + (r.h - size) * 0.5f;
     cui__draw_text_line(ui, CUI_FONT_ICONS, size, x, y, color, icon, (int)strlen(icon), false);
 }
+
+/* ---- terminal cells with ligatures (cui_vt_look.ligatures and .font_features) ----
+ * One plan (cui_shape.h) for the view's font and features. Text is cut into words at spaces (no ligature crosses one);
+ * a word with none of the characters a lookup starts with is drawn glyph by glyph from the font's ASCII table, the
+ * others are shaped once and kept in a table of 1024 words, so a screen seen before costs a hash and a compare a word.
+ * Each glyph is drawn at the left edge of its character's cell (a ligature's glyphs reach over the cells of the
+ * characters it took), exactly where cui__draw_text_line puts the characters of a monospace font. */
+#ifdef CUI__SHAPER
+#define CUI__TAG(s) ((uint32_t)(uint8_t)(s)[0] << 24 | (uint32_t)(uint8_t)(s)[1] << 16 | (uint32_t)(uint8_t)(s)[2] << 8 | (uint32_t)(uint8_t)(s)[3])
+#define CUI__LATN 0x6c61746eu
+#define CUI__CELLS_WORDS 1024           /* a power of two */
+#define CUI__CELLS_MAXW 256             /* longer words are drawn without ligatures */
+typedef struct { uint16_t gid, cell; int16_t dx; } cui__cell_glyph;     /* dx: font units after the cell's edge (a 2nd glyph of one character) */
+typedef struct { uint64_t key; char *text; cui__cell_glyph *g; uint16_t len, n; bool ctx_ok; uint32_t used; } cui__cells_word;
+struct cui__cells_lig {
+    int font;                           /* the font index of the plan; -1 none yet */
+    uint32_t clock;                     /* stamps the words' last use (a set of 4 drops its oldest) */
+    bool ligatures, active;             /* active: the plan changes some ASCII text */
+    char features[128];
+    cui_shape_plan plan;
+    cui__cells_word words[CUI__CELLS_WORDS];
+};
+
+static void cui__cells_words_free(cui_ctx *ui, struct cui__cells_lig *c) {
+    for (int i = 0; i < CUI__CELLS_WORDS; i++) {
+        cui__free(ui, c->words[i].text); cui__free(ui, c->words[i].g);
+        memset(&c->words[i], 0, sizeof c->words[i]);
+    }
+}
+
+static void cui__cells_free(cui_ctx *ui) {
+    if (!ui->cells_lig) return;
+    cui__cells_words_free(ui, ui->cells_lig);
+    cui__free(ui, ui->cells_lig);
+    ui->cells_lig = NULL;
+}
+
+/* the features as tags: the ligature ones when asked, then "ss01,zero" added and "-calt" taken away */
+static int cui__cells_tags(bool ligatures, const char *features, uint32_t *tags, int cap) {
+    static const char *const LIG[] = { "rlig", "calt", "rclt", "liga", "clig" };
+    int n = 0;
+    if (ligatures) for (int k = 0; k < 5; k++) tags[n++] = CUI__TAG(LIG[k]);
+    for (const char *p = features ? features : ""; *p;) {
+        while (*p == ',' || *p == ';' || *p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        bool on = true;
+        if (*p == '-' || *p == '+') on = *p++ == '+';
+        char t[4] = { ' ', ' ', ' ', ' ' };
+        int k = 0;
+        bool ok = true;
+        for (; *p && *p != ',' && *p != ';' && *p != ' ' && *p != '\t' && *p != '='; p++) {
+            if (k < 4) t[k] = *p;
+            ok &= ++k <= 4 && ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9'));
+        }
+        if (*p == '=') { p++; if (*p == '0') on = false; while (*p && *p != ',' && *p != ';' && *p != ' ') p++; }   /* "calt=0" */
+        if (!ok || !k) continue;
+        uint32_t tag = CUI__TAG(t);
+        int at = 0;
+        while (at < n && tags[at] != tag) at++;
+        if (!on && at < n) tags[at] = tags[--n];
+        else if (on && at == n && n < cap) tags[n++] = tag;
+    }
+    return n;
+}
+
+bool cui__cells_begin(cui_ctx *ui, cui_font font, bool ligatures, const char *features) {
+    if (!features) features = "";
+    if (!ligatures && !*features) return false;
+    int f = cui__resolve_font(ui, font);
+    if (f < 0) return false;
+    struct cui__cells_lig *c = ui->cells_lig;
+    if (!c) {
+        c = cui__alloc(ui, sizeof *c);
+        if (!c) return false;
+        memset(c, 0, sizeof *c);
+        c->font = -1;
+        ui->cells_lig = c;
+    }
+    if (c->font == f && c->ligatures == ligatures && !strncmp(c->features, features, sizeof c->features - 1)) return c->active;
+    cui__cells_words_free(ui, c);
+    c->font = f; c->ligatures = ligatures;
+    snprintf(c->features, sizeof c->features, "%s", features);
+    uint32_t tags[40];
+    int nt = cui__cells_tags(ligatures, features, tags, 40);
+    cui__shape_plan(&ui->fonts[f].shaped, CUI__LATN, tags, nt, &c->plan);
+    c->active = false;
+    for (int k = 33; k < 127; k++) c->active |= c->plan.cover[k] != 0;
+    return c->active;
+}
+
+/* the shaped glyphs of a word, kept; NULL when it cannot be shaped (too long, out of memory): drawn without ligatures */
+static const cui__cells_word *cui__cells_shaped(cui_ctx *ui, struct cui__cells_lig *c, const char *t, int len) {
+    uint64_t key = 1469598103934665603ull;
+    for (int i = 0; i < len; i++) key = (key ^ (uint8_t)t[i]) * 1099511628211ull;
+    cui__cells_word *set = &c->words[(key ^ (key >> 29)) & (CUI__CELLS_WORDS - 4)], *w = set;   /* 4 ways: the oldest goes */
+    for (int k = 0; k < 4; k++) {
+        if (set[k].text && set[k].key == key && set[k].len == len && !memcmp(set[k].text, t, (size_t)len)) { set[k].used = ++c->clock; return &set[k]; }
+        if (set[k].used < w->used) w = &set[k];
+    }
+    if (len > CUI__CELLS_MAXW) return NULL;
+    cui_shape_glyph g[CUI__CELLS_MAXW * 2];
+    for (int i = 0; i < len; i++) g[i] = (cui_shape_glyph){ (uint8_t)t[i], 0, i, 0, 0, 0, 0, 0, 0 };
+    int m = cui__shape_gsub(&ui->fonts[c->font].shaped, &c->plan, g, len, CUI__CELLS_MAXW * 2);
+    if (m < 0) return NULL;
+    char *text = cui__alloc(ui, (size_t)len);
+    cui__cell_glyph *cg = cui__alloc(ui, (size_t)(m > 0 ? m : 1) * sizeof *cg);
+    if (!text || !cg) { cui__free(ui, text); cui__free(ui, cg); return NULL; }
+    memcpy(text, t, (size_t)len);
+    for (int i = 0; i < m; i++) {
+        int cell = CUI_CLAMP(g[i].cluster, 0, len - 1), dx = 0;
+        if (i > 0 && g[i - 1].cluster == g[i].cluster) dx = cg[i - 1].dx + g[i - 1].advance;   /* one character, several glyphs */
+        cg[i] = (cui__cell_glyph){ (uint16_t)g[i].id, (uint16_t)cell, (int16_t)CUI_CLAMP(dx, -32768, 32767) };
+    }
+    /* a piece's context (an end character that starts no lookup) must come out as it went in, alone in its cell */
+    bool ok = true;
+    for (int end = 0; end < 2 && ok; end++) {
+        int at = end ? len - 1 : 0, seen = 0;
+        if (c->plan.cover[(uint8_t)t[at] & 127]) continue;
+        for (int i = 0; i < m; i++) if (cg[i].cell == at) { seen++; ok &= cg[i].gid == c->plan.ascii[(uint8_t)t[at] & 127]; }
+        ok &= seen == 1;
+    }
+    cui__free(ui, w->text); cui__free(ui, w->g);
+    *w = (cui__cells_word){ key, text, cg, (uint16_t)len, (uint16_t)m, ok, ++c->clock };
+    return w;
+}
+
+/* The piece of a word around the run [r0, r1) of characters that start lookups, with one character of context on each
+ * side that the word has; *s0: where its text starts. A run is shaped with its neighbours, so a word that differs only
+ * in its letters and digits ("www_17->y", "www_18->y") is found among the kept ones. */
+static const cui__cells_word *cui__cells_piece(cui_ctx *ui, struct cui__cells_lig *c, const char *t, int a, int e, int r0, int r1, int *s0) {
+    *s0 = r0 > a ? r0 - 1 : r0;
+    int s1 = r1 < e ? r1 + 1 : r1;
+    return cui__cells_shaped(ui, c, t + *s0, s1 - *s0);
+}
+
+/* one glyph with its pen at `pen` (points) on the baseline `by` (device pixels) */
+static void cui__cells_glyph(cui_ctx *ui, int font, int gid, float pen, float by, float px_size, cui_color col) {
+    if (!gid) return;
+    float px = pen * ui->scale, fl = floorf(px);
+    int subpx = CUI_MIN(2, (int)((px - fl) * 3.0f));
+    cui_glyph *g = cui__glyph_get(ui, font, gid, px_size, subpx);
+    if (!g || !g->w) return;
+    float iw = 1.0f / (float)ui->atlas_w, ih = 1.0f / (float)ui->atlas_h, qx = fl + g->x0, qy = by + g->y0;
+    cui__draw_glyph_quad(ui, qx, qy, qx + g->w, qy + g->h, g->ax * iw, g->ay * ih, (g->ax + g->w) * iw, (g->ay + g->h) * ih, col);
+}
+
+void cui__draw_cells(cui_ctx *ui, cui_font font, float size, float x, float y, float cw, cui_color color, const char *t, int n) {
+    struct cui__cells_lig *c = ui->cells_lig;
+    int f = cui__resolve_font(ui, font);
+    if (!c || !c->active || f != c->font || f < 0) { cui__draw_text_line(ui, font, size, x, y, color, t, n, true); return; }
+    color = cui_color_of(ui, color);
+    if (color.a == 0 || n <= 0) return;
+    cui_font_data *fd = &ui->fonts[f];
+    float s = ui->scale, px_size = size * s;
+    if (px_size < 1) return;
+    float half_track = 0.5f * size * (-0.0223f + 0.185f * expf(-0.1745f * size));   /* cui__iter_init's tracking, centred as it is */
+    float by = roundf((y + fd->ascent * size) * s), em = size / fd->upem;
+    const unsigned char *cov = c->plan.cover;
+#define CUI__COV(k) (cov[(uint8_t)t[k] & 127] != 0)
+#define CUI__PLAIN(k) do {                                                                                          \
+        uint8_t ch_ = (uint8_t)t[k];                                                                                \
+        int gid_ = ch_ < 128 ? fd->gi_ascii[ch_] : 0;                                                               \
+        float pen_ = x + (float)(k) * cw + half_track;                                                              \
+        if (gid_) cui__cells_glyph(ui, f, gid_, pen_, by, px_size, color);                                         \
+        else { cui_font gf_; int gi_; cui__find_glyph(ui, f, ch_, &gf_, &gi_);   /* the font lacks it: its fallbacks */ \
+               if (gf_ >= 0 && gi_) cui__cells_glyph(ui, gf_, gi_, pen_, by, cui__glyph_size(ui, f, gf_, size) * s, color); } \
+    } while (0)
+    for (int i = 0; i < n;) {
+        if (t[i] == ' ') { i++; continue; }
+        int a = i, s0;
+        bool shape = false;
+        while (i < n && t[i] != ' ') { shape |= CUI__COV(i); i++; }
+        if (!shape) { for (int k = a; k < i; k++) CUI__PLAIN(k); continue; }
+        /* the word in pieces, unless one of them changes a neighbour: then as a whole. The pieces found are remembered
+         * for the drawing below (a later piece of the same word may push one out of its set: then it is looked up again) */
+        struct { const cui__cells_word *w; uint64_t key; } pc[16];
+        int np = 0;
+        bool pieces = true;
+        for (int k = a; k < i && pieces;) {
+            if (!CUI__COV(k)) { k++; continue; }
+            int r0 = k;
+            while (k < i && CUI__COV(k)) k++;
+            const cui__cells_word *w = cui__cells_piece(ui, c, t, a, i, r0, k, &s0);
+            pieces = w && w->ctx_ok;
+            if (np < 16) { pc[np].w = w; pc[np].key = w ? w->key : 0; }
+            np++;
+        }
+        if (!pieces) {
+            const cui__cells_word *w = cui__cells_shaped(ui, c, t + a, i - a);
+            if (w) for (int k = 0; k < w->n; k++)
+                cui__cells_glyph(ui, f, w->g[k].gid, x + (float)(a + w->g[k].cell) * cw + half_track + (float)w->g[k].dx * em, by, px_size, color);
+            else for (int k = a; k < i; k++) CUI__PLAIN(k);
+            continue;
+        }
+        for (int k = a, j = 0; k < i; ) {
+            if (!CUI__COV(k)) { CUI__PLAIN(k); k++; continue; }
+            int r0 = k;
+            while (k < i && CUI__COV(k)) k++;
+            const cui__cells_word *w = j < 16 && pc[j].w && pc[j].w->key == pc[j].key && pc[j].w->text ? pc[j].w : NULL;
+            j++;
+            s0 = r0 > a ? r0 - 1 : r0;
+            if (!w) w = cui__cells_piece(ui, c, t, a, i, r0, k, &s0);
+            if (!w) { for (int q = r0; q < k; q++) CUI__PLAIN(q); continue; }
+            for (int q = 0; q < w->n; q++) {
+                int cell = s0 + w->g[q].cell;
+                if (cell >= r0 && cell < k)
+                    cui__cells_glyph(ui, f, w->g[q].gid, x + (float)cell * cw + half_track + (float)w->g[q].dx * em, by, px_size, color);
+            }
+        }
+    }
+#undef CUI__PLAIN
+#undef CUI__COV
+}
+
+int cui_font_ligatures(cui_ctx *ui, cui_font font) {
+    int f = ui ? cui__resolve_font(ui, font) : -1;
+    if (f < 0) return 0;
+    cui_font_data *fd = &ui->fonts[f];
+    if (!fd->ligs) {
+        static const char *const TAGS[] = { "rlig", "calt", "rclt", "liga", "clig" };
+        static const char *const PROBE[] = { "->", "=>", "!=", "==", "===", "<=", ">=", "::", "&&", "||", "www", "<!--", "|>", "...", "++", "</", "<>", "//" };
+        uint32_t tags[5];
+        for (int k = 0; k < 5; k++) tags[k] = CUI__TAG(TAGS[k]);
+        cui_shape_plan *plan = cui__alloc(ui, sizeof *plan);
+        bool some = false;
+        if (plan && cui__shape_plan(&fd->shaped, CUI__LATN, tags, 5, plan) > 0) {
+            for (size_t p = 0; p < sizeof PROBE / sizeof *PROBE && !some; p++) {
+                cui_shape_glyph g[16];
+                int len = (int)strlen(PROBE[p]);
+                for (int i = 0; i < len; i++) g[i] = (cui_shape_glyph){ (uint8_t)PROBE[p][i], 0, i, 0, 0, 0, 0, 0, 0 };
+                int m = cui__shape_gsub(&fd->shaped, plan, g, len, 16);
+                some = m >= 0 && m != len;
+                for (int i = 0; i < m && !some; i++) some = g[i].id != cui__shape_map(&fd->shaped, (uint8_t)PROBE[p][g[i].cluster]);
+            }
+        }
+        cui__free(ui, plan);
+        fd->ligs = some ? 2 : 1;
+    }
+    return fd->ligs == 2;
+}
+#else
+bool cui__cells_begin(cui_ctx *ui, cui_font font, bool ligatures, const char *features) {
+    (void)ui; (void)font; (void)ligatures; (void)features;
+    return false;
+}
+void cui__draw_cells(cui_ctx *ui, cui_font font, float size, float x, float y, float cw, cui_color color, const char *t, int n) {
+    (void)cw;
+    cui__draw_text_line(ui, font, size, x, y, color, t, n, true);
+}
+int cui_font_ligatures(cui_ctx *ui, cui_font font) { (void)ui; (void)font; return -1; }
+#endif
