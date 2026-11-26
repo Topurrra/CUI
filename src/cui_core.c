@@ -614,6 +614,7 @@ static void cui__key_action(cui_ctx *ui, const cui_input_event *event) {
 }
 void cui_input_key(cui_ctx *ui, cui_key key, bool down, int mods) {
     const cui_input_event event = { .kind = CUI_INPUT_KEY, .key = key, .down = down, .mods = mods };
+    if (down && key != CUI_KEY_NONE) ui->typed_seq++;
     if (cui__input_handled(ui, &event)) return;
     /* Keep legacy modifier sampling unchanged outside opt-in dispatch. */
     int previous_mods = ui->mods;
@@ -660,6 +661,7 @@ bool cui_file_drag_active(cui_ctx *ui) { return ui->drag_hover; }
 void cui_input_text(cui_ctx *ui, const char *utf8) {
     if (!utf8) return;
     const cui_input_event event = { .kind = CUI_INPUT_TEXT, .text = utf8 };
+    if (*utf8) ui->typed_seq++;
     if (cui__input_handled(ui, &event)) return;
     int n = (int)strlen(utf8);
     if (ui->text_in_len + n >= (int)sizeof(ui->text_in)) return;

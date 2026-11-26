@@ -916,6 +916,7 @@ struct cui_ctx {
     char text_in[256]; int text_in_len;
     bool window_focused;
     bool input_this_frame;
+    unsigned typed_seq;             /* bumps on every key press and text input (cui_app_unpace_answers) */
 
     /* theme */
     cui_theme theme;

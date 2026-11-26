@@ -386,6 +386,10 @@ static void cui__app_finish(cui_app *app) {
     if (!app->in_frame) return;
     cui__app_render(app);
     app->idle_since = cui__plat_now();
+    if (app->unpace_s > 0 && app->ui->typed_seq != app->typed_seen) {   /* this frame took typing (cui_app_unpace_answers) */
+        app->typed_seen = app->ui->typed_seq;
+        app->typed_at = app->idle_since;
+    }
     app->wake_seen = -2;   /* the timers of the frame just drawn count from now */
     if (app->screenshot_path && ++app->frames >= app->screenshot_frames) {
         const cui_draw_data *dd = cui_get_draw_data(app->ui);
@@ -445,12 +449,26 @@ static double cui__app_plan(cui_app *app, double *pace_until) {
     return timeout;
 }
 
+/* cui_app_unpace_answers: a worker woke the window soon after typing, so what it brought is the answer to a key and
+ * is drawn at once rather than at the next display period. */
+static bool cui__app_answer_due(cui_app *app) {
+    return app->unpace_s > 0 && app->woken && app->typed_at > 0 && cui__plat_now() - app->typed_at <= app->unpace_s;
+}
+
+void cui_app_unpace_answers(cui_app *app, double ms) {
+    app = cui__app_or_current(app);
+    if (!app) return;
+    app->unpace_s = ms > 0 ? ms / 1000.0 : 0;
+    app->typed_seen = app->ui->typed_seq;
+    app->typed_at = 0;
+}
+
 bool cui_app_frame(cui_app *app) {
     cui__app_finish(app);
     if (!app->running) return false;
     double until, timeout = cui__app_plan(app, &until);
     if (until > 0)
-        for (double left = until - cui__plat_now(); left > 0.0005 && app->running; left = until - cui__plat_now())
+        for (double left = until - cui__plat_now(); left > 0.0005 && app->running && !cui__app_answer_due(app); left = until - cui__plat_now())
             cui__plat_wait(app, left);
     CUI__PROBE(CUI_PROBE_SLEEP);
     cui__plat_wait(app, timeout);
@@ -521,7 +539,12 @@ void cui_app_wait(cui_app *const *apps, int n) {
     }
     if (pace > 0 && (limit < 0 || pace - now < limit)) {
         /* the nearest frame period: events on the way are taken in, the frame still waits for it */
-        for (double left = pace - now; left > 0.0005; left = pace - cui__plat_now()) cui__plat_wait(first, left);
+        for (double left = pace - now; left > 0.0005; left = pace - cui__plat_now()) {
+            bool due = false;                     /* cui_app_unpace_answers: an answer to typing ends the wait */
+            for (int i = 0; i < n && !due; i++) due = apps[i] && cui__app_answer_due(apps[i]);
+            if (due) break;
+            cui__plat_wait(first, left);
+        }
         limit = 0;
     }
     CUI__PROBE(CUI_PROBE_SLEEP);

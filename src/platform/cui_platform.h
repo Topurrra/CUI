@@ -21,6 +21,9 @@ struct cui_app {
     bool gl_counted;           /* counted in this thread's OpenGL apps (one GL context per thread: cui__gl_apps) */
     bool wake_tracked;         /* the backend sets `woken` when something other than input wakes the window */
     bool woken;                /* a worker's message arrived since the frame began (cui_app_pending) */
+    double unpace_s;           /* cui_app_unpace_answers: how long after typing a worker's wake skips the pacing, 0 off */
+    double typed_at;           /* when the last frame that took typing ended */
+    unsigned typed_seen;       /* ui->typed_seq as that frame saw it */
     double idle_since;         /* when the last frame was presented */
     double wake_at;            /* absolute time of the next timer the app asked for (cui_request_wakeup), < 0 none */
     float wake_seen;           /* the cui_next_wakeup value wake_at was made from */

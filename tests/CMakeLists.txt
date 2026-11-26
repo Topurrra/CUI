@@ -121,6 +121,12 @@ if(CUI_WITH_APP)
     target_link_libraries(cui_test_fit_work_area PRIVATE cui::cui)
     add_test(NAME cui_test_fit_work_area COMMAND cui_test_fit_work_area)
 
+    if(WIN32 AND CUI_BACKEND STREQUAL "win32")   # cui_app_unpace_answers: a worker's wake (WM_APP) after a key
+        add_executable(cui_test_unpace_answers test_unpace_answers.c)
+        target_link_libraries(cui_test_unpace_answers PRIVATE cui::cui)
+        add_test(NAME cui_test_unpace_answers COMMAND cui_test_unpace_answers)
+    endif()
+
     add_executable(cui_test_window_state test_window_state.c)
     target_link_libraries(cui_test_window_state PRIVATE cui::cui)
     add_test(NAME cui_test_window_state COMMAND cui_test_window_state)
