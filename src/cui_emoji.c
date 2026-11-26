@@ -41,6 +41,7 @@ typedef struct cui__emoji {
     uint32_t base;                          /* the font inside a collection */
     uint8_t *cmap; uint32_t cmap_len, cmap_sub; int cmap_fmt;
     uint8_t *gsub; uint32_t gsub_len;
+    uint64_t gsub_use[4]; bool gsub_feat;   /* the lookups the features (ccmp, liga...) apply, when the font says (lookups 0..255) */
     uint8_t *cblc; uint32_t cblc_len, cbdt;
     uint32_t sbix, sbix_strike[16]; uint16_t sbix_ppem[16]; int sbix_n;
     uint8_t *colr, *cpal; uint32_t colr_len, cpal_len;
@@ -167,6 +168,31 @@ static void cui__emoji_hook(cui_ctx *ui, int what) {
 /* Opening a font                                                           */
 /* ------------------------------------------------------------------------ */
 
+/* The lookups the font's ccmp, liga, clig and rlig features name. A font can keep lookups that only a contextual lookup calls
+ * (Windows 11's Segoe UI Emoji: ccmp names 17 and 18, and 0..16 are 18's steps); run in order on their own they would turn
+ * "person ZWJ" into a step's glyph before the technologist's ligature sees it. With no such feature every ligature lookup
+ * runs, as before. (Its family sequences are three glyphs the font places, not one: they are still drawn as their pieces.) */
+static void cui__em_gsub_features(cui__emoji *e) {
+    const uint8_t *t = e->gsub;
+    uint32_t L = e->gsub_len;
+    memset(e->gsub_use, 0, sizeof e->gsub_use);
+    e->gsub_feat = false;
+    if (!t) return;
+    uint32_t fl = CUI__T16(t, L, 6);
+    int nf = CUI__T16(t, L, fl);
+    for (int i = 0; i < nf; i++) {
+        const uint8_t *tag = t + fl + 2 + (uint32_t)i * 6;
+        if (fl + 2 + (uint32_t)i * 6 + 6 > L) break;
+        if (memcmp(tag, "ccmp", 4) && memcmp(tag, "liga", 4) && memcmp(tag, "clig", 4) && memcmp(tag, "rlig", 4)) continue;
+        uint32_t fo = fl + CUI__T16(t, L, fl + 6 + (uint32_t)i * 6);
+        int nl = CUI__T16(t, L, fo + 2);
+        for (int k = 0; k < nl; k++) {
+            int li = CUI__T16(t, L, fo + 4 + (uint32_t)k * 2);
+            if (li < 256) { e->gsub_use[li >> 6] |= 1ull << (li & 63); e->gsub_feat = true; }
+        }
+    }
+}
+
 static bool cui__em_open(cui_ctx *ui, cui__emoji *e) {
     uint8_t h[12];
     if (!cui__em_read(e, 0, h, 12)) return false;
@@ -215,6 +241,7 @@ static bool cui__em_open(cui_ctx *ui, cui__emoji *e) {
         }
     if (!e->cmap_fmt) return false;
     if (gsub) { e->gsub = cui__em_table(ui, e, gsub, gsub_l); e->gsub_len = e->gsub ? gsub_l : 0; }
+    cui__em_gsub_features(e);
     if (cblc && e->cbdt) { e->cblc = cui__em_table(ui, e, cblc, cblc_l); e->cblc_len = e->cblc ? cblc_l : 0; }
     if (e->sbix && e->num_glyphs) {
         uint8_t sh[8];
@@ -395,7 +422,7 @@ static int cui__em_liga(const uint8_t *t, uint32_t L, uint32_t sub, const int *g
     return 0;
 }
 
-/* runs every ligature lookup over the glyphs, in order */
+/* runs the ligature lookups over the glyphs, in order: those the font's features name, else every one */
 static int cui__em_gsub(const cui__emoji *e, int *g, int n) {
     const uint8_t *t = e->gsub;
     uint32_t L = e->gsub_len;
@@ -406,6 +433,7 @@ static int cui__em_gsub(const cui__emoji *e, int *g, int n) {
         uint32_t look = list + CUI__T16(t, L, list + 2 + (uint32_t)li * 2);
         int type = CUI__T16(t, L, look), nsub = CUI__T16(t, L, look + 4);
         if (type != 4 && type != 7) continue;
+        if (e->gsub_feat && (li >= 256 || !(e->gsub_use[li >> 6] >> (li & 63) & 1))) continue;   /* a step of a contextual lookup */
         for (int i = 0; i < n; i++) {
             for (int si = 0; si < nsub; si++) {
                 uint32_t sub = look + CUI__T16(t, L, look + 6 + (uint32_t)si * 2);
