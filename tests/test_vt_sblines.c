@@ -7,6 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#if defined(_WIN32)
+#include <windows.h>
+static double now_ms(void) { LARGE_INTEGER f, c; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&c); return (double)c.QuadPart * 1000.0 / (double)f.QuadPart; }
+#else
+static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000.0 + t.tv_nsec / 1e6; }
+#endif
 
 static int g_failed, g_checks;
 #define CHECK(cond) do { g_checks++; if (!(cond)) { g_failed++; printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
@@ -90,6 +97,15 @@ static void test_memory(void) {
     size_t m80 = cui_vt_memory(v);
     CHECK(m80 > (size_t)10000 * 80 * 8 && m80 < (size_t)10001 * 80 * 8 + 300 * 1024);
     printf("  10,000 lines of 80: %.1f MB\n", (double)m80 / 1048576.0);
+    /* a save of its last 5000 rows (jnshell's restore) still carries 5000 rows, into a screen that keeps lines too */
+    cui_vt_saved sv = {0};
+    CHECK(cui_vt_save(v, 5000, &sv) > 0);
+    cui_vt *w = mk(80, 24, 10000, SBL);
+    CHECK(cui_vt_load(w, sv.data, sv.len));
+    CHECK_EQ(cui_vt_scrollback_count(w), 5000 - 24);
+    CHECK(line_is(w, -(5000 - 24), 10000 + 24 + 1 - 5000, 80));    /* lines 0..10023 and the cursor's empty row: the last 5000 rows */
+    cui_vt_saved_free(&sv);
+    cui_vt_destroy(w);
     cui_vt_destroy(v);
     v = mk(300, 24, 10000, SBL);
     fill(v, 10000 + 24, 300);
@@ -142,6 +158,34 @@ static void test_toggle(void) {
     cui_vt_destroy(v);
 }
 
+/* the cost: 40 MB of 88-column lines into a 120 x 30 screen with 5000 lines of scrollback, off and on, interleaved (logged;
+ * the check only catches something far off) */
+static void test_speed(void) {
+    enum { LINES = 400000 };
+    char *buf = (char *)malloc((size_t)LINES * 100);
+    size_t n = 0;
+    for (int i = 0; i < LINES; i++) {
+        int k = snprintf(buf + n, 100, "%08d the quick brown fox jumps over the lazy dog 0123456789 abcdefghijklmnopqrstuvwxyz", i);
+        n += (size_t)k;
+        buf[n++] = '\r'; buf[n++] = '\n';
+    }
+    double best[2] = { 1e9, 1e9 };
+    for (int round = 0; round < 3; round++)
+        for (int on = 0; on < 2; on++) {
+            cui_vt *v = mk(120, 30, 5000, on ? SBL : 0);
+            double t0 = now_ms();
+            for (size_t off = 0; off < n; off += 65536) cui_vt_write(v, buf + off, n - off < 65536 ? n - off : 65536);
+            double ms = now_ms() - t0;
+            if (ms < best[on]) best[on] = ms;
+            if (round == 0 && on) CHECK_EQ(cui_vt_scrollback_count(v), 5000);
+            cui_vt_destroy(v);
+        }
+    printf("  %.0f MB of lines: off %.1f MB/s, on %.1f MB/s\n", (double)n / 1048576.0, (double)n / 1048576.0 / (best[0] / 1000.0),
+           (double)n / 1048576.0 / (best[1] / 1000.0));
+    CHECK(best[1] < best[0] * 1.5);
+    free(buf);
+}
+
 int main(void) {
     test_off();
     test_on_uniform();
@@ -149,6 +193,7 @@ int main(void) {
     test_memory();
     test_reflow();
     test_toggle();
+    test_speed();
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }
