@@ -253,6 +253,10 @@ add_executable(cui_test_inflate test_inflate.c)
 target_include_directories(cui_test_inflate PRIVATE ../include)
 add_test(NAME cui_test_inflate COMMAND cui_test_inflate)
 
+# the terminal's ligatures: the shaper's GSUB path with Geist Mono and, where installed, Cascadia Code (any build options)
+add_executable(cui_test_vt_lig test_vt_lig.c ../src/cui_shape.c)
+add_test(NAME cui_test_vt_lig COMMAND cui_test_vt_lig "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # Random input against the example apps (their sources are included directly)
 if(CUI_WITH_APP)
     # the tutorial's app does what the tutorial says
