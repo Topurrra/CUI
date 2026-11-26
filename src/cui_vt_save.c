@@ -247,8 +247,12 @@ size_t cui_vt_save(const cui_vt *v, int max_lines, cui_vt_saved *out) {
             cui__vts_link(&w, v, &link, id);
             cui__vts_sgr(&w, &pen, c->attrs, c->fg, c->bg);
             char u[4];
-            uint32_t cp = c->cp < 0x20 || c->cp == 0x7F || c->cp > 0x10FFFF ? 0xFFFD : c->cp;
-            cui__vts_put(&w, u, cui__vts_utf8(cp, u));
+            uint32_t cps[16];
+            int ncp = cui__vt_cell_cps(v, c->cp, cps, 16);       /* a grapheme cluster (CUI_VT_FEATURE_CLUSTERS): all of it */
+            for (int k = 0; k < ncp; k++) {
+                uint32_t cp = cps[k] < 0x20 || cps[k] == 0x7F || cps[k] > 0x10FFFF ? 0xFFFD : cps[k];
+                cui__vts_put(&w, u, cui__vts_utf8(cp, u));
+            }
             x += x + 1 < use && row[x + 1].spacer ? 2 : 1;
             at = x;
         }

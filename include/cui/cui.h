@@ -4845,7 +4845,29 @@ CUI_API unsigned cui_vt_bell_count(const cui_vt *vt);
  * goes. Ids no cell holds any more are reused once the table (8192 links) is full. A resize drops every link (the cells
  * move, reflowed or cut); the text stays. Without it OSC 8 is skipped, as before. The view shows and opens them with `.links`. */
 #define CUI_VT_FEATURE_LINKS 16u
+/* Characters by Unicode 17.0.0, kept whole, as Windows Terminal measures graphemes:
+ *   - widths: 2 cells for East Asian Width W and F, Emoji_Presentation (U+231A, 26A1, 2705, 2B50, 1F680..., flags) and
+ *     not yet assigned Extended_Pictographic code points; ambiguous ones are narrow. Without it a short built-in list.
+ *   - grapheme clusters (UAX #29): combining marks, variation selectors, emoji modifiers (skin tones), ZWJ sequences, flags
+ *     (regional indicator pairs), Hangul jamo and Indic conjuncts stay in the cell of the character they belong to, so
+ *     "é", a family emoji or a flag is one cell or two, copied and saved whole. A cluster takes the cells of its
+ *     first character, except that VS16 (FE0F) right after a character with an emoji style makes it 2 cells (a text heart
+ *     becomes the red one) and VS15 (FE0E) right after an emoji makes it 1. Without it those characters are dropped.
+ *   - a mark that comes with nothing before it to join (the cursor moved, the cell was written over) is dropped, as before.
+ *   - DECRQM ?2027 (grapheme cluster mode) answers "permanently set" with CUI_VT_FEATURE_QUERIES.
+ * A cell still holds one code point: a cluster's cell holds an id into a table of the clusters seen (nothing allocated before
+ * the first; at most 65536 at once, those no cell holds any more are freed when it is full). cui_vt_cell_at gives a cluster's
+ * first character, cui_vt_cell_text all of it; selections, cui_vt_line_text and cui_vt_save carry whole clusters; find and
+ * links see the first character. Turning it off makes every cluster its first character. The view draws a cluster of
+ * pictographs with the emoji font (cui_emoji_font_load_*) in its cells, other clusters as text. */
+#define CUI_VT_FEATURE_CLUSTERS 64u
 CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
+/* The grapheme cluster at the start of utf8 (len bytes), by the rules of CUI_VT_FEATURE_CLUSTERS: its length in bytes (0 for
+ * an empty string) and in *width the cells it takes (0 for one with nothing to show alone, such as a lone combining mark). */
+CUI_API int cui_vt_grapheme_next(const char *utf8, int len, int *width);
+CUI_API int cui_vt_text_width(const char *utf8, int len);                /* cells the text takes, by the same rules; len < 0: up to NUL */
+CUI_API size_t cui_vt_cell_text(const cui_vt *vt, int x, int y, char *out, size_t cap);   /* a cell's characters as UTF-8 (a whole cluster), "" for an empty cell or a wide character's second half */
+CUI_API int cui_vt_cell_width(const cui_vt *vt, int x, int y);          /* 1, 2 for a wide character's first cell, 0 for its second; 0 outside */
 /* With REFLOW, for a program behind a console host that hears of the size later than the screen (a resize debounced during a
  * drag): call this when you tell the program the screen's size (ResizePseudoConsole). From the first call on, the main screen
  * reflows from how it was when the program last heard its size or last wrote to it, so a drag through a narrow width and back
@@ -4916,7 +4938,14 @@ typedef struct cui_vt_opts {
     bool paste;                    /* this frame: paste, as Ctrl+V does (the clipboard's text comes back in `paste`) */
     bool marks;                    /* CUI_VT_FEATURE_MARKS (see "Command marks" below): a tick per command on the scrollbar track while it shows, red for exit != 0,
                                       the accent for the one cui_vt_mark_select chose; a click on a tick fills `mark`; cui_vt_mark_select scrolls and selects. false: none, as before */
+    bool fit_symbols;              /* a character outside ASCII drawn from a font (a symbol, an arrow, a CJK character from a fallback font) is centred in its cells
+                                      both ways and scaled down only when it is wider than them, so it never runs into the next cell; false: at the cell's left edge with
+                                      the font's own advance, as before */
+    int adjust_colors;             /* CUI_VT_ADJUST_*: Windows Terminal's "adjust indistinguishable colors". A text color too close to its background (Oklab distance
+                                      under 0.5) has its lightness moved away from it, keeping the hue: the light theme's ANSI white on near white becomes a readable gray.
+                                      INDEXED: only when both colors are the scheme's (default or one of the 16); ALWAYS: every color. 0 (NEVER): as before */
 } cui_vt_opts;
+enum { CUI_VT_ADJUST_NEVER = 0, CUI_VT_ADJUST_INDEXED = 1, CUI_VT_ADJUST_ALWAYS = 2 };
 /* Links (`.links = true`). A link is an OSC 8 hyperlink (kept with CUI_VT_FEATURE_LINKS) or text that looks like one:
  *   - a URL: http://, https://, file:// (punctuation at its end and a closing bracket it did not open are not part of it);
  *   - a path: absolute (C:\x, C:/x, \\server\share, /usr/x), relative (.\x, ..\x, ~/x, dir\file.ext, dir/file.ext,

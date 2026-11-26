@@ -181,6 +181,7 @@ void cui_vt_set_features(cui_vt *v, unsigned features) {
     cui__vt_reflow_set(v, (features & CUI_VT_FEATURE_REFLOW) != 0);     /* the screen's own (cui_vt.c): needs no extension */
     cui__vt_lk_feature(v, (features & CUI_VT_FEATURE_LINKS) != 0);     /* hyperlinks live in cui_vt_links.c */
     cui__vt_mk_feature(v, (features & CUI_VT_FEATURE_MARKS) != 0);     /* marks, progress, copy requests: cui_vt_marks.c */
+    cui__vt_clusters_set(v, (features & CUI_VT_FEATURE_CLUSTERS) != 0); /* Unicode 17 widths, grapheme clusters: cui_vt_width.c */
     features &= CUI_VT_FEATURE_QUERIES | CUI_VT_FEATURE_SIXEL | CUI_VT_FEATURE_SIXEL_ASPECT;
     cui__vt_x *x = cui__vt_ext(v);
     if (!features && !x) return;

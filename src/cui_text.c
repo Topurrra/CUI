@@ -438,6 +438,20 @@ static float cui__advance_em(cui_font_data *fd, int gi, uint32_t cp) {
     return adv / fd->upem;
 }
 
+/* The ink of cp's glyph (with fallbacks) from the pen, in points: left and right edge; false when no font has it or it
+ * draws nothing. For the terminal, which centres combining marks over their cell. */
+bool cui__glyph_ink(cui_ctx *ui, cui_font font, float size, uint32_t cp, float *x0, float *x1) {
+    cui_font f; int gi;
+    font = cui__resolve_font(ui, font);
+    cui__find_glyph(ui, font, cp, &f, &gi);
+    cui_font_data *fd = gi ? cui__fd(ui, f) : NULL;
+    int a, b, c, d;
+    if (!fd || !stbtt_GetGlyphBox(&fd->info, gi, &a, &b, &c, &d) || c <= a) return false;
+    float s = cui__glyph_size(ui, font, f, size) / fd->upem;
+    *x0 = (float)a * s; *x1 = (float)c * s;
+    return true;
+}
+
 static float cui__kern_em(cui_ctx *ui, cui_font_data *fd, uint32_t a, uint32_t b, int ga, int gb) {
     if (fd->is_icon) return 0;
     if (a >= 32 && a < 127 && b >= 32 && b < 127) {

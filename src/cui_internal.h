@@ -239,6 +239,7 @@ cui_font cui__font_load_face(cui_ctx *ui, const void *data, size_t size, bool co
 bool cui__fonts_reserve(cui_ctx *ui, int n);                 /* room for n fonts without the array moving */
 void cui__fonts_changed(cui_ctx *ui);                        /* drops cached layouts, asks for a redraw */
 int cui__font_glyph(cui_ctx *ui, cui_font font, uint32_t cp, cui_font *out_font);   /* glyph drawn for cp, fallbacks included; 0 none */
+bool cui__glyph_ink(cui_ctx *ui, cui_font font, float size, uint32_t cp, float *x0, float *x1);  /* its ink from the pen in points, left and right */
 int cui__font_own_glyph(cui_ctx *ui, cui_font f, uint32_t cp);                      /* in internal font f alone; 0 none */
 
 /* ---- draw list ---- */
@@ -644,6 +645,37 @@ void cui__vt_smart_line(const cui_vt *v, int64_t row, int64_t *r0, int64_t *r1);
 void cui__vt_trim_copy(char *text);                                   /* spaces before each line break and at the end go */
 void cui__vt_links_paint(cui_ctx *ui, const cui_vt *v, const cui__vt_lpaint *lp, int64_t top, int rows, float x0, float y0, float cw, float lh, cui_color col);
 int cui__vt_links_detections(void);                                   /* tests: how many times the view looked for a link (all screens) */
+/* The VT screen's characters by Unicode 17 and its grapheme clusters (cui_vt_width.c, CUI_VT_FEATURE_CLUSTERS). A cell's code
+ * point from CUI__VT_CLUSTER0 on names a cluster in the table. Properties of a character (cui__vtw_props): */
+#define CUI__VT_CLUSTER0 0x110000u
+enum { CUI__VTW_OTHER, CUI__VTW_CR, CUI__VTW_LF, CUI__VTW_CONTROL, CUI__VTW_EXTEND, CUI__VTW_ZWJ, CUI__VTW_RI, CUI__VTW_PREPEND,
+       CUI__VTW_SPACING, CUI__VTW_L, CUI__VTW_V, CUI__VTW_T, CUI__VTW_LV, CUI__VTW_LVT };   /* Grapheme_Cluster_Break */
+#define CUI__VTW_GCB(p) (((p) >> 2) & 15u)
+#define CUI__VTW_PICT 0x40u            /* Extended_Pictographic */
+#define CUI__VTW_VS16 0x80u            /* has an emoji style (FE0F makes it 2 cells) */
+#define CUI__VTW_PRES 0x100u           /* Emoji_Presentation (FE0E makes it 1 cell) */
+#define CUI__VTW_INCB(p) (((p) >> 9) & 3u)   /* Indic_Conjunct_Break: 0 none, 1 linker, 2 consonant, 3 extend */
+typedef struct { uint16_t last; uint8_t ri, pict, incb; } cui__vtw_gs;   /* a cluster being read: its last character and the rules' state */
+unsigned cui__vtw_props(uint32_t c);
+typedef struct { uint32_t lo, n; uint16_t p; } cui__vtw_run;          /* the run the last lookup fell in (n 0: none yet) */
+unsigned cui__vtw_props_in(cui__vtw_run *r, uint32_t c);              /* cui__vtw_props with that remembered */
+int cui__vtw_cells(unsigned props);                                   /* alone: 1 or 2, 0 for a character with nothing to show alone */
+void cui__vtw_begin(cui__vtw_gs *s, unsigned props);                  /* a cluster starts with this character */
+bool cui__vtw_join(cui__vtw_gs *s, unsigned props);                   /* the next character joins the cluster (else one starts with it) */
+int cui__vtw_cluster_cells(const uint32_t *cps, int n);
+bool cui__vtw_cluster_emoji(const uint32_t *cps, int n, int cells);
+uint32_t cui__vtw_compose(uint32_t a, uint32_t b);                    /* canonical composite of a BMP pair, 0 none */
+typedef struct cui__vt_gcl cui__vt_gcl;
+uint32_t cui__vt_gcl_add(cui__vt_gcl **g, const uint32_t *cps, int n, unsigned flags, bool *full);   /* 0: not kept (*full: collect, try again) */
+void cui__vt_gcl_undo(cui__vt_gcl *g, uint32_t cp);
+const uint32_t *cui__vt_gcl_get(const cui__vt_gcl *g, uint32_t cp, int *n, unsigned *flags);         /* NULL (n 0) for a cluster not there */
+void cui__vt_gcl_mark(cui__vt_gcl *g, uint32_t cp);                   /* a collection: a cell holds cp ... */
+void cui__vt_gcl_sweep(cui__vt_gcl *g);                               /* ... and the rest goes */
+void cui__vt_gcl_free(cui__vt_gcl *g);
+size_t cui__vt_gcl_memory(const cui__vt_gcl *g);
+uint32_t cui__vt_gcl_count(const cui__vt_gcl *g);
+void cui__vt_clusters_set(cui_vt *v, bool on);                        /* cui_vt.c, for cui_vt_set_features */
+int cui__vt_cell_cps(const cui_vt *v, uint32_t cp, uint32_t *out, int cap);   /* cui_vt.c, for cui_vt_save.c: a cell's code points (a cluster's all) */
 /* The screen pointer in the layout space of wheel area `id`, using its last paint transform. */
 cui_vec2 cui__wheel_point(cui_ctx *ui, cui_id id);
 
