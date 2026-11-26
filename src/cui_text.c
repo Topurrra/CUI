@@ -1744,7 +1744,10 @@ void cui__draw_cells(cui_ctx *ui, cui_font font, float size, float x, float y, f
         bool shape = false;
         while (i < n && t[i] != ' ') { shape |= CUI__COV(i); i++; }
         if (!shape) { for (int k = a; k < i; k++) CUI__PLAIN(k); continue; }
-        /* the word in pieces, unless one of them changes a neighbour: then as a whole */
+        /* the word in pieces, unless one of them changes a neighbour: then as a whole. The pieces found are remembered
+         * for the drawing below (a later piece of the same word may push one out of its set: then it is looked up again) */
+        struct { const cui__cells_word *w; uint64_t key; } pc[16];
+        int np = 0;
         bool pieces = true;
         for (int k = a; k < i && pieces;) {
             if (!CUI__COV(k)) { k++; continue; }
@@ -1752,6 +1755,8 @@ void cui__draw_cells(cui_ctx *ui, cui_font font, float size, float x, float y, f
             while (k < i && CUI__COV(k)) k++;
             const cui__cells_word *w = cui__cells_piece(ui, c, t, a, i, r0, k, &s0);
             pieces = w && w->ctx_ok;
+            if (np < 16) { pc[np].w = w; pc[np].key = w ? w->key : 0; }
+            np++;
         }
         if (!pieces) {
             const cui__cells_word *w = cui__cells_shaped(ui, c, t + a, i - a);
@@ -1760,11 +1765,14 @@ void cui__draw_cells(cui_ctx *ui, cui_font font, float size, float x, float y, f
             else for (int k = a; k < i; k++) CUI__PLAIN(k);
             continue;
         }
-        for (int k = a; k < i;) {
+        for (int k = a, j = 0; k < i; ) {
             if (!CUI__COV(k)) { CUI__PLAIN(k); k++; continue; }
             int r0 = k;
             while (k < i && CUI__COV(k)) k++;
-            const cui__cells_word *w = cui__cells_piece(ui, c, t, a, i, r0, k, &s0);     /* kept by the pass above */
+            const cui__cells_word *w = j < 16 && pc[j].w && pc[j].w->key == pc[j].key && pc[j].w->text ? pc[j].w : NULL;
+            j++;
+            s0 = r0 > a ? r0 - 1 : r0;
+            if (!w) w = cui__cells_piece(ui, c, t, a, i, r0, k, &s0);
             if (!w) { for (int q = r0; q < k; q++) CUI__PLAIN(q); continue; }
             for (int q = 0; q < w->n; q++) {
                 int cell = s0 + w->g[q].cell;
