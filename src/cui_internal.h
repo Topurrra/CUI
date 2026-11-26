@@ -42,6 +42,12 @@
 #define CUI_BUILDING
 #endif
 
+/* The OpenType shaper (cui_shape.c) is in: all of it with CUI_TEXT_SHAPING, only the terminal's ligatures with
+ * CUI_VT_LIGATURES (no bidi, no shaped labels). */
+#if defined(CUI_TEXT_SHAPING) || defined(CUI_VT_LIGATURES)
+#define CUI__SHAPER 1
+#endif
+
 #include "cui/cui.h"
 
 #include <math.h>
@@ -208,6 +214,14 @@ float cui__text_min_width(cui_ctx *ui, cui_font font, float size, const char *te
 /* Draw single line text with top-left at pos (points). */
 void cui__draw_text_line(cui_ctx *ui, cui_font font, float size, float x, float y, cui_color color,
                          const char *text, int len, bool tabular);
+/* Terminal cells with ligatures (cui_vt_look.ligatures / .font_features; needs CUI__SHAPER, else false). Set up for
+ * the font and the features of this view: true when its ASCII runs must be drawn with cui__draw_cells (the font has
+ * ligatures, or a feature it has was asked for); false: draw them as before. */
+bool cui__cells_begin(cui_ctx *ui, cui_font font, bool ligatures, const char *features);
+/* ASCII text s[0..n), one byte a cell (spaces included), cell i's pen at x + i * cw as cui__draw_text_line puts it for
+ * a monospace font; y the top of the font box. A ligature is drawn in the cells of its characters and never moves one.
+ * Words are shaped once and kept (1024 of them), so text seen before costs a table lookup. */
+void cui__draw_cells(cui_ctx *ui, cui_font font, float size, float x, float y, float cw, cui_color color, const char *s, int n);
 typedef enum { CUI__AT_LEFT, CUI__AT_CENTER, CUI__AT_RIGHT } cui__text_anchor;
 /* one line of text placed by a point: x is its left edge, center or right edge, y its vertical middle */
 void cui__draw_text_at(cui_ctx *ui, cui_font font, float size, float x, float y, cui__text_anchor anchor, cui_color color, const char *s, bool tab);
@@ -895,6 +909,9 @@ struct cui_ctx {
     bool input_paras;               /* cui_input_use_paragraphs: text areas order and align each paragraph by its own direction */
     const char *bidi_para;          /* set around the cui__bidi_* calls for one text area line (cui__ta_ctx) */
     int bidi_para_len, bidi_para_dir;
+#endif
+#ifdef CUI__SHAPER
+    struct cui__cells_lig *cells_lig;   /* cui_vt's ligatures: the font's plan and the shaped words (cui__cells_begin) */
 #endif
     bool text_unshaped;             /* editing keeps logical glyph positions */
     cui_font_data *fonts; int font_count, font_cap;
