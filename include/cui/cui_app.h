@@ -341,6 +341,15 @@ CUI_API long cui_app_frames_skipped(cui_app *app);  /* wakes that brought no fra
  * timer only wakes the loop and the frame it draws is the app's chance to run its deadlines. */
 CUI_API bool cui_app_schedule(cui_app *app, int64_t ms, void (*tick)(void *user), void *user);
 
+/* Answers to typing at once (opt in). Frames that follow input are paced one display period apart when nothing waits
+ * for the display (the software renderer), so what a worker brings right after a key (a terminal's echo from its
+ * program) waits up to a whole period before it is drawn. After cui_app_unpace_answers(app, ms), a worker's wake (on
+ * Windows a WM_APP message, as cui_app_pending counts it) that comes within ms after a frame that took a key press or
+ * text starts the next frame at once, in cui_app_frame and cui_app_wait alike. Wakes later than that (a flood of
+ * output, an animation) are paced as before, and an idle app stays idle. 0 (the default) turns it off. Windows only
+ * (other backends cannot tell a worker's wake apart; there it changes nothing). Thread: the one that made the window. */
+CUI_API void cui_app_unpace_answers(cui_app *app, double ms);
+
 /* ---- Fullscreen (Windows) ---- */
 
 /* Borderless fullscreen: the window covers its monitor, over the taskbar, with no caption or frame; leaving puts back what
