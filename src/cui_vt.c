@@ -78,6 +78,16 @@ struct cui_vt {
     bool lk_on;                       /* CUI_VT_FEATURE_LINKS: OSC 8 hyperlinks are kept */
     cui__vt_lx *lk;                   /* their table and cell ids (cui_vt_links.c): NULL until the first one */
     cui__vt_mk *mk;                   /* CUI_VT_FEATURE_MARKS: command marks, progress, copy requests (cui_vt_marks.c); NULL while off */
+    /* CUI_VT_FEATURE_CLUSTERS (cui_vt_width.c): Unicode 17 widths, grapheme clusters kept in the cells */
+    bool gc_on;
+    cui__vt_gcl *gcl;                 /* the clusters: NULL until the first */
+    uint32_t gid;                     /* the open cluster: what the cell of the last character put holds (a code point or a cluster
+                                         id), 0 none. A mark that comes next joins it while that cell is still just before the cursor */
+    uint8_t gw, gcur;                 /* its cells and screen */
+    bool glazy, gfresh;               /* its rules' state is not worked out yet (a plain character); its id was made for it alone */
+    bool gprep;                       /* its last character is a Prepend one: the next character joins it whatever it is */
+    cui__vtw_gs gs;
+    cui__vtw_run grun;                /* the table's run the last character fell in */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -141,6 +151,7 @@ void cui_vt_destroy(cui_vt *v) {
     if (v->rf) cui__vt_rf_free(v);
     if (v->lk) cui__vt_lk_free(v);
     if (v->mk) cui__vt_mk_free(v);
+    cui__vt_gcl_free(v->gcl);
     cui__vt_screen_free(&v->scr[0]); cui__vt_screen_free(&v->scr[1]);
     free(v->sb); free(v->sb_lines); free(v->tabs); free(v->snap); free(v->cwd);
     free(v);
@@ -156,6 +167,7 @@ size_t cui_vt_memory(const cui_vt *v) {
     if (v->rf) n += cui__vt_rf_memory(v);
     if (v->lk) n += cui__vt_lk_memory(v);
     if (v->mk) n += cui__vt_mk_memory(v);
+    n += cui__vt_gcl_memory(v->gcl);
     return n + v->sb_cap * sizeof(cui__vt_cell) + (size_t)v->sb_max * sizeof(cui__vt_line);
 }
 
@@ -272,9 +284,98 @@ static int cui__vt_width(uint32_t c) {
     return 1;
 }
 
+static void cui__vt_place(cui_vt *v, uint32_t c, int w);
+static void cui__vt_put_gc(cui_vt *v, uint32_t c);
+
 static void cui__vt_put(cui_vt *v, uint32_t c) {
+    if (v->gc_on && (c >= 0x300 || v->gprep)) { cui__vt_put_gc(v, c); return; }
     int w = cui__vt_width(c);
     if (w == 0) return;
+    cui__vt_place(v, c, w);
+    v->gid = c; v->gw = (uint8_t)w; v->gcur = (uint8_t)v->cur; v->glazy = true;   /* CLUSTERS: below 0x300 nothing joins what came before */
+}
+
+/* ------------------------------------------------------------------------ */
+/* Grapheme clusters (CUI_VT_FEATURE_CLUSTERS; the tables in cui_vt_width.c) */
+/* ------------------------------------------------------------------------ */
+
+static void cui__vt_gc_collect(cui_vt *v);
+
+/* a cell's characters: one, or a cluster's (at most cap); 0 for an empty cell */
+static int cui__vt_cps(const cui_vt *v, uint32_t cp, uint32_t *out, int cap) {
+    if (cp < CUI__VT_CLUSTER0) { out[0] = cp; return cp ? 1 : 0; }
+    int n; const uint32_t *p = cui__vt_gcl_get(v->gcl, cp, &n, NULL);
+    if (!p) { out[0] = 0xFFFD; return 1; }
+    n = CUI_MIN(n, cap);
+    memcpy(out, p, sizeof(uint32_t) * (size_t)n);
+    return n;
+}
+
+/* the open cluster's cell, -1 when it is no longer just before the cursor (the cursor moved, the cell was written over) */
+static int cui__vt_gc_cell(const cui_vt *v) {
+    if (!v->gid || v->gcur != v->cur) return -1;
+    int x = v->pend ? v->cx - (v->gw - 1) : v->cx - v->gw;
+    if (x < 0 || x + v->gw > v->cols) return -1;
+    const cui__vt_cell *row = cui__vt_row(v, CUI__VT_S(v), v->cy);
+    if ((row[x].ca & CUI__VT_SPACER) || CUI__VT_CP(row[x].ca) != v->gid) return -1;
+    if (v->gw == 2 && !(row[x + 1].ca & CUI__VT_SPACER)) return -1;
+    return x;
+}
+
+/* c joins the open cluster at cell x: the cell takes the longer cluster, and VS16 or VS15 may widen or narrow it */
+static void cui__vt_gc_extend(cui_vt *v, int x, uint32_t c) {
+    uint32_t cps[17];
+    int n = cui__vt_cps(v, v->gid, cps, 16);
+    if (n >= 16) return;                                       /* a long run of marks: the rest are dropped */
+    cps[n++] = c;
+    int w = cui__vtw_cluster_cells(cps, n);
+    if (w < 1) w = v->gw;
+    if (v->gfresh) cui__vt_gcl_undo(v->gcl, v->gid);           /* the shorter cluster was this cell's alone */
+    bool full;
+    uint32_t id = cui__vt_gcl_add(&v->gcl, cps, n, 0, &full);
+    if (!id && full) { cui__vt_gc_collect(v); id = cui__vt_gcl_add(&v->gcl, cps, n, 0, &full); }
+    if (!id) id = cps[0];                                      /* no room: the first character stays */
+    cui__vt_screen *s = CUI__VT_S(v);
+    cui__vt_cell *row = cui__vt_row(v, s, v->cy);
+    row[x].ca = CUI__VT_ATTRS(row[x].ca) | id;
+    v->gid = id; v->gfresh = id >= CUI__VT_CLUSTER0;
+    if (w == 2 && v->gw == 1 && x + 1 < v->cols) {             /* VS16: an emoji now, two cells */
+        if (v->pic_on) cui__vt_pic_erase(v, v->cur, s->map[v->cy], x + 1, x + 2);
+        if (v->lk) cui__vt_lk_put(v, v->cur, s->map[v->cy], x, 2);
+        if (x + 2 < v->cols && (row[x + 2].ca & CUI__VT_SPACER)) row[x + 2].ca = 0;    /* half of a wide character it covered */
+        row[x + 1] = (cui__vt_cell){ CUI__VT_SPACER | CUI__VT_ATTRS(row[x].ca), row[x].fg, row[x].bg };
+        v->gw = 2; v->pend = false;
+        v->cx = x + 2;
+        if (v->cx >= v->cols) { v->cx = v->cols - 1; v->pend = true; }
+    } else if (w == 1 && v->gw == 2) {                         /* VS15: text, one cell */
+        row[x + 1] = (cui__vt_cell){ 0, 0, row[x].bg };
+        v->gw = 1; v->pend = false;
+        v->cx = x + 1;
+    }
+}
+
+/* a character from 0x300 on, or any after a Prepend character (plain ones below 0x300 take cui__vt_put's short way) */
+static void cui__vt_put_gc(cui_vt *v, uint32_t c) {
+    unsigned p = cui__vtw_props_in(&v->grun, c);
+    if (!v->gprep && (p & ((15u << 2) | CUI__VTW_PICT)) == 0 && CUI__VTW_INCB(p) != 2) {   /* Other, not a pictograph or a consonant: joins nothing */
+        cui__vt_place(v, c, (int)(p & 3u));
+        v->gid = c; v->gw = (uint8_t)(p & 3u); v->gcur = (uint8_t)v->cur; v->glazy = true;
+        return;
+    }
+    int x = cui__vt_gc_cell(v);
+    if (x >= 0) {
+        if (v->glazy) { cui__vtw_begin(&v->gs, cui__vtw_props(v->gid)); v->glazy = false; }
+        if (cui__vtw_join(&v->gs, p)) { cui__vt_gc_extend(v, x, c); v->gprep = CUI__VTW_GCB(p) == CUI__VTW_PREPEND; return; }
+    } else { cui__vtw_begin(&v->gs, p); v->glazy = false; }
+    v->gprep = false;
+    int w = cui__vtw_cells(p);
+    if (w == 0) { v->gid = 0; return; }                        /* a mark, a joiner or a format character with nothing to join: dropped, as before */
+    cui__vt_place(v, c, w);
+    v->gid = c; v->gw = (uint8_t)w; v->gcur = (uint8_t)v->cur; v->gfresh = false;
+    v->gprep = CUI__VTW_GCB(p) == CUI__VTW_PREPEND;
+}
+
+static void cui__vt_place(cui_vt *v, uint32_t c, int w) {
     cui__vt_screen *s = CUI__VT_S(v);
     if (v->pend || v->cx + w > v->cols) {
         if (v->autowrap) {
@@ -432,6 +533,7 @@ static void cui__vt_sync_begin(cui_vt *v) {
     for (int y = 0; y < v->rows; y++) memcpy(v->snap + (size_t)y * (size_t)v->cols, cui__vt_row(v, CUI__VT_S(v), y), sizeof(cui__vt_cell) * (size_t)v->cols);
     v->snap_cx = v->cx; v->snap_cy = v->cy; v->snap_cursor = v->cursor_vis;
     v->sync_on = true; v->sync_seq++;
+    v->gfresh = false;                                          /* the copy holds the open cluster too: it must stay */
 }
 
 static void cui__vt_mode(cui_vt *v, bool set) {
@@ -584,6 +686,7 @@ static void cui__vt_esc(cui_vt *v, char c) {
         if (v->lk) cui__vt_lk_reset(v);
         if (v->cur == 1) cui__vt_switch_screen(v, false, false);
         if (v->mk) cui__vt_mk_reset(v);       /* progress off, the screen's marks go with its text */
+        v->gid = 0; v->gprep = false;
         for (int y = 0; y < v->rows; y++) cui__vt_clear_row(v, y);
         cui__vt_cursor_to(v, 0, 0);
         break;
@@ -775,6 +878,7 @@ void cui_vt_resize(cui_vt *v, int cols, int rows) {
     if (cols == v->cols && rows == v->rows) return;
     v->sync_on = false;
     v->wseq++;
+    v->gid = 0; v->gfresh = false; v->gprep = false;                    /* cells move, and a reflow keeps a copy */
     if (v->lk) cui__vt_lk_free(v);                    /* cells move: hyperlinks go (cui_vt_links.c), the text stays */
     if (v->rf) { cui__vt_rf_resize(v, cols, rows); return; }      /* CUI_VT_FEATURE_REFLOW (below) */
     int64_t mk_t0 = (int64_t)v->sb_total; int mk_drop = 0;        /* marks follow (cui_vt_marks.c) */
@@ -843,6 +947,51 @@ struct cui__vt_rf {
 };
 
 static const cui__vt_cell cui__vt_rf_blank_cell = { 0, 0, 0 };
+
+/* Every cell that can hold a cluster: both screens, the scrollback, the synchronized-output copy and a reflow's base. With
+ * `flatten` each cluster becomes its first character (the feature goes off), else the clusters held are marked. */
+static void cui__vt_gc_walk(cui_vt *v, bool flatten) {
+    struct { cui__vt_cell *c; size_t n; } part[5] = {
+        { v->scr[0].cells, (size_t)v->cols * (size_t)v->rows }, { v->scr[1].cells, (size_t)v->cols * (size_t)v->rows },
+        { v->snap, v->snap ? (size_t)v->snap_cols * (size_t)v->snap_rows : 0 },
+        { v->rf && v->rf->base_ok ? v->rf->bcells : NULL, v->rf && v->rf->base_ok ? (size_t)v->rf->bcols * (size_t)v->rf->brows : 0 },
+        { NULL, 0 } };
+    for (int k = 0, line = 0; k < 5; k++) {
+        cui__vt_cell *c = part[k].c;
+        size_t n = c ? part[k].n : 0;
+        if (k == 4) {                                       /* the scrollback, line by line */
+            if (line >= v->sb_count) break;
+            const cui__vt_line *L = &v->sb_lines[(v->sb_head + line) % v->sb_max];
+            c = v->sb + L->off; n = L->len;
+            line++; k--;
+        }
+        for (size_t i = 0; i < n; i++) {
+            uint32_t cp = CUI__VT_CP(c[i].ca);
+            if (cp < CUI__VT_CLUSTER0) continue;
+            if (flatten) { uint32_t b; cui__vt_cps(v, cp, &b, 1); c[i].ca = CUI__VT_ATTRS(c[i].ca) | b; }
+            else cui__vt_gcl_mark(v->gcl, cp);
+        }
+    }
+}
+
+/* the table is full: the clusters no cell holds go */
+static void cui__vt_gc_collect(cui_vt *v) {
+    if (!v->gcl) return;
+    cui__vt_gc_walk(v, false);
+    cui__vt_gcl_sweep(v->gcl);
+    v->gfresh = false;
+}
+
+void cui__vt_clusters_set(cui_vt *v, bool on) {
+    if (on == v->gc_on) return;
+    v->gc_on = on;
+    v->gid = 0; v->gfresh = false; v->glazy = false; v->gprep = false;
+    if (!on && v->gcl) {
+        cui__vt_gc_walk(v, true);
+        cui__vt_gcl_free(v->gcl);
+        v->gcl = NULL;
+    }
+}
 
 /* blank for a line's end, as the console host measures it: no character, or a space (the attributes do not count) */
 static bool cui__vt_rf_blank(uint32_t ca) {
@@ -1262,7 +1411,7 @@ static size_t cui__vt_utf8(uint32_t c, char *o) {
 }
 
 /* the text of cells c0..c1-1 of a row, blanks as spaces; `trim` cuts the blank right end */
-static size_t cui__vt_text(const cui__vt_cell *cells, int n, int c0, int c1, bool trim, char *out, size_t cap) {
+static size_t cui__vt_text(const cui_vt *v, const cui__vt_cell *cells, int n, int c0, int c1, bool trim, char *out, size_t cap) {
     size_t len = 0;
     int last = c1;
     if (trim) { last = CUI_MIN(c1, n); while (last > c0 && CUI__VT_CP(cells[last - 1].ca) == 0) last--; }
@@ -1270,6 +1419,12 @@ static size_t cui__vt_text(const cui__vt_cell *cells, int n, int c0, int c1, boo
         uint32_t c = x < n ? cells[x].ca : 0;
         if (c & CUI__VT_SPACER) continue;
         c = CUI__VT_CP(c);
+        if (c >= CUI__VT_CLUSTER0) {                           /* a cluster: all of it, as far as it fits */
+            uint32_t cps[16];
+            int k = cui__vt_cps(v, c, cps, 16);
+            for (int i = 0; i < k && len + 5 < cap; i++) len += cui__vt_utf8(cps[i], out + len);
+            continue;
+        }
         len += cui__vt_utf8(c ? c : ' ', out + len);
     }
     if (out && cap) out[len < cap ? len : cap - 1] = 0;
@@ -1280,13 +1435,42 @@ size_t cui_vt_line_text(const cui_vt *v, int row, char *out, size_t cap) {
     int n; bool w;
     const cui__vt_cell *c = cui__vt_cells_at(v, row, &n, &w);
     if (!c) { if (cap) out[0] = 0; return 0; }
-    return cui__vt_text(c, n, 0, n, true, out, cap);
+    return cui__vt_text(v, c, n, 0, n, true, out, cap);
+}
+
+/* the cell's code point, the first of a cluster */
+static uint32_t cui__vt_base(const cui_vt *v, uint32_t ca) {
+    uint32_t c = CUI__VT_CP(ca);
+    if (c >= CUI__VT_CLUSTER0) cui__vt_cps(v, c, &c, 1);
+    return c;
+}
+
+int cui__vt_cell_cps(const cui_vt *v, uint32_t cp, uint32_t *out, int cap) { return cui__vt_cps(v, cp, out, cap); }
+
+size_t cui_vt_cell_text(const cui_vt *v, int x, int y, char *out, size_t cap) {
+    if (out && cap) out[0] = 0;
+    if (!v || !out || x < 0 || y < 0 || x >= v->cols || y >= v->rows) return 0;
+    const cui__vt_cell *c = &cui__vt_row(v, &v->scr[v->cur], y)[x];
+    if (c->ca & CUI__VT_SPACER) return 0;
+    uint32_t cps[16];
+    int k = cui__vt_cps(v, CUI__VT_CP(c->ca), cps, 16);
+    size_t len = 0;
+    for (int i = 0; i < k && len + 5 <= cap; i++) len += cui__vt_utf8(cps[i], out + len);
+    out[len < cap ? len : cap - 1] = 0;
+    return len;
+}
+
+int cui_vt_cell_width(const cui_vt *v, int x, int y) {
+    if (!v || x < 0 || y < 0 || x >= v->cols || y >= v->rows) return 0;
+    const cui__vt_cell *row = cui__vt_row(v, &v->scr[v->cur], y);
+    if (row[x].ca & CUI__VT_SPACER) return 0;
+    return x + 1 < v->cols && (row[x + 1].ca & CUI__VT_SPACER) ? 2 : 1;
 }
 
 bool cui_vt_cell_at(const cui_vt *v, int x, int y, cui_vt_cell *out) {
     if (x < 0 || y < 0 || x >= v->cols || y >= v->rows) return false;
     const cui__vt_cell *c = &cui__vt_row(v, &v->scr[v->cur], y)[x];
-    out->ch = CUI__VT_CP(c->ca);
+    out->ch = cui__vt_base(v, c->ca);
     {
         uint32_t a = c->ca, style = CUI__VT_ULS(a);
         int at = (int)(a & 0x3F000000u);                                          /* bold .. strike: the same bits as CUI_VT_* */
@@ -1328,7 +1512,7 @@ int cui__vt_row_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool
     *wrapped = w;
     if (!c) return -1;
     n = CUI_MIN(n, cap);
-    for (int i = 0; i < n; i++) out[i] = (c[i].ca & CUI__VT_SPACER) ? CUI__VT_FIND_SPACER : CUI__VT_CP(c[i].ca);
+    for (int i = 0; i < n; i++) out[i] = (c[i].ca & CUI__VT_SPACER) ? CUI__VT_FIND_SPACER : cui__vt_base(v, c[i].ca);
     return n;
 }
 
@@ -1351,7 +1535,7 @@ int cui__vt_main_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, boo
     } else if (!(c = cui__vt_cells_at(v, row, &n, &w))) return -1;
     *wrapped = w;
     n = CUI_MIN(n, cap);
-    for (int i = 0; i < n; i++) out[i] = (c[i].ca & CUI__VT_SPACER) ? CUI__VT_FIND_SPACER : CUI__VT_CP(c[i].ca);
+    for (int i = 0; i < n; i++) out[i] = (c[i].ca & CUI__VT_SPACER) ? CUI__VT_FIND_SPACER : cui__vt_base(v, c[i].ca);
     return n;
 }
 
@@ -1413,6 +1597,7 @@ int cui__vt_mode_report(const cui_vt *v, int m, bool dec) {
     case 1006: on = v->mouse_sgr; break;
     case 2004: on = v->bracketed; break;
     case 2026: on = v->sync_on; break;
+    case 2027: return v->gc_on ? 3 : 0;                     /* grapheme clusters: permanently set with CUI_VT_FEATURE_CLUSTERS (else unknown, as before) */
     case 9001: on = v->win32_input; break;
     default: return 0;
     }
@@ -1794,7 +1979,7 @@ static char *cui__vt_selection_text(cui_ctx *ui, const cui_vt *v, const cui__vt_
         int n; bool wrapped = false;
         const cui__vt_cell *c = cui__vt_cells_abs(v, r, &n, &wrapped);
         int c0 = r == s0.row ? s0.col : 0, c1 = r == s1.row ? s1.col + 1 : v->cols;
-        if (c) len += cui__vt_text(c, n, c0, c1, !(wrapped && r != s1.row), out + len, cap - len);
+        if (c) len += cui__vt_text(v, c, n, c0, c1, !(wrapped && r != s1.row), out + len, cap - len);
         if (r != s1.row && !wrapped) out[len++] = '\n';
     }
     out[len] = 0;
@@ -1934,7 +2119,11 @@ typedef struct {
     bool focused, show_cursor, has_sel;
     int shape;                        /* CUI_VT_CURSOR_* */
     bool glyphs, italic;              /* the opt-in looks: hand-drawn characters, slanted italic */
-    const cui__vt_cell *snap;         /* paint this copy of the screen (a synchronized update is open) instead of the live one */
+    bool fit;                         /* .fit_symbols: characters from 128 centred in their cells, scaled down when wider */
+    int adjust;                       /* .adjust_colors: CUI_VT_ADJUST_* */
+    uint32_t adj_done[4][18];         /* bit b of [k][f]: the pair (f, b) is worked out (0..15, 16 default fg, 17 default bg; k: inverse, dim) */
+    cui_color adj[4][18][18];
+    const cui__vt_cell *snap;        /* paint this copy of the screen (a synchronized update is open) instead of the live one */
     int scx, scy; bool scursor;
     const cui__vt_pic_draw *pics;     /* each visible row's picture (cui_vt_sixel.c), or NULL when none is on screen */
     bool find;                        /* .find: mark the matches of cui_vt_find (cui_vt_find.c) */
@@ -1959,12 +2148,54 @@ static cui_color cui__vt_color(cui_ctx *ui, const cui_vt *v, uint16_t id, cui_co
     return cui__rgba((int)((c >> 16) & 255), (int)((c >> 8) & 255), (int)(c & 255), 255);
 }
 
-/* a cell's colors after inverse and dim */
-static void cui__vt_cell_colors(cui_ctx *ui, const cui__vt_paint *p, const cui__vt_cell *c, cui_color *fg, cui_color *bg, bool *has_bg) {
+/* Oklab (Björn Ottosson's published matrices), for the contrast floor */
+static float cui__vt_lin(int v) { float c = (float)v / 255.0f; return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f); }
+static int cui__vt_srgb(float c) {
+    c = c <= 0.0031308f ? 12.92f * c : 1.055f * powf(c, 1.0f / 2.4f) - 0.055f;
+    return (int)floorf(CUI_CLAMP(c, 0.0f, 1.0f) * 255.0f + 0.5f);
+}
+static void cui__vt_oklab(cui_color c, float o[3]) {
+    float r = cui__vt_lin(c.r), g = cui__vt_lin(c.g), b = cui__vt_lin(c.b);
+    float l = cbrtf(0.4122214708f * r + 0.5363325363f * g + 0.0514459929f * b);
+    float m = cbrtf(0.2119034982f * r + 0.6806995451f * g + 0.1073969566f * b);
+    float s = cbrtf(0.0883024619f * r + 0.2817188376f * g + 0.6299787005f * b);
+    o[0] = 0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s;
+    o[1] = 1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s;
+    o[2] = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s;
+}
+
+/* Windows Terminal's "adjust indistinguishable colors": a text color whose Oklab distance to its background is under 0.5 gets the
+ * lightness that puts it at 0.5 (the hue kept), darker when it was darker, else lighter, and the other way when that leaves 0..1 */
+static cui_color cui__vt_perceivable(cui_color f, cui_color b) {
+    float x[3], y[3];
+    cui__vt_oklab(f, x); cui__vt_oklab(b, y);
+    float da = x[1] - y[1], db = x[2] - y[2], dl = x[0] - y[0], min2 = 0.25f;
+    if (dl * dl + da * da + db * db >= min2) return f;
+    float need = sqrtf(fmaxf(0.0f, min2 - da * da - db * db));
+    float L = x[0] < y[0] ? y[0] - need : y[0] + need;
+    if (L < 0.0f || L > 1.0f) L = x[0] < y[0] ? y[0] + need : y[0] - need;
+    float l = L + 0.3963377774f * x[1] + 0.2158037573f * x[2], m = L - 0.1055613458f * x[1] - 0.0638541728f * x[2], s = L - 0.0894841775f * x[1] - 1.2914855480f * x[2];
+    l = l * l * l; m = m * m * m; s = s * s * s;
+    cui_color o = f;
+    o.r = (uint8_t)cui__vt_srgb(4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s);
+    o.g = (uint8_t)cui__vt_srgb(-1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s);
+    o.b = (uint8_t)cui__vt_srgb(-0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s);
+    return o;
+}
+
+/* a cell's colors after inverse and dim, and with .adjust_colors the text color moved off its background */
+static void cui__vt_cell_colors(cui_ctx *ui, cui__vt_paint *p, const cui__vt_cell *c, cui_color *fg, cui_color *bg, bool *has_bg) {
     cui_color f = cui__vt_color(ui, p->v, c->fg, p->fg, p->ansi), b = cui__vt_color(ui, p->v, c->bg, p->bg, p->ansi);
     bool hb = c->bg != 0;
     if (c->ca & CUI_VT_INVERSE) { cui_color t = f; f = c->bg ? b : p->bg; b = t; hb = true; }
     if (c->ca & CUI_VT_DIM) f = cui_mix(f, p->bg, 0.4f);
+    if (p->adjust && (c->fg != c->bg || !c->fg)) {              /* the same color asked for both (hidden text on purpose) stays */
+        if (c->fg <= 16 && c->bg <= 16) {                       /* the scheme's colors: worked out once a frame per pair */
+            int k = ((c->ca & CUI_VT_INVERSE) ? 1 : 0) | ((c->ca & CUI_VT_DIM) ? 2 : 0), fi = c->fg ? c->fg - 1 : 16, bi = c->bg ? c->bg - 1 : 17;
+            if (!(p->adj_done[k][fi] & (1u << bi))) { p->adj[k][fi][bi] = cui__vt_perceivable(f, b); p->adj_done[k][fi] |= 1u << bi; }
+            f = p->adj[k][fi][bi];
+        } else if (p->adjust == CUI_VT_ADJUST_ALWAYS) f = cui__vt_perceivable(f, b);
+    }
     *fg = f; *bg = b; *has_bg = hb;
 }
 
@@ -2027,6 +2258,68 @@ static void cui__vt_slant(cui_ctx *ui, int v0, float base) {
     for (int v = v0; v < ui->dl.vtx_count; v++) ui->dl.vtx[v].x += 0.2f * (by - ui->dl.vtx[v].y);
 }
 
+/* One cell's characters from 128 on (a cluster too), in `ncell` cells from `left`: an emoji the emoji font draws whole fills
+ * its cells (CUI_VT_FEATURE_CLUSTERS); other text sits at the left edge, or with .fit_symbols is centred both ways and
+ * scaled down to the cells when it is wider. */
+static void cui__vt_draw_chars(cui_ctx *ui, const cui__vt_paint *p, uint32_t ch, uint32_t at, float left, float ry, int ncell, cui_color fg, bool slant) {
+    const cui_vt *v = p->v;
+    uint32_t cps[16];
+    int n = cui__vt_cps(v, ch, cps, 16), k = 0;
+    char u[16 * 4];
+    for (int i = 0; i < n; i++) k += (int)cui__vt_utf8(cps[i], u + k);
+    if (!k) return;
+    float box = (float)ncell * p->cw;
+    bool emoji = v->gc_on && cui__vtw_cluster_emoji(cps, n, ncell);
+    if (emoji && ui->emoji_text && ui->emoji_text(ui, u, k, NULL, 0) == k) {
+        cui_rect r = { left, ry, box, p->lh };
+        ui->emoji_text(ui, u, k, &r, fg.a / 255.0f);
+        return;
+    }
+    /* a character with marks only (no shaping here): the character alone, composed with the marks that make a character of
+     * their own (a + ring above: å, which every font has), then each other mark centred over the cells */
+    bool marks = n > 1;
+    for (int i = 1; i < n && marks; i++) {                        /* Hangul vowels and finals compose too (L V T: one syllable) */
+        unsigned g = CUI__VTW_GCB(cui__vtw_props(cps[i]));
+        marks = g == CUI__VTW_EXTEND || g == CUI__VTW_ZWJ || g == CUI__VTW_V || g == CUI__VTW_T;
+    }
+    int kb = k;
+    if (emoji) {                                    /* a sequence the emoji font lacks: its pictures without the joiners and selectors, */
+        kb = 0; marks = false;                      /* a flag as its two letters (as Windows shows one it has no picture for) */
+        for (int i = 0; i < n; i++) {
+            uint32_t c = cps[i];
+            if (c == 0x200D || (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xE0000 && c <= 0xE0FFF)) continue;
+            if (c >= 0x1F1E6 && c <= 0x1F1FF) c = 'A' + (c - 0x1F1E6);
+            kb += (int)cui__vt_utf8(c, u + kb);
+        }
+        if (!kb) return;
+    } else if (marks) {
+        uint32_t base = cps[0];
+        for (int i = 1; i < n; i++) { uint32_t c = cui__vtw_compose(base, cps[i]); if (c) { base = c; cps[i] = 0x200D; } }   /* used up: drawn as nothing */
+        kb = (int)cui__vt_utf8(base, u);
+    }
+    float size = p->size, x = left;
+    if (p->fit || emoji) {                          /* an emoji sequence the font lacks: its pieces, fitted into its cells */
+        float tw = cui__text_width(ui, CUI_FONT_MONO, size, u, kb, true);
+        if (tw > box + 0.01f) { size *= box / tw; tw = box; }
+        x = left + (box - tw) * 0.5f;
+    }
+    float fh = cui__font_line_height(ui, CUI_FONT_MONO, size), ty = ry + (p->lh - fh) * 0.5f;
+    int v0 = ui->dl.vtx_count;
+    for (int pass = 0; pass < ((at & CUI_VT_BOLD) ? 2 : 1); pass++) {
+        float dx = pass ? 0.45f : 0.0f;
+        cui__draw_text_line(ui, CUI_FONT_MONO, size, x + dx, ty, fg, u, kb, true);
+        for (int i = 1; marks && i < n; i++) {
+            uint32_t c = cps[i];
+            float m0, m1;
+            if (c == 0x200D || (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xE0000 && c <= 0xE0FFF)) continue;   /* joiners, selectors, tags: nothing to draw */
+            if (!cui__glyph_ink(ui, CUI_FONT_MONO, size, c, &m0, &m1)) continue;
+            char mu[4]; int mk = (int)cui__vt_utf8(c, mu);
+            cui__draw_text_line(ui, CUI_FONT_MONO, size, left + box * 0.5f - (m0 + m1) * 0.5f + dx, ty, fg, mu, mk, true);
+        }
+    }
+    if (slant) cui__vt_slant(ui, v0, ty + cui__font_ascent(ui, CUI_FONT_MONO, size));
+}
+
 static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
     cui__vt_paint *p = (cui__vt_paint *)data;
     const cui_vt *v = p->v;
@@ -2081,11 +2374,15 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
                     if (cui__vt_box0(ui, ch, cell, fg)) { x++; continue; }
                     if (ch >= 0x2580 && ch <= 0x2593) { cui__tm_block(ui, (int)(ch - 0x2580), cell, fg); x++; continue; }
                 }
-                char u[4]; size_t k = cui__vt_utf8(ch, u);
-                cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, u, (int)k, true);
-                if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, u, (int)k, true);
-                if (slant) cui__vt_slant(ui, v0, ty + asc);
-                if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, x + 1 < cn && (cells[x + 1].ca & CUI__VT_SPACER) ? 2 : 1, ry, fg);
+                int ncell = x + 1 < cn && (cells[x + 1].ca & CUI__VT_SPACER) ? 2 : 1;
+                if (p->fit || v->gc_on || ch >= CUI__VT_CLUSTER0) cui__vt_draw_chars(ui, p, ch, at, x0 + x * p->cw, ry, ncell, fg, slant);
+                else {                                      /* as it always was: at the cell's left edge with the font's advance */
+                    char u[4]; size_t k = cui__vt_utf8(ch, u);
+                    cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw, ty, fg, u, (int)k, true);
+                    if (at & CUI_VT_BOLD) cui__draw_text_line(ui, CUI_FONT_MONO, p->size, x0 + x * p->cw + 0.45f, ty, fg, u, (int)k, true);
+                    if (slant) cui__vt_slant(ui, v0, ty + asc);
+                }
+                if (at & (CUI_VT_UNDERLINE | CUI__VT_OVER)) cui__vt_decor(ui, p, at, x0, x, ncell, ry, fg);
                 x++;
                 continue;
             }
@@ -2141,7 +2438,9 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             const cui__vt_cell *cells = p->snap ? p->snap + (size_t)ccy * (size_t)v->cols : cui__vt_cells_at(v, ccy, &cn, &w);
             if (p->snap) cn = v->cols;
             uint32_t ch = cells && ccx < cn ? CUI__VT_CP(cells[ccx].ca) : 0;
-            if (ch > ' ' && ch != 0x7F && !(p->glyphs && ch >= 128 && cui__vt_glyph(ui, ch, (cui_rect){ cx, cy, p->cw, p->lh }, p->cursor_text))) {
+            if (ch >= 128 && (p->fit || v->gc_on || ch >= CUI__VT_CLUSTER0) && !(p->glyphs && cui__vt_glyph(ui, ch, (cui_rect){ cx, cy, p->cw, p->lh }, p->cursor_text)))
+                cui__vt_draw_chars(ui, p, ch, cells[ccx].ca, cx, cy, ccx + 1 < cn && (cells[ccx + 1].ca & CUI__VT_SPACER) ? 2 : 1, p->cursor_text, false);
+            else if (ch > ' ' && ch != 0x7F && !(p->glyphs && ch >= 128 && cui__vt_glyph(ui, ch, (cui_rect){ cx, cy, p->cw, p->lh }, p->cursor_text))) {
                 char u[4]; size_t k = cui__vt_utf8(ch, u);
                 cui__draw_text_line(ui, CUI_FONT_MONO, p->size, cx, cy + (p->lh - fh) * 0.5f, p->cursor_text, u, (int)k, true);
             }
@@ -2375,6 +2674,7 @@ static cui_vt_result cui__vt_view_body(cui_ctx *ui, const char *id_str, cui_vt *
     p->v = v; p->cw = cw; p->lh = lh; p->size = size; p->padx = padx; p->pady = pady; p->off = st->off;
     p->focused = focused; p->show_cursor = true; p->shape = v->cursor_shape;
     p->glyphs = o->glyphs; p->italic = o->italic;
+    p->fit = o->fit_symbols; p->adjust = o->adjust_colors;
     p->has_sel = st->has_sel;
     cui__vt_sel_order(st, &p->s0, &p->s1);
     p->fg = CUI_C(ui, FOREGROUND);
