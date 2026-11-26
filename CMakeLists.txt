@@ -100,6 +100,7 @@ set(CUI_CORE_SOURCES
     src/cui_vt_sixel.c
     src/cui_vt_find.c
     src/cui_vt_marks.c
+    src/cui_vt_save.c
     src/cui_emoji.c
     src/cui_sysfont.c
     src/cui_inflate.c
