@@ -4748,7 +4748,7 @@ CUI_API cui_terminal_result cui_terminal_ex(cui_ctx *ui, const char *id, cui_ter
  * and the window the focus, ESC [ O when either is lost. A view that is no longer built (a hidden tab) sends nothing.
  *
  * Memory is fixed: two grids of 8 bytes per cell, and a scrollback ring of `lines * 48` cells (lines are
- * stored without their blank right end). Scrolling moves no cell data. Writing never allocates and parses
+ * stored without their blank right end; CUI_VT_FEATURE_SB_LINES sizes it by real lines instead). Scrolling moves no cell data. Writing never allocates and parses
  * several hundred MB/s, so feed output in slices (a few ms of work a frame) and ask for another frame while
  * more waits. Idle, the view costs nothing: no blinking, no timers.
  *
@@ -4861,6 +4861,13 @@ CUI_API unsigned cui_vt_bell_count(const cui_vt *vt);
  * links see the first character. Turning it off makes every cluster its first character. The view draws a cluster of
  * pictographs with the emoji font (cui_emoji_font_load_*) in its cells, other clusters as text. */
 #define CUI_VT_FEATURE_CLUSTERS 64u
+/* CUI_VT_FEATURE_SB_LINES: the scrollback holds `scrollback_lines` real lines whatever their width, as Windows Terminal counts
+ * it. Without it the ring has room for `lines * 48` cells and drops the oldest lines when wide output fills it first (5000
+ * lines of 120 full columns keep about 2000). With it the ring starts at 256 KB (or less), grows when a line finds no room,
+ * up to (lines + 1) x the longest line pushed, and goes back to its start size when the scrollback is erased (ESC [ 3 J) or
+ * when the option is turned on while the scrollback is empty: lines go only by count. Memory then follows the output: 10,000
+ * lines of 80 full columns take about 6 MB, of 300 about 24 MB. Turning it off keeps the ring's size. */
+#define CUI_VT_FEATURE_SB_LINES 128u
 CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
 /* The grapheme cluster at the start of utf8 (len bytes), by the rules of CUI_VT_FEATURE_CLUSTERS: its length in bytes (0 for
  * an empty string) and in *width the cells it takes (0 for one with nothing to show alone, such as a lone combining mark). */

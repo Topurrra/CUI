@@ -88,6 +88,10 @@ struct cui_vt {
     bool gprep;                       /* its last character is a Prepend one: the next character joins it whatever it is */
     cui__vtw_gs gs;
     cui__vtw_run grun;                /* the table's run the last character fell in */
+    /* CUI_VT_FEATURE_SB_LINES: the ring of cells grows to hold sb_max lines whatever their width (and shrinks back when the
+       scrollback is erased), so lines go only by count */
+    bool sbl_on;
+    int sb_widest;                    /* the longest line pushed so far (cells), for the ring's bound */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -181,12 +185,83 @@ static void cui__vt_sb_drop(cui_vt *v) {
     if (v->mk) cui__vt_mk_trim(v);         /* a mark whose prompt was on that line goes */
 }
 
+/* CUI_VT_FEATURE_SB_LINES. The ring starts small and grows (doubling) when a line finds no room, to at most (lines + 1) x the
+ * longest line pushed: sb_max lines of any width then always fit, the room lost where the ring wraps (less than one line)
+ * included. Growing copies the lines, oldest first, to the start of the new ring. */
+#define CUI__VT_SBL_START 32768u                 /* cells (256 KB) a ring starts with, or less when the legacy size is smaller */
+
+static size_t cui__vt_sbl_start(const cui_vt *v) {
+    size_t legacy = (size_t)v->sb_max * 48;
+    return legacy < CUI__VT_SBL_START ? legacy : CUI__VT_SBL_START;
+}
+
+static bool cui__vt_sbl_grow(cui_vt *v, int n) {
+    size_t used = 0;
+    for (int k = 0; k < v->sb_count; k++) used += v->sb_lines[(v->sb_head + k) % v->sb_max].len;
+    size_t bound = ((size_t)v->sb_max + 1) * (size_t)CUI_MAX(v->sb_widest, n);
+    size_t cap = v->sb_cap ? v->sb_cap * 2 : cui__vt_sbl_start(v);
+    if (cap < used + (size_t)n) cap = used + (size_t)n;
+    if (cap > bound) cap = CUI_MAX(bound, used + (size_t)n);
+    if (cap <= v->sb_cap || cap > 0xFFFFFFFFu) return false;
+    cui__vt_cell *nsb = (cui__vt_cell *)malloc(cap * sizeof *nsb);
+    if (!nsb) return false;
+    size_t pos = 0;
+    for (int k = 0; k < v->sb_count; k++) {
+        cui__vt_line *L = &v->sb_lines[(v->sb_head + k) % v->sb_max];
+        if (L->len) memcpy(nsb + pos, v->sb + L->off, (size_t)L->len * sizeof *nsb);
+        L->off = (uint32_t)pos;
+        pos += L->len;
+    }
+    free(v->sb);
+    v->sb = nsb; v->sb_cap = cap; v->sb_pos = pos;
+    return true;
+}
+
+/* room for n cells without dropping a line (sb_pos is put where they go), growing the ring if need be; false when out of memory */
+static bool cui__vt_sbl_room(cui_vt *v, int n) {
+    if (n > v->sb_widest) v->sb_widest = n;
+    for (int tries = 0; tries < 2; tries++) {
+        int k = 0;
+        while (k < v->sb_count && v->sb_lines[(v->sb_head + k) % v->sb_max].len == 0) k++;
+        if (k == v->sb_count) {                                   /* no line holds cells */
+            v->sb_pos = 0;
+            if ((size_t)n <= v->sb_cap) return true;
+        } else {
+            size_t oldest = v->sb_lines[(v->sb_head + k) % v->sb_max].off;
+            if (v->sb_pos > oldest) {                             /* the cells run from the oldest line to pos */
+                if (v->sb_pos + (size_t)n <= v->sb_cap) return true;
+                if ((size_t)n <= oldest) { v->sb_pos = 0; return true; }
+            } else if (v->sb_pos + (size_t)n <= oldest) return true;   /* wrapped: room before the oldest line */
+        }
+        if (!cui__vt_sbl_grow(v, n)) return false;
+    }
+    return false;
+}
+
+/* turned on or off (cui_vt_set_features), and after the scrollback is erased: an empty ring goes back to its start size */
+static void cui__vt_sbl_shrink(cui_vt *v) {
+    if (!v->sbl_on || v->sb_count || v->sb_max == 0) return;
+    size_t want = cui__vt_sbl_start(v);
+    if (v->sb_cap == want) return;
+    cui__vt_cell *nsb = (cui__vt_cell *)malloc(want * sizeof *nsb);
+    if (!nsb) return;
+    free(v->sb);
+    v->sb = nsb; v->sb_cap = want; v->sb_pos = 0; v->sb_widest = 0;
+}
+
+void cui__vt_sblines_set(cui_vt *v, bool on) {
+    if (v->sbl_on == on) return;
+    v->sbl_on = on;
+    cui__vt_sbl_shrink(v);
+}
+
 static void cui__vt_sb_push(cui_vt *v, const cui__vt_cell *src, int n, uint8_t wrapped) {
     if (v->sb_max == 0) return;
     if (!(wrapped && v->rf)) while (n > 0 && src[n - 1].ca == 0 && src[n - 1].bg == 0) n--;      /* the blank right end is not kept (a reflow needs a soft-wrapped row whole) */
-    if ((size_t)n > v->sb_cap) n = (int)v->sb_cap;
     if (v->sb_count == v->sb_max) cui__vt_sb_drop(v);
-    if (n > 0) {
+    bool placed = n > 0 && v->sbl_on && cui__vt_sbl_room(v, n);   /* by lines: room is made, no line goes for it */
+    if ((size_t)n > v->sb_cap) n = (int)v->sb_cap;
+    if (n > 0 && !placed) {
         for (;;) {
             if (v->sb_count == 0) v->sb_pos = 0;
             size_t oldest = v->sb_count ? v->sb_lines[v->sb_head].off : 0;
@@ -606,7 +681,7 @@ static void cui__vt_csi(cui_vt *v, char f) {
         if (m == 0) { cui__vt_erase(v, v->cy, v->cx, v->cols); for (int y = v->cy + 1; y < v->rows; y++) cui__vt_erase(v, y, 0, v->cols); }
         else if (m == 1) { for (int y = 0; y < v->cy; y++) cui__vt_erase(v, y, 0, v->cols); cui__vt_erase(v, v->cy, 0, v->cx + 1); }
         else if (m == 2 || m == 3) { if (m == 2) for (int y = 0; y < v->rows; y++) cui__vt_erase(v, y, 0, v->cols);
-                                     else if (v->cur == 0) { v->sb_count = 0; v->sb_pos = 0; if (v->pic_on & CUI__VT_PIC_SB) cui__vt_pic_trim_sb(v); if (v->mk) cui__vt_mk_trim(v); } }
+                                     else if (v->cur == 0) { v->sb_count = 0; v->sb_pos = 0; if (v->pic_on & CUI__VT_PIC_SB) cui__vt_pic_trim_sb(v); if (v->mk) cui__vt_mk_trim(v); cui__vt_sbl_shrink(v); } }
         v->pend = false;
         break;
     }
