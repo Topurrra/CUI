@@ -591,6 +591,18 @@ typedef struct { cui__vt_rfpt *sb, *base, *cut; int nsb, nbase, ncut; int64_t sb
 cui__vt_mk *cui__vt_mk_get(const cui_vt *v);
 void cui__vt_set_mk(cui_vt *v, cui__vt_mk *mk);
 int cui__vt_main_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, bool *wrapped);   /* as cui__vt_row_chars, of the main screen always */
+/* Saving a screen (cui_vt_save.c: cui_vt_save and cui_vt_load). Rows as above (sb_total + y of the main screen). */
+typedef struct { uint32_t cp; int attrs; int32_t fg, bg; bool spacer; } cui__vt_scell;   /* attrs, fg, bg as cui_vt_cell has them; spacer: a wide character's second cell */
+typedef struct { int64_t row[4]; int col[4]; int exit_code; bool finished; double dur_ms; const char *cmd; } cui__vt_mkx;   /* a mark's A B C D (row INT64_MIN: not come); dur_ms < 0 unknown */
+/* cui_vt.c, for cui_vt_save.c */
+int cui__vt_save_row(const cui_vt *v, int64_t abs, cui__vt_scell *out, int cap, int *wrapped);   /* cells (at most cap), wrapped 0, 1 or 2 (after a padding cell); -1 no such row */
+void cui__vt_save_cursor(const cui_vt *v, int *cx, int *cy);         /* the main screen's cursor */
+/* cui_vt_links.c, for cui_vt_save.c */
+const uint16_t *cui__vt_lk_main_ids(const cui_vt *v, int64_t abs, int *n);   /* the link ids of a main screen or scrollback row; NULL none */
+const char *cui__vt_lk_uri_of(const cui_vt *v, uint16_t id);
+/* cui_vt_marks.c, for cui_vt_save.c */
+int cui__vt_mk_export(const cui_vt *v, cui__vt_mkx *out, int cap);  /* oldest first; returns how many there are (all of them, even past cap) */
+void cui__vt_mk_set_durations(cui_vt *v, int first, const double *dur, int n);   /* marks first.. end now and began dur ms before (dur < 0: left as they are) */
 /* cui_vt_marks.c, for cui_vt.c and cui_vt_sixel.c */
 void cui__vt_mk_feature(cui_vt *v, bool on);
 void cui__vt_mk_free(cui_vt *v);

@@ -300,6 +300,25 @@ const char *cui_vt_hyperlink(const cui_vt *v, int col, int row) {
     return cui__vtl_uri(v, cui__vtl_id_at(v, &in, (int64_t)in.sb_total + row, col));
 }
 
+/* for cui_vt_save.c: the main screen's ids even while the alternate one is shown */
+const uint16_t *cui__vt_lk_main_ids(const cui_vt *v, int64_t abs, int *n) {
+    const cui__vt_lx *x = cui__vt_lk(v);
+    *n = 0;
+    if (!x) return NULL;
+    cui__vt_info in;
+    cui__vt_get_info(v, &in);
+    if (abs >= (int64_t)in.sb_total) {
+        int64_t y = abs - (int64_t)in.sb_total;
+        if (y >= in.rows || y >= x->rows || !x->grid[0]) return NULL;
+        *n = x->cols;
+        return x->grid[0] + (size_t)cui__vt_slot(v, 0, (int)y) * (size_t)x->cols;
+    }
+    in.cur = 0;
+    return cui__vtl_row_ids(v, &in, abs, n);
+}
+
+const char *cui__vt_lk_uri_of(const cui_vt *v, uint16_t id) { return cui__vtl_uri(v, id); }
+
 /* ------------------------------------------------------------------------ */
 /* Finding links in text                                                    */
 /* ------------------------------------------------------------------------ */

@@ -433,6 +433,35 @@ void cui__vt_mk_osc(cui_vt *v, int code, const char *a, int n) {
     }
 }
 
+/* for cui_vt_save.c */
+int cui__vt_mk_export(const cui_vt *v, cui__vt_mkx *out, int cap) {
+    const cui__vt_mk *k = cui__vt_mk_get(v);
+    if (!k) return 0;
+    for (int i = 0; i < k->n && i < cap; i++) {
+        const cui__vtm *m = &k->m[i];
+        cui__vt_mkx *o = &out[i];
+        for (int j = 0; j < 4; j++) { o->row[j] = m->row[j]; o->col[j] = m->col[j]; }
+        o->exit_code = m->exit_code;
+        o->finished = m->finished;
+        o->dur_ms = m->finished && m->start_ms > 0 && m->end_ms >= m->start_ms ? m->end_ms - m->start_ms : -1;
+        o->cmd = m->cmd;
+    }
+    return k->n;
+}
+
+void cui__vt_mk_set_durations(cui_vt *v, int first, const double *dur, int n) {
+    cui__vt_mk *k = cui__vt_mk_get(v);
+    if (!k) return;
+    double now = cui_vt_now_ms();
+    for (int i = 0; i < n && first + i < k->n; i++) {
+        if (first + i < 0 || dur[i] < 0) continue;
+        cui__vtm *m = &k->m[first + i];
+        if (!m->finished) continue;
+        m->end_ms = now;
+        m->start_ms = now - dur[i] > 0 ? now - dur[i] : 0;
+    }
+}
+
 /* ------------------------------------------------------------------------ */
 /* OSC 52                                                                   */
 /* ------------------------------------------------------------------------ */

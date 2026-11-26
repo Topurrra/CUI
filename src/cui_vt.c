@@ -1355,6 +1355,44 @@ int cui__vt_main_chars(const cui_vt *v, int64_t abs, uint32_t *out, int cap, boo
     return n;
 }
 
+/* for cui_vt_save.c: a row of the main screen (also behind the alternate one) or of the scrollback, decoded */
+int cui__vt_save_row(const cui_vt *v, int64_t abs, cui__vt_scell *out, int cap, int *wrapped) {
+    int64_t row = abs - (int64_t)v->sb_total;
+    const cui__vt_cell *c;
+    int n, w;
+    if (row >= 0) {
+        if (row >= v->rows) return -1;
+        const cui__vt_screen *s = &v->scr[0];
+        c = cui__vt_row(v, s, (int)row); n = v->cols; w = s->wrap[s->map[row]];
+    } else {
+        int64_t i = (int64_t)v->sb_count + row;
+        if (i < 0 || v->sb_max == 0) return -1;
+        const cui__vt_line *L = &v->sb_lines[(v->sb_head + (int)i) % v->sb_max];
+        c = v->sb + L->off; n = L->len; w = L->wrapped;
+    }
+    *wrapped = w;
+    n = CUI_MIN(n, cap);
+    for (int i = 0; i < n; i++) {
+        uint32_t a = c[i].ca, style = CUI__VT_ULS(a);
+        cui__vt_scell *o = &out[i];
+        o->spacer = (a & CUI__VT_SPACER) != 0;
+        o->cp = o->spacer ? 0 : CUI__VT_CP(a);
+        int at = (int)(a & 0x3F000000u);                    /* bold .. strike: the same bits as CUI_VT_* */
+        if (style >= 2) at |= CUI_VT_UNDERLINE_DOUBLE << (style - 2);
+        if (a & CUI__VT_OVER) at |= CUI_VT_OVERLINE;
+        o->attrs = at;
+        for (int k = 0; k < 2; k++) {
+            uint16_t id = k ? c[i].bg : c[i].fg;
+            int32_t r = id == 0 ? -1 : id < CUI__VT_PALETTE ? id - 1 : (int32_t)(0x1000000u | v->rgb[id - CUI__VT_PALETTE]);
+            if (k) o->bg = r; else o->fg = r;
+        }
+    }
+    return n;
+}
+void cui__vt_save_cursor(const cui_vt *v, int *cx, int *cy) {
+    if (v->cur == 0) { *cx = v->cx; *cy = v->cy; } else { *cx = v->sx; *cy = v->sy; }    /* the main screen's: saved when the alternate one came */
+}
+
 void cui__vt_scroll_lines(cui_vt *v, int n) {
     v->cy = v->sbot;
     cui__vt_scroll_up(v, v->stop, v->sbot, n);

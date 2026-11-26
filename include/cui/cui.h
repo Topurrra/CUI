@@ -5036,6 +5036,48 @@ CUI_API int cui_vt_progress(const cui_vt *vt, int *percent);                    
 CUI_API size_t cui_vt_take_clipboard(cui_vt *vt, char *out, size_t cap);                 /* the newest request's decoded UTF-8 length (0: none). It is taken (cleared)
                                                                                              only by a call whose cap holds it with its NUL; a smaller cap (or NULL, 0)
                                                                                              writes nothing and keeps it, so a call with NULL, 0 sizes the buffer */
+/* Saving a screen and loading it again (cui_vt_save.c), for an app that restores its terminals after a restart. Nothing runs
+ * unless called: a screen that is never saved costs nothing.
+ *
+ *     cui_vt_saved b = {0};
+ *     cui_vt_save(vt, 5000, &b);                  // appends the last 5000 rows (scrollback and screen) to b.data
+ *     ... compress b.data, b.len and write it; later read it back ...
+ *     cui_vt_load(fresh_vt, data, len);           // false: not a saved screen, a newer version, cut off or damaged
+ *     cui_vt_saved_free(&b);
+ *
+ * What is kept: the main screen's rows (also while the alternate one is shown; the alternate screen itself is not kept, its
+ * program is gone) and the last scrollback rows, at most max_lines rows together (the newest; max_lines <= 0: all of them),
+ * cut after the last row that holds anything or the cursor's. Each cell's character, wide characters with their second cell,
+ * attributes (bold, dim, italic, the underline styles, inverse, strike, overline), colors (default, 0..255, true color), blank
+ * cells with a background, soft wraps, OSC 8 hyperlinks (with CUI_VT_FEATURE_LINKS) and the command marks (with
+ * CUI_VT_FEATURE_MARKS: each mark's A, B, C and D cells, its exit code, its 633;E command line and its run time). Not kept:
+ * pictures (sixel), the title, the folder, modes, the pen, the alternate screen. A command still running is saved as ended
+ * with an unknown exit code (the program is gone when it comes back).
+ *
+ * The format (little endian; CUI_VT_SAVE_VERSION 1):
+ *     0   4  "CUVT"
+ *     4   1  version (1)
+ *     5   1  flags (0)
+ *     6   2  columns of the screen saved
+ *     8   2  rows of the screen saved
+ *     10  4  rows in the stream
+ *     14  4  n: bytes of the stream
+ *     18  4  m: marks in the stream
+ *     22  n  the stream: the rows as a terminal byte stream (UTF-8 text, CR LF between rows that do not wrap) using only
+ *            SGR (ESC [ ... m), CUF (ESC [ n C), ECH (ESC [ n X), CUU (ESC [ n A), CHA (ESC [ n G), OSC 8 hyperlinks and
+ *            OSC 133 A/B/C/D and 633;E, each OSC ended by ESC \ ; it ends with the cursor where it was and the pen reset
+ *     22+n 4*m  each mark's run time in ms (0xFFFFFFFF unknown), oldest first
+ * cui_vt_load checks the header and the length, refuses any byte or sequence outside that set (so a file from elsewhere can
+ * never make the screen answer, ring, set a title or ask for the clipboard), then writes the stream into the screen as output
+ * at its cursor (a fresh screen: from the top) and gives the marks their run times (ended now). A screen of the same size
+ * comes back cell for cell; another width wraps the rows again as the stream is written, so a load is also a reflow. The text
+ * is about a byte a cell plus the color changes before compression (the app compresses: CUI does not). 5000 rows of 120
+ * coloured columns save in about 2.8 ms and load in about 2 ms (Release). */
+#define CUI_VT_SAVE_VERSION 1
+typedef struct cui_vt_saved { unsigned char *data; size_t len, cap; } cui_vt_saved;   /* a growing buffer; zero it before the first use */
+CUI_API size_t cui_vt_save(const cui_vt *vt, int max_lines, cui_vt_saved *out);        /* appends one saved screen; returns its bytes (0: out of memory, out unchanged) */
+CUI_API void cui_vt_saved_free(cui_vt_saved *b);                                       /* frees b->data and zeroes b */
+CUI_API bool cui_vt_load(cui_vt *vt, const void *data, size_t len);                   /* one saved screen (exactly len bytes) into vt; false changes nothing */
 
 /* ---- Emoji ----
  * Color emoji come from an emoji font: the system's (cui_emoji_font_load_system, which
