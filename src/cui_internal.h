@@ -111,7 +111,8 @@ char *cui__frame_vprintf(cui_ctx *ui, const char *fmt, va_list ap);
 /* ---- PNG and font outlines, for color emoji (cui_emoji.c) ---- */
 unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *h);   /* cui_image.c */
 void cui__png_free(unsigned char *px);
-typedef struct cui__tt cui__tt;                                                        /* cui_text.c */
+bool cui__img_info(const unsigned char *data, int len, int *w, int *h);                /* the size from the header (PNG, JPEG): false when unknown */
+typedef struct cui__tt cui__tt;                                                       /* cui_text.c */
 cui__tt *cui__tt_open(cui_ctx *ui, const unsigned char *data, int offset);
 void cui__tt_vmetrics(cui__tt *t, int *ascent, int *descent);
 bool cui__tt_box(cui__tt *t, int gid, float scale, int *x0, int *y0, int *x1, int *y1);

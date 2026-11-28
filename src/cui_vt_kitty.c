@@ -33,6 +33,18 @@
 #define CUI__VTK_BUDGET ((size_t)32 << 20)      /* stored kitty images, decoded */
 #define CUI__VTK_DIM 16384                      /* a picture's side, in pixels */
 #define CUI__VTK_ROWS 4000                      /* rows a placement may take */
+#define CUI__VTK_PIXELS 25000000                /* pixels of one picture (100 MB decoded): a bigger one is refused unread */
+
+static bool cui__vtk_size_ok(int64_t w, int64_t h) { return w > 0 && h > 0 && w <= CUI__VTK_DIM && h <= CUI__VTK_DIM && w * h <= CUI__VTK_PIXELS; }
+
+/* a PNG or JPEG file decoded to RGBA (stb's buffer: cui__png_free), its size checked from the header first */
+static unsigned char *cui__vtk_decode_file(const uint8_t *d, size_t n, int *w, int *h) {
+    int iw = 0, ih = 0;
+    if (n == 0 || n >= (size_t)INT_MAX || !cui__img_info(d, (int)n, &iw, &ih) || !cui__vtk_size_ok(iw, ih)) return NULL;
+    unsigned char *px = cui__png_decode(d, (int)n, w, h);
+    if (px && !cui__vtk_size_ok(*w, *h)) { cui__png_free(px); return NULL; }
+    return px;
+}
 
 typedef struct { uint8_t *p; size_t n, cap; uint32_t q; int qn; bool bad, over; } cui__vtk_blob;   /* base64 decoded as it comes */
 typedef struct { uint32_t id, num; int w, h; uint8_t *px; size_t bytes; uint32_t seq; } cui__vtk_img;
@@ -347,13 +359,13 @@ static uint8_t *cui__vtk_decode(const cui__vtk_cmd *c, cui__vtk_blob *b, int *w,
     uint8_t *raw = NULL;
     if (c->f == 24 || c->f == 32) {
         int bpp = c->f / 8;
-        if (c->s <= 0 || c->v <= 0 || c->s > CUI__VTK_DIM || c->v > CUI__VTK_DIM) { *err = "EINVAL:the width and height are needed"; return NULL; }
+        if (c->s <= 0 || c->v <= 0) { *err = "EINVAL:the width and height are needed"; return NULL; }
+        if (!cui__vtk_size_ok(c->s, c->v)) { *err = "EFBIG:the picture is too big"; return NULL; }
         size_t need = (size_t)c->s * (size_t)c->v * (size_t)bpp;
-        if (c->o == 'z') {
-            raw = (uint8_t *)malloc(need);
-            if (!raw) { *err = "ENOMEM:out of memory"; return NULL; }
-            cui_inflate_result r = cui_inflate(src, n, raw, need, CUI_INFLATE_ZLIB);
-            if (r.status != CUI_INFLATE_OK) { free(raw); *err = "EINVAL:the zlib data does not inflate"; return NULL; }
+        if (c->o == 'z') {                               /* grows with what really inflates, never to `need` up front */
+            cui_inflate_result r;
+            raw = (uint8_t *)cui_inflate_alloc(src, n, CUI_INFLATE_ZLIB, CUI_MIN(need, n * 4 + 64), need, &r);
+            if (!raw) { *err = "EINVAL:the zlib data does not inflate"; return NULL; }
             if (r.out_len < need) { free(raw); *err = "ENODATA:insufficient image data"; return NULL; }
             src = raw; n = need;
         }
@@ -375,9 +387,9 @@ static uint8_t *cui__vtk_decode(const cui__vtk_cmd *c, cui__vtk_blob *b, int *w,
         src = raw; n = r.out_len;
     }
     int iw = 0, ih = 0;
-    unsigned char *dec = n > 0 && n < (size_t)INT_MAX ? cui__png_decode(src, (int)n, &iw, &ih) : NULL;
+    unsigned char *dec = cui__vtk_decode_file(src, n, &iw, &ih);
     free(raw);
-    if (!dec || iw <= 0 || ih <= 0 || iw > CUI__VTK_DIM || ih > CUI__VTK_DIM) { if (dec) cui__png_free(dec); *err = "EBADPNG:the PNG does not decode"; return NULL; }
+    if (!dec) { *err = "EBADPNG:the PNG does not decode"; return NULL; }
     uint8_t *px = (uint8_t *)malloc((size_t)iw * (size_t)ih * 4);
     if (px) memcpy(px, dec, (size_t)iw * (size_t)ih * 4);
     cui__png_free(dec);
@@ -674,9 +686,8 @@ static void cui__vtk_iterm_show(cui_vt *v, cui__vtk *k, const char *args) {
     if (!cui__vtk_arg(args, "inline", b, sizeof b) || strcmp(b, "1")) return;       /* a download: not shown */
     if (k->it.bad || k->it.over || k->it.n == 0 || k->it.n >= (size_t)INT_MAX) return;
     int w = 0, h = 0;
-    unsigned char *px = cui__png_decode(k->it.p, (int)k->it.n, &w, &h);
+    unsigned char *px = cui__vtk_decode_file(k->it.p, k->it.n, &w, &h);
     if (!px) return;
-    if (w <= 0 || h <= 0 || w > CUI__VTK_DIM || h > CUI__VTK_DIM) { cui__png_free(px); return; }
     cui__vt_info in;
     cui__vt_get_info(v, &in);
     const int cw = cui__vt_pic_cw(v);

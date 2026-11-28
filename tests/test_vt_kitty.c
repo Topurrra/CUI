@@ -268,6 +268,21 @@ static void test_query(void) {
     W(v, "\x1b_Ga=p,I=7,p=4\x1b\\");
     CHECK_STR(reply(v), "\x1b_Gi=2147483648,I=7,p=4;OK\x1b\\");
     CHECK_EQ(cui__vt_pic_count(v), 1);
+    W(v, "\x1b_Gi=41,a=t,f=32,o=z,s=16384,v=16384;AAAA\x1b\\");   /* hostile sizes: refused before anything is allocated */
+    CHECK_STR(reply(v), "\x1b_Gi=41;EFBIG:the picture is too big\x1b\\");
+    W(v, "\x1b_Gi=42,a=t,f=32,o=z,s=5000,v=5000;eAEBAAD//wAAAAE=\x1b\\");   /* a tiny zlib stream claiming 100 MB */
+    CHECK_STR(reply(v), "\x1b_Gi=42;ENODATA:insufficient image data\x1b\\");
+    {
+        uint8_t hp[64]; size_t o = 0;
+        static const uint8_t sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+        memcpy(hp, sig, 8); o = 8;
+        uint8_t ih[13] = { 0 };
+        be32(ih, 20000); be32(ih + 4, 20000); ih[8] = 8; ih[9] = 6;
+        o += png_chunk(hp + o, "IHDR", ih, 13);
+        o += png_chunk(hp + o, "IEND", NULL, 0);
+        kitty(v, "i=43,a=t,f=100", hp, o);
+        CHECK_STR(reply(v), "\x1b_Gi=43;EBADPNG:the PNG does not decode\x1b\\");
+    }
     W(v, "\x1b_Gi=40,a=x;\x1b\\");                                 /* an unknown action: nothing */
     CHECK_STR(reply(v), "");
     CHECK_STR(row(v, 0), "");
