@@ -49,6 +49,11 @@ unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *
     return stbi_load_from_memory(data, len, w, h, &comp, 4);
 }
 void cui__png_free(unsigned char *px) { stbi_image_free(px); }
+/* a picture's size from its header alone (the terminal screen refuses a huge one before decoding it) */
+bool cui__img_info(const unsigned char *data, int len, int *w, int *h) {
+    int comp = 0;
+    return stbi_info_from_memory(data, len, w, h, &comp) != 0;
+}
 
 /** Load an image from the UTF-8 path supplied by the application or window backend. */
 cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h) {
@@ -64,6 +69,7 @@ cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h) {
 #else
 unsigned char *cui__png_decode(const unsigned char *data, int len, int *w, int *h) { (void)data; (void)len; (void)w; (void)h; return NULL; }
 void cui__png_free(unsigned char *px) { (void)px; }
+bool cui__img_info(const unsigned char *data, int len, int *w, int *h) { (void)data; (void)len; (void)w; (void)h; return false; }
 /** Report that loading is unavailable in builds without the bundled decoder. */
 cui_texture cui_image_load(cui_ctx *ui, const char *path, int *w, int *h) {
     (void)ui; (void)path; (void)w; (void)h;

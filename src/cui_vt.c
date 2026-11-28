@@ -32,7 +32,9 @@ typedef struct cui__vt_rf cui__vt_rf;   /* CUI_VT_FEATURE_REFLOW's state (the "R
 
 enum { CUI__VT_GROUND, CUI__VT_ESC, CUI__VT_ESC_INT, CUI__VT_CSI, CUI__VT_OSC, CUI__VT_OSC_ESC, CUI__VT_STR, CUI__VT_STR_ESC,
        CUI__VT_DCS, CUI__VT_SIXEL,     /* the last two only with an extension (cui_vt_sixel.c): a DCS's parameters, sixel data */
-       CUI__VT_OSC52 };                /* only with CUI_VT_FEATURE_MARKS (cui_vt_marks.c): an OSC 52 copy request, read in runs */
+       CUI__VT_OSC52,                  /* only with CUI_VT_FEATURE_MARKS (cui_vt_marks.c): an OSC 52 copy request, read in runs */
+       CUI__VT_APC, CUI__VT_KITTY,     /* only with an extension: an APC's first byte, then kitty's graphics (cui_vt_kitty.c) */
+       CUI__VT_ITERM };                /* only with CUI_VT_FEATURE_ITERM: an OSC 1337, read in runs (cui_vt_kitty.c) */
 
 struct cui_vt {
     int cols, rows;
@@ -92,6 +94,7 @@ struct cui_vt {
        scrollback is erased), so lines go only by count */
     bool sbl_on;
     int sb_widest;                    /* the longest line pushed so far (cells), for the ring's bound */
+    bool kp_on;                       /* CUI_VT_FEATURE_KITTY: a U+10EEEE cell is a kitty placeholder (cui_vt_kitty.c paints it) */
 };
 
 enum { CUI__VT_M1000 = 1, CUI__VT_M1002 = 2, CUI__VT_M1003 = 4 };
@@ -361,6 +364,21 @@ static int cui__vt_width(uint32_t c) {
 
 static void cui__vt_place(cui_vt *v, uint32_t c, int w);
 static void cui__vt_put_gc(cui_vt *v, uint32_t c);
+static int cui__vt_cps(const cui_vt *v, uint32_t cp, uint32_t *out, int cap);
+
+/* Kitty's Unicode placeholder (CUI_VT_FEATURE_KITTY): the cell at x of the cursor's row holds U+10EEEE, with its diacritics
+ * when CLUSTERS kept them; cui_vt_kitty.c paints the piece of picture it names. The image id is the foreground color. */
+#define CUI__VT_KPH 0x10EEEEu
+static void cui__vt_kph(cui_vt *v, int x) {
+    if (x < 0 || x >= v->cols) return;
+    const cui__vt_cell *c = &cui__vt_row(v, CUI__VT_S(v), v->cy)[x];
+    uint32_t cps[8];
+    int n = cui__vt_cps(v, CUI__VT_CP(c->ca), cps, 8);
+    if (n < 1 || cps[0] != CUI__VT_KPH) return;
+    uint32_t id = c->fg == 0 ? 0 : c->fg < CUI__VT_PALETTE ? (uint32_t)(c->fg - 1) : v->rgb[c->fg - CUI__VT_PALETTE];
+    cui__vt_kitty_ph(v, x, v->cy, id, cps, n);
+}
+void cui__vt_kp_set(cui_vt *v, bool on) { v->kp_on = on; }
 
 static void cui__vt_put(cui_vt *v, uint32_t c) {
     if (v->gc_on && (c >= 0x300 || v->gprep)) { cui__vt_put_gc(v, c); return; }
@@ -414,6 +432,7 @@ static void cui__vt_gc_extend(cui_vt *v, int x, uint32_t c) {
     cui__vt_cell *row = cui__vt_row(v, s, v->cy);
     row[x].ca = CUI__VT_ATTRS(row[x].ca) | id;
     v->gid = id; v->gfresh = id >= CUI__VT_CLUSTER0;
+    if (v->kp_on && cps[0] == CUI__VT_KPH) { cui__vt_kph(v, x); return; }      /* a kitty placeholder's row, column or id byte came */
     if (w == 2 && v->gw == 1 && x + 1 < v->cols) {             /* VS16: an emoji now, two cells */
         if (v->pic_on) cui__vt_pic_erase(v, v->cur, s->map[v->cy], x + 1, x + 2);
         if (v->lk) cui__vt_lk_put(v, v->cur, s->map[v->cy], x, 2);
@@ -860,13 +879,17 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
                 v->cp = c & (0x3Fu >> v->need);
             } else if (c >= 0x80 && c < 0xC0 && v->need > 0) {
                 v->cp = (v->cp << 6) | (c & 0x3Fu);
-                if (--v->need == 0) cui__vt_put(v, v->cp > 0x10FFFF ? 0xFFFD : v->cp);
+                if (--v->need == 0) {
+                    cui__vt_put(v, v->cp > 0x10FFFF ? 0xFFFD : v->cp);
+                    if (v->cp == CUI__VT_KPH && v->kp_on) cui__vt_kph(v, v->pend ? v->cx : v->cx - 1);   /* a kitty placeholder */
+                }
             } else { v->need = 0; cui__vt_put(v, 0xFFFD); }
             break;
         case CUI__VT_ESC:
             if (c == '[') { v->state = CUI__VT_CSI; v->np = 0; v->pcolon = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
             else if (c == ']') { v->state = CUI__VT_OSC; v->osc_n = 0; }
             else if (c == 'P' && v->x) { v->state = CUI__VT_DCS; v->np = 0; v->pcolon = 0; v->pany = false; memset(v->p, 0, sizeof v->p); v->priv = v->inter = 0; }
+            else if (c == '_' && v->x) v->state = CUI__VT_APC;                 /* kitty's graphics, when the extension reads them */
             else if (c == 'P' || c == 'X' || c == '^' || c == '_') v->state = CUI__VT_STR;
             else if (c >= 0x20 && c <= 0x2F) v->state = CUI__VT_ESC_INT;       /* ( ) # % and the like: one more byte */
             else if (c == 0x1B) {}
@@ -901,7 +924,24 @@ void cui_vt_write(cui_vt *v, const char *data, size_t len) {
             else if (v->osc_n + 1 < (int)sizeof v->osc) {
                 v->osc[v->osc_n++] = (char)c;
                 if (v->osc_n == 3 && c == ';' && v->mk && v->osc[0] == '5' && v->osc[1] == '2') { cui__vt_mk_c52_begin(v); v->state = CUI__VT_OSC52; }   /* a copy request may be long: read past the buffer */
+                else if (v->osc_n == 5 && c == ';' && v->x && !memcmp(v->osc, "1337", 4) && cui__vt_iterm_begin(v)) v->state = CUI__VT_ITERM;   /* an iTerm2 picture, as long */
             }
+            break;
+        case CUI__VT_ITERM:                 /* only with CUI_VT_FEATURE_ITERM: read in runs up to the terminator */
+            i += cui__vt_iterm_feed(v, d + i, len - i);
+            if (i >= len) break;
+            cui__vt_iterm_end(v);
+            v->state = d[i] == 0x1B ? CUI__VT_STR_ESC : CUI__VT_GROUND;
+            break;
+        case CUI__VT_APC:                   /* only with an extension: kitty's graphics start with G */
+            if (c == 'G' && cui__vt_kitty_begin(v)) { v->state = CUI__VT_KITTY; break; }
+            v->state = c == 0x07 ? CUI__VT_GROUND : c == 0x1B ? CUI__VT_STR_ESC : CUI__VT_STR;   /* as before: skipped to its end */
+            break;
+        case CUI__VT_KITTY:
+            i += cui__vt_kitty_feed(v, d + i, len - i);
+            if (i >= len) break;
+            cui__vt_kitty_end(v);
+            v->state = d[i] == 0x1B ? CUI__VT_STR_ESC : CUI__VT_GROUND;   /* ESC \ ends it; BEL, CAN and SUB too */
             break;
         case CUI__VT_OSC52:                 /* only with marks: base64 decoded in runs up to the terminator */
             i += cui__vt_mk_c52_feed(v, d + i, len - i);
@@ -2461,6 +2501,10 @@ static void cui__paint_vt(cui_ctx *ui, cui_node *n, void *data) {
             bool slant = p->italic && (at & CUI_VT_ITALIC);
             int v0 = ui->dl.vtx_count;
             if (ch >= 128) {
+                if (v->kp_on && (ch == CUI__VT_KPH || ch >= CUI__VT_CLUSTER0)) {    /* a kitty placeholder shows only its picture */
+                    uint32_t k0[1];
+                    if (cui__vt_cps(v, ch, k0, 1) == 1 && k0[0] == CUI__VT_KPH) { x++; continue; }
+                }
                 cui_rect cell = { x0 + x * p->cw, ry, p->cw, p->lh };
                 if (p->glyphs) {                            /* the complete hand-drawn set; lines above and below go with it, as with text */
                     if (cui__vt_glyph(ui, ch, cell, fg)) {
