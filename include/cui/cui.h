@@ -4819,7 +4819,8 @@ CUI_API unsigned cui_vt_bell_count(const cui_vt *vt);
  *                           where Windows Terminal leaves it; ESC [ 14 t and ESC [ 16 t then report that virtual size, the
  *                           device attributes include 4, and XTSMGRAPHICS (ESC [ ? Pi ; Pa ; Pv S) is answered. Pictures belong
  *                           to the rows: they scroll into the scrollback, erasing or writing text over a cell removes its piece,
- *                           the alternate screen's pictures go when it is left. Kitty and iTerm2 pictures are never shown.
+ *                           the alternate screen's pictures go when it is left. Kitty and iTerm2 pictures: CUI_VT_FEATURE_KITTY
+ *                           and CUI_VT_FEATURE_ITERM, below.
  * The view creates a texture only for the rows of picture on screen and frees it when they leave or the view is gone. */
 #define CUI_VT_FEATURE_QUERIES 1u
 #define CUI_VT_FEATURE_SIXEL   2u
@@ -4868,7 +4869,34 @@ CUI_API unsigned cui_vt_bell_count(const cui_vt *vt);
  * when the option is turned on while the scrollback is empty: lines go only by count. Memory then follows the output: 10,000
  * lines of 80 full columns take about 6 MB, of 300 about 24 MB. Turning it off keeps the ring's size. */
 #define CUI_VT_FEATURE_SB_LINES 128u
+/* Kitty's and iTerm2's pictures, kept and drawn as sixel pictures are (scaled onto the same virtual cell, SIXEL_ASPECT's width
+ * when it is on, in the same slices: they scroll into the scrollback, text written into a cell takes its piece, ESC [ 3 J and
+ * the picture budget drop them, a resize and a reflow treat them as sixel rows). Independent of CUI_VT_FEATURE_SIXEL. Without
+ * them the sequences are skipped as before and nothing is allocated. Nothing is allocated before the first picture either.
+ *   CUI_VT_FEATURE_KITTY    kitty's graphics protocol, ESC _ G keys ; base64 ESC \ : transmit (a=t), transmit and place (a=T),
+ *                           place (a=p), delete (a=d: a, i, n, p, c, x, y, r, z, lowercase keeping the image, capital freeing it),
+ *                           query (a=q, answered OK: how a program learns the screen speaks it). Data direct only (t=d; files and
+ *                           shared memory are refused with EBADF, never opened), f=24, 32 or 100 (PNG), o=z, chunks (m=1). A
+ *                           placement fills c x r cells (one given: the other by the picture's shape; none: its pixels over the
+ *                           virtual cell) from the source rectangle x, y, w, h; X, Y and z are not used. The cursor goes to the
+ *                           column after the picture on its last row (the screen scrolls up so it fits) unless C=1. Replies
+ *                           ESC _ G i=..[,I=..][,p=..] ; OK|ECODE:text ESC \ when i or I is given, as q allows. Stored images are
+ *                           kept decoded, by id, within cui_vt_set_image_budget. Unicode placeholders: a placement with U=1 is
+ *                           virtual, and cells holding U+10EEEE (image id in the foreground color, row, column and the id's high
+ *                           byte as kitty's diacritics) show the piece they name; the view draws no glyph for U+10EEEE. Their
+ *                           diacritics need CUI_VT_FEATURE_CLUSTERS (else only those a cell takes from its left neighbour work).
+ *   CUI_VT_FEATURE_ITERM    iTerm2's inline images, ESC ] 1337 ; File = args : base64 BEL (or ST), and MultipartFile, FilePart,
+ *                           FileEnd: inline=1 shows PNG and JPEG; width and height in cells, Npx (virtual pixels), N% or auto;
+ *                           preserveAspectRatio (default 1) fits the picture in that box; doNotMoveCursor=1. Without inline=1
+ *                           (a download) nothing is kept. The cursor as kitty's.
+ *   CUI_VT_FEATURE_PICS_STILL  kitty and iTerm2 pictures never move the cursor (as C=1 and doNotMoveCursor=1), and are cut at
+ *                           the screen's bottom instead of scrolling it: for a screen behind a console host that does not see
+ *                           them (OpenConsole), so the host's cursor and the screen's stay the same. */
+#define CUI_VT_FEATURE_KITTY      256u
+#define CUI_VT_FEATURE_ITERM      512u
+#define CUI_VT_FEATURE_PICS_STILL 1024u
 CUI_API void cui_vt_set_features(cui_vt *vt, unsigned features);        /* CUI_VT_FEATURE_*; 0 (the default) frees everything they hold */
+CUI_API void cui_vt_set_image_budget(cui_vt *vt, size_t bytes);         /* kitty's stored (transmitted) images, decoded: 32 MB a screen unless set; the oldest image goes first */
 /* The grapheme cluster at the start of utf8 (len bytes), by the rules of CUI_VT_FEATURE_CLUSTERS: its length in bytes (0 for
  * an empty string) and in *width the cells it takes (0 for one with nothing to show alone, such as a lone combining mark). */
 CUI_API int cui_vt_grapheme_next(const char *utf8, int len, int *width);

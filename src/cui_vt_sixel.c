@@ -41,7 +41,8 @@ typedef struct cui__vtp_slice {
     int c0, c1, live;                   /* columns c0..c1-1; live: how many of them hold picture */
     int cw;                             /* pixels a cell is wide here: 10, or the W it was drawn with (SIXEL_ASPECT) */
     size_t bytes;
-    uint8_t *mask;                      /* c1 - c0 bytes: 1 where the cell holds picture */
+    uint8_t *mask;                      /* c1 - c0 bytes: the cell's tag, 0 where it holds no picture (1 sixel and iTerm2,
+                                           2..255 a kitty placement: cui_vt_kitty.c deletes by it) */
     uint32_t *px;                       /* (c1 - c0) * cw x 20 pixels, RGBA bytes in memory order; 0 is transparent */
 } cui__vtp_slice;
 
@@ -77,7 +78,10 @@ struct cui__vt_x {
     cui__vtp_six *six; bool reading;
     bool has_fg, has_bg, has_cur; cui_color fg, bg, cur;
     char *rbig; size_t rbig_n;
+    cui__vtk *kitty;                    /* kitty and iTerm2 pictures (cui_vt_kitty.c): NULL until the first one */
 };
+
+#define CUI__VTP_PICS (CUI_VT_FEATURE_SIXEL | CUI_VT_FEATURE_KITTY | CUI_VT_FEATURE_ITERM)
 
 static uint32_t cui__vtp_rgba(int r, int g, int b) {
     uint8_t q[4] = { (uint8_t)r, (uint8_t)g, (uint8_t)b, 255 };
@@ -147,6 +151,7 @@ void cui__vt_x_free(cui_vt *v) {
     if (!x) return;
     cui__vtp_drop_all(v, x);
     cui__vtp_six_free(x);
+    cui__vtk_free(x->kitty);
     free(x->rbig);
     free(x);
     cui__vt_set_ext(v, NULL);
@@ -158,14 +163,18 @@ size_t cui__vt_x_memory(const cui_vt *v) {
     size_t n = sizeof *x + x->used + (size_t)x->sb_cap * sizeof(cui__vtp_sbent) + (x->rbig ? CUI__VTP_REPLY_BIG : 0);
     n += ((size_t)x->tab_rows[0] + (size_t)x->tab_rows[1]) * sizeof(cui__vtp_slice *);
     if (x->six) n += sizeof *x->six + (size_t)x->six->band_cap * sizeof(uint32_t);
-    return n;
+    return n + cui__vtk_memory(x->kitty);
 }
 
 void cui__vt_x_reset(cui_vt *v) {
     cui__vt_x *x = cui__vt_ext(v);
     x->sdm = false;
     if (x->six) x->six->dead = true;
+    cui__vtk_reset(x->kitty);
 }
+
+cui__vtk **cui__vt_x_kitty(cui_vt *v) { cui__vt_x *x = cui__vt_ext(v); return x ? &x->kitty : NULL; }
+unsigned cui__vt_x_features(const cui_vt *v) { const cui__vt_x *x = cui__vt_ext(v); return x ? x->features : 0; }
 
 /* The virtual cell's width: 10 as Windows Terminal, or with SIXEL_ASPECT the width that keeps the view's cell shape at a
  * height of 20 (10 until a view has drawn and told the screen its cell). */
@@ -183,18 +192,21 @@ void cui_vt_set_features(cui_vt *v, unsigned features) {
     cui__vt_mk_feature(v, (features & CUI_VT_FEATURE_MARKS) != 0);     /* marks, progress, copy requests: cui_vt_marks.c */
     cui__vt_clusters_set(v, (features & CUI_VT_FEATURE_CLUSTERS) != 0); /* Unicode 17 widths, grapheme clusters: cui_vt_width.c */
     cui__vt_sblines_set(v, (features & CUI_VT_FEATURE_SB_LINES) != 0);  /* the scrollback by lines: cui_vt.c */
-    features &= CUI_VT_FEATURE_QUERIES | CUI_VT_FEATURE_SIXEL | CUI_VT_FEATURE_SIXEL_ASPECT;
+    cui__vt_kp_set(v, (features & CUI_VT_FEATURE_KITTY) != 0);        /* kitty's Unicode placeholders: a hook on cui_vt.c's text path */
+    features &= CUI_VT_FEATURE_QUERIES | CUI_VT_FEATURE_SIXEL | CUI_VT_FEATURE_SIXEL_ASPECT | CUI_VT_FEATURE_KITTY | CUI_VT_FEATURE_ITERM |
+                CUI_VT_FEATURE_PICS_STILL;
     cui__vt_x *x = cui__vt_ext(v);
     if (!features && !x) return;
     if (!features && x && !x->has_fg && !x->has_bg && !x->has_cur && !x->rbig_n) { cui__vt_x_free(v); return; }
     x = cui__vtp_get(v);
     if (!x) return;
     x->features = features;
-    if (!(features & CUI_VT_FEATURE_SIXEL)) {          /* pictures go with the feature */
+    if (!(features & CUI__VTP_PICS)) {                 /* pictures go with the last picture feature */
         cui__vtp_drop_all(v, x);
-        cui__vtp_six_free(x);
         x->sdm = false;
     }
+    if (!(features & CUI_VT_FEATURE_SIXEL)) { cui__vtp_six_free(x); x->sdm = false; }
+    if (!(features & (CUI_VT_FEATURE_KITTY | CUI_VT_FEATURE_ITERM))) { cui__vtk_free(x->kitty); x->kitty = NULL; }
 }
 
 void cui_vt_set_colors(cui_vt *v, cui_color fg, cui_color bg, cui_color cursor) {
@@ -445,14 +457,15 @@ void cui__vt_pic_shift(cui_vt *v, int slot, int at, int n) {
     for (int pass = 0; pass < s->c1 - a; pass++) {
         int c = n > 0 ? s->c1 - 1 - pass : a + pass;       /* destination cell, walked so sources are read before they are written */
         int from = c - n;
-        bool has = from >= at && from >= s->c0 && from < s->c1 && s->mask[from - s->c0];
+        uint8_t tag = from >= at && from >= s->c0 && from < s->c1 ? s->mask[from - s->c0] : 0;   /* the cell keeps its tag */
+        bool has = tag != 0;
         bool had = s->mask[c - s->c0] != 0;
         for (int r = 0; r < CUI__VTP_CH; r++) {
             uint32_t *dst = s->px + (size_t)r * (size_t)w + (size_t)(c - s->c0) * (size_t)cw;
             if (has) memcpy(dst, s->px + (size_t)r * (size_t)w + (size_t)(from - s->c0) * (size_t)cw, (size_t)cw * 4);
             else memset(dst, 0, (size_t)cw * 4);
         }
-        s->mask[c - s->c0] = has;
+        s->mask[c - s->c0] = tag;
         s->live += (int)has - (int)had;
     }
     s->ver++;
@@ -550,6 +563,158 @@ void cui__vt_x_resize(cui_vt *v, int scr, const uint16_t *old_map, int old_rows,
     free(x->tab[scr]);
     x->tab[scr] = t; x->tab_rows[scr] = t ? rows : 0; x->tab_count[scr] = count;
     cui__vtp_bits(v, x);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Pictures of the other protocols (cui_vt_kitty.c)                         */
+/* ------------------------------------------------------------------------ */
+
+int cui__vt_pic_cw(const cui_vt *v) {
+    const cui__vt_x *x = cui__vt_ext(v);
+    cui__vt_info in;
+    cui__vt_get_info(v, &in);
+    return x ? cui__vtp_cw(x, &in) : CUI__VTP_CW;
+}
+
+/* The picture rgba (w x h pixels, `stride` pixels a row, straight alpha, bytes r g b a) scaled to cols x rows virtual cells
+ * (box filtered when it shrinks); its cells pc0..pc0+nc-1 of rows pr0..pr0+nr-1 go to the screen cells from (x, y) on, every
+ * pixel of each cell replaced and the cell given `tag`. Rows off the screen and cells past its right edge are left out. False
+ * when the budget stopped it (what was written stays). */
+uint32_t cui__vt_pic_seq(cui_vt *v) { cui__vt_x *x = cui__vt_ext(v); return x ? ++x->next_seq : 0; }
+
+bool cui__vt_pic_put(cui_vt *v, const uint8_t *rgba, int w, int h, int stride, int cols, int rows, int pc0, int pr0, int nc, int nr,
+                     int x, int y, uint8_t tag, uint32_t seq) {
+    cui__vt_x *xx = cui__vt_ext(v);
+    if (!xx || !rgba || w <= 0 || h <= 0 || cols <= 0 || rows <= 0 || nc <= 0 || nr <= 0 || !tag) return true;
+    cui__vt_info in;
+    cui__vt_get_info(v, &in);
+    const int cw = cui__vtp_cw(xx, &in), ch = CUI__VTP_CH;
+    const int64_t DW = (int64_t)cols * cw, DH = (int64_t)rows * ch;
+    int c0 = CUI_MAX(x, 0), c1 = CUI_MIN(x + nc, in.cols);
+    if (c1 <= c0) return true;
+    int nx = (c1 - c0) * cw;
+    int *xs = (int *)malloc(sizeof(int) * (size_t)(nx + 1));       /* the source columns of each destination column */
+    if (!xs) return false;
+    for (int i = 0; i <= nx; i++) {
+        int64_t dx = (int64_t)(pc0 + (c0 - x)) * cw + i;
+        xs[i] = (int)CUI_CLAMP(dx * w / DW, 0, (int64_t)w);
+    }
+    if (!seq) seq = ++xx->next_seq;                       /* the rows of one picture share it: none of them evicts another */
+    bool ok = true;
+    for (int r = 0; r < nr && ok; r++) {
+        int sy = y + r;
+        if (sy < 0) continue;
+        if (sy >= in.rows) break;
+        cui__vtp_slice *s = cui__vtp_slice_for(v, xx, in.cur, cui__vt_slot(v, in.cur, sy), c0, c1, cw, seq);
+        if (!s) { ok = false; break; }
+        const int sw = (s->c1 - s->c0) * cw, base = (c0 - s->c0) * cw;
+        for (int py = 0; py < ch; py++) {
+            int64_t dy = (int64_t)(pr0 + r) * ch + py;
+            int y0 = (int)CUI_CLAMP(dy * h / DH, 0, (int64_t)h - 1), y1 = (int)CUI_CLAMP((dy + 1) * h / DH, 0, (int64_t)h);
+            if (y1 <= y0) y1 = y0 + 1;
+            uint32_t *dst = s->px + (size_t)py * (size_t)sw + (size_t)base;
+            for (int i = 0; i < nx; i++) {
+                int x0 = CUI_MIN(xs[i], w - 1), x1 = xs[i + 1];
+                if (x1 <= x0) x1 = x0 + 1;
+                uint32_t sa = 0, sr = 0, sg = 0, sb = 0, n = 0;
+                for (int yy = y0; yy < y1; yy++) {
+                    const uint8_t *p = rgba + ((size_t)yy * (size_t)stride + (size_t)x0) * 4;
+                    for (int k = x0; k < x1; k++, p += 4) { uint32_t a = p[3]; sa += a; sr += p[0] * a; sg += p[1] * a; sb += p[2] * a; n++; }
+                }
+                uint32_t a = n ? (sa + n / 2) / n : 0;
+                dst[i] = a ? cui__vtp_rgba((int)((sr + sa / 2) / sa), (int)((sg + sa / 2) / sa), (int)((sb + sa / 2) / sa)) : 0;
+                if (a && a < 255) { uint8_t q[4]; memcpy(q, &dst[i], 4); q[3] = (uint8_t)a; memcpy(&dst[i], q, 4); }
+            }
+        }
+        for (int c = c0; c < c1; c++) {
+            uint8_t *m = &s->mask[c - s->c0];
+            if (!*m) s->live++;
+            *m = tag;
+        }
+        s->ver++; s->seq = seq;
+    }
+    free(xs);
+    return ok;
+}
+
+uint8_t cui__vt_pic_tag_at(const cui_vt *v, int y, int col) {
+    const cui__vt_x *x = cui__vt_ext(v);
+    cui__vt_info in;
+    cui__vt_get_info(v, &in);
+    if (!x || y < 0 || y >= in.rows || !x->tab[in.cur]) return 0;
+    int slot = cui__vt_slot(v, in.cur, y);
+    const cui__vtp_slice *s = slot < x->tab_rows[in.cur] ? x->tab[in.cur][slot] : NULL;
+    return s && col >= s->c0 && col < s->c1 ? s->mask[col - s->c0] : 0;
+}
+
+/* Every picture cell for which f says so is erased; f gets the cell's tag, its row (as cui_vt_line_text counts: 0 the top of the
+ * live screen, negative the scrollback; INT_MIN on the screen not shown) and column. how: 0 erases, 1 retags to `to`. Slices left
+ * empty go. */
+static void cui__vtp_walk(cui_vt *v, cui__vt_x *x, cui__vt_pic_pred f, void *u, int how, uint8_t to, bool screen_only) {
+    cui__vt_info in;
+    cui__vt_get_info(v, &in);
+    for (int k = 0; k < 2; k++) {
+        if (!x->tab[k] || (screen_only && k != in.cur)) continue;
+        for (int i = 0; i < x->tab_rows[k]; i++) {
+            cui__vtp_slice *s = x->tab[k][i];
+            if (!s) continue;
+            int row = INT_MIN;
+            if (k == in.cur) for (int y = 0; y < in.rows; y++) if (cui__vt_slot(v, k, y) == i) { row = y; break; }
+            bool changed = false;
+            for (int c = s->c0; c < s->c1; c++) {
+                uint8_t t = s->mask[c - s->c0];
+                if (!t || !f(u, t, row, c)) continue;
+                if (how == 1) { s->mask[c - s->c0] = to; continue; }
+                cui__vtp_slice_erase(s, c, c + 1);
+                changed = true;
+            }
+            if (changed && s->live <= 0) { cui__vtp_slice_free(x, s); x->tab[k][i] = NULL; x->tab_count[k]--; }
+        }
+    }
+    if (!screen_only && x->sb_n) {
+        int w = 0;
+        for (int i = 0; i < x->sb_n; i++) {
+            cui__vtp_sbent e = x->sb[(x->sb_head + i) % x->sb_cap];
+            int row = (int)CUI_MAX((int64_t)e.line - (int64_t)in.sb_total, (int64_t)INT_MIN + 1);
+            for (int c = e.s->c0; c < e.s->c1; c++) {
+                uint8_t t = e.s->mask[c - e.s->c0];
+                if (!t || !f(u, t, row, c)) continue;
+                if (how == 1) e.s->mask[c - e.s->c0] = to;
+                else cui__vtp_slice_erase(e.s, c, c + 1);
+            }
+            if (e.s->live <= 0) { cui__vtp_slice_free(x, e.s); continue; }
+            x->sb[(x->sb_head + w) % x->sb_cap] = e;
+            w++;
+        }
+        x->sb_n = w;
+    }
+    cui__vtp_bits(v, x);
+}
+
+void cui__vt_pic_erase_if(cui_vt *v, cui__vt_pic_pred f, void *u, bool screen_only) {
+    cui__vt_x *x = cui__vt_ext(v);
+    if (x) cui__vtp_walk(v, x, f, u, 0, 0, screen_only);
+}
+
+static bool cui__vtp_is_tag(void *u, uint8_t t, int row, int col) { (void)row; (void)col; return t == *(const uint8_t *)u; }
+
+void cui__vt_pic_retag(cui_vt *v, uint8_t from, uint8_t to) {
+    cui__vt_x *x = cui__vt_ext(v);
+    if (x) cui__vtp_walk(v, x, cui__vtp_is_tag, &from, 1, to, false);
+}
+
+void cui__vt_pic_tags(const cui_vt *v, uint8_t used[256]) {
+    memset(used, 0, 256);
+    const cui__vt_x *x = cui__vt_ext(v);
+    if (!x) return;
+    for (int k = 0; k < 2; k++) for (int i = 0; x->tab[k] && i < x->tab_rows[k]; i++) {
+        const cui__vtp_slice *s = x->tab[k][i];
+        if (s) for (int c = 0; c < s->c1 - s->c0; c++) used[s->mask[c]] = 1;
+    }
+    for (int i = 0; i < x->sb_n; i++) {
+        const cui__vtp_slice *s = x->sb[(x->sb_head + i) % x->sb_cap].s;
+        for (int c = 0; c < s->c1 - s->c0; c++) used[s->mask[c]] = 1;
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -676,7 +841,8 @@ static void cui__vtp_commit(cui_vt *v, cui__vt_x *x, cui__vtp_six *z, int y0, in
             if (dx < 0 || dx >= sw) continue;
             dst[dx] = c;
             uint8_t *m = &s->mask[dx / cw];
-            if (!*m) { *m = 1; s->live++; }
+            if (!*m) s->live++;
+            *m = 1;                                         /* a sixel cell (over a kitty one, it is sixel's now) */
         }
         s->ver++; s->seq = z->seq;
     }

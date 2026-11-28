@@ -578,7 +578,31 @@ bool cui__vt_find_frame(cui_ctx *ui, cui_vt *v, uint32_t *seen, cui__vt_span *cu
 void cui__vt_find_look_of(cui_ctx *ui, cui__vt_find_look *o);
 void cui__vt_find_paint_row(cui_ctx *ui, const cui_vt *v, int64_t arow, float x0, float ry, float cw, float lh, const cui__vt_find_look *k);
 int cui__vt_pic_count(const cui_vt *v);                             /* tests: slices kept */
-/* The VT screen's links (cui_vt_links.c): OSC 8 hyperlinks kept per cell (CUI_VT_FEATURE_LINKS), links found in the text
+/* Kitty and iTerm2 pictures (cui_vt_kitty.c), drawn into the slices of cui_vt_sixel.c. A slice cell's tag: 0 none, 1 sixel or
+ * iTerm2, 2..255 a kitty placement. */
+typedef struct cui__vtk cui__vtk;
+typedef bool (*cui__vt_pic_pred)(void *u, uint8_t tag, int row, int col);
+cui__vtk **cui__vt_x_kitty(cui_vt *v);                               /* the extension's slot for it; NULL without an extension */
+unsigned cui__vt_x_features(const cui_vt *v);
+int cui__vt_pic_cw(const cui_vt *v);                                  /* the virtual cell's width (10, or SIXEL_ASPECT's) */
+uint32_t cui__vt_pic_seq(cui_vt *v);                                 /* a new drawing order number, for the rows of one picture */
+bool cui__vt_pic_put(cui_vt *v, const uint8_t *rgba, int w, int h, int stride, int cols, int rows, int pc0, int pr0, int nc, int nr,
+                     int x, int y, uint8_t tag, uint32_t seq);       /* seq 0: a new one */
+uint8_t cui__vt_pic_tag_at(const cui_vt *v, int y, int col);
+void cui__vt_pic_erase_if(cui_vt *v, cui__vt_pic_pred f, void *u, bool screen_only);
+void cui__vt_pic_retag(cui_vt *v, uint8_t from, uint8_t to);
+void cui__vt_pic_tags(const cui_vt *v, uint8_t used[256]);           /* used[t] = 1 for every tag some cell holds */
+void cui__vtk_free(cui__vtk *k);
+size_t cui__vtk_memory(const cui__vtk *k);
+void cui__vtk_reset(cui__vtk *k);                                     /* RIS: a picture being read is dropped */
+bool cui__vt_kitty_begin(cui_vt *v);                                  /* APC G: true when the feature reads it */
+size_t cui__vt_kitty_feed(cui_vt *v, const unsigned char *d, size_t n);   /* bytes used, stopping before ESC, BEL, CAN or SUB */
+void cui__vt_kitty_end(cui_vt *v);
+bool cui__vt_iterm_begin(cui_vt *v);                                  /* after "OSC 1337;": true when the feature reads it */
+size_t cui__vt_iterm_feed(cui_vt *v, const unsigned char *d, size_t n);
+void cui__vt_iterm_end(cui_vt *v);
+void cui__vt_kp_set(cui_vt *v, bool on);                              /* cui_vt.c: U+10EEEE cells call cui__vt_kitty_ph */
+void cui__vt_kitty_ph(cui_vt *v, int x, int y, uint32_t id24, const uint32_t *cps, int n);   /* a placeholder cell was written *//* The VT screen's links (cui_vt_links.c): OSC 8 hyperlinks kept per cell (CUI_VT_FEATURE_LINKS), links found in the text
  * under the mouse, the smart double and triple click. cui_vt.c calls the cui__vt_lk_* hooks only while the screen has a
  * link table (cui__vt_lk is set, after the first OSC 8 with the feature on); a screen without one tests one pointer. */
 typedef struct cui__vt_lx cui__vt_lx;
